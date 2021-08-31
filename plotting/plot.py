@@ -33,7 +33,8 @@ vldb_col_width_pt = 240
 icml_col_width_pt = 234.8775
 sigmod20_col_width_pt = 241.14749
 vldb21_col_width_pt = 241.14749
-fig_width_pt = vldb21_col_width_pt
+nsdi22_col_width_pt = 241.02039
+fig_width_pt = nsdi22_col_width_pt
 
 inches_per_pt = 1.0 / 72.27  # Convert pt to inch
 golden_mean = (np.sqrt(5) - 1.0) / 2.0  # Aesthetic ratio

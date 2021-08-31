@@ -261,13 +261,29 @@ class SkyOptimizer(object):
         return egress_cost
 
     @staticmethod
-    def optimize(dag: Dag, minimize) -> PlannedDag:
-        if minimize == SkyOptimizer.COST:
-            return SkyOptimizer._optimize_cost(dag)
-        elif minimize == SkyOptimizer.TIME:
-            return SkyOptimizer._optimize_time(dag)
+    def _egress_time(src_cloud, dst_cloud, gigabytes):
+        """Returns estimated egress time in seconds."""
+        # FIXME: estimate bandwidth between each cloud-region pair.
+        if isinstance(src_cloud, DummyCloud) or isinstance(
+                dst_cloud, DummyCloud):
+            return 0.0
+        if not src_cloud.is_same_cloud(dst_cloud):
+            # 10Gbps is close to the average of observed b/w from S3
+            # (us-west,east-2) to GCS us-central1, assuming highly sharded files
+            # (~128MB per file).
+            bandwidth_gbps = 10
+            egress_time = gigabytes * 8 / bandwidth_gbps
+            print('  {} -> {} egress time: {} s for {:.1f} GB'.format(
+                src_cloud, dst_cloud, egress_time, gigabytes))
         else:
-            assert False, 'Set minimize to COST or TIME.'
+            egress_time = 0.0
+        return egress_time
+
+    @staticmethod
+    def optimize(dag: Dag, minimize) -> PlannedDag:
+        dag = SkyOptimizer._add_dummy_source_sink_nodes(copy.deepcopy(dag))
+        return SkyOptimizer._optimize_cost(
+            dag, minimize_cost=minimize == SkyOptimizer.COST)
 
     @staticmethod
     def _add_dummy_source_sink_nodes(dag: Dag):
@@ -311,8 +327,7 @@ class SkyOptimizer(object):
         return dag
 
     @staticmethod
-    def _optimize_cost(dag: Dag):
-        dag = SkyOptimizer._add_dummy_source_sink_nodes(copy.deepcopy(dag))
+    def _optimize_cost(dag: Dag, minimize_cost=True):
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
 
@@ -345,26 +360,37 @@ class SkyOptimizer(object):
                     print('hardware:', hardware)
 
                 estimated_runtime = node.estimate_runtime(hardware)
-                estimated_cost = hardware.get_cost(estimated_runtime)
+                if minimize_cost:
+                    estimated_cost = hardware.get_cost(estimated_runtime)
+                else:
+                    # Minimize run time; overload the term 'cost'.
+                    estimated_cost = estimated_runtime
                 min_pred_cost_plus_egress = np.inf
                 if do_print:
                     print('  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
                         estimated_runtime, estimated_runtime / 3600))
-                    print('  estimated_cost (no egress): ${:.1f}'.format(
-                        estimated_cost))
+                    if minimize_cost:
+                        print('  estimated_cost (no egress): ${:.1f}'.format(
+                            estimated_cost))
 
                 for parent_hardware, parent_cost in dp_best_cost[parent].items(
                 ):
-                    egress_cost = SkyOptimizer._egress_cost(
-                        parent_hardware.cloud, hardware.cloud,
-                        parent.get_estimated_outputs_size_gigabytes())
+                    # import ipdb; ipdb.set_trace()
+                    if minimize_cost:
+                        egress_cost = SkyOptimizer._egress_cost(
+                            parent_hardware.cloud, hardware.cloud,
+                            parent.get_estimated_outputs_size_gigabytes())
+                    else:
+                        # Minimize run time; overload the term 'cost'.
+                        egress_cost = SkyOptimizer._egress_time(
+                            parent_hardware.cloud, hardware.cloud,
+                            parent.get_estimated_outputs_size_gigabytes())
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
                         best_parent = parent_hardware
                         best_egress_cost = egress_cost
                 if do_print:
                     print('  best_parent', best_parent)
-                # print('  best_egress_cost', best_egress_cost)
                 dp_point_backs[node][hardware] = (parent, best_parent,
                                                   best_egress_cost)
                 dp_best_cost[node][
@@ -374,15 +400,16 @@ class SkyOptimizer(object):
         pprint.pprint(dict(dp_best_cost))
 
         return SkyOptimizer.print_optimized_plan(dp_best_cost, topo_order,
-                                                 dp_point_backs)
+                                                 dp_point_backs, minimize_cost)
 
     @staticmethod
-    def print_optimized_plan(dp_best_cost, topo_order, dp_point_backs):
+    def print_optimized_plan(dp_best_cost, topo_order, dp_point_backs,
+                             minimize_cost):
         # FIXME: this function assumes chain.
-        print('\nOptimizer - best plan:')
         node = topo_order[-1]
         messages = []
         egress_cost = 0.0
+        overall_best = None
         while True:
             best_costs = dp_best_cost[node]
             h, c = None, np.inf
@@ -394,10 +421,18 @@ class SkyOptimizer(object):
             node.best_hardware = h
             if not isinstance(h, DummyHardware):
                 messages.append('  {} : {}'.format(node, h))
+            elif overall_best is None:
+                overall_best = c
             if node not in dp_point_backs:
                 break
             egress_cost = dp_point_backs[node][h][2]
             node = dp_point_backs[node][h][0]
+        if minimize_cost:
+            print('\nOptimizer - plan minimizing cost (~${:.1f}):'.format(
+                overall_best))
+        else:
+            print('\nOptimizer - plan minimizing run time (~{:.1f} hr):'.format(
+                overall_best / 3600))
         for msg in reversed(messages):
             print(msg)
 
@@ -571,26 +606,26 @@ def make_application():
 
         train_op.set_estimate_runtime_func(resnet50_estimate_runtime)
 
-        # # Infer.
-        # infer_op = Operator('infer_op',
-        #                     command='infer.py',
-        #                     args='--model_dir=INPUTS[0]')
+        # Infer.
+        infer_op = Operator('infer_op',
+                            command='infer.py',
+                            args='--model_dir=INPUTS[0]')
 
-        # # Data dependency.
-        # # FIXME: make the system know this is from train_op's outputs.
-        # infer_op.set_inputs(train_op.get_outputs(),
-        #                     estimated_size_gigabytes=0.1)
+        # Data dependency.
+        # FIXME: make the system know this is from train_op's outputs.
+        infer_op.set_inputs(train_op.get_outputs(),
+                            estimated_size_gigabytes=0.1)
 
-        # infer_op.set_allowed_hardware({
-        #     Hardware(AWS(), 'inf1.xlarge'),
-        #     # Hardware(GCP(), ('n1-standard-8', '1x V100')),
-        # })
+        infer_op.set_allowed_hardware({
+            Hardware(AWS(), 'inf1.xlarge'),
+            # Hardware(GCP(), ('n1-standard-8', '1x V100')),
+        })
 
-        # infer_op.set_estimate_runtime_func(resnet50_infer_estimate_runtime)
+        infer_op.set_estimate_runtime_func(resnet50_infer_estimate_runtime)
 
-        # # Chain the operators (Airflow syntax).
-        # # The dependency represents data flow.
-        # train_op >> infer_op
+        # Chain the operators (Airflow syntax).
+        # The dependency represents data flow.
+        train_op >> infer_op
 
     return dag
 
@@ -599,11 +634,4 @@ dag = make_application()
 
 SkyOptimizer.optimize(dag, minimize=SkyOptimizer.COST)
 
-# SkyOptimizer.optimize(dag, minimize=SkyOptimizer.TIME)
-
-# print(train_op)
-# print('######## DAG')
-# print(dag)
-# print('######## nodes')
-# print(dag.get_graph().nodes)
-# print(plan)
+SkyOptimizer.optimize(dag, minimize=SkyOptimizer.TIME)
