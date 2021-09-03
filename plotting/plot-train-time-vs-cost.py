@@ -13,7 +13,7 @@ v100_costs = [79, 133.27]
 # v100_time_hours = [25, 3.5]
 # v100_costs = [76.5, 85.68]
 
-plt.plot(v100_costs, v100_time_hours, marker='o', ls='--', label='EC2')
+plt.plot(v100_costs, v100_time_hours, marker='o', ls='--', label='AWS')
 plt.plot(32.12, 3.9, label='GCP (compute only)', marker='x')
 plt.plot(32.12 + 13, 3.9 + 3 / 60, label='GCP (with egress)', marker='o')
 
