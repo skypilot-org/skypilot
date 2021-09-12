@@ -80,7 +80,6 @@ class AWS(Cloud):
 
         if num_gigabytes > 1:
             cost += (num_gigabytes - 1) * 0.09
-            num_gigabytes -= 1
 
         cost += 0.0
         return cost
@@ -100,14 +99,20 @@ class GCP(Cloud):
     # NOTE: assumes us-central1.
     _ON_DEMAND_PRICES = {
         # GPUs: https://cloud.google.com/compute/gpus-pricing.
+        # V100
         '1x V100': 2.48,
         '2x V100': 2.48 * 2,
         '4x V100': 2.48 * 4,
         '8x V100': 2.48 * 8,
+        # T4
+        '1x T4': 0.35,
+        '2x T4': 0.35 * 2,
+        '4x T4': 0.35 * 4,
         # TPUs: https://cloud.google.com/tpu/pricing.
         'tpu-v2-8': 4.5,
         'tpu-v3-8': 8.0,
         # VMs: https://cloud.google.com/compute/all-pricing.
+        'n1-standard-4': 0.189999,
         'n1-standard-8': 0.379998,
     }
 
@@ -373,18 +378,28 @@ class SkyOptimizer(object):
                         print('  estimated_cost (no egress): ${:.1f}'.format(
                             estimated_cost))
 
+                def _egress(parent, parent_hardware, node, hardware):
+                    if isinstance(parent_hardware.cloud, DummyCloud):
+                        # Special case.  The current 'node' is a real
+                        # source node, and its input may be on a different
+                        # cloud from 'hardware'.
+                        src_cloud = node.get_inputs_cloud()
+                        nbytes = node.get_estimated_inputs_size_gigabytes()
+                    else:
+                        src_cloud = parent_hardware.cloud
+                        nbytes = parent.get_estimated_outputs_size_gigabytes()
+                    dst_cloud = hardware.cloud
+
+                    if minimize_cost:
+                        fn = SkyOptimizer._egress_cost
+                    else:
+                        fn = SkyOptimizer._egress_time
+                    return fn(src_cloud, dst_cloud, nbytes)
+
                 for parent_hardware, parent_cost in dp_best_cost[parent].items(
                 ):
-                    # import ipdb; ipdb.set_trace()
-                    if minimize_cost:
-                        egress_cost = SkyOptimizer._egress_cost(
-                            parent_hardware.cloud, hardware.cloud,
-                            parent.get_estimated_outputs_size_gigabytes())
-                    else:
-                        # Minimize run time; overload the term 'cost'.
-                        egress_cost = SkyOptimizer._egress_time(
-                            parent_hardware.cloud, hardware.cloud,
-                            parent.get_estimated_outputs_size_gigabytes())
+                    egress_cost = _egress(parent, parent_hardware, node,
+                                          hardware)
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
                         best_parent = parent_hardware
@@ -549,9 +564,13 @@ def resnet50_estimate_runtime(hardware):
         # 112590 steps, 1024 BS = 90 epochs.
         total_steps = 112590 * (1024.0 / effective_batch_size)
         flops_for_one_batch = flops_for_one_image * max_per_device_batch_size
+
         # 27 TFLOPs, harmonic mean b/t 15TFLOPs (single-precision) & 120 TFLOPs
         # (16 bit).
         utilized_flops = 27 * (10**12)
+        print('****** trying 1/3 util for v100')
+        utilized_flops = 120 * (10**12) / 3
+
         estimated_step_time_seconds = flops_for_one_batch / utilized_flops \
           + communication_slack
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
@@ -560,6 +579,14 @@ def resnet50_estimate_runtime(hardware):
         assert 'tpu-v3-8' in hardware.types, hardware
         tpu_v3_8_flops = 420 * (10**12)
         known_resnet50_utilization = 0.445  # From actual profiling.
+
+        # GPU - fixed to 1/3 util
+        # TPU
+        #  - 1/4 util: doesn't work
+        #  - 1/3 util: works
+        #  - 1/2 util: works
+        print('*** trying hand written util for TPU')
+        known_resnet50_utilization = 1 / 3
 
         max_per_device_batch_size = 1024
         total_steps = 112590  # 112590 steps, 1024 BS = 90 epochs.
@@ -579,7 +606,60 @@ def resnet50_estimate_runtime(hardware):
 
 
 def resnet50_infer_estimate_runtime(hardware):
-    return 0.0  # FIXME
+    # 3.8 G Multiply-Adds, 2 FLOPs per MADD.
+    flops_for_one_image = 3.8 * (10**9) * 2
+    num_images = 0.1 * 1e6  # TODO: vary this.
+    num_images = 1e6  # TODO: vary this.
+    num_images = 70 * 1e6  # TODO: vary this.
+
+    instance = hardware.types
+    # assert instance in ['p3.2xlarge', 'inf1.2xlarge', 'nvidia-t4'], instance
+
+    if instance == 'p3.2xlarge':
+        # 120 TFLOPS TensorCore.
+        print('****** trying 1/3 util for v100')
+        utilized_flops = 120 * (10**12) / 3
+
+        # # Max bs to keep p99 < 15ms.
+        # max_per_device_batch_size = 8
+        # max_per_device_batch_size = 8*1e3
+        # max_per_device_batch_size = 1
+
+        # num_v100s = 1
+        # effective_batch_size = max_per_device_batch_size * num_v100s
+
+        # # 112590 steps, 1024 BS = 90 epochs.
+        # total_steps = num_images // effective_batch_size
+        # flops_for_one_batch = flops_for_one_image * max_per_device_batch_size
+
+        # estimated_step_time_seconds = flops_for_one_batch / utilized_flops
+        # estimated_run_time_seconds = estimated_step_time_seconds * total_steps
+
+        # TODO: this ignores offline vs. online.  It's a huge batch.
+        estimated_run_time_seconds = \
+            flops_for_one_image * num_images / utilized_flops
+    elif instance == 'inf1.2xlarge':
+        # Inferentia: 1 chip = 128T[F?]OPS
+        # Each AWS Inferentia chip supports up to 128 TOPS (trillions of
+        # operations per second) of performance [assume 16, as it casts to
+        # bfloat16 by default).
+        # TODO: also assume 1/3 utilization
+        utilized_flops = 128 * (10**12) / 3
+        # TODO: this ignores offline vs. online.  It's a huge batch.
+        estimated_run_time_seconds = \
+            flops_for_one_image * num_images / utilized_flops
+    elif isinstance(instance, tuple) and instance[0] == '1x T4':
+        # T4 GPU: 65 TFLOPS fp16
+        utilized_flops = 65 * (10**12) / 3
+        estimated_run_time_seconds = \
+            flops_for_one_image * num_images / utilized_flops
+    else:
+        assert False, hardware
+
+    # print('** num images {} total flops {}'.format(
+    #     num_images, flops_for_one_image * num_images))
+
+    return estimated_run_time_seconds
 
 
 def make_application():
@@ -591,8 +671,12 @@ def make_application():
                             command='train.py',
                             args='--data_dir=INPUTS[0] --model_dir=OUTPUTS[0]')
 
-        train_op.set_inputs('s3://my-imagenet-data',
-                            estimated_size_gigabytes=150)
+        train_op.set_inputs(
+            's3://my-imagenet-data',
+            # estimated_size_gigabytes=150,
+            # estimated_size_gigabytes=1500,
+            estimated_size_gigabytes=600,
+        )
 
         # 'CLOUD': saves to the cloud this op ends up executing on.
         train_op.set_outputs('CLOUD://my-model', estimated_size_gigabytes=0.1)
@@ -617,8 +701,10 @@ def make_application():
                             estimated_size_gigabytes=0.1)
 
         infer_op.set_allowed_hardware({
-            Hardware(AWS(), 'inf1.xlarge'),
-            # Hardware(GCP(), ('n1-standard-8', '1x V100')),
+            Hardware(AWS(), 'inf1.2xlarge'),
+            Hardware(AWS(), 'p3.2xlarge'),
+            Hardware(GCP(), ('1x T4', 'n1-standard-4')),
+            Hardware(GCP(), ('1x T4', 'n1-standard-8')),
         })
 
         infer_op.set_estimate_runtime_func(resnet50_infer_estimate_runtime)
@@ -634,4 +720,4 @@ dag = make_application()
 
 SkyOptimizer.optimize(dag, minimize=SkyOptimizer.COST)
 
-SkyOptimizer.optimize(dag, minimize=SkyOptimizer.TIME)
+# SkyOptimizer.optimize(dag, minimize=SkyOptimizer.TIME)

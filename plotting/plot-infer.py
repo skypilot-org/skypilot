@@ -2,8 +2,8 @@ from plot import *
 # InitMatplotlib(font_size=7)  # for 1-col figures
 InitMatplotlib(font_size=8)  # for .5-col figures
 
-plot_offline = False
 plot_offline = True
+plot_offline = False
 
 figure_name = 'resnet50-infer-{}'.format(
     'offline' if plot_offline else 'online')
@@ -11,16 +11,18 @@ figure_name = 'resnet50-infer-{}'.format(
 # https://docs.google.com/spreadsheets/d/1cwfFAVMjNk4nkfCH8k18j57jqDxKcR_wq3N-7AVSOvI/edit#gid=973498304
 
 
+# AWS - V100,0.46,540.0
 results_offline = StringIO("""
 hardware,cost,duration
 GCP - TPU,0.37,160.8
-AWS - V100,0.46,540.0
+AWS - T4,0.30,888.3716276
 AWS - Inferentia,0.06,641.1
 """)
 
+# AWS - V100,1.11,1305.8
 results_online = StringIO("""
 hardware,cost,duration
-AWS - V100,1.11,1305.8
+AWS - T4,0.43,1276.874505
 AWS - Inferentia,0.12,1233.1
 """)
 
@@ -66,7 +68,8 @@ for i, ax in enumerate(axes):
         if plot_offline:
             _y = p.get_y() + p.get_height() - .045
         else:
-            _y = p.get_y() + p.get_height() - .095
+            # _y = p.get_y() + p.get_height() - .095  # V100
+            _y = p.get_y() + p.get_height() - .055  # V100
         value = '{:.2f}'.format(p.get_height())
         ax.text(_x, _y, value, ha='center', color='white')
 
@@ -100,12 +103,14 @@ for i, ax in enumerate(axes):
     if plot_offline:
         ax.set_xticklabels([
             'GCP\nTPU',
-            'AWS\nV100',
+            # 'AWS\nV100',
+            'AWS\nT4',
             'AWS\nInferentia',
         ])
     else:
         ax.set_xticklabels([
-            'AWS\nV100',
+            # 'AWS\nV100',
+            'AWS\nT4',
             'AWS\nInferentia',
         ])
 
@@ -122,7 +127,8 @@ for i, ax in enumerate(axes):
     ax2.set_ylim(0, df['duration'].max() + 1)
     # ax.set_ylim(0, df['cost'].max())
     if not plot_offline:
-        ax.set_ylim(0, 1.2)
+        # ax.set_ylim(0, 1.2)  # V100
+        ax.set_ylim(0, 0.5)
 
     ax.set_xlabel('')
     ax.set_ylabel('Cost (\$)' if i == 0 else '')
