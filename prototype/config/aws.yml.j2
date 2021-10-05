@@ -1,0 +1,42 @@
+### Variables: {{NODE_TYPE}}, {{WORKING_DIR}}
+
+cluster_name: sky-aws
+
+max_workers: 1
+
+provider:
+  type: aws
+  region: us-west-2
+  availability_zone: us-west-2a,us-west-2b
+
+auth:
+  ssh_user: ubuntu
+
+available_node_types:
+  ray.head.default:
+    min_workers: 1
+    max_workers: 1
+    node_config:
+      InstanceType: {{NODE_TYPE}}
+      ImageId: ami-0e9c522a722725e62 # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+
+head_node_type: ray.head.default
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "/tmp/workdir": {{WORKING_DIR}}
+}
+
+# Patterns for files to exclude when running rsync up or rsync down
+rsync_exclude:
+  - "**/.git"
+  - "**/.git/**"
+
+rsync_filter:
+  - .gitignore
+
+# List of shell commands to run to set up nodes.
+setup_commands: []
+
+# Command to start ray on the head node. You don't need to change this.
+head_start_ray_commands: []
