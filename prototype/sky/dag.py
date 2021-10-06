@@ -1,4 +1,5 @@
 import networkx as nx
+import pprint
 
 
 class DagContext(object):
@@ -32,12 +33,12 @@ class Dag(object):
     _CURRENT_DAG = None
 
     def __init__(self):
-        self.operators = []
+        self.tasks = []
         self.graph = nx.DiGraph()
 
-    def add(self, operator):
-        self.graph.add_node(operator)
-        self.operators.append(operator)
+    def add(self, task):
+        self.graph.add_node(task)
+        self.tasks.append(task)
 
     def add_edge(self, op1, op2):
         assert op1 in self.graph.nodes
@@ -52,9 +53,9 @@ class Dag(object):
         DagContext.pop_dag()
 
     def __repr__(self):
-        pformat = pprint.pformat(self.operators)
+        pformat = pprint.pformat(self.tasks)
         return 'DAG:\n{}'.format(pformat)
-        # return '<DAG=[{}]>'.format(','.join(map(str, self.operators)))
+        # return '<DAG=[{}]>'.format(','.join(map(str, self.tasks)))
 
     def get_graph(self):
         return self.graph
