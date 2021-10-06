@@ -28,7 +28,7 @@ import sky
 from sky import clouds
 
 
-class Hardware(typing.NamedTuple):
+class Resources(typing.NamedTuple):
     cloud: clouds.Cloud
     types: typing.Tuple[str]
 
@@ -49,13 +49,13 @@ class Hardware(typing.NamedTuple):
         return cost
 
 
-class DummyHardware(Hardware):
-    """A dummy Hardware that has zero egress cost from/to."""
+class DummyResources(Resources):
+    """A dummy Resources that has zero egress cost from/to."""
 
     _REPR = 'DummyCloud'
 
     def __repr__(self) -> str:
-        return DummyHardware._REPR
+        return DummyResources._REPR
 
     def get_cost(self, seconds):
         return 0
@@ -142,7 +142,7 @@ class SkyOptimizer(object):
 
         def make_dummy(name):
             dummy = sky.Task(name)
-            dummy.set_allowed_hardware({DummyHardware(DummyCloud(), None)})
+            dummy.set_allowed_resources({DummyResources(DummyCloud(), None)})
             dummy.set_estimate_runtime_func(lambda _: 0)
             return dummy
 
@@ -161,15 +161,15 @@ class SkyOptimizer(object):
         topo_order = list(nx.topological_sort(graph))
 
         # FIXME: write to (node, cloud) as egress cost depends only on clouds.
-        # node -> {hardware -> best estimated cost}
+        # node -> {resources -> best estimated cost}
         dp_best_cost = collections.defaultdict(dict)
-        # node -> {hardware -> (parent, best parent hardware)}
+        # node -> {resources -> (parent, best parent resources)}
         dp_point_backs = collections.defaultdict(dict)
 
         for node_i, node in enumerate(topo_order):
             # Base case: a special source node.
             if node_i == 0:
-                dp_best_cost[node][list(node.get_allowed_hardware())[0]] = 0
+                dp_best_cost[node][list(node.get_allowed_resources())[0]] = 0
                 continue
             # Don't print for the last node, Sink.
             do_print = node_i != len(topo_order) - 1
@@ -181,16 +181,16 @@ class SkyOptimizer(object):
             assert len(parents) == 1, 'Supports single parent for now'
             parent = parents[0]
 
-            for hardware in node.get_allowed_hardware():
-                # Computes dp_best_cost[node][hardware]
+            for resources in node.get_allowed_resources():
+                # Computes dp_best_cost[node][resources]
                 #   = my estimated cost + min { pred_cost + egress_cost }
-                assert hardware not in dp_best_cost[node]
+                assert resources not in dp_best_cost[node]
                 if do_print:
-                    print('hardware:', hardware)
+                    print('resources:', resources)
 
-                estimated_runtime = node.estimate_runtime(hardware)
+                estimated_runtime = node.estimate_runtime(resources)
                 if minimize_cost:
-                    estimated_cost = hardware.get_cost(estimated_runtime)
+                    estimated_cost = resources.get_cost(estimated_runtime)
                 else:
                     # Minimize run time; overload the term 'cost'.
                     estimated_cost = estimated_runtime
@@ -202,17 +202,17 @@ class SkyOptimizer(object):
                         print('  estimated_cost (no egress): ${:.1f}'.format(
                             estimated_cost))
 
-                def _egress(parent, parent_hardware, node, hardware):
-                    if isinstance(parent_hardware.cloud, DummyCloud):
+                def _egress(parent, parent_resources, node, resources):
+                    if isinstance(parent_resources.cloud, DummyCloud):
                         # Special case.  The current 'node' is a real
                         # source node, and its input may be on a different
-                        # cloud from 'hardware'.
+                        # cloud from 'resources'.
                         src_cloud = node.get_inputs_cloud()
                         nbytes = node.get_estimated_inputs_size_gigabytes()
                     else:
-                        src_cloud = parent_hardware.cloud
+                        src_cloud = parent_resources.cloud
                         nbytes = parent.get_estimated_outputs_size_gigabytes()
-                    dst_cloud = hardware.cloud
+                    dst_cloud = resources.cloud
 
                     if minimize_cost:
                         fn = SkyOptimizer._egress_cost
@@ -220,20 +220,20 @@ class SkyOptimizer(object):
                         fn = SkyOptimizer._egress_time
                     return fn(src_cloud, dst_cloud, nbytes)
 
-                for parent_hardware, parent_cost in dp_best_cost[parent].items(
+                for parent_resources, parent_cost in dp_best_cost[parent].items(
                 ):
-                    egress_cost = _egress(parent, parent_hardware, node,
-                                          hardware)
+                    egress_cost = _egress(parent, parent_resources, node,
+                                          resources)
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
-                        best_parent = parent_hardware
+                        best_parent = parent_resources
                         best_egress_cost = egress_cost
                 if do_print:
                     print('  best_parent', best_parent)
-                dp_point_backs[node][hardware] = (parent, best_parent,
+                dp_point_backs[node][resources] = (parent, best_parent,
                                                   best_egress_cost)
                 dp_best_cost[node][
-                    hardware] = min_pred_cost_plus_egress + estimated_cost
+                    resources] = min_pred_cost_plus_egress + estimated_cost
 
         print('\nOptimizer - dp_best_cost:')
         pprint.pprint(dict(dp_best_cost))
@@ -252,13 +252,13 @@ class SkyOptimizer(object):
         while True:
             best_costs = dp_best_cost[node]
             h, c = None, np.inf
-            for hardware in best_costs:
-                if best_costs[hardware] < c:
-                    h = hardware
-                    c = best_costs[hardware]
+            for resources in best_costs:
+                if best_costs[resources] < c:
+                    h = resources
+                    c = best_costs[resources]
             # TODO: avoid modifying in-place.
-            node.best_hardware = h
-            if not isinstance(h, DummyHardware):
+            node.best_resources = h
+            if not isinstance(h, DummyResources):
                 messages.append('  {} : {}'.format(node, h))
             elif overall_best is None:
                 overall_best = c
@@ -277,13 +277,13 @@ class SkyOptimizer(object):
 
 
 
-def resnet50_estimate_runtime(hardware):
+def resnet50_estimate_runtime(resources):
     """A simple runtime model for Resnet50."""
     # 3.8 G Multiply-Adds, 2 FLOPs per MADD, 3 for fwd+bwd.
     flops_for_one_image = 3.8 * (10**9) * 2 * 3
 
-    if isinstance(hardware.cloud, clouds.AWS):
-        instance = hardware.types
+    if isinstance(resources.cloud, clouds.AWS):
+        instance = resources.types
         if instance == 'p3.2xlarge':
             num_v100s = 1
         elif instance == 'p3.8xlarge':
@@ -291,7 +291,7 @@ def resnet50_estimate_runtime(hardware):
         elif instance == 'p3.16xlarge':
             num_v100s = 8
         else:
-            assert False, 'Not supported: {}'.format(hardware)
+            assert False, 'Not supported: {}'.format(resources)
 
         # Adds communication overheads per step (in seconds).
         communication_slack = 0.0
@@ -317,8 +317,8 @@ def resnet50_estimate_runtime(hardware):
           + communication_slack
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
 
-    elif isinstance(hardware.cloud, clouds.GCP):
-        assert 'tpu-v3-8' in hardware.types, hardware
+    elif isinstance(resources.cloud, clouds.GCP):
+        assert 'tpu-v3-8' in resources.types, resources
         tpu_v3_8_flops = 420 * (10**12)
         known_resnet50_utilization = 0.445  # From actual profiling.
 
@@ -342,19 +342,19 @@ def resnet50_estimate_runtime(hardware):
 
     else:
         assert False, 'not supported cloud in prototype: {}'.format(
-            hardware.cloud)
+            resources.cloud)
 
     return estimated_run_time_seconds
 
 
-def resnet50_infer_estimate_runtime(hardware):
+def resnet50_infer_estimate_runtime(resources):
     # 3.8 G Multiply-Adds, 2 FLOPs per MADD.
     flops_for_one_image = 3.8 * (10**9) * 2
     num_images = 0.1 * 1e6  # TODO: vary this.
     num_images = 1e6  # TODO: vary this.
     num_images = 70 * 1e6  # TODO: vary this.
 
-    instance = hardware.types
+    instance = resources.types
     # assert instance in ['p3.2xlarge', 'inf1.2xlarge', 'nvidia-t4'], instance
 
     if instance == 'p3.2xlarge':
@@ -396,7 +396,7 @@ def resnet50_infer_estimate_runtime(hardware):
         estimated_run_time_seconds = \
             flops_for_one_image * num_images / utilized_flops
     else:
-        assert False, hardware
+        assert False, resources
 
     # print('** num images {} total flops {}'.format(
     #     num_images, flops_for_one_image * num_images))
@@ -423,11 +423,11 @@ def make_application():
         # 'CLOUD': saves to the cloud this op ends up executing on.
         train_op.set_outputs('CLOUD://my-model', estimated_size_gigabytes=0.1)
 
-        train_op.set_allowed_hardware({
-            Hardware(clouds.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
-            Hardware(clouds.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
+        train_op.set_allowed_resources({
+            Resources(clouds.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
+            Resources(clouds.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            Hardware(clouds.GCP(), ('n1-standard-8', 'tpu-v3-8')),
+            Resources(clouds.GCP(), ('n1-standard-8', 'tpu-v3-8')),
         })
 
         train_op.set_estimate_runtime_func(resnet50_estimate_runtime)
@@ -442,11 +442,11 @@ def make_application():
         infer_op.set_inputs(train_op.get_outputs(),
                             estimated_size_gigabytes=0.1)
 
-        infer_op.set_allowed_hardware({
-            Hardware(clouds.AWS(), 'inf1.2xlarge'),
-            Hardware(clouds.AWS(), 'p3.2xlarge'),
-            Hardware(clouds.GCP(), ('1x T4', 'n1-standard-4')),
-            Hardware(clouds.GCP(), ('1x T4', 'n1-standard-8')),
+        infer_op.set_allowed_resources({
+            Resources(clouds.AWS(), 'inf1.2xlarge'),
+            Resources(clouds.AWS(), 'p3.2xlarge'),
+            Resources(clouds.GCP(), ('1x T4', 'n1-standard-4')),
+            Resources(clouds.GCP(), ('1x T4', 'n1-standard-8')),
         })
 
         infer_op.set_estimate_runtime_func(resnet50_infer_estimate_runtime)
