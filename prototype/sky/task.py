@@ -15,7 +15,7 @@ class Task(object):
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
         self.estimated_outputs_size_gigabytes = None
-        self.allowed_resources = None
+        self.resources = None
         self.estimate_runtime_func = None
 
         dag = sky.DagContext.get_current_dag()
@@ -38,7 +38,7 @@ class Task(object):
         if self.inputs.startswith('s3:'):
             return clouds.AWS()
         elif self.inputs.startswith('gcs:'):
-            return GCP()
+            return clouds.GCP()
         else:
             assert False, 'cloud path not supported: {}'.format(self.inputs)
 
@@ -52,12 +52,12 @@ class Task(object):
     def get_estimated_outputs_size_gigabytes(self):
         return self.estimated_outputs_size_gigabytes
 
-    def set_allowed_resources(self, allowed_resources):
+    def set_resources(self, resources):
         """Sets the allowed cloud-instance type combos to execute this op."""
-        self.allowed_resources = allowed_resources
+        self.resources = resources
 
-    def get_allowed_resources(self):
-        return self.allowed_resources
+    def get_resources(self):
+        return self.resources
 
     def set_estimate_runtime_func(self, func):
         """Sets a func mapping resources to estimated time (secs)."""
@@ -80,5 +80,5 @@ class Task(object):
         s = 'Task(cmd={}, args={})'.format(self.command, self.args)
         s += '\n  inputs: {}'.format(self.inputs)
         s += '\n  outputs: {}'.format(self.outputs)
-        s += '\n  allowed_resources: {}'.format(self.allowed_resources)
+        s += '\n  resources: {}'.format(self.resources)
         return s
