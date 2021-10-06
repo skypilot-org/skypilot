@@ -3,3 +3,7 @@
 
 plotting/*.pdf
 plotting/*.png
+
+prototype/_airflow_dags/
+prototype/*.egg-info/
+prototype/**/*.tmp
