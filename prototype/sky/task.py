@@ -15,7 +15,7 @@ class Task(object):
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
         self.estimated_outputs_size_gigabytes = None
-        self.allowed_hardware = None
+        self.allowed_resources = None
         self.estimate_runtime_func = None
 
         dag = sky.DagContext.get_current_dag()
@@ -52,24 +52,24 @@ class Task(object):
     def get_estimated_outputs_size_gigabytes(self):
         return self.estimated_outputs_size_gigabytes
 
-    def set_allowed_hardware(self, allowed_hardware):
+    def set_allowed_resources(self, allowed_resources):
         """Sets the allowed cloud-instance type combos to execute this op."""
-        self.allowed_hardware = allowed_hardware
+        self.allowed_resources = allowed_resources
 
-    def get_allowed_hardware(self):
-        return self.allowed_hardware
+    def get_allowed_resources(self):
+        return self.allowed_resources
 
     def set_estimate_runtime_func(self, func):
-        """Sets a func mapping hardware to estimated time (secs)."""
+        """Sets a func mapping resources to estimated time (secs)."""
         self.estimate_runtime_func = func
 
-    def estimate_runtime(self, hardware):
-        """Returns a func mapping hardware to estimated time (secs)."""
+    def estimate_runtime(self, resources):
+        """Returns a func mapping resources to estimated time (secs)."""
         if self.estimate_runtime_func is None:
             raise NotImplementedError(
                 'Node [{}] does not have a cost model set; '
                 'call set_estimate_runtime_func() first'.format(self))
-        return self.estimate_runtime_func(hardware)
+        return self.estimate_runtime_func(resources)
 
     def __rshift__(a, b):
         sky.DagContext.get_current_dag().add_edge(a, b)
@@ -80,5 +80,5 @@ class Task(object):
         s = 'Task(cmd={}, args={})'.format(self.command, self.args)
         s += '\n  inputs: {}'.format(self.inputs)
         s += '\n  outputs: {}'.format(self.outputs)
-        s += '\n  allowed_hardware: {}'.format(self.allowed_hardware)
+        s += '\n  allowed_resources: {}'.format(self.allowed_resources)
         return s
