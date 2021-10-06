@@ -24,125 +24,12 @@ import typing
 import networkx as nx
 import numpy as np
 
-
-class Cloud(object):
-
-    # TODO: incorporate region/zone into the API.
-    def instance_type_to_hourly_cost(self, instance_type):
-        """Returns the hourly on-demand price for an instance type."""
-        raise NotImplementedError
-
-    def get_egress_cost(self, num_gigabytes):
-        """Returns the egress cost.
-
-        TODO: takes into account "per month" accumulation per account.
-        """
-        raise NotImplementedError
-
-    def is_same_cloud(self, other):
-        raise NotImplementedError
-
-
-class AWS(Cloud):
-    _REPR = 'AWS'
-
-    # In general, query this from the cloud.
-    _ON_DEMAND_PRICES = {
-        # p3.
-        'p3.2xlarge': 3.06,
-        'p3.8xlarge': 12.24,
-        'p3.16xlarge': 24.48,
-
-        # inf1.
-        'inf1.xlarge': 0.228,
-        'inf1.2xlarge': 0.362,
-        'inf1.6xlarge': 1.18,
-        'inf1.24xlarge': 4.721,
-    }
-
-    def instance_type_to_hourly_cost(self, instance_type):
-        return AWS._ON_DEMAND_PRICES[instance_type]
-
-    def get_egress_cost(self, num_gigabytes):
-        # In general, query this from the cloud:
-        #   https://aws.amazon.com/s3/pricing/
-        # NOTE: egress from US East (Ohio).
-        if num_gigabytes > 150 * 1024:
-            return 0.05 * num_gigabytes
-        cost = 0.0
-        if num_gigabytes >= 50 * 1024:
-            cost += (num_gigabytes - 50 * 1024) * 0.07
-            num_gigabytes -= 50 * 1024
-
-        if num_gigabytes >= 10 * 1024:
-            cost += (num_gigabytes - 10 * 1024) * 0.085
-            num_gigabytes -= 10 * 1024
-
-        if num_gigabytes > 1:
-            cost += (num_gigabytes - 1) * 0.09
-
-        cost += 0.0
-        return cost
-
-    def __repr__(self):
-        return AWS._REPR
-
-    def is_same_cloud(self, other):
-        return isinstance(other, AWS)
-
-
-class GCP(Cloud):
-
-    _REPR = 'GCP'
-
-    # In general, query this from the cloud.
-    # NOTE: assumes us-central1.
-    _ON_DEMAND_PRICES = {
-        # GPUs: https://cloud.google.com/compute/gpus-pricing.
-        # V100
-        '1x V100': 2.48,
-        '2x V100': 2.48 * 2,
-        '4x V100': 2.48 * 4,
-        '8x V100': 2.48 * 8,
-        # T4
-        '1x T4': 0.35,
-        '2x T4': 0.35 * 2,
-        '4x T4': 0.35 * 4,
-        # TPUs: https://cloud.google.com/tpu/pricing.
-        'tpu-v2-8': 4.5,
-        'tpu-v3-8': 8.0,
-        # VMs: https://cloud.google.com/compute/all-pricing.
-        'n1-standard-4': 0.189999,
-        'n1-standard-8': 0.379998,
-    }
-
-    def instance_type_to_hourly_cost(self, instance_type):
-        return GCP._ON_DEMAND_PRICES[instance_type]
-
-    def get_egress_cost(self, num_gigabytes):
-        # In general, query this from the cloud:
-        #   https://cloud.google.com/storage/pricing#network-pricing
-        # NOTE: egress to worldwide (excl. China, Australia).
-        if num_gigabytes <= 1024:
-            return 0.12 * num_gigabytes
-        elif num_gigabytes <= 1024 * 10:
-            return 0.11 * num_gigabytes
-        else:
-            return 0.08 * num_gigabytes
-
-    def __repr__(self):
-        return GCP._REPR
-
-    def is_same_cloud(self, other):
-        return isinstance(other, GCP)
-
-
-class Azure(Cloud):
-    pass
+import sky
+from sky import clouds
 
 
 class Hardware(typing.NamedTuple):
-    cloud: Cloud
+    cloud: clouds.Cloud
     types: typing.Tuple[str]
 
     def __repr__(self) -> str:
@@ -174,7 +61,7 @@ class DummyHardware(Hardware):
         return 0
 
 
-class DummyCloud(Cloud):
+class DummyCloud(clouds.Cloud):
     """A dummy Cloud that has zero egress cost from/to."""
     pass
 
@@ -487,7 +374,7 @@ class Operator(object):
         """Returns the cloud my inputs live in."""
         assert type(self.inputs) is str, self.inputs
         if self.inputs.startswith('s3:'):
-            return AWS()
+            return clouds.AWS()
         elif self.inputs.startswith('gcs:'):
             return GCP()
         else:
@@ -540,7 +427,7 @@ def resnet50_estimate_runtime(hardware):
     # 3.8 G Multiply-Adds, 2 FLOPs per MADD, 3 for fwd+bwd.
     flops_for_one_image = 3.8 * (10**9) * 2 * 3
 
-    if isinstance(hardware.cloud, AWS):
+    if isinstance(hardware.cloud, clouds.AWS):
         instance = hardware.types
         if instance == 'p3.2xlarge':
             num_v100s = 1
@@ -575,7 +462,7 @@ def resnet50_estimate_runtime(hardware):
           + communication_slack
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
 
-    elif isinstance(hardware.cloud, GCP):
+    elif isinstance(hardware.cloud, clouds.GCP):
         assert 'tpu-v3-8' in hardware.types, hardware
         tpu_v3_8_flops = 420 * (10**12)
         known_resnet50_utilization = 0.445  # From actual profiling.
@@ -682,10 +569,10 @@ def make_application():
         train_op.set_outputs('CLOUD://my-model', estimated_size_gigabytes=0.1)
 
         train_op.set_allowed_hardware({
-            Hardware(AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
-            Hardware(AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
+            Hardware(clouds.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
+            Hardware(clouds.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            Hardware(GCP(), ('n1-standard-8', 'tpu-v3-8')),
+            Hardware(clouds.GCP(), ('n1-standard-8', 'tpu-v3-8')),
         })
 
         train_op.set_estimate_runtime_func(resnet50_estimate_runtime)
@@ -701,10 +588,10 @@ def make_application():
                             estimated_size_gigabytes=0.1)
 
         infer_op.set_allowed_hardware({
-            Hardware(AWS(), 'inf1.2xlarge'),
-            Hardware(AWS(), 'p3.2xlarge'),
-            Hardware(GCP(), ('1x T4', 'n1-standard-4')),
-            Hardware(GCP(), ('1x T4', 'n1-standard-8')),
+            Hardware(clouds.AWS(), 'inf1.2xlarge'),
+            Hardware(clouds.AWS(), 'p3.2xlarge'),
+            Hardware(clouds.GCP(), ('1x T4', 'n1-standard-4')),
+            Hardware(clouds.GCP(), ('1x T4', 'n1-standard-8')),
         })
 
         infer_op.set_estimate_runtime_func(resnet50_infer_estimate_runtime)

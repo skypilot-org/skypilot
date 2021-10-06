@@ -2,6 +2,8 @@
 
 ## Setup
 
+0. `pip install -e .`
+
 1. `pip install -r requirements.txt`
 
 2. Initialize Airflow
