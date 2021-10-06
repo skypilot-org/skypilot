@@ -24,11 +24,4 @@
     airflow scheduler
     ```
 
-4. Copy the Sky DAG to Airflow directory: `mkdir -p ~/airflow/dags && cp sky_dag.py ~/airflow/dags/`
-
-    1. (I'm working to remove this step)
-
-5. Run `python main.py`
-
-6. Navigate to http://localhost:8080/dagrun/list/ to see your run
-
+4. Run `python main.py`, which will submit your job to Airflow and open http://localhost:8080/dagrun/list/ for monitoring progress.

@@ -1,0 +1,36 @@
+### Variables: {{cluster_config_file}}, {{dag_id}}, {{output_cloud_uri}}, {{output_path}}, {{run_command}}, {{timeout_seconds}}
+
+from datetime import datetime, timedelta
+
+from airflow import DAG
+from airflow.operators.bash import BashOperator
+
+with DAG(
+    dag_id="{{dag_id}}",
+    start_date=datetime(2021, 1, 1),
+    catchup=False,
+    is_paused_upon_creation=False,
+    dagrun_timeout=timedelta(seconds={{timeout_seconds}}),
+    tags=["sky"],
+) as dag:
+    setup = BashOperator(
+        task_id="ray_up",
+        bash_command="ray up -y {{cluster_config_file}} --no-config-cache",
+    )
+
+    execute = BashOperator(
+        task_id="ray_exec",
+        bash_command="ray exec {{cluster_config_file}} '{{run_command}}'",
+    )
+
+    save_result = BashOperator(
+        task_id="save_result_to_cloud",
+        bash_command="ray exec {{cluster_config_file}} 'aws s3 cp {{output_path}} {{output_cloud_uri}}'",
+    )
+
+    teardown = BashOperator(
+        task_id="ray_down",
+        bash_command="ray down -y {{cluster_config_file}}",
+    )
+
+    setup >> execute >> save_result >> teardown
