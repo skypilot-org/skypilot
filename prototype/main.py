@@ -16,17 +16,17 @@ import jinja2
 FLAGS = flags.FLAGS
 flags.DEFINE_string(
     "cluster_config_template",
-    os.path.join("/Users/lsf/projects/sky-experiments/prototype", "config/aws.yml.j2"),
+    "config/aws.yml.j2",
     "path to the cluster config file relative to repository root",
 )
 flags.DEFINE_string(
     "dag_template",
-    "sky_dag.py.j2",
+    "config/sky_dag.py.j2",
     "path to the Airflow DAG file template",
 )
 flags.DEFINE_string(
     "airflow_dags_path",
-    "/Users/lsf/airflow/dags",
+    "_airflow_dags",
     "path to the Airflow DAGs location",
 )
 
