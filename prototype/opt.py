@@ -28,28 +28,7 @@ import sky
 from sky import clouds
 
 
-class Resources(typing.NamedTuple):
-    cloud: clouds.Cloud
-    types: typing.Tuple[str]
-
-    def __repr__(self) -> str:
-        return f'{self.cloud}({self.types})'
-        # return f'{self.cloud.name}({self.types})'
-
-    def get_cost(self, seconds):
-        """Returns cost in USD for the runtime in seconds."""
-
-        cost = 0.0
-        typs = self.types
-        if type(typs) is str:
-            typs = [typs]
-        for instance_type in typs:
-            hourly_cost = self.cloud.instance_type_to_hourly_cost(instance_type)
-            cost += hourly_cost * (seconds / 3600)
-        return cost
-
-
-class DummyResources(Resources):
+class DummyResources(sky.Resources):
     """A dummy Resources that has zero egress cost from/to."""
 
     _REPR = 'DummyCloud'
@@ -64,7 +43,6 @@ class DummyResources(Resources):
 class DummyCloud(clouds.Cloud):
     """A dummy Cloud that has zero egress cost from/to."""
     pass
-
 
 
 # Optimizer.
@@ -231,7 +209,7 @@ class SkyOptimizer(object):
                 if do_print:
                     print('  best_parent', best_parent)
                 dp_point_backs[node][resources] = (parent, best_parent,
-                                                  best_egress_cost)
+                                                   best_egress_cost)
                 dp_best_cost[node][
                     resources] = min_pred_cost_plus_egress + estimated_cost
 
@@ -274,7 +252,6 @@ class SkyOptimizer(object):
                 overall_best / 3600))
         for msg in reversed(messages):
             print(msg)
-
 
 
 def resnet50_estimate_runtime(resources):
@@ -424,10 +401,10 @@ def make_application():
         train_op.set_outputs('CLOUD://my-model', estimated_size_gigabytes=0.1)
 
         train_op.set_allowed_resources({
-            Resources(clouds.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
-            Resources(clouds.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
+            sky.Resources(clouds.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
+            sky.Resources(clouds.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            Resources(clouds.GCP(), ('n1-standard-8', 'tpu-v3-8')),
+            sky.Resources(clouds.GCP(), ('n1-standard-8', 'tpu-v3-8')),
         })
 
         train_op.set_estimate_runtime_func(resnet50_estimate_runtime)
@@ -443,10 +420,10 @@ def make_application():
                             estimated_size_gigabytes=0.1)
 
         infer_op.set_allowed_resources({
-            Resources(clouds.AWS(), 'inf1.2xlarge'),
-            Resources(clouds.AWS(), 'p3.2xlarge'),
-            Resources(clouds.GCP(), ('1x T4', 'n1-standard-4')),
-            Resources(clouds.GCP(), ('1x T4', 'n1-standard-8')),
+            sky.Resources(clouds.AWS(), 'inf1.2xlarge'),
+            sky.Resources(clouds.AWS(), 'p3.2xlarge'),
+            sky.Resources(clouds.GCP(), ('1x T4', 'n1-standard-4')),
+            sky.Resources(clouds.GCP(), ('1x T4', 'n1-standard-8')),
         })
 
         infer_op.set_estimate_runtime_func(resnet50_infer_estimate_runtime)
