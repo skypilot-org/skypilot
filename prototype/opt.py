@@ -165,7 +165,7 @@ def make_application():
         # 'CLOUD': saves to the cloud this op ends up executing on.
         train_op.set_outputs('CLOUD://my-model', estimated_size_gigabytes=0.1)
 
-        train_op.set_allowed_resources({
+        train_op.set_resources({
             sky.Resources(clouds.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
             sky.Resources(clouds.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
@@ -184,7 +184,7 @@ def make_application():
         infer_op.set_inputs(train_op.get_outputs(),
                             estimated_size_gigabytes=0.1)
 
-        infer_op.set_allowed_resources({
+        infer_op.set_resources({
             sky.Resources(clouds.AWS(), 'inf1.2xlarge'),
             sky.Resources(clouds.AWS(), 'p3.2xlarge'),
             sky.Resources(clouds.GCP(), ('1x T4', 'n1-standard-4')),

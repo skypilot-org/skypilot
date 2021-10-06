@@ -85,7 +85,7 @@ class Optimizer(object):
 
         def make_dummy(name):
             dummy = sky.Task(name)
-            dummy.set_allowed_resources({DummyResources(DummyCloud(), None)})
+            dummy.set_resources({DummyResources(DummyCloud(), None)})
             dummy.set_estimate_runtime_func(lambda _: 0)
             return dummy
 
@@ -112,7 +112,7 @@ class Optimizer(object):
         for node_i, node in enumerate(topo_order):
             # Base case: a special source node.
             if node_i == 0:
-                dp_best_cost[node][list(node.get_allowed_resources())[0]] = 0
+                dp_best_cost[node][list(node.get_resources())[0]] = 0
                 continue
             # Don't print for the last node, Sink.
             do_print = node_i != len(topo_order) - 1
@@ -124,7 +124,7 @@ class Optimizer(object):
             assert len(parents) == 1, 'Supports single parent for now'
             parent = parents[0]
 
-            for resources in node.get_allowed_resources():
+            for resources in node.get_resources():
                 # Computes dp_best_cost[node][resources]
                 #   = my estimated cost + min { pred_cost + egress_cost }
                 assert resources not in dp_best_cost[node]
@@ -182,7 +182,7 @@ class Optimizer(object):
         pprint.pprint(dict(dp_best_cost))
 
         return Optimizer.print_optimized_plan(dp_best_cost, topo_order,
-                                                 dp_point_backs, minimize_cost)
+                                              dp_point_backs, minimize_cost)
 
     @staticmethod
     def print_optimized_plan(dp_best_cost, topo_order, dp_point_backs,
