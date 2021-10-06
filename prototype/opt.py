@@ -66,69 +66,6 @@ class DummyCloud(clouds.Cloud):
     pass
 
 
-# DAGs.
-class DagContext(object):
-    _current_dag = None
-    _previous_dags = []
-
-    @classmethod
-    def push_dag(cls, dag):
-        if cls._current_dag:
-            cls._previous_dags.append(cls._current_dag)
-        cls._current_dag = dag
-
-    @classmethod
-    def pop_dag(cls):
-        old_dag = cls._current_dag
-        if cls._previous_dags:
-            cls._current_dag = cls._previous_dags.pop()
-        else:
-            cls._current_dag = None
-        return old_dag
-
-    @classmethod
-    def get_current_dag(cls):
-        return cls._current_dag
-
-
-class Dag(object):
-    """FIXME: assume a chain DAG for now."""
-
-    _PREVIOUS_DAGS = []
-    _CURRENT_DAG = None
-
-    def __init__(self):
-        self.operators = []
-        self.graph = nx.DiGraph()
-
-    def add(self, operator):
-        self.graph.add_node(operator)
-        self.operators.append(operator)
-
-    def add_edge(self, op1, op2):
-        assert op1 in self.graph.nodes
-        assert op2 in self.graph.nodes
-        self.graph.add_edge(op1, op2)
-
-    def __enter__(self):
-        DagContext.push_dag(self)
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        DagContext.pop_dag()
-
-    def __repr__(self):
-        pformat = pprint.pformat(self.operators)
-        return 'DAG:\n{}'.format(pformat)
-        # return '<DAG=[{}]>'.format(','.join(map(str, self.operators)))
-
-    def get_graph(self):
-        return self.graph
-
-
-class PlannedDag(object):
-    pass
-
 
 # Optimizer.
 class SkyOptimizer(object):
@@ -172,13 +109,13 @@ class SkyOptimizer(object):
         return egress_time
 
     @staticmethod
-    def optimize(dag: Dag, minimize) -> PlannedDag:
+    def optimize(dag: sky.Dag, minimize):
         dag = SkyOptimizer._add_dummy_source_sink_nodes(copy.deepcopy(dag))
         return SkyOptimizer._optimize_cost(
             dag, minimize_cost=minimize == SkyOptimizer.COST)
 
     @staticmethod
-    def _add_dummy_source_sink_nodes(dag: Dag):
+    def _add_dummy_source_sink_nodes(dag: sky.Dag):
         """Adds special Source and Sink nodes.
 
         The two special nodes are for conveniently handling cases such as
@@ -219,7 +156,7 @@ class SkyOptimizer(object):
         return dag
 
     @staticmethod
-    def _optimize_cost(dag: Dag, minimize_cost=True):
+    def _optimize_cost(dag: sky.Dag, minimize_cost=True):
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
 
@@ -356,7 +293,7 @@ class Operator(object):
         self.allowed_hardware = None
         self.estimate_runtime_func = None
 
-        dag = DagContext.get_current_dag()
+        dag = sky.DagContext.get_current_dag()
         dag.add(self)
 
     # E.g., 's3://bucket', 'gcs://bucket', or None.
@@ -410,7 +347,7 @@ class Operator(object):
         return self.estimate_runtime_func(hardware)
 
     def __rshift__(a, b):
-        DagContext.get_current_dag().add_edge(a, b)
+        sky.DagContext.get_current_dag().add_edge(a, b)
 
     def __repr__(self):
         if self.name:
@@ -552,7 +489,7 @@ def resnet50_infer_estimate_runtime(hardware):
 def make_application():
     """A simple application: train_op -> infer_op."""
 
-    with Dag() as dag:
+    with sky.Dag() as dag:
         # Train.
         train_op = Operator('train_op',
                             command='train.py',
