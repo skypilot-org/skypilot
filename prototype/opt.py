@@ -141,7 +141,7 @@ class SkyOptimizer(object):
                 zero_outdegree_nodes.append(node)
 
         def make_dummy(name):
-            dummy = Operator(name)
+            dummy = sky.Task(name)
             dummy.set_allowed_hardware({DummyHardware(DummyCloud(), None)})
             dummy.set_estimate_runtime_func(lambda _: 0)
             return dummy
@@ -276,88 +276,6 @@ class SkyOptimizer(object):
             print(msg)
 
 
-# Operator.
-class Operator(object):
-    """Operator: a coarse-grained stage in an application."""
-
-    def __init__(self, name=None, command=None, args=None):
-        self.name = name
-        # The script and args to run.
-        self.command = command
-        self.args = args
-
-        self.inputs = None
-        self.outputs = None
-        self.estimated_inputs_size_gigabytes = None
-        self.estimated_outputs_size_gigabytes = None
-        self.allowed_hardware = None
-        self.estimate_runtime_func = None
-
-        dag = sky.DagContext.get_current_dag()
-        dag.add(self)
-
-    # E.g., 's3://bucket', 'gcs://bucket', or None.
-    def set_inputs(self, inputs, estimated_size_gigabytes):
-        self.inputs = inputs
-        self.estimated_inputs_size_gigabytes = estimated_size_gigabytes
-
-    def get_inputs(self):
-        return self.inputs
-
-    def get_estimated_inputs_size_gigabytes(self):
-        return self.estimated_inputs_size_gigabytes
-
-    def get_inputs_cloud(self):
-        """Returns the cloud my inputs live in."""
-        assert type(self.inputs) is str, self.inputs
-        if self.inputs.startswith('s3:'):
-            return clouds.AWS()
-        elif self.inputs.startswith('gcs:'):
-            return GCP()
-        else:
-            assert False, 'cloud path not supported: {}'.format(self.inputs)
-
-    def set_outputs(self, outputs, estimated_size_gigabytes):
-        self.outputs = outputs
-        self.estimated_outputs_size_gigabytes = estimated_size_gigabytes
-
-    def get_outputs(self):
-        return self.outputs
-
-    def get_estimated_outputs_size_gigabytes(self):
-        return self.estimated_outputs_size_gigabytes
-
-    def set_allowed_hardware(self, allowed_hardware):
-        """Sets the allowed cloud-instance type combos to execute this op."""
-        self.allowed_hardware = allowed_hardware
-
-    def get_allowed_hardware(self):
-        return self.allowed_hardware
-
-    def set_estimate_runtime_func(self, func):
-        """Sets a func mapping hardware to estimated time (secs)."""
-        self.estimate_runtime_func = func
-
-    def estimate_runtime(self, hardware):
-        """Returns a func mapping hardware to estimated time (secs)."""
-        if self.estimate_runtime_func is None:
-            raise NotImplementedError(
-                'Node [{}] does not have a cost model set; '
-                'call set_estimate_runtime_func() first'.format(self))
-        return self.estimate_runtime_func(hardware)
-
-    def __rshift__(a, b):
-        sky.DagContext.get_current_dag().add_edge(a, b)
-
-    def __repr__(self):
-        if self.name:
-            return self.name
-        s = 'Operator(cmd={}, args={})'.format(self.command, self.args)
-        s += '\n  inputs: {}'.format(self.inputs)
-        s += '\n  outputs: {}'.format(self.outputs)
-        s += '\n  allowed_hardware: {}'.format(self.allowed_hardware)
-        return s
-
 
 def resnet50_estimate_runtime(hardware):
     """A simple runtime model for Resnet50."""
@@ -491,7 +409,7 @@ def make_application():
 
     with sky.Dag() as dag:
         # Train.
-        train_op = Operator('train_op',
+        train_op = sky.Task('train_op',
                             command='train.py',
                             args='--data_dir=INPUTS[0] --model_dir=OUTPUTS[0]')
 
@@ -515,7 +433,7 @@ def make_application():
         train_op.set_estimate_runtime_func(resnet50_estimate_runtime)
 
         # Infer.
-        infer_op = Operator('infer_op',
+        infer_op = sky.Task('infer_op',
                             command='infer.py',
                             args='--model_dir=INPUTS[0]')
 
@@ -533,7 +451,7 @@ def make_application():
 
         infer_op.set_estimate_runtime_func(resnet50_infer_estimate_runtime)
 
-        # Chain the operators (Airflow syntax).
+        # Chain the sky.tasks (Airflow syntax).
         # The dependency represents data flow.
         train_op >> infer_op
 
