@@ -26,13 +26,13 @@ import time_estimators
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
-    working_dir = '/Users/zongheng/Dropbox/workspace/riselab/tpu'
+    working_dir = '~/Downloads/tpu' #'/Users/zongheng/Dropbox/workspace/riselab/tpu'
 
     # The setup command.  Will be run under the working directory.
-    setup = 'pip install tensorflow==2.4.0 pyyaml && cd models && pip install -e .'
+    setup = 'pip install --upgrade pip; conda create -n resnet python=3.7 -y; conda activate resnet; pip install tensorflow==2.4.0 pyyaml && cd models && pip install -e .'
 
     # The run command.  Will be run under the working directory.
-    run = 'python models/official/resnet/resnet_main.py --use_tpu=False --mode=train \
+    run = 'conda activate resnet; python models/official/resnet/resnet_main.py --use_tpu=False --mode=train \
     --train_batch_size=256 --train_steps=250 --iterations_per_loop=125 \
     --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
     --model_dir=resnet-model-dir --amp --xla --loss_scale=128'
