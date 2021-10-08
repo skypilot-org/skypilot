@@ -1,5 +1,5 @@
 absl-py
-apache-airflow
+colorama
 jinja2
 networkx
-ray
+ray[default]
