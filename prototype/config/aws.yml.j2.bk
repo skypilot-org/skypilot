@@ -1,10 +1,15 @@
-
-
-### Variables: {{instance_type}}, {{working_dir}}
+### Variables: {{instance_type}}, {{setup_commands}}, {{working_dir}}
 
 cluster_name: sky-aws
 
 max_workers: 1
+
+docker:
+  image: "rayproject/ray-ml:latest-gpu"
+  container_name: sky_container
+  pull_before_run: True
+  run_options: # Extra options to pass into "docker run"
+    - --ulimit nofile=65536:65536
 
 provider:
   type: aws
@@ -22,12 +27,16 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       ImageId: ami-0e9c522a722725e62 # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 500
 
 head_node_type: ray.head.default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-  "/tmp/workdir": {{working_dir}}
+  {% if working_dir is not none %} "/tmp/workdir": {{working_dir}} {% endif %}
 }
 
 # Patterns for files to exclude when running rsync up or rsync down
@@ -39,7 +48,12 @@ rsync_filter:
   - .gitignore
 
 # List of shell commands to run to set up nodes.
-setup_commands: []
+setup_commands:
+  - pip install awscli
+  - sudo apt-get update; sudo apt-get -y install vim htop
+{% for cmd in setup_commands %}
+  - {{cmd}}
+{% endfor %}
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands: []
