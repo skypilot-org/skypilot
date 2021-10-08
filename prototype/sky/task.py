@@ -5,11 +5,18 @@ from sky import clouds
 class Task(object):
     """Task: a coarse-grained stage in an application."""
 
-    def __init__(self, name=None, command=None, args=None):
+    def __init__(self,
+                 name=None,
+                 command=None,
+                 args=None,
+                 setup_command=None,
+                 working_dir=None):
         self.name = name
         # The script and args to run.
         self.command = command
         self.args = args
+        self.setup_command = setup_command
+        self.working_dir = working_dir
 
         self.inputs = None
         self.outputs = None
@@ -21,7 +28,7 @@ class Task(object):
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
 
-    # E.g., 's3://bucket', 'gcs://bucket', or None.
+    # E.g., 's3://bucket', 'gs://bucket', or None.
     def set_inputs(self, inputs, estimated_size_gigabytes):
         self.inputs = inputs
         self.estimated_inputs_size_gigabytes = estimated_size_gigabytes
@@ -37,7 +44,7 @@ class Task(object):
         assert type(self.inputs) is str, self.inputs
         if self.inputs.startswith('s3:'):
             return clouds.AWS()
-        elif self.inputs.startswith('gcs:'):
+        elif self.inputs.startswith('gs:'):
             return clouds.GCP()
         else:
             assert False, 'cloud path not supported: {}'.format(self.inputs)

@@ -40,10 +40,17 @@ class Dag(object):
         self.graph.add_node(task)
         self.tasks.append(task)
 
+    def remove(self, task):
+        self.tasks.remove(task)
+        self.graph.remove_node(task)
+
     def add_edge(self, op1, op2):
         assert op1 in self.graph.nodes
         assert op2 in self.graph.nodes
         self.graph.add_edge(op1, op2)
+
+    def __len__(self):
+        return len(self.tasks)
 
     def __enter__(self):
         DagContext.push_dag(self)

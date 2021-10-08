@@ -6,17 +6,7 @@ def resnet50_estimate_runtime(resources):
     # 3.8 G Multiply-Adds, 2 FLOPs per MADD, 3 for fwd+bwd.
     flops_for_one_image = 3.8 * (10**9) * 2 * 3
 
-    if isinstance(resources.cloud, clouds.AWS):
-        instance = resources.types
-        if instance == 'p3.2xlarge':
-            num_v100s = 1
-        elif instance == 'p3.8xlarge':
-            num_v100s = 4
-        elif instance == 'p3.16xlarge':
-            num_v100s = 8
-        else:
-            assert False, 'Not supported: {}'.format(resources)
-
+    def _v100(num_v100s):
         # Adds communication overheads per step (in seconds).
         communication_slack = 0.0
         if num_v100s == 4:
@@ -34,14 +24,35 @@ def resnet50_estimate_runtime(resources):
         # 27 TFLOPs, harmonic mean b/t 15TFLOPs (single-precision) & 120 TFLOPs
         # (16 bit).
         utilized_flops = 27 * (10**12)
-        print('****** trying 1/3 util for v100')
+
+        # print('****** trying 1/3 util for v100')
         utilized_flops = 120 * (10**12) / 3
 
         estimated_step_time_seconds = flops_for_one_batch / utilized_flops \
           + communication_slack
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
+        return estimated_run_time_seconds
+
+    if isinstance(resources.cloud, clouds.AWS):
+        instance = resources.types
+        if instance == 'p3.2xlarge':
+            num_v100s = 1
+        elif instance == 'p3.8xlarge':
+            num_v100s = 4
+        elif instance == 'p3.16xlarge':
+            num_v100s = 8
+        else:
+            assert False, 'Not supported: {}'.format(resources)
+        return _v100(num_v100s)
 
     elif isinstance(resources.cloud, clouds.GCP):
+        if isinstance(resources.types, tuple):
+            for t in resources.types:
+                if 'x V100' in t:
+                    num_v100s = int(t.split('x V100')[0])
+                    assert num_v100s in [1, 2, 4, 8], resources.types
+                    return _v100(num_v100s)
+
         assert 'tpu-v3-8' in resources.types, resources
         tpu_v3_8_flops = 420 * (10**12)
         known_resnet50_utilization = 0.445  # From actual profiling.
@@ -51,7 +62,8 @@ def resnet50_estimate_runtime(resources):
         #  - 1/4 util: doesn't work
         #  - 1/3 util: works
         #  - 1/2 util: works
-        print('*** trying hand written util for TPU')
+
+        # print('*** trying hand written util for TPU')
         known_resnet50_utilization = 1 / 3
 
         max_per_device_batch_size = 1024
@@ -60,15 +72,13 @@ def resnet50_estimate_runtime(resources):
         utilized_flops = tpu_v3_8_flops * known_resnet50_utilization
         estimated_step_time_seconds = flops_for_one_batch / utilized_flops
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
-
         print('  tpu-v3-8 estimated_step_time_seconds',
               estimated_step_time_seconds)
+        return estimated_run_time_seconds
 
     else:
         assert False, 'not supported cloud in prototype: {}'.format(
             resources.cloud)
-
-    return estimated_run_time_seconds
 
 
 def resnet50_infer_estimate_runtime(resources):
