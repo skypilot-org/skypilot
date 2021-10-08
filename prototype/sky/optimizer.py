@@ -54,8 +54,10 @@ class Optimizer(object):
     @staticmethod
     def optimize(dag: sky.Dag, minimize):
         dag = Optimizer._add_dummy_source_sink_nodes(copy.deepcopy(dag))
-        return Optimizer._optimize_cost(
+        optimized_dag, best_plan = Optimizer._optimize_cost(
             dag, minimize_cost=minimize == Optimizer.COST)
+        optimized_dag = Optimizer._remove_dummy_source_sink_nodes(optimized_dag)
+        return optimized_dag
 
     @staticmethod
     def _add_dummy_source_sink_nodes(dag: sky.Dag):
@@ -96,6 +98,16 @@ class Optimizer(object):
             sink = make_dummy('__sink__')
             for real_sink_node in zero_outdegree_nodes:
                 real_sink_node >> sink
+        return dag
+
+    @staticmethod
+    def _remove_dummy_source_sink_nodes(dag: sky.Dag):
+        """Removes special Source and Sink nodes."""
+        source = [t for t in dag.tasks if t.name == '__source__']
+        sink = [t for t in dag.tasks if t.name == '__sink__']
+        assert len(source) == len(sink) == 1, dag.tasks
+        dag.remove(source[0])
+        dag.remove(sink[0])
         return dag
 
     @staticmethod
@@ -181,17 +193,20 @@ class Optimizer(object):
         print('\nOptimizer - dp_best_cost:')
         pprint.pprint(dict(dp_best_cost))
 
-        return Optimizer.print_optimized_plan(dp_best_cost, topo_order,
-                                              dp_point_backs, minimize_cost)
+        # Dict, node -> (resources, cost).
+        best_plan = Optimizer.read_optimized_plan(dp_best_cost, topo_order,
+                                                  dp_point_backs, minimize_cost)
+        return dag, best_plan
 
     @staticmethod
-    def print_optimized_plan(dp_best_cost, topo_order, dp_point_backs,
-                             minimize_cost):
+    def read_optimized_plan(dp_best_cost, topo_order, dp_point_backs,
+                            minimize_cost):
         # FIXME: this function assumes chain.
         node = topo_order[-1]
         messages = []
         egress_cost = 0.0
         overall_best = None
+        best_plan = {}
         while True:
             best_costs = dp_best_cost[node]
             h, c = None, np.inf
@@ -199,10 +214,10 @@ class Optimizer(object):
                 if best_costs[resources] < c:
                     h = resources
                     c = best_costs[resources]
-            # TODO: avoid modifying in-place.
-            node.best_resources = h
             if not isinstance(h, DummyResources):
                 messages.append('  {} : {}'.format(node, h))
+                best_plan[node] = (h, c)
+                node.best_resources = h
             elif overall_best is None:
                 overall_best = c
             if node not in dp_point_backs:
@@ -217,6 +232,7 @@ class Optimizer(object):
                 overall_best / 3600))
         for msg in reversed(messages):
             print(msg)
+        return best_plan
 
 
 class DummyResources(sky.Resources):
