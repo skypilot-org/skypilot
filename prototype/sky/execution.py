@@ -22,6 +22,9 @@ from mako import template
 
 import sky
 
+# NOTE: keep in sync with the cluster template 'file_mounts'.
+SKY_REMOTE_WORKDIR = '/tmp/workdir'
+
 _CLOUD_TO_TEMPLATE = {
     sky.clouds.AWS: 'config/aws.yml.j2',
 }
@@ -82,8 +85,7 @@ def execute(dag: sky.Dag, teardown=False):
     _run(provision_cmd)
 
     # Resync file mounts.  Needed if we add a flag to skip the ray up step.
-    # NOTE: keep in sync with the cluster template 'file_mounts'.
-    remote_workdir = '/tmp/workdir'
+    remote_workdir = SKY_REMOTE_WORKDIR
     sync_template = template.Template('ray rsync_up ${cluster_config_file} \
         ${local_workdir}/ ${remote_workdir}')
     sync_cmd = sync_template.render(cluster_config_file=cluster_config_file,
