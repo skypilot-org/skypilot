@@ -55,6 +55,7 @@ def _write_cluster_config(task, cluster_config_template):
         {
             'instance_type': task.best_resources.types,
             'workdir': task.workdir,
+            'setup_command': task.setup_command,
         },
     )
 
@@ -74,13 +75,13 @@ def execute(dag: sky.Dag, teardown=False):
         task, _get_cluster_config_template(task))
 
     # Provision resources.
-    setup_template = template.Template(
+    provision_template = template.Template(
         'ray up -y ${cluster_config_file} --no-config-cache')
-    setup_cmd = setup_template.render(cluster_config_file=cluster_config_file)
-    _run(setup_cmd)
+    provision_cmd = provision_template.render(
+        cluster_config_file=cluster_config_file)
+    _run(provision_cmd)
 
-    # Resync file mounts.  This is needed when files changed between the
-    # resource launch and this current execute() request.
+    # Resync file mounts.  Needed if we add a flag to skip the ray up step.
     # NOTE: keep in sync with the cluster template 'file_mounts'.
     remote_workdir = '/tmp/workdir'
     sync_template = template.Template('ray rsync_up ${cluster_config_file} \
@@ -92,14 +93,11 @@ def execute(dag: sky.Dag, teardown=False):
 
     # Execute.
     execute_template = template.Template(
-        'ray exec ${cluster_config_file} "cd ${remote_workdir}; ${command}"'
-    )
+        'ray exec ${cluster_config_file} "cd ${remote_workdir}; ${command}"')
     execute_template = template.Template(
-        textwrap.dedent("""
+        textwrap.dedent("""\
           ray exec ${cluster_config_file} \
-            "cd ${remote_workdir} && \
-             ${setup_command} && cd ${remote_workdir} && \
-             ${command}"
+          "cd ${remote_workdir} && ${command}"
     """).strip())
     execute_cmd = execute_template.render(
         cluster_config_file=cluster_config_file,
