@@ -58,7 +58,7 @@ def _write_cluster_config(task, cluster_config_template):
         {
             'instance_type': task.best_resources.types,
             'workdir': task.workdir,
-            'setup_command': task.setup_command,
+            'setup_command': task.setup,
         },
     )
 
@@ -104,7 +104,7 @@ def execute(dag: sky.Dag, teardown=False):
     execute_cmd = execute_template.render(
         cluster_config_file=cluster_config_file,
         remote_workdir=remote_workdir,
-        command=task.command,
-        setup_command=task.setup_command or ':',
+        command=task.run,
+        setup_command=task.setup or ':',
     )
     _run(execute_cmd)

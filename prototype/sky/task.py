@@ -5,17 +5,19 @@ from sky import clouds
 class Task(object):
     """Task: a coarse-grained stage in an application."""
 
-    def __init__(self,
-                 name=None,
-                 command=None,
-                 args=None,
-                 setup_command=None,
-                 workdir=None):
+    def __init__(
+            self,
+            name=None,
+            workdir=None,
+            setup=None,
+            run=None,
+            args=None,  # TODO: consider removing.
+    ):
         self.name = name
         # The script and args to run.
-        self.command = command
+        self.run = run
         self.args = args
-        self.setup_command = setup_command
+        self.setup = setup
         self.workdir = workdir
 
         self.inputs = None
@@ -84,7 +86,7 @@ class Task(object):
     def __repr__(self):
         if self.name:
             return self.name
-        s = 'Task(cmd={}, args={})'.format(self.command, self.args)
+        s = 'Task(run={}, args={})'.format(self.run, self.args)
         s += '\n  inputs: {}'.format(self.inputs)
         s += '\n  outputs: {}'.format(self.outputs)
         s += '\n  resources: {}'.format(self.resources)

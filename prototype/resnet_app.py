@@ -36,7 +36,7 @@ with sky.Dag() as dag:
            pip install tensorflow==2.4.0 pyyaml && \
            cd models && pip install -e ."'
 
-    # The run command.  Will be run under the working directory.
+    # The command to run.  Will be run under the working directory.
     run = 'conda activate resnet && \
         python models/official/resnet/resnet_main.py --use_tpu=False \
         --mode=train --train_batch_size=256 --train_steps=250 \
@@ -47,9 +47,9 @@ with sky.Dag() as dag:
 
     train = sky.Task(
         'train',
-        command=run,
-        setup_command=setup,
         workdir=workdir,
+        setup=setup,
+        run=run,
     )
     train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
                      estimated_size_gigabytes=70)
