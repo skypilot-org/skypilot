@@ -30,10 +30,11 @@ with sky.Dag() as dag:
 
     # The setup command.  Will be run under the working directory.
     setup = 'pip install --upgrade pip && \
-        conda create -n resnet python=3.7 -y && \
-        conda activate resnet && \
-        pip install tensorflow==2.4.0 pyyaml && \
-        cd models && pip install -e .'
+        conda activate resnet || \
+          "conda create -n resnet python=3.7 -y && \
+           conda activate resnet && \
+           pip install tensorflow==2.4.0 pyyaml && \
+           cd models && pip install -e ."'
 
     # The run command.  Will be run under the working directory.
     run = 'conda activate resnet && \
