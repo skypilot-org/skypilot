@@ -1,6 +1,6 @@
 
 
-### Variables: {{instance_type}}, {{working_dir}}
+### Variables: {{instance_type}}, {{workdir}}
 
 cluster_name: sky-aws
 
@@ -27,7 +27,7 @@ head_node_type: ray.head.default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-  "/tmp/workdir": {{working_dir}}
+  "/tmp/workdir": {{workdir}}
 }
 
 # Patterns for files to exclude when running rsync up or rsync down
