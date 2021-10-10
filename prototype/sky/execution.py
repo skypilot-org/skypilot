@@ -54,7 +54,7 @@ def _write_cluster_config(task, cluster_config_template):
         cluster_config_template,
         {
             'instance_type': task.best_resources.types,
-            'working_dir': task.working_dir,
+            'workdir': task.workdir,
         },
     )
 
@@ -82,28 +82,28 @@ def execute(dag: sky.Dag, teardown=False):
     # Resync file mounts.  This is needed when files changed between the
     # resource launch and this current execute() request.
     # NOTE: keep in sync with the cluster template 'file_mounts'.
-    remote_working_dir = '/tmp/workdir'
+    remote_workdir = '/tmp/workdir'
     sync_template = template.Template('ray rsync_up ${cluster_config_file} \
-        ${local_working_dir}/ ${remote_working_dir}')
+        ${local_workdir}/ ${remote_workdir}')
     sync_cmd = sync_template.render(cluster_config_file=cluster_config_file,
-                                    local_working_dir=task.working_dir,
-                                    remote_working_dir=remote_working_dir)
+                                    local_workdir=task.workdir,
+                                    remote_workdir=remote_workdir)
     _run(sync_cmd)
 
     # Execute.
     execute_template = template.Template(
-        'ray exec ${cluster_config_file} "cd ${remote_working_dir}; ${command}"'
+        'ray exec ${cluster_config_file} "cd ${remote_workdir}; ${command}"'
     )
     execute_template = template.Template(
         textwrap.dedent("""
           ray exec ${cluster_config_file} \
-            "cd ${remote_working_dir} && \
-             ${setup_command} && cd ${remote_working_dir} && \
+            "cd ${remote_workdir} && \
+             ${setup_command} && cd ${remote_workdir} && \
              ${command}"
     """).strip())
     execute_cmd = execute_template.render(
         cluster_config_file=cluster_config_file,
-        remote_working_dir=remote_working_dir,
+        remote_workdir=remote_workdir,
         command=task.command,
         setup_command=task.setup_command or ':',
     )

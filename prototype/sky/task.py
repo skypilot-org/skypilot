@@ -10,13 +10,13 @@ class Task(object):
                  command=None,
                  args=None,
                  setup_command=None,
-                 working_dir=None):
+                 workdir=None):
         self.name = name
         # The script and args to run.
         self.command = command
         self.args = args
         self.setup_command = setup_command
-        self.working_dir = working_dir
+        self.workdir = workdir
 
         self.inputs = None
         self.outputs = None
