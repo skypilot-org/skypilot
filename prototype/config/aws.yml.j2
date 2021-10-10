@@ -1,6 +1,4 @@
-
-
-### Variables: {{instance_type}}, {{workdir}}
+### Variables: {{instance_type}}, {{workdir}}, {{setup_command}}
 
 cluster_name: sky-aws
 
@@ -21,7 +19,7 @@ available_node_types:
     max_workers: 1
     node_config:
       InstanceType: {{instance_type}}
-      ImageId: ami-0e9c522a722725e62 # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+      ImageId: ami-0e9c522a722725e62  # Deep Learning AMI (Ubuntu 18.04) Version 49.0
 
 head_node_type: ray.head.default
 
@@ -39,7 +37,8 @@ rsync_filter:
   - .gitignore
 
 # List of shell commands to run to set up nodes.
-setup_commands: []
+setup_commands:
+  - cd /tmp/workdir && {{setup_command}}
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands: []
