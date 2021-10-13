@@ -15,7 +15,6 @@ Current task launcher:
 """
 import datetime
 import json
-import logging
 import os
 import subprocess
 import time
@@ -30,6 +29,7 @@ import sky
 RunId = str
 
 SKY_LOGS_DIRECTORY = './logs'
+STREAM_LOGS_TO_CONSOLE = True
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
@@ -104,20 +104,23 @@ class Step:
         self.shell_command = shell_command
 
     def run(self, **kwargs) -> subprocess.CompletedProcess:
-        logfile = os.path.join(self.runner.logs_root, f'{self.step_id}.log')
-        print(
-            f'  To view progress: {Style.BRIGHT}tail -n100 -f {logfile}{Style.RESET_ALL}'
-        )
-        with open(logfile, 'w') as fout:
-            proc = subprocess.run(
-                self.shell_command,
+        log_path = os.path.join(self.runner.logs_root, f'{self.step_id}.log')
+        log_abs_path = os.path.abspath(log_path)
+        tail_cmd = f'tail -n100 -f {log_abs_path}'
+        if STREAM_LOGS_TO_CONSOLE:
+            return subprocess.run(
+                self.shell_command + f' 2>&1 | tee {log_path}',
                 shell=True,
-                stderr=subprocess.STDOUT,
-                stdout=fout,
-                **kwargs,
+                check=True,
+            )  # TODO: `ray up` has a bug where if you redirect stdout and stderr, stdout is not flushed.
+        else:
+            print(
+                f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
+            return subprocess.run(
+                self.shell_command + f' 2>&1 >{log_path}',
+                shell=True,
+                check=True,
             )
-            proc.check_returncode()
-            return proc
 
 
 class Runner:
@@ -159,7 +162,7 @@ class Runner:
                     },
                 )
                 print(
-                    f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}'
+                    f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{step.shell_command}{Style.RESET_ALL}'
                 )
                 step.run()
                 self.logger.log('finish_step')
