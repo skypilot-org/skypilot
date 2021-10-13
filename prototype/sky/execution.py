@@ -13,14 +13,23 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
+import datetime
+import json
+import logging
+import os
 import subprocess
-import textwrap
-import typing
+import time
+from typing import List, Optional
 
+import colorama
+from colorama import Fore, Style
 import jinja2
-from mako import template
 
 import sky
+
+RunId = str
+
+SKY_LOGS_DIRECTORY = './logs'
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
@@ -37,7 +46,7 @@ def _get_cluster_config_template(task):
 
 def _fill_template(template_path: str,
                    variables: dict,
-                   output_path: typing.Optional[str] = None) -> str:
+                   output_path: Optional[str] = None) -> str:
     """Create a file from a Jinja template and return the filename."""
     assert template_path.endswith('.j2'), template_path
     with open(template_path) as fin:
@@ -52,59 +61,148 @@ def _fill_template(template_path: str,
     return output_path
 
 
-def _write_cluster_config(task, cluster_config_template):
+def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
     return _fill_template(
         cluster_config_template,
         {
             'instance_type': task.best_resources.types,
-            'workdir': task.workdir,
+            'run_id': run_id,
             'setup_command': task.setup,
+            'workdir': task.workdir,
         },
     )
 
 
-def _run(cmd, **kwargs) -> subprocess.CompletedProcess:
-    print('$ ' + cmd)
-    ret = subprocess.run(cmd, shell=True, **kwargs)
-    ret.check_returncode()
-    return ret
+def _get_run_id() -> RunId:
+    return 'sky_' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
-def execute(dag: sky.Dag, teardown=False):
+class EventLogger:
+
+    def __init__(self, log_file_path: str):
+        self.logfile = log_file_path
+        # Create an empty file.
+        with open(self.logfile, 'w'):
+            pass
+
+    def log(self, event: str, payload: dict = {}):
+        now = time.time()
+        json_payload = {'time': now, 'event': event}
+        json_payload.update(payload)
+        with open(self.logfile, 'a') as fout:
+            fout.write(json.dumps(json_payload))
+            fout.write('\n')
+
+
+class Step:
+
+    def __init__(self, runner: 'Runner', step_id: str, step_desc: str,
+                 shell_command: str):
+        self.runner = runner
+        self.step_id = str(step_id)
+        self.step_desc = step_desc
+        self.shell_command = shell_command
+
+    def run(self, **kwargs) -> subprocess.CompletedProcess:
+        logfile = os.path.join(self.runner.logs_root, f'{self.step_id}.log')
+        print(
+            f'  To view progress: {Style.BRIGHT}tail -n100 -f {logfile}{Style.RESET_ALL}'
+        )
+        with open(logfile, 'w') as fout:
+            proc = subprocess.run(
+                self.shell_command,
+                shell=True,
+                stderr=subprocess.STDOUT,
+                stdout=fout,
+                **kwargs,
+            )
+            proc.check_returncode()
+            return proc
+
+
+class Runner:
+    """
+    FIXME: This is a linear sequence of steps for now. Will upgrade to a DAG.
+    """
+
+    def __init__(self, run_id: RunId, steps: List[Step] = []):
+        self.run_id = run_id
+        self.steps = steps
+        self.next_step_id = 0
+        self.logs_root = os.path.join(SKY_LOGS_DIRECTORY, run_id)
+        os.makedirs(self.logs_root, exist_ok=True)
+        self.logger = EventLogger(os.path.join(self.logs_root, '_events.jsonl'))
+
+    def add_step(self, step_name: str, step_desc: str,
+                 shell_command: str) -> 'Runner':
+        step_id = f'{self.next_step_id:03}_{step_name}'
+        self.next_step_id += 1
+        self.steps.append(Step(self, step_id, step_desc, shell_command))
+        return self
+
+    def run(self) -> 'Runner':
+        self.logger.log('start_run')
+        print(f'{Fore.GREEN}', end='')
+        print('--------------------------')
+        print('  Sky execution started')
+        print('--------------------------')
+        print(f'{Fore.RESET}')
+
+        try:
+            for step in self.steps:
+                self.logger.log(
+                    'start_step',
+                    {
+                        'step_id': step.step_id,
+                        'step_desc': step.step_desc,
+                        'shell_command': step.shell_command,
+                    },
+                )
+                print(
+                    f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}'
+                )
+                step.run()
+                self.logger.log('finish_step')
+                print(f'{Fore.CYAN}Step {step.step_id} finished{Fore.RESET}\n')
+
+            self.logger.log('finish_run')
+            print(f'{Fore.GREEN}', end='')
+            print('---------------------------')
+            print('  Sky execution finished')
+            print('---------------------------')
+            print(f'{Fore.RESET}')
+            return self
+        except subprocess.CalledProcessError as e:
+            print(f'{Fore.RED}Step failed! {e}{Fore.RESET}')
+            raise e
+
+
+def execute(dag: sky.Dag, teardown: bool = False):
+    colorama.init()
+
     assert len(dag) == 1, 'Job launcher assumes 1 task for now'
-    assert not teardown, 'Implement by copying from main.py'
     task = dag.tasks[0]
+
+    run_id = _get_run_id()
     cluster_config_file = _write_cluster_config(
-        task, _get_cluster_config_template(task))
+        run_id, task, _get_cluster_config_template(task))
 
-    # Provision resources.
-    provision_template = template.Template(
-        'ray up -y ${cluster_config_file} --no-config-cache')
-    provision_cmd = provision_template.render(
-        cluster_config_file=cluster_config_file)
-    _run(provision_cmd)
-
-    # Resync file mounts.  Needed if we add a flag to skip the ray up step.
-    remote_workdir = SKY_REMOTE_WORKDIR
-    sync_template = template.Template('ray rsync_up ${cluster_config_file} \
-        ${local_workdir}/ ${remote_workdir}')
-    sync_cmd = sync_template.render(cluster_config_file=cluster_config_file,
-                                    local_workdir=task.workdir,
-                                    remote_workdir=remote_workdir)
-    _run(sync_cmd)
-
-    # Execute.
-    execute_template = template.Template(
-        'ray exec ${cluster_config_file} "cd ${remote_workdir}; ${command}"')
-    execute_template = template.Template(
-        textwrap.dedent("""\
-          ray exec ${cluster_config_file} \
-          "cd ${remote_workdir} && ${command}"
-    """).strip())
-    execute_cmd = execute_template.render(
-        cluster_config_file=cluster_config_file,
-        remote_workdir=remote_workdir,
-        command=task.run,
-        setup_command=task.setup or ':',
+    runner = Runner(run_id)
+    runner.add_step('provision', 'Provision resources',
+                    f'ray up -y {cluster_config_file} --no-config-cache')
+    runner.add_step(
+        'sync', 'Sync files',
+        f'ray rsync_up {cluster_config_file} {task.workdir} {SKY_REMOTE_WORKDIR}'
     )
-    _run(execute_cmd)
+    runner.add_step(
+        'exec', 'Execute task',
+        f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && {task.run}\''
+    )
+    if teardown:
+        runner.add_step('teardown', 'Tear down resources',
+                        f'ray down -y {cluster_config_file}')
+    runner.run()
+    if not teardown:
+        print(
+            f'  To log into the cloud VM: {Style.BRIGHT}ray attach {cluster_config_file} {Style.RESET_ALL}\n'
+        )
