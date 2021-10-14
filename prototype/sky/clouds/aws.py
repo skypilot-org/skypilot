@@ -49,4 +49,4 @@ class AWS(clouds.Cloud):
         return isinstance(other, AWS)
 
     def make_deploy_resources_variables(self, task):
-        return {'instance_type': task.best_resources.types}
+        return {'instance_type': task.best_resources.instance_type}

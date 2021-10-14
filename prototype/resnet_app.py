@@ -59,12 +59,15 @@ with sky.Dag() as dag:
         # sky.Resources(clouds.GCP(), 'n1-standard-16'),
         sky.Resources(
             clouds.GCP(),
-            # Format for GPUs: '<num>x <name>', or '<name>' (implies num=1).
-            # Examples: 'V100', '1x P100', '4x V100'.
-            ('n1-standard-8', '1x V100'),
-        )
+            'n1-standard-8',
+            # Options: 'V100', {'V100': <num>}.
+            'V100',
+        ),
+        # sky.Resources(accelerators='V100'),
     })
-    train.set_estimate_runtime_func(time_estimators.resnet50_estimate_runtime)
+
+    # Optionally, specify a time estimator: Resources -> time in seconds.
+    # train.set_estimate_runtime_func(time_estimators.resnet50_estimate_runtime)
 
 dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
 # sky.execute(dag, dryrun=True)
