@@ -61,7 +61,7 @@ def _fill_template(template_path: str,
     return output_path
 
 
-def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
+def _write_cluster_config(run_id: RunId, task, cluster_config_template: str, docker_config=None):
     return _fill_template(
         cluster_config_template,
         {
@@ -112,6 +112,7 @@ class Step:
                 self.shell_command + f' 2>&1 | tee {log_path}',
                 shell=True,
                 check=True,
+                stdout = subprocess.PIPE,
             )  # TODO: `ray up` has a bug where if you redirect stdout and stderr, stdout is not flushed.
         else:
             print(
@@ -120,6 +121,7 @@ class Step:
                 self.shell_command + f' 2>&1 >{log_path}',
                 shell=True,
                 check=True,
+                stdout = subprocess.PIPE,
             )
 
 
@@ -135,6 +137,7 @@ class Runner:
         self.logs_root = os.path.join(SKY_LOGS_DIRECTORY, run_id)
         os.makedirs(self.logs_root, exist_ok=True)
         self.logger = EventLogger(os.path.join(self.logs_root, '_events.jsonl'))
+        self.cluster_ips = []
 
     def add_step(self, step_name: str, step_desc: str,
                  shell_command: str) -> 'Runner':
@@ -164,7 +167,11 @@ class Runner:
                 print(
                     f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{step.shell_command}{Style.RESET_ALL}'
                 )
-                step.run()
+                output = step.run()
+                if 'ray get-head-ip' in step.shell_command or 'ray get-worker-ips' in step.shell_command:
+                    str_output = output.stdout.decode('utf-8')
+                    self.cluster_ips.append(ips)
+
                 self.logger.log('finish_step')
                 print(f'{Fore.CYAN}Step {step.step_id} finished{Fore.RESET}\n')
 
@@ -197,6 +204,17 @@ def execute(dag: sky.Dag, teardown: bool = False):
         'sync', 'Sync files',
         f'ray rsync_up {cluster_config_file} {task.workdir} {SKY_REMOTE_WORKDIR}'
     )
+
+    runner.add_step(
+        'get_head_ip', 'Get Head IP',
+        f'ray get-head-ip {cluster_config_file}'
+    )
+
+    runner.add_step(
+        'get_worker_ips', 'Get Worker IP',
+        f'ray get-worker-ips {cluster_config_file}'
+    )
+
     runner.add_step(
         'exec', 'Execute task',
         f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && {task.run}\''
