@@ -1,6 +1,5 @@
-### Variables: {{instance_type}}, {{workdir}}, {{setup_command}}
-
 # Ref: https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/gcp/example-gpu-docker.yaml
+# FIXME: use variables for project_id, zone.
 
 cluster_name: sky-gcp
 
@@ -9,8 +8,7 @@ max_workers: 1
 provider:
   type: gcp
   region: us-west1
-  availability_zone: us-west1-a
-  # FIXME: make this a variable
+  availability_zone: us-west1-b
   project_id: intercloud-320520  # Globally unique project id
 
 auth:
@@ -30,17 +28,20 @@ available_node_types:
             initializeParams:
               diskSizeGb: 500
               # See https://cloud.google.com/deep-learning-vm/docs/images
+{% if gpu is none %}
+              sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu
+{% else %}
               sourceImage: projects/deeplearning-platform-release/global/images/family/common-cu110
         guestAccelerators:
-          # FIXME: use variables for project_id, zone, accelerator type (if any).
-          - acceleratorType: projects/intercloud-320520/zones/us-west1-a/acceleratorTypes/nvidia-tesla-v100
-            acceleratorCount: 1
+          - acceleratorType: projects/intercloud-320520/zones/us-west1-b/acceleratorTypes/{{gpu}}
+            acceleratorCount: {{gpu_count}}
         metadata:
           items:
             - key: install-nvidia-driver
               value: "True"
         scheduling:
           - onHostMaintenance: TERMINATE
+{% endif %}
 
 head_node_type: ray_head_default
 

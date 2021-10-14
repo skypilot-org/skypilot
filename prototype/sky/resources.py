@@ -1,19 +1,17 @@
-import typing
+from typing import NamedTuple, Tuple
 
 from sky import clouds
 
 
-class Resources(typing.NamedTuple):
+class Resources(NamedTuple):
     cloud: clouds.Cloud
-    types: typing.Tuple[str]
+    types: Tuple[str]
 
     def __repr__(self) -> str:
         return f'{self.cloud}({self.types})'
-        # return f'{self.cloud.name}({self.types})'
 
     def get_cost(self, seconds):
         """Returns cost in USD for the runtime in seconds."""
-
         cost = 0.0
         typs = self.types
         if type(typs) is str:
