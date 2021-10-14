@@ -5,6 +5,10 @@ class Cloud(object):
         """Returns the hourly on-demand price for an instance type."""
         raise NotImplementedError
 
+    def accelerators_to_hourly_cost(self, accelerators):
+        """Returns the hourly on-demand price for accelerators."""
+        raise NotImplementedError
+
     def get_egress_cost(self, num_gigabytes):
         """Returns the egress cost.
 
