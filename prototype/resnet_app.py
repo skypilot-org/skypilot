@@ -56,11 +56,16 @@ with sky.Dag() as dag:
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
         # sky.Resources(clouds.AWS(), 'p3.2xlarge'),
-        sky.Resources(clouds.GCP(), 'n1-standard-8'),
-        # TODO: require ram 32g
-        # sky.Resources(clouds.GCP(), ('1x V100', 'n1-standard-8')),
+        # sky.Resources(clouds.GCP(), 'n1-standard-16'),
+        sky.Resources(
+            clouds.GCP(),
+            # Format for GPUs: '<num>x <name>', or '<name>' (implies num=1).
+            # Examples: 'V100', '1x P100', '4x V100'.
+            ('n1-standard-8', '1x V100'),
+        )
     })
     train.set_estimate_runtime_func(time_estimators.resnet50_estimate_runtime)
 
 dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
-sky.execute(dag, teardown=False)
+# sky.execute(dag, dryrun=True)
+sky.execute(dag)

@@ -47,3 +47,6 @@ class AWS(clouds.Cloud):
 
     def is_same_cloud(self, other):
         return isinstance(other, AWS)
+
+    def make_deploy_resources_variables(self, task):
+        return {'instance_type': task.best_resources.types}
