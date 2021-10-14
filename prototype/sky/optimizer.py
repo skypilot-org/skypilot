@@ -135,6 +135,7 @@ class Optimizer(object):
 
             assert len(parents) == 1, 'Supports single parent for now'
             parent = parents[0]
+            num_resources = node.get_resources()
 
             for resources in node.get_resources():
                 # Computes dp_best_cost[node][resources]
@@ -143,7 +144,13 @@ class Optimizer(object):
                 if do_print:
                     print('resources:', resources)
 
-                estimated_runtime = node.estimate_runtime(resources)
+                try:
+                    estimated_runtime = node.estimate_runtime(resources)
+                except Exception as e:
+                    print('Time estimator errors out.  '
+                          'Defaulting estimated time to 1 day.')
+                    print('Error: {}'.format(str(e)))
+                    estimated_runtime = 1 * 24 * 3600
                 if minimize_cost:
                     estimated_cost = resources.get_cost(estimated_runtime)
                 else:
