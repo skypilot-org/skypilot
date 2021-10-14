@@ -31,14 +31,14 @@ with sky.Dag() as dag:
     # The setup command.  Will be run under the working directory.
     setup = 'pip install --upgrade pip && \
         conda activate resnet || \
-          "conda create -n resnet python=3.7 -y && \
+          (conda create -n resnet python=3.7 -y && \
            conda activate resnet && \
            pip install tensorflow==2.4.0 pyyaml && \
-           cd models && pip install -e ."'
+           cd models && pip install -e .)'
 
     # The command to run.  Will be run under the working directory.
     run = 'conda activate resnet && \
-        python models/official/resnet/resnet_main.py --use_tpu=False \
+        python -u models/official/resnet/resnet_main.py --use_tpu=False \
         --mode=train --train_batch_size=256 --train_steps=250 \
         --iterations_per_loop=125 \
         --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
@@ -55,8 +55,10 @@ with sky.Dag() as dag:
                      estimated_size_gigabytes=70)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
-        sky.Resources(clouds.AWS(), 'p3.2xlarge'),
-        # sky.Resources(clouds.GCP(), ('1x V100', 'n1-standard-4')),
+        # sky.Resources(clouds.AWS(), 'p3.2xlarge'),
+        sky.Resources(clouds.GCP(), 'n1-standard-8'),
+        # TODO: require ram 32g
+        # sky.Resources(clouds.GCP(), ('1x V100', 'n1-standard-8')),
     })
     train.set_estimate_runtime_func(time_estimators.resnet50_estimate_runtime)
 

@@ -36,6 +36,7 @@ SKY_REMOTE_WORKDIR = '/tmp/workdir'
 
 _CLOUD_TO_TEMPLATE = {
     sky.clouds.AWS: 'config/aws.yml.j2',
+    sky.clouds.GCP: 'config/gcp.yml.j2',
 }
 
 
