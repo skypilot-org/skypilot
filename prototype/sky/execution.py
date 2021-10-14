@@ -208,5 +208,8 @@ def execute(dag: sky.Dag, teardown: bool = False):
     runner.run()
     if not teardown:
         print(
-            f'  To log into the cloud VM: {Style.BRIGHT}ray attach {cluster_config_file} {Style.RESET_ALL}\n'
+            f'  To log into the cloud VM:\t{Style.BRIGHT}ray attach {cluster_config_file} {Style.RESET_ALL}\n'
+        )
+        print(
+            f'  To teardown the resources:\t{Style.BRIGHT}ray down {cluster_config_file} {Style.RESET_ALL}\n'
         )
