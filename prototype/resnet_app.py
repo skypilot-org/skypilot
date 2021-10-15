@@ -55,15 +55,19 @@ with sky.Dag() as dag:
                      estimated_size_gigabytes=70)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
+        ##### Fully specified
         # sky.Resources(clouds.AWS(), 'p3.2xlarge'),
         # sky.Resources(clouds.GCP(), 'n1-standard-16'),
-        sky.Resources(
-            clouds.GCP(),
-            'n1-standard-8',
-            # Options: 'V100', {'V100': <num>}.
-            'V100',
-        ),
-        # sky.Resources(accelerators='V100'),
+        # sky.Resources(
+        #     clouds.GCP(),
+        #     'n1-standard-8',
+        #     # Options: 'V100', {'V100': <num>}.
+        #     'V100',
+        # ),
+        ##### Partially specified
+        sky.Resources(accelerators='V100'),
+        # sky.Resources(clouds.AWS(), accelerators={'V100': 4}),
+        # sky.Resources(clouds.AWS(), accelerators='V100'),
     })
 
     # Optionally, specify a time estimator: Resources -> time in seconds.
