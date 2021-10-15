@@ -1,6 +1,5 @@
 import copy
 
-
 from sky import clouds
 
 
@@ -12,6 +11,7 @@ class GCP(clouds.Cloud):
     # In general, query pricing from the cloud.
     _ON_DEMAND_PRICES = {
         # VMs: https://cloud.google.com/compute/all-pricing.
+        # N1 standard
         'n1-standard-1': 0.04749975,
         'n1-standard-2': 0.0949995,
         'n1-standard-4': 0.189999,
@@ -20,6 +20,14 @@ class GCP(clouds.Cloud):
         'n1-standard-32': 1.519992,
         'n1-standard-64': 3.039984,
         'n1-standard-96': 4.559976,
+        # N1 highmem
+        'n1-highmem-2': 0.118303,
+        'n1-highmem-4': 0.236606,
+        'n1-highmem-8': 0.473212,
+        'n1-highmem-16': 0.946424,
+        'n1-highmem-32': 1.892848,
+        'n1-highmem-64': 3.785696,
+        'n1-highmem-96': 5.678544,
     }
     # GPUs: https://cloud.google.com/compute/gpus-pricing.
     _ON_DEMAND_PRICES_GPUS = {
@@ -111,7 +119,7 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls):
-        return 'n1-standard-8'
+        return 'n1-highmem-8'
 
     def get_feasible_launchable_resources(self, resources):
         if resources.instance_type is not None:
