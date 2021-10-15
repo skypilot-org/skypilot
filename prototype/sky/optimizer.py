@@ -183,7 +183,7 @@ class Optimizer(object):
                                 estimated_runtime, estimated_runtime / 3600))
                         if minimize_cost:
                             print(
-                                '  estimated_cost (no egress): ${:.1f}'.format(
+                                '  estimated_cost (not incl. egress): ${:.1f}'.format(
                                     estimated_cost))
 
                     def _egress(parent, parent_resources, node, resources):
@@ -213,8 +213,6 @@ class Optimizer(object):
                             min_pred_cost_plus_egress = parent_cost + egress_cost
                             best_parent = parent_resources
                             best_egress_cost = egress_cost
-                    if do_print:
-                        print('  best_parent', best_parent)
                     dp_point_backs[node][resources] = (parent, best_parent,
                                                        best_egress_cost)
                     dp_best_cost[node][
