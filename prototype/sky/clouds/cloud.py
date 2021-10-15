@@ -32,3 +32,17 @@ class Cloud(object):
           A dictionary of cloud-specific node type variables.
         """
         raise NotImplementedError
+
+    def get_default_instance_type(self):
+        raise NotImplementedError
+
+    def get_feasible_launchable_resources(self, resources):
+        """Returns a list of feasible and launchable resources.
+
+        Feasible resources refer to an offering respecting the resource
+        requirements.  Currently, this function implements "filtering" the
+        cloud's offerings only w.r.t. accelerators constraints.
+
+        Launchable resources require a cloud and an instance type be assigned.
+        """
+        raise NotImplementedError

@@ -1,3 +1,6 @@
+import copy
+
+
 from sky import clouds
 
 
@@ -105,3 +108,18 @@ class GCP(clouds.Cloud):
             'gpu': gpu,
             'gpu_count': gpu_count,
         }
+
+    @classmethod
+    def get_default_instance_type(cls):
+        return 'n1-standard-8'
+
+    def get_feasible_launchable_resources(self, resources):
+        if resources.instance_type is not None:
+            assert resources.is_launchable(), resources
+            return [resources]
+        # No other resources (cpu/mem) to filter for now, so just return a
+        # default VM type.
+        r = copy.deepcopy(resources)
+        r.cloud = GCP()
+        r.instance_type = GCP.get_default_instance_type()
+        return [r]

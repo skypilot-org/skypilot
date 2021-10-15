@@ -54,9 +54,6 @@ class Optimizer(object):
     @staticmethod
     def optimize(dag: sky.Dag, minimize):
         dag = copy.deepcopy(dag)
-        # Filtering: convert partial resource labels to launchable resources.
-        # for task in dag.tasks:
-        #     sky.registry.fill_in_launchable_resources(task)
         # Optimization.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
         optimized_dag, best_plan = Optimizer._optimize_cost(
@@ -140,66 +137,88 @@ class Optimizer(object):
 
             assert len(parents) == 1, 'Supports single parent for now'
             parent = parents[0]
+
+            if node_i < len(topo_order) - 1:
+                # Convert partial resource labels to launchable resources.
+                launchable_resources = sky.registry.fill_in_launchable_resources(
+                    node)
+            else:
+                # Dummy sink node.
+                launchable_resources = node.get_resources()
+                launchable_resources = {
+                    list(node.get_resources())[0]: launchable_resources
+                }
             num_resources = len(node.get_resources())
 
-            for resources in node.get_resources():
-                # Computes dp_best_cost[node][resources]
-                #   = my estimated cost + min { pred_cost + egress_cost }
-                assert resources not in dp_best_cost[node]
-                if do_print:
-                    print('resources:', resources)
-
+            for orig_resources, launchable_list in launchable_resources.items():
                 if num_resources == 1 and node.estimate_runtime_func is None:
                     print('Time estimator not set and only one possible '
                           'resource choice; defaulting estimated time to 1 hr.')
                     estimated_runtime = 1 * 3600
                 else:
-                    estimated_runtime = node.estimate_runtime(resources)
-                if minimize_cost:
-                    estimated_cost = resources.get_cost(estimated_runtime)
-                else:
-                    # Minimize run time; overload the term 'cost'.
-                    estimated_cost = estimated_runtime
-                min_pred_cost_plus_egress = np.inf
-                if do_print:
-                    print('  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
-                        estimated_runtime, estimated_runtime / 3600))
-                    if minimize_cost:
-                        print('  estimated_cost (no egress): ${:.1f}'.format(
-                            estimated_cost))
-
-                def _egress(parent, parent_resources, node, resources):
-                    if isinstance(parent_resources.cloud, DummyCloud):
-                        # Special case.  The current 'node' is a real
-                        # source node, and its input may be on a different
-                        # cloud from 'resources'.
-                        src_cloud = node.get_inputs_cloud()
-                        nbytes = node.get_estimated_inputs_size_gigabytes()
-                    else:
-                        src_cloud = parent_resources.cloud
-                        nbytes = parent.get_estimated_outputs_size_gigabytes()
-                    dst_cloud = resources.cloud
+                    # We assume the time estimator takes in a partial resource
+                    #    Resources('V100')
+                    # and treat their launchable versions
+                    #    Resources(AWS, 'p3.2xlarge'),
+                    #    Resources(GCP, '...', 'V100'),
+                    #    ...
+                    # as having the same run time.
+                    estimated_runtime = node.estimate_runtime(orig_resources)
+                for resources in launchable_list:
+                    # Computes dp_best_cost[node][resources]
+                    #   = my estimated cost + min { pred_cost + egress_cost }
+                    assert resources not in dp_best_cost[node]
+                    if do_print:
+                        print('resources:', resources)
 
                     if minimize_cost:
-                        fn = Optimizer._egress_cost
+                        estimated_cost = resources.get_cost(estimated_runtime)
                     else:
-                        fn = Optimizer._egress_time
-                    return fn(src_cloud, dst_cloud, nbytes)
+                        # Minimize run time; overload the term 'cost'.
+                        estimated_cost = estimated_runtime
+                    min_pred_cost_plus_egress = np.inf
+                    if do_print:
+                        print(
+                            '  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
+                                estimated_runtime, estimated_runtime / 3600))
+                        if minimize_cost:
+                            print(
+                                '  estimated_cost (no egress): ${:.1f}'.format(
+                                    estimated_cost))
 
-                for parent_resources, parent_cost in dp_best_cost[parent].items(
-                ):
-                    egress_cost = _egress(parent, parent_resources, node,
-                                          resources)
-                    if parent_cost + egress_cost < min_pred_cost_plus_egress:
-                        min_pred_cost_plus_egress = parent_cost + egress_cost
-                        best_parent = parent_resources
-                        best_egress_cost = egress_cost
-                if do_print:
-                    print('  best_parent', best_parent)
-                dp_point_backs[node][resources] = (parent, best_parent,
-                                                   best_egress_cost)
-                dp_best_cost[node][
-                    resources] = min_pred_cost_plus_egress + estimated_cost
+                    def _egress(parent, parent_resources, node, resources):
+                        if isinstance(parent_resources.cloud, DummyCloud):
+                            # Special case.  The current 'node' is a real
+                            # source node, and its input may be on a different
+                            # cloud from 'resources'.
+                            src_cloud = node.get_inputs_cloud()
+                            nbytes = node.get_estimated_inputs_size_gigabytes()
+                        else:
+                            src_cloud = parent_resources.cloud
+                            nbytes = parent.get_estimated_outputs_size_gigabytes(
+                            )
+                        dst_cloud = resources.cloud
+
+                        if minimize_cost:
+                            fn = Optimizer._egress_cost
+                        else:
+                            fn = Optimizer._egress_time
+                        return fn(src_cloud, dst_cloud, nbytes)
+
+                    for parent_resources, parent_cost in dp_best_cost[
+                            parent].items():
+                        egress_cost = _egress(parent, parent_resources, node,
+                                              resources)
+                        if parent_cost + egress_cost < min_pred_cost_plus_egress:
+                            min_pred_cost_plus_egress = parent_cost + egress_cost
+                            best_parent = parent_resources
+                            best_egress_cost = egress_cost
+                    if do_print:
+                        print('  best_parent', best_parent)
+                    dp_point_backs[node][resources] = (parent, best_parent,
+                                                       best_egress_cost)
+                    dp_best_cost[node][
+                        resources] = min_pred_cost_plus_egress + estimated_cost
 
         print('\nOptimizer - dp_best_cost:')
         pprint.pprint(dict(dp_best_cost))

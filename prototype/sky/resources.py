@@ -35,6 +35,8 @@ class Resources(object):
     ):
         self.cloud = cloud
         self.instance_type = instance_type
+        assert not (instance_type is not None and cloud is None), \
+            'If instance_type is specified, must specify the cloud'
         if accelerators is not None and type(accelerators) is str:
             accelerators = {accelerators: 1}
         self.accelerators = accelerators
@@ -47,7 +49,7 @@ class Resources(object):
     def is_launchable(self) -> bool:
         return self.cloud is not None and self.instance_type is not None
 
-    def get_accelerators(self) -> Union[None, Dict[str, int]]:
+    def get_accelerators(self) -> Optional[Dict[str, int]]:
         return self.accelerators
 
     def get_cost(self, seconds):
