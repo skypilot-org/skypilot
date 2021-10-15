@@ -25,7 +25,7 @@ class Task(object):
         self.estimated_inputs_size_gigabytes = None
         self.estimated_outputs_size_gigabytes = None
         self.resources = None
-        self.estimate_runtime_func = None
+        self.time_estimator_func = None
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
@@ -68,17 +68,17 @@ class Task(object):
     def get_resources(self):
         return self.resources
 
-    def set_estimate_runtime_func(self, func):
+    def set_time_estimator(self, func):
         """Sets a func mapping resources to estimated time (secs)."""
-        self.estimate_runtime_func = func
+        self.time_estimator_func = func
 
     def estimate_runtime(self, resources):
         """Returns a func mapping resources to estimated time (secs)."""
-        if self.estimate_runtime_func is None:
+        if self.time_estimator_func is None:
             raise NotImplementedError(
                 'Node [{}] does not have a cost model set; '
-                'call set_estimate_runtime_func() first'.format(self))
-        return self.estimate_runtime_func(resources)
+                'call set_time_estimator() first'.format(self))
+        return self.time_estimator_func(resources)
 
     def __rshift__(a, b):
         sky.DagContext.get_current_dag().add_edge(a, b)
