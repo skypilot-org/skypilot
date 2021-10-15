@@ -90,7 +90,7 @@ class Optimizer(object):
         def make_dummy(name):
             dummy = sky.Task(name)
             dummy.set_resources({DummyResources(DummyCloud(), None)})
-            dummy.set_estimate_runtime_func(lambda _: 0)
+            dummy.set_time_estimator(lambda _: 0)
             return dummy
 
         with dag:
@@ -151,7 +151,7 @@ class Optimizer(object):
             num_resources = len(node.get_resources())
 
             for orig_resources, launchable_list in launchable_resources.items():
-                if num_resources == 1 and node.estimate_runtime_func is None:
+                if num_resources == 1 and node.time_estimator_func is None:
                     print('Time estimator not set and only one possible '
                           'resource choice; defaulting estimated time to 1 hr.')
                     estimated_runtime = 1 * 3600
