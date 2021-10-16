@@ -20,6 +20,13 @@ class AWS(clouds.Cloud):
         'inf1.24xlarge': 4.721,
     }
 
+    # TODO: add other GPUs c.f. https://aws.amazon.com/ec2/instance-types/
+    _ACCELERATORS_DIRECTORY = {
+        ('V100', 1): 'p3.2xlarge',
+        ('V100', 4): 'p3.8xlarge',
+        ('V100', 8): 'p3.16xlarge',
+    }
+
     def instance_type_to_hourly_cost(self, instance_type):
         return AWS._ON_DEMAND_PRICES[instance_type]
 
@@ -79,10 +86,7 @@ class AWS(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        # TODO: add other GPUs c.f. https://aws.amazon.com/ec2/instance-types/
-        directory = {
-            ('V100', 1): 'p3.2xlarge',
-            ('V100', 4): 'p3.8xlarge',
-            ('V100', 8): 'p3.16xlarge',
-        }
-        return _make(directory[(acc, acc_count)])
+        instance_type = AWS._ACCELERATORS_DIRECTORY.get((acc, acc_count))
+        if instance_type is None:
+            return []
+        return _make(instance_type)
