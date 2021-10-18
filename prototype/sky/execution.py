@@ -17,6 +17,7 @@ import datetime
 import json
 import os
 import subprocess
+import sys
 import time
 from typing import List, Optional
 
@@ -67,12 +68,12 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
     resources_vars = cloud.make_deploy_resources_variables(task)
     return _fill_template(
         cluster_config_template,
-        dict(resources_vars, **{
-            'run_id': run_id,
-            'setup_command': task.setup,
-            'workdir': task.workdir,
-        })
-    )
+        dict(
+            resources_vars, **{
+                'run_id': run_id,
+                'setup_command': task.setup,
+                'workdir': task.workdir,
+            }))
 
 
 def _get_run_id() -> RunId:
@@ -105,16 +106,29 @@ class Step:
         self.step_desc = step_desc
         self.shell_command = shell_command
 
-    def run(self, **kwargs) -> subprocess.CompletedProcess:
+    def run(self, **kwargs) -> subprocess.Popen:
         log_path = os.path.join(self.runner.logs_root, f'{self.step_id}.log')
         log_abs_path = os.path.abspath(log_path)
         tail_cmd = f'tail -n100 -f {log_abs_path}'
         if STREAM_LOGS_TO_CONSOLE:
-            return subprocess.run(
-                self.shell_command + f' 2>&1 | tee {log_path}',
-                shell=True,
-                check=True,
-            )  # TODO: `ray up` has a bug where if you redirect stdout and stderr, stdout is not flushed.
+            with open(log_path, 'w') as fout:
+                proc = subprocess.Popen(
+                    self.shell_command,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                for line in proc.stdout:
+                    sys.stdout.write(line)
+                    fout.write(line)
+                proc.communicate()
+                if proc.returncode != 0:
+                    raise subprocess.CalledProcessError(
+                        proc.returncode,
+                        proc.args,
+                    )
+                return proc
         else:
             print(
                 f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
