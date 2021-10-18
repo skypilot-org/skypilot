@@ -6,6 +6,7 @@ from sky import clouds
 
 _CLOUDS = [
     clouds.AWS(),
+    clouds.Azure(),
     clouds.GCP(),
 ]
 
@@ -14,7 +15,7 @@ def fill_in_launchable_resources(task: sky.Task):
     launchable = collections.defaultdict(list)
     for resources in task.get_resources():
         if resources.is_launchable():
-            launchable[resources] = [resource]
+            launchable[resources] = [resources]
             continue
         if resources.cloud is not None:
             print(resources.cloud)

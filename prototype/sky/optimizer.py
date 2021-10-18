@@ -114,6 +114,8 @@ class Optimizer(object):
 
     @staticmethod
     def _optimize_cost(dag: sky.Dag, minimize_cost=True):
+        # TODO: The output of this function is useful. Should generate a
+        # text plan and print to both console and a log file.
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
 
@@ -183,8 +185,8 @@ class Optimizer(object):
                                 estimated_runtime, estimated_runtime / 3600))
                         if minimize_cost:
                             print(
-                                '  estimated_cost (not incl. egress): ${:.1f}'.format(
-                                    estimated_cost))
+                                '  estimated_cost (not incl. egress): ${:.1f}'.
+                                format(estimated_cost))
 
                     def _egress(parent, parent_resources, node, resources):
                         if isinstance(parent_resources.cloud, DummyCloud):
