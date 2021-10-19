@@ -78,7 +78,7 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
 
 
 def _get_run_id() -> RunId:
-    return 'sky_' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+    return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
 class EventLogger:
