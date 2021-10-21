@@ -17,6 +17,7 @@ import datetime
 import json
 import os
 import subprocess
+import sys
 import time
 from typing import List, Optional, Callable
 
@@ -36,6 +37,8 @@ SKY_REMOTE_WORKDIR = '/tmp/workdir'
 
 _CLOUD_TO_TEMPLATE = {
     sky.clouds.AWS: 'config/aws.yml.j2',
+    sky.clouds.Azure: 'config/azure.yml.j2',
+    sky.clouds.GCP: 'config/gcp.yml.j2',
 }
 
 CLUSTER_CONFIG_FILE = None
@@ -63,20 +66,20 @@ def _fill_template(template_path: str,
     return output_path
 
 
-def _write_cluster_config(run_id: RunId, task, cluster_config_template: str, docker_config=None):
+def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
+    cloud = task.best_resources.cloud
+    resources_vars = cloud.make_deploy_resources_variables(task)
     return _fill_template(
         cluster_config_template,
-        {
-            'instance_type': task.best_resources.types,
-            'run_id': run_id,
-            'setup_command': task.setup,
-            'workdir': task.workdir,
-            'docker_image': task.docker_image,#'rayproject/ray-ml:latest-gpu',
-            'container_name': task.container_name, #'resnet_container',
-            'num_workers': 1,
-
-        },
-    )
+        dict(
+            resources_vars, **{
+                'run_id': run_id,
+                'setup_command': task.setup,
+                'workdir': task.workdir,
+                'docker_image': task.docker_image,#'rayproject/ray-ml:latest-gpu',
+                'container_name': task.container_name, #'resnet_container',
+                'num_workers': 1,
+            }))
 
 
 def _execute_single_node_command(ip, command, private_key="~/.ssh/ray-autoscaler_us-west-2.pem", container_name="resnet_container"):
@@ -91,7 +94,7 @@ def _execute_single_node_command(ip, command, private_key="~/.ssh/ray-autoscaler
 
 
 def _get_run_id() -> RunId:
-    return 'sky_distributed' #+ datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+    return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
 class EventLogger:
@@ -120,17 +123,29 @@ class Step:
         self.step_desc = step_desc
         self.execute_fn = execute_fn
 
-    def run(self, pipe_stdout=False, **kwargs) -> subprocess.CompletedProcess:
+    def run(self, **kwargs) -> subprocess.CompletedProcess:
         log_path = os.path.join(self.runner.logs_root, f'{self.step_id}.log')
         log_abs_path = os.path.abspath(log_path)
         tail_cmd = f'tail -n100 -f {log_abs_path}'
         if STREAM_LOGS_TO_CONSOLE:
-            return subprocess.run(
-                self.execute_fn + f' 2>&1 | tee {log_path}',
-                shell=True,
-                check=True,
-                stdout = subprocess.PIPE if pipe_stdout else None,
-            )  # TODO: `ray up` has a bug where if you redirect stdout and stderr, stdout is not flushed.
+            with open(log_path, 'w') as fout:
+                proc = subprocess.Popen(
+                    self.shell_command,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                for line in proc.stdout:
+                    sys.stdout.write(line)
+                    fout.write(line)
+                proc.communicate()
+                if proc.returncode != 0:
+                    raise subprocess.CalledProcessError(
+                        proc.returncode,
+                        proc.args,
+                    )
+                return proc
         else:
             print(
                 f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
@@ -138,7 +153,9 @@ class Step:
                 self.execute_fn + f' 2>&1 >{log_path}',
                 shell=True,
                 check=True,
-                stdout = subprocess.PIPE if pipe_stdout else None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
             )
 
 
@@ -187,13 +204,13 @@ class Runner:
                 )
                 if  isinstance(step.execute_fn, str):
                     if 'ray get-head-ip' in step.execute_fn:
-                        output = step.run(pipe_stdout=True)
+                        output = step.run()
                         str_output = output.stdout.decode('utf-8')
                         ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",str_output)
                         assert len(ips)==1
                         self.cluster_ips['head'] = ips[0]
                     elif 'ray get-worker-ips' in step.execute_fn:
-                        output = step.run(pipe_stdout=True)
+                        output = step.run()
                         str_output = output.stdout.decode('utf-8')
                         ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",str_output)
                         self.cluster_ips['workers'] = ips
@@ -239,7 +256,7 @@ class Runner:
             raise e
 
 
-def execute(dag: sky.Dag, teardown: bool = False):
+def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     colorama.init()
 
     assert len(dag) == 1, 'Job launcher assumes 1 task for now'
@@ -248,10 +265,13 @@ def execute(dag: sky.Dag, teardown: bool = False):
     run_id = _get_run_id()
     cluster_config_file = _write_cluster_config(
         run_id, task, _get_cluster_config_template(task))
+    if dryrun:
+        return
 
     global CLUSTER_CONFIG_FILE
     CLUSTER_CONFIG_FILE = cluster_config_file
 
+    # FIXME: if a command fails, stop the rest.
     runner = Runner(run_id)
     runner.add_step('provision', 'Provision resources',
                     f'ray up -y {cluster_config_file} --no-config-cache')
@@ -292,5 +312,8 @@ def execute(dag: sky.Dag, teardown: bool = False):
     runner.run()
     if not teardown:
         print(
-            f'  To log into the cloud VM: {Style.BRIGHT}ray attach {cluster_config_file} {Style.RESET_ALL}\n'
+            f'  To log into the cloud VM:\t{Style.BRIGHT}ray attach {cluster_config_file} {Style.RESET_ALL}\n'
+        )
+        print(
+            f'  To teardown the resources:\t{Style.BRIGHT}ray down {cluster_config_file} -y {Style.RESET_ALL}\n'
         )

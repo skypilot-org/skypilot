@@ -1,6 +1,6 @@
 """Assumptions:
 
-- Users supply a estimate_runtime_func() for all nodes in the DAG.
+- Users supply a time estimator func for each node in the DAG.
 - Assuming homogeneous instances:
   - Support for choosing # instances
 - Support for heterogeneous instances?
@@ -47,8 +47,7 @@ def make_application():
             sky.Resources(clouds.GCP(), ('n1-standard-8', 'tpu-v3-8')),
         })
 
-        train_op.set_estimate_runtime_func(
-            time_estimators.resnet50_estimate_runtime)
+        train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
         # Infer.
         infer_op = sky.Task('infer_op',
@@ -67,7 +66,7 @@ def make_application():
             sky.Resources(clouds.GCP(), ('1x T4', 'n1-standard-8')),
         })
 
-        infer_op.set_estimate_runtime_func(
+        infer_op.set_time_estimator(
             time_estimators.resnet50_infer_estimate_runtime)
 
         # Chain the sky.tasks (Airflow syntax).

@@ -1,24 +1,65 @@
-import typing
+from typing import Dict, Optional, Union
 
 from sky import clouds
 
 
-class Resources(typing.NamedTuple):
-    cloud: clouds.Cloud
-    types: typing.Tuple[str]
+class Resources(object):
+    """A cloud resource bundle.
+
+    Used
+      * for representing resource requests for tasks/apps
+      * as a "filter" to get concrete launchable instances
+      * for calculating billing
+      * for provisioning on a cloud
+
+    Examples:
+
+        # Fully specified cloud and instance type (is_launchable() is True).
+        sky.Resources(clouds.AWS(), 'p3.2xlarge'),
+        sky.Resources(clouds.GCP(), 'n1-standard-16'),
+        sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
+
+        # Specifying required resources; Sky decides the cloud/instance type.
+        sky.Resources(accelerators='V100'),
+        sky.Resources(clouds.GCP(), accelerators={'V100': 1}),
+
+        # TODO:
+        sky.Resources(requests={'mem': '16g', 'cpu': 8})
+    """
+
+    def __init__(
+            self,
+            cloud: Optional[clouds.Cloud] = None,
+            instance_type: Optional[str] = None,
+            accelerators: Union[None, str, Dict[str, int]] = None,
+    ):
+        self.cloud = cloud
+        self.instance_type = instance_type
+        assert not (instance_type is not None and cloud is None), \
+            'If instance_type is specified, must specify the cloud'
+        if accelerators is not None and type(accelerators) is str:
+            accelerators = {accelerators: 1}
+        self.accelerators = accelerators
 
     def __repr__(self) -> str:
-        return f'{self.cloud}({self.types})'
-        # return f'{self.cloud.name}({self.types})'
+        if self.accelerators is not None:
+            return f'{self.cloud}({self.instance_type}, {self.accelerators})'
+        return f'{self.cloud}({self.instance_type})'
+
+    def is_launchable(self) -> bool:
+        return self.cloud is not None and self.instance_type is not None
+
+    def get_accelerators(self) -> Optional[Dict[str, int]]:
+        return self.accelerators
 
     def get_cost(self, seconds):
         """Returns cost in USD for the runtime in seconds."""
-
-        cost = 0.0
-        typs = self.types
-        if type(typs) is str:
-            typs = [typs]
-        for instance_type in typs:
-            hourly_cost = self.cloud.instance_type_to_hourly_cost(instance_type)
-            cost += hourly_cost * (seconds / 3600)
-        return cost
+        hours = seconds / 3600
+        # Instance.
+        hourly_cost = self.cloud.instance_type_to_hourly_cost(
+            self.instance_type)
+        # Accelerators (if any).
+        if self.accelerators is not None:
+            hourly_cost += self.cloud.accelerators_to_hourly_cost(
+                self.accelerators)
+        return hourly_cost * hours

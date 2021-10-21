@@ -34,7 +34,7 @@ def resnet50_estimate_runtime(resources):
         return estimated_run_time_seconds
 
     if isinstance(resources.cloud, clouds.AWS):
-        instance = resources.types
+        instance = resources.instance_type
         if instance == 'p3.2xlarge':
             num_v100s = 1
         elif instance == 'p3.8xlarge':
@@ -46,14 +46,18 @@ def resnet50_estimate_runtime(resources):
         return _v100(num_v100s)
 
     elif isinstance(resources.cloud, clouds.GCP):
-        if isinstance(resources.types, tuple):
-            for t in resources.types:
-                if 'x V100' in t:
-                    num_v100s = int(t.split('x V100')[0])
-                    assert num_v100s in [1, 2, 4, 8], resources.types
-                    return _v100(num_v100s)
+        accelerators = resources.get_accelerators()
+        if accelerators is None:
+            assert False, 'not supported'
 
-        assert 'tpu-v3-8' in resources.types, resources
+        assert len(accelerators) == 1, resources
+        for acc, acc_count in accelerators.items():
+            break
+        if acc == 'V100':
+            assert acc_count in [1, 2, 4, 8], resources
+            return _v100(acc_count)
+
+        assert acc == 'tpu-v3-8', resources
         tpu_v3_8_flops = 420 * (10**12)
         known_resnet50_utilization = 0.445  # From actual profiling.
 
@@ -88,7 +92,7 @@ def resnet50_infer_estimate_runtime(resources):
     num_images = 1e6  # TODO: vary this.
     num_images = 70 * 1e6  # TODO: vary this.
 
-    instance = resources.types
+    instance = resources.instance_type
     # assert instance in ['p3.2xlarge', 'inf1.2xlarge', 'nvidia-t4'], instance
 
     if instance == 'p3.2xlarge':
@@ -124,7 +128,11 @@ def resnet50_infer_estimate_runtime(resources):
         # TODO: this ignores offline vs. online.  It's a huge batch.
         estimated_run_time_seconds = \
             flops_for_one_image * num_images / utilized_flops
-    elif isinstance(instance, tuple) and instance[0] == '1x T4':
+    elif resources.get_accelerators() is not None:
+        accs = resources.get_accelerators()
+        for acc, acc_count in accs.items():
+            break
+        assert acc == 'T4' and acc_count == 1, resources
         # T4 GPU: 65 TFLOPS fp16
         utilized_flops = 65 * (10**12) / 3
         estimated_run_time_seconds = \
