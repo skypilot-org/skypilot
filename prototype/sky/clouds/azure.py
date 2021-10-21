@@ -3,37 +3,32 @@ import copy
 from sky import clouds
 
 
-class AWS(clouds.Cloud):
-    _REPR = 'AWS'
+class Azure(clouds.Cloud):
+    _REPR = 'Azure'
 
     # In general, query this from the cloud.
+    # This pricing is for East US region.
     _ON_DEMAND_PRICES = {
-        # p3.
-        'p3.2xlarge': 3.06,
-        'p3.8xlarge': 12.24,
-        'p3.16xlarge': 24.48,
-
-        # inf1.
-        'inf1.xlarge': 0.228,
-        'inf1.2xlarge': 0.362,
-        'inf1.6xlarge': 1.18,
-        'inf1.24xlarge': 4.721,
+        # V100 GPU series
+        'Standard_NC6s_v3': 3.06,
+        'Standard_NC12s_v3': 6.12,
+        'Standard_NC24s_v3': 12.24,
     }
 
-    # TODO: add other GPUs c.f. https://aws.amazon.com/ec2/instance-types/
+    # TODO: add other GPUs
     _ACCELERATORS_DIRECTORY = {
-        ('V100', 1): 'p3.2xlarge',
-        ('V100', 4): 'p3.8xlarge',
-        ('V100', 8): 'p3.16xlarge',
+        ('V100', 1): 'Standard_NC6s_v3',
+        ('V100', 2): 'Standard_NC12s_v3',
+        ('V100', 4): 'Standard_NC24s_v3',
     }
 
     def instance_type_to_hourly_cost(self, instance_type):
-        return AWS._ON_DEMAND_PRICES[instance_type]
+        return Azure._ON_DEMAND_PRICES[instance_type]
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
-        #   https://aws.amazon.com/s3/pricing/
-        # NOTE: egress from US East (Ohio).
+        #   https://azure.microsoft.com/en-us/pricing/details/bandwidth/
+        # NOTE: egress from US East.
         # NOTE: Not accurate as the pricing tier is based on cumulative monthly usage.
         if num_gigabytes > 150 * 1024:
             return 0.05 * num_gigabytes
@@ -43,27 +38,27 @@ class AWS(clouds.Cloud):
             num_gigabytes -= 50 * 1024
 
         if num_gigabytes >= 10 * 1024:
-            cost += (num_gigabytes - 10 * 1024) * 0.085
+            cost += (num_gigabytes - 10 * 1024) * 0.083
             num_gigabytes -= 10 * 1024
 
         if num_gigabytes > 1:
-            cost += (num_gigabytes - 1) * 0.09
+            cost += (num_gigabytes - 1) * 0.0875
 
         cost += 0.0
         return cost
 
     def __repr__(self):
-        return AWS._REPR
+        return Azure._REPR
 
     def is_same_cloud(self, other):
-        return isinstance(other, AWS)
+        return isinstance(other, Azure)
 
     def make_deploy_resources_variables(self, task):
         return {'instance_type': task.best_resources.instance_type}
 
     @classmethod
     def get_default_instance_type(cls):
-        return 'm4.2xlarge'
+        return 'Standard_D2_v4'
 
     def get_feasible_launchable_resources(self, resources):
         if resources.instance_type is not None:
@@ -74,7 +69,7 @@ class AWS(clouds.Cloud):
 
         def _make(instance_type):
             r = copy.deepcopy(resources)
-            r.cloud = AWS()
+            r.cloud = Azure()
             r.instance_type = instance_type
             r.accelerators = None
             return [r]
@@ -83,11 +78,11 @@ class AWS(clouds.Cloud):
         accelerators = resources.get_accelerators()
         if accelerators is None:
             # No requirements to filter, so just return a default VM type.
-            return _make(AWS.get_default_instance_type())
+            return _make(Azure.get_default_instance_type())
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        instance_type = AWS._ACCELERATORS_DIRECTORY.get((acc, acc_count))
+        instance_type = Azure._ACCELERATORS_DIRECTORY.get((acc, acc_count))
         if instance_type is None:
             return []
         return _make(instance_type)

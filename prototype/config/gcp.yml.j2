@@ -1,0 +1,66 @@
+# Ref: https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/gcp/example-gpu-docker.yaml
+# FIXME: use variables for project_id, zone.
+
+cluster_name: sky-gcp
+
+max_workers: 1
+
+provider:
+  type: gcp
+  region: us-west1
+  availability_zone: us-west1-a
+  project_id: intercloud-320520  # Globally unique project id
+
+auth:
+  ssh_user: ubuntu
+
+available_node_types:
+  ray_head_default:
+    resources: {}
+    min_workers: 1
+    max_workers: 1
+    node_config:
+        machineType: {{instance_type}}
+        disks:
+          - boot: true
+            autoDelete: true
+            type: PERSISTENT
+            initializeParams:
+              diskSizeGb: 500
+              # See https://cloud.google.com/deep-learning-vm/docs/images
+{% if gpu is none %}
+              sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu
+{% else %}
+              sourceImage: projects/deeplearning-platform-release/global/images/family/common-cu110
+        guestAccelerators:
+          - acceleratorType: projects/intercloud-320520/zones/us-west1-a/acceleratorTypes/{{gpu}}
+            acceleratorCount: {{gpu_count}}
+        metadata:
+          items:
+            - key: install-nvidia-driver
+              value: "True"
+        scheduling:
+          - onHostMaintenance: TERMINATE
+{% endif %}
+
+head_node_type: ray_head_default
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "/tmp/workdir": {{workdir}}
+}
+
+# Patterns for files to exclude when running rsync up or rsync down
+rsync_exclude:
+  - "**/.git"
+  - "**/.git/**"
+
+rsync_filter:
+  - .gitignore
+
+# List of shell commands to run to set up nodes.
+setup_commands:
+  - cd /tmp/workdir && {{setup_command}}
+
+# Command to start ray on the head node. You don't need to change this.
+head_start_ray_commands: []
