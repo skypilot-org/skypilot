@@ -239,8 +239,6 @@ class Runner:
                                 break
                             time.sleep(5)
                     else:
-
-
                         output = step.run()
                 else:
                     fn = step.execute_fn
@@ -248,7 +246,6 @@ class Runner:
                         commands = fn(self.cluster_ips)
                         for k, v in commands.items():
                             _execute_single_node_command(ip=k, command=v, container_name="resnet_container")
-                        import pdb; pdb.set_trace()
                     elif "exec" in step.step_id:
                         commands = fn(self.cluster_ips)
                         for k, v in commands.items():
