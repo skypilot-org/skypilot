@@ -32,6 +32,8 @@ with sky.Dag() as dag:
     docker_image = 'rayproject/ray-ml:latest-gpu'
     container_name = 'resnet_container'
 
+    num_workers = 1
+
     # The setup command.  Will be run under the working directory.
     setup = 'pip install --upgrade pip && \
            pip install ray[default] awscli && \
@@ -77,6 +79,7 @@ with sky.Dag() as dag:
         post_setup_fn = post_setup_fn,
         docker_image = docker_image,
         container_name = container_name,
+        num_workers = num_workers,
         run=run,
     )
 
@@ -85,7 +88,7 @@ with sky.Dag() as dag:
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
         ##### Fully specified
-        # sky.Resources(clouds.AWS(), 'p3.2xlarge'),
+        sky.Resources(clouds.AWS(), 'p3.2xlarge'),
         # sky.Resources(clouds.GCP(), 'n1-standard-16'),
         # sky.Resources(
         #     clouds.GCP(),
@@ -94,7 +97,7 @@ with sky.Dag() as dag:
         #     'V100',
         # ),
         ##### Partially specified
-        sky.Resources(accelerators='V100'),
+        #sky.Resources(accelerators='V100'),
         # sky.Resources(accelerators='tpu-v3-8'),
         # sky.Resources(clouds.AWS(), accelerators={'V100': 4}),
         # sky.Resources(clouds.AWS(), accelerators='V100'),

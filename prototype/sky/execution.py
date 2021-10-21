@@ -31,6 +31,8 @@ RunId = str
 
 SKY_LOGS_DIRECTORY = './logs'
 STREAM_LOGS_TO_CONSOLE = True
+CLUSTER_CONFIG_FILE = None
+TASK = None
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
@@ -40,8 +42,6 @@ _CLOUD_TO_TEMPLATE = {
     sky.clouds.Azure: 'config/azure.yml.j2',
     sky.clouds.GCP: 'config/gcp.yml.j2',
 }
-
-CLUSTER_CONFIG_FILE = None
 
 
 def _get_cluster_config_template(task):
@@ -78,7 +78,7 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,#'rayproject/ray-ml:latest-gpu',
                 'container_name': task.container_name, #'resnet_container',
-                'num_workers': 1,
+                'num_workers': task.num_workers,
             }))
 
 
@@ -130,7 +130,7 @@ class Step:
         if STREAM_LOGS_TO_CONSOLE:
             with open(log_path, 'w') as fout:
                 proc = subprocess.Popen(
-                    self.shell_command,
+                    self.execute_fn,
                     shell=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -204,13 +204,23 @@ class Runner:
                 )
                 if  isinstance(step.execute_fn, str):
                     if 'ray get-head-ip' in step.execute_fn:
-                        output = step.run()
+                        output = subprocess.run(
+                            step.execute_fn,
+                            shell=True,
+                            check=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
                         str_output = output.stdout.decode('utf-8')
                         ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",str_output)
-                        assert len(ips)==1
+                        assert len(ips)==1, "Only 1 Node can be Head Node!"
                         self.cluster_ips['head'] = ips[0]
                     elif 'ray get-worker-ips' in step.execute_fn:
-                        output = step.run()
+                        output = subprocess.run(
+                            step.execute_fn,
+                            shell=True,
+                            check=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
                         str_output = output.stdout.decode('utf-8')
                         ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",str_output)
                         self.cluster_ips['workers'] = ips
@@ -218,15 +228,19 @@ class Runner:
                         output = step.run()
                         # Wait for all workers to setup post setup
                         while True:
+                            if TASK.num_workers <=0:
+                                break
                             proc = subprocess.run(
                             f"ray exec {CLUSTER_CONFIG_FILE} 'ray status'", shell=True, check=True, capture_output=True)
                             output = proc.stdout.decode("ascii")
                             print(output)
                             self.logger.log(output)
-                            if "1 ray.worker.default" in output:
+                            if f"{TASK.num_workers} ray.worker.default" in output:
                                 break
                             time.sleep(5)
                     else:
+
+
                         output = step.run()
                 else:
                     fn = step.execute_fn
@@ -270,7 +284,8 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
 
     global CLUSTER_CONFIG_FILE
     CLUSTER_CONFIG_FILE = cluster_config_file
-
+    global TASK
+    TASK = task
     # FIXME: if a command fails, stop the rest.
     runner = Runner(run_id)
     runner.add_step('provision', 'Provision resources',
