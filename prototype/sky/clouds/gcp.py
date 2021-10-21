@@ -1,3 +1,5 @@
+import copy
+
 from sky import clouds
 
 
@@ -5,29 +7,79 @@ class GCP(clouds.Cloud):
 
     _REPR = 'GCP'
 
-    # In general, query this from the cloud.
-    # NOTE: assumes us-central1.
+    # Pricing.  All info assumes us-central1.
+    # In general, query pricing from the cloud.
     _ON_DEMAND_PRICES = {
-        # GPUs: https://cloud.google.com/compute/gpus-pricing.
+        # VMs: https://cloud.google.com/compute/all-pricing.
+        # N1 standard
+        'n1-standard-1': 0.04749975,
+        'n1-standard-2': 0.0949995,
+        'n1-standard-4': 0.189999,
+        'n1-standard-8': 0.379998,
+        'n1-standard-16': 0.759996,
+        'n1-standard-32': 1.519992,
+        'n1-standard-64': 3.039984,
+        'n1-standard-96': 4.559976,
+        # N1 highmem
+        'n1-highmem-2': 0.118303,
+        'n1-highmem-4': 0.236606,
+        'n1-highmem-8': 0.473212,
+        'n1-highmem-16': 0.946424,
+        'n1-highmem-32': 1.892848,
+        'n1-highmem-64': 3.785696,
+        'n1-highmem-96': 5.678544,
+    }
+    # GPUs: https://cloud.google.com/compute/gpus-pricing.
+    _ON_DEMAND_PRICES_GPUS = {
+        # T4
+        'T4': 0.35,
+        '1x T4': 0.35,
+        '2x T4': 0.35 * 2,
+        '4x T4': 0.35 * 4,
+        # P4
+        'P4': 0.60,
+        '1x P4': 0.60,
+        '2x P4': 0.60 * 2,
+        '4x P4': 0.60 * 4,
         # V100
+        'V100': 2.48,
         '1x V100': 2.48,
         '2x V100': 2.48 * 2,
         '4x V100': 2.48 * 4,
         '8x V100': 2.48 * 8,
-        # T4
-        '1x T4': 0.35,
-        '2x T4': 0.35 * 2,
-        '4x T4': 0.35 * 4,
-        # TPUs: https://cloud.google.com/tpu/pricing.
+        # P100
+        'P100': 1.46,
+        '1x P100': 1.46,
+        '2x P100': 1.46 * 2,
+        '4x P100': 1.46 * 4,
+        # K80
+        'K80': 0.45,
+        '1x K80': 0.45,
+        '2x K80': 0.45 * 2,
+        '4x K80': 0.45 * 4,
+        '8x K80': 0.45 * 8,
+    }
+    # TPUs: https://cloud.google.com/tpu/pricing.
+    _ON_DEMAND_PRICES_TPUS = {
         'tpu-v2-8': 4.5,
         'tpu-v3-8': 8.0,
-        # VMs: https://cloud.google.com/compute/all-pricing.
-        'n1-standard-4': 0.189999,
-        'n1-standard-8': 0.379998,
     }
+    _ON_DEMAND_PRICES.update(_ON_DEMAND_PRICES_GPUS)
+    _ON_DEMAND_PRICES.update(_ON_DEMAND_PRICES_TPUS)
 
     def instance_type_to_hourly_cost(self, instance_type):
         return GCP._ON_DEMAND_PRICES[instance_type]
+
+    def accelerators_to_hourly_cost(self, accelerators):
+        assert len(accelerators) == 1, accelerators
+        acc, acc_count = list(accelerators.items())[0]
+        if acc in GCP._ON_DEMAND_PRICES_GPUS:
+            # Assuming linear pricing.
+            return GCP._ON_DEMAND_PRICES_GPUS[acc] * acc_count
+        if acc in GCP._ON_DEMAND_PRICES_TPUS:
+            assert acc_count == 1, accelerators
+            return GCP._ON_DEMAND_PRICES_TPUS[acc]
+        assert False, accelerators
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -45,3 +97,38 @@ class GCP(clouds.Cloud):
 
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
+
+    def make_deploy_resources_variables(self, task):
+        r = task.best_resources
+        # Find GPU spec, if any.
+        gpu = None
+        gpu_count = 0
+        accelerators = r.get_accelerators()
+        if accelerators is not None:
+            assert len(accelerators) == 1, r
+            for gpu, gpu_count in accelerators.items():
+                break
+        if gpu is not None:
+            # Convert to GCP names: https://cloud.google.com/compute/docs/gpus
+            gpu = 'nvidia-tesla-{}'.format(gpu.lower())
+        return {
+            'instance_type': r.instance_type,
+            'gpu': gpu,
+            'gpu_count': gpu_count,
+        }
+
+    @classmethod
+    def get_default_instance_type(cls):
+        return 'n1-highmem-8'
+
+    def get_feasible_launchable_resources(self, resources):
+        if resources.instance_type is not None:
+            assert resources.is_launchable(), resources
+            return [resources]
+        # TODO: check if accelerators well-formed/available.
+        # No other resources (cpu/mem) to filter for now, so just return a
+        # default VM type.
+        r = copy.deepcopy(resources)
+        r.cloud = GCP()
+        r.instance_type = GCP.get_default_instance_type()
+        return [r]
