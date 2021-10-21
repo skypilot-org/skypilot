@@ -245,12 +245,12 @@ class Runner:
                     if "post_setup" in step.step_id:
                         commands = fn(self.cluster_ips)
                         for k, v in commands.items():
-                            _execute_single_node_command(ip=k, command=v, container_name="resnet_container")
+                            _execute_single_node_command(ip=k, command=v, container_name=TASK.container_name)
                     elif "exec" in step.step_id:
                         commands = fn(self.cluster_ips)
                         for k, v in commands.items():
                             v = f'cd {SKY_REMOTE_WORKDIR} && ' + v
-                            _execute_single_node_command(ip=k, command=v, container_name="resnet_container")
+                            _execute_single_node_command(ip=k, command=v, container_name=TASK.container_name)
 
                 self.logger.log('finish_step')
                 print(f'{Fore.CYAN}Step {step.step_id} finished{Fore.RESET}\n')
