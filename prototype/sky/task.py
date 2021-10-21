@@ -10,6 +10,9 @@ class Task(object):
             name=None,
             workdir=None,
             setup=None,
+            post_setup_fn = None,
+            docker_image = None,
+            container_name = None,
             run=None,
             args=None,  # TODO: consider removing.
     ):
@@ -18,7 +21,10 @@ class Task(object):
         self.run = run
         self.args = args
         self.setup = setup
+        self.post_setup_fn = post_setup_fn
         self.workdir = workdir
+        self.docker_image = docker_image
+        self.container_name = container_name
 
         self.inputs = None
         self.outputs = None

@@ -18,12 +18,12 @@ import json
 import os
 import subprocess
 import time
-from typing import List, Optional
+from typing import List, Optional, Callable
 
 import colorama
 from colorama import Fore, Style
 import jinja2
-
+import re
 import sky
 
 RunId = str
@@ -37,6 +37,8 @@ SKY_REMOTE_WORKDIR = '/tmp/workdir'
 _CLOUD_TO_TEMPLATE = {
     sky.clouds.AWS: 'config/aws.yml.j2',
 }
+
+CLUSTER_CONFIG_FILE = None
 
 
 def _get_cluster_config_template(task):
@@ -69,12 +71,27 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str, doc
             'run_id': run_id,
             'setup_command': task.setup,
             'workdir': task.workdir,
+            'docker_image': task.docker_image,#'rayproject/ray-ml:latest-gpu',
+            'container_name': task.container_name, #'resnet_container',
+            'num_workers': 1,
+
         },
     )
 
 
+def _execute_single_node_command(ip, command, private_key="~/.ssh/ray-autoscaler_us-west-2.pem", container_name="resnet_container"):
+    final_command = command
+    if container_name:
+        def nest_command(command):
+            return command.replace('\\', '\\\\').replace('"', '\\"')
+
+        raw_command = nest_command(command)
+        final_command = "docker exec {} /bin/bash -c \"{}\"".format(container_name, raw_command)
+    ssh = subprocess.Popen(["ssh",  "-i", private_key, "-o", "StrictHostKeyChecking=no",  "ubuntu@{}".format(ip), final_command])
+
+
 def _get_run_id() -> RunId:
-    return 'sky_' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+    return 'sky_distributed' #+ datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
 class EventLogger:
@@ -97,31 +114,31 @@ class EventLogger:
 class Step:
 
     def __init__(self, runner: 'Runner', step_id: str, step_desc: str,
-                 shell_command: str):
+                 execute_fn: str):
         self.runner = runner
         self.step_id = str(step_id)
         self.step_desc = step_desc
-        self.shell_command = shell_command
+        self.execute_fn = execute_fn
 
-    def run(self, **kwargs) -> subprocess.CompletedProcess:
+    def run(self, pipe_stdout=False, **kwargs) -> subprocess.CompletedProcess:
         log_path = os.path.join(self.runner.logs_root, f'{self.step_id}.log')
         log_abs_path = os.path.abspath(log_path)
         tail_cmd = f'tail -n100 -f {log_abs_path}'
         if STREAM_LOGS_TO_CONSOLE:
             return subprocess.run(
-                self.shell_command + f' 2>&1 | tee {log_path}',
+                self.execute_fn + f' 2>&1 | tee {log_path}',
                 shell=True,
                 check=True,
-                stdout = subprocess.PIPE,
+                stdout = subprocess.PIPE if pipe_stdout else None,
             )  # TODO: `ray up` has a bug where if you redirect stdout and stderr, stdout is not flushed.
         else:
             print(
                 f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
             return subprocess.run(
-                self.shell_command + f' 2>&1 >{log_path}',
+                self.execute_fn + f' 2>&1 >{log_path}',
                 shell=True,
                 check=True,
-                stdout = subprocess.PIPE,
+                stdout = subprocess.PIPE if pipe_stdout else None,
             )
 
 
@@ -130,20 +147,21 @@ class Runner:
     FIXME: This is a linear sequence of steps for now. Will upgrade to a DAG.
     """
 
-    def __init__(self, run_id: RunId, steps: List[Step] = []):
+    def __init__(self, run_id: RunId, steps: List[Step] = [], task=None):
         self.run_id = run_id
         self.steps = steps
         self.next_step_id = 0
         self.logs_root = os.path.join(SKY_LOGS_DIRECTORY, run_id)
         os.makedirs(self.logs_root, exist_ok=True)
         self.logger = EventLogger(os.path.join(self.logs_root, '_events.jsonl'))
-        self.cluster_ips = []
+        self.cluster_ips = {}
+        self.task = task
 
     def add_step(self, step_name: str, step_desc: str,
-                 shell_command: str) -> 'Runner':
+                 execute_fn: str) -> 'Runner':
         step_id = f'{self.next_step_id:03}_{step_name}'
         self.next_step_id += 1
-        self.steps.append(Step(self, step_id, step_desc, shell_command))
+        self.steps.append(Step(self, step_id, step_desc, execute_fn))
         return self
 
     def run(self) -> 'Runner':
@@ -161,16 +179,50 @@ class Runner:
                     {
                         'step_id': step.step_id,
                         'step_desc': step.step_desc,
-                        'shell_command': step.shell_command,
+                        'execute_fn': str(step.execute_fn),
                     },
                 )
                 print(
-                    f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{step.shell_command}{Style.RESET_ALL}'
+                    f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{step.execute_fn}{Style.RESET_ALL}'
                 )
-                output = step.run()
-                if 'ray get-head-ip' in step.shell_command or 'ray get-worker-ips' in step.shell_command:
-                    str_output = output.stdout.decode('utf-8')
-                    self.cluster_ips.append(ips)
+                if  isinstance(step.execute_fn, str):
+                    if 'ray get-head-ip' in step.execute_fn:
+                        output = step.run(pipe_stdout=True)
+                        str_output = output.stdout.decode('utf-8')
+                        ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",str_output)
+                        assert len(ips)==1
+                        self.cluster_ips['head'] = ips[0]
+                    elif 'ray get-worker-ips' in step.execute_fn:
+                        output = step.run(pipe_stdout=True)
+                        str_output = output.stdout.decode('utf-8')
+                        ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",str_output)
+                        self.cluster_ips['workers'] = ips
+                    elif 'ray up' in step.execute_fn:
+                        output = step.run()
+                        # Wait for all workers to setup post setup
+                        while True:
+                            proc = subprocess.run(
+                            f"ray exec {CLUSTER_CONFIG_FILE} 'ray status'", shell=True, check=True, capture_output=True)
+                            output = proc.stdout.decode("ascii")
+                            print(output)
+                            self.logger.log(output)
+                            if "1 ray.worker.default" in output:
+                                break
+                            time.sleep(5)
+                    else:
+                        output = step.run()
+                else:
+                    fn = step.execute_fn
+                    if "post_setup" in step.step_id:
+                        commands = fn(self.cluster_ips)
+                        for k, v in commands.items():
+                            _execute_single_node_command(ip=k, command=v, container_name="resnet_container")
+                        import pdb; pdb.set_trace()
+                    elif "exec" in step.step_id:
+                        commands = fn(self.cluster_ips)
+                        for k, v in commands.items():
+                            v = f'cd {SKY_REMOTE_WORKDIR} && ' + v
+                            _execute_single_node_command(ip=k, command=v, container_name="resnet_container")
 
                 self.logger.log('finish_step')
                 print(f'{Fore.CYAN}Step {step.step_id} finished{Fore.RESET}\n')
@@ -197,6 +249,9 @@ def execute(dag: sky.Dag, teardown: bool = False):
     cluster_config_file = _write_cluster_config(
         run_id, task, _get_cluster_config_template(task))
 
+    global CLUSTER_CONFIG_FILE
+    CLUSTER_CONFIG_FILE = cluster_config_file
+
     runner = Runner(run_id)
     runner.add_step('provision', 'Provision resources',
                     f'ray up -y {cluster_config_file} --no-config-cache')
@@ -216,9 +271,21 @@ def execute(dag: sky.Dag, teardown: bool = False):
     )
 
     runner.add_step(
-        'exec', 'Execute task',
-        f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && {task.run}\''
+        'post_setup', 'Additional Setup after Base Setup (includes custom setup on individual node)',
+        task.post_setup_fn
     )
+
+    if isinstance(task.run, str):
+        runner.add_step(
+            'exec', 'Execute task',
+            f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && {task.run}\''
+        )
+    else:
+        runner.add_step(
+            'exec', 'Execute task',
+            task.run
+        )
+
     if teardown:
         runner.add_step('teardown', 'Tear down resources',
                         f'ray down -y {cluster_config_file}')
