@@ -24,6 +24,7 @@ TODO: see https://github.com/banzaicloud/cloudinfo#cloud-credentials for a refer
 ```
 pip install google-api-python-client
 # Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart
+conda install -c conda-forge google-cloud-sdk
 
 # Init.
 gcloud init
