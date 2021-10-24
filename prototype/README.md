@@ -9,7 +9,7 @@ pip install -e .
 #   https://github.com/concretevitamin/tpu/tree/gpu_train/models/official/resnet
 # to your local machine's ~/Downloads/.
 
-python resnet_app.py
+python examples/resnet_app.py
 ```
 
 ## Cloud account setup

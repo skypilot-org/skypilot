@@ -26,9 +26,9 @@ def make_application():
 
     with sky.Dag() as dag:
         # Train.
-        train_op = sky.Task('train_op',
-                            command='train.py',
-                            args='--data_dir=INPUTS[0] --model_dir=OUTPUTS[0]')
+        train_op = sky.Task(
+            'train_op',
+            run='python train.py --data_dir=INPUTS[0] --model_dir=OUTPUTS[0]')
 
         train_op.set_inputs(
             's3://my-imagenet-data',
@@ -44,15 +44,14 @@ def make_application():
             sky.Resources(clouds.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
             sky.Resources(clouds.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            sky.Resources(clouds.GCP(), ('n1-standard-8', 'tpu-v3-8')),
+            sky.Resources(clouds.GCP(), 'n1-standard-8', 'tpu-v3-8'),
         })
 
         train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
         # Infer.
         infer_op = sky.Task('infer_op',
-                            command='infer.py',
-                            args='--model_dir=INPUTS[0]')
+                            run='python infer.py --model_dir=INPUTS[0]')
 
         # Data dependency.
         # FIXME: make the system know this is from train_op's outputs.
@@ -62,8 +61,8 @@ def make_application():
         infer_op.set_resources({
             sky.Resources(clouds.AWS(), 'inf1.2xlarge'),
             sky.Resources(clouds.AWS(), 'p3.2xlarge'),
-            sky.Resources(clouds.GCP(), ('1x T4', 'n1-standard-4')),
-            sky.Resources(clouds.GCP(), ('1x T4', 'n1-standard-8')),
+            sky.Resources(clouds.GCP(), 'n1-standard-4', 'T4'),
+            sky.Resources(clouds.GCP(), 'n1-standard-8', 'T4'),
         })
 
         infer_op.set_time_estimator(
