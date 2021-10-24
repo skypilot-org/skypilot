@@ -193,6 +193,9 @@ class Optimizer(object):
                             # Special case.  The current 'node' is a real
                             # source node, and its input may be on a different
                             # cloud from 'resources'.
+                            if node.get_inputs() is None:
+                                # A Task may have no inputs specified.
+                                return 0
                             src_cloud = node.get_inputs_cloud()
                             nbytes = node.get_estimated_inputs_size_gigabytes()
                         else:

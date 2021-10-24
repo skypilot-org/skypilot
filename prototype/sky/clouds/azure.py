@@ -8,6 +8,7 @@ class Azure(clouds.Cloud):
 
     # In general, query this from the cloud.
     # This pricing is for East US region.
+    # https://azureprice.net/
     _ON_DEMAND_PRICES = {
         # V100 GPU series
         'Standard_NC6s_v3': 3.06,

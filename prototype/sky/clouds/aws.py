@@ -7,6 +7,7 @@ class AWS(clouds.Cloud):
     _REPR = 'AWS'
 
     # In general, query this from the cloud.
+    # https://instances.vantage.sh/
     _ON_DEMAND_PRICES = {
         # p3.
         'p3.2xlarge': 3.06,
