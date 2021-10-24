@@ -46,7 +46,9 @@ head_node_type: ray.head.gpu
 # Files or directories to copy to the head and worker nodes. The format is a
 # dictionary from REMOTE_PATH: LOCAL_PATH, e.g.
 file_mounts: {
+{% if workdir is not none %}
   "/tmp/workdir": {{workdir}}
+{% endif %}
 }
 
 # List of commands that will be run before `setup_commands`. If docker is
@@ -62,7 +64,7 @@ initialization_commands:
 # List of shell commands to run to set up nodes.
 # NOTE: rayproject/ray-ml:latest has ray latest bundled
 setup_commands:
-    - cd /tmp/workdir && {{setup_command}}
+  - mkdir -p /tmp/workdir && cd /tmp/workdir && {{setup_command}}
 
 # Custom commands that will be run on the head node after common setup.
 # NOTE: rayproject/ray-ml:latest has azure packages bundled

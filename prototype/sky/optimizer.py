@@ -52,7 +52,7 @@ class Optimizer(object):
         return egress_time
 
     @staticmethod
-    def optimize(dag: sky.Dag, minimize):
+    def optimize(dag: sky.Dag, minimize=COST):
         dag = copy.deepcopy(dag)
         # Optimization.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)

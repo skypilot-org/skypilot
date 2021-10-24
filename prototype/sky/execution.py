@@ -199,10 +199,11 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     runner = Runner(run_id)
     runner.add_step('provision', 'Provision resources',
                     f'ray up -y {cluster_config_file} --no-config-cache')
-    runner.add_step(
-        'sync', 'Sync files',
-        f'ray rsync_up {cluster_config_file} {task.workdir} {SKY_REMOTE_WORKDIR}'
-    )
+    if task.workdir is not None:
+        runner.add_step(
+            'sync', 'Sync files',
+            f'ray rsync_up {cluster_config_file} {task.workdir} {SKY_REMOTE_WORKDIR}'
+        )
     runner.add_step(
         'exec', 'Execute task',
         f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && {task.run}\''

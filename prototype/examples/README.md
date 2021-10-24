@@ -13,6 +13,12 @@
     ```
     The training data is currently a public, "fake_imagenet" dataset (`gs://cloud-tpu-test-datasets/fake_imagenet`, 70GB).
 
+2. [**`huggingface_glue_imdb_app.py`**](./huggingface_glue_imdb_app.py): use [huggingface/transformers](https://github.com/huggingface/transformers/) to finetune a pretrained BERT model.
+
+    ```bash
+    python huggingface_glue_imdb_app.py
+    ```
+
 ## TODO: non-runnable apps
 1. [**`timm_app.py`**](./timm_app.py): the [PyTorch image models (timm)](https://github.com/rwightman/pytorch-image-models) package.
   - Not runnable due to ImageNet data must be on a local disk, and we don't have data movement yet.
