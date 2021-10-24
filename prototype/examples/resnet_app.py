@@ -30,6 +30,7 @@ with sky.Dag() as dag:
         setup=setup,
         run=run,
     )
+    # TODO: allow option to say (or detect) no download/egress cost.
     train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
                      estimated_size_gigabytes=70)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
