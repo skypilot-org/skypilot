@@ -3,27 +3,6 @@ from sky import clouds
 
 import time_estimators
 
-##############################
-# Options for inputs:
-#
-#  P0:
-#    - read from the specified cloud store, continuously
-#    - sync submission-site local files to remote FS
-#
-#  1. egress from the specified cloud store, to local
-#
-#  TODO: if egress, what bucket to use for the destination cloud store?
-#
-##############################
-# Options for outputs:
-#
-#  P0. write to local only (don't destroy VM at the end)
-#
-#  P1. write to local, sync to a specified cloud's bucket
-#
-#  P2. continuously write checkpoints to a specified cloud's bucket
-#       TODO: this is data egress from run_cloud; not taken into account
-
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
