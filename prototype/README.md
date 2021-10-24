@@ -5,9 +5,10 @@
 ```bash
 pip install -e .
 
-# Clone the the ResNet repo (gpu_train branch)
-#   https://github.com/concretevitamin/tpu/tree/gpu_train/models/official/resnet
-# to your local machine's ~/Downloads/.
+git clone -b gpu_train https://github.com/concretevitamin/tpu ~/Downloads/tpu
+pushd ~/Downloads/tpu
+git checkout 222cc86b5
+popd
 
 python examples/resnet_app.py
 ```
