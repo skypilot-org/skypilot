@@ -18,7 +18,7 @@ set -eo pipefail
 
 ver=$(yapf --version)
 if ! echo $ver | grep -q 0.27.0; then
-    echo "Wrong YAPF version installed: 0.23.0 is required, not $ver"
+    echo "Wrong YAPF version installed: 0.27.0 is required, not $ver"
     exit 1
 fi
 
@@ -42,7 +42,7 @@ tool_version_check() {
     fi
 }
 
-tool_version_check "yapf" $YAPF_VERSION "0.28.0"
+tool_version_check "yapf" $YAPF_VERSION "0.27.0"
 
 # Only fetch master since that's the branch we're diffing against.
 # git fetch upstream master || true
