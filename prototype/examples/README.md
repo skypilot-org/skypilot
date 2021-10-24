@@ -1,8 +1,8 @@
 # Example Sky apps
 
-*[`resnet_app.py`](./resnet_app.py)*: ResNet50 training on GPUs, adapted from [tensorflow/tpu](https://github.com/tensorflow/tpu).
+1. [**`resnet_app.py`**](./resnet_app.py): ResNet50 training on GPUs, adapted from [tensorflow/tpu](https://github.com/tensorflow/tpu).
 
-Do the following before running the app:
+    Do the following before running the app:
 ```bash
 # To run on GPUs, we prepared a fork that added a few changes.
 git clone -b gpu_train https://github.com/concretevitamin/tpu ~/Downloads/tpu
