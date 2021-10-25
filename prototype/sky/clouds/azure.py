@@ -62,6 +62,7 @@ class Azure(clouds.Cloud):
         return 'Standard_D2_v4'
 
     def get_feasible_launchable_resources(self, resources):
+        # TODO: refactor this method (AWS and Azure are similar)?
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
@@ -83,6 +84,8 @@ class Azure(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
+        # TODO: support bin-packing; if requesting 2 V100s, should allow 2x
+        # Standard_NC6s_v3 rather than not returning anything.
         instance_type = Azure._ACCELERATORS_DIRECTORY.get((acc, acc_count))
         if instance_type is None:
             return []
