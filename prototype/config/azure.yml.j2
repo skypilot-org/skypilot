@@ -11,6 +11,8 @@ provider:
     type: azure
     location: southcentralus
     resource_group: ray-cluster
+    # set subscription id otherwise the default from az cli will be used
+    # subscription_id: 00000000-0000-0000-0000-000000000000
 
 # How Ray will authenticate with newly launched nodes.
 auth:

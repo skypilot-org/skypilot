@@ -3,3 +3,5 @@ colorama
 jinja2
 networkx
 ray[default]
+
+azure-cli
