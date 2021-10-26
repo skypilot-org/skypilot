@@ -48,8 +48,11 @@ head_node_type: ray_head_default
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
 {% if workdir is not none %}
-  "/tmp/workdir": {{workdir}}
-{% endif %}
+  "/tmp/workdir": "{{workdir}}",
+{% endif -%}
+{% for remote_path, local_path in file_mounts.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{% endfor -%}
 }
 
 # Patterns for files to exclude when running rsync up or rsync down

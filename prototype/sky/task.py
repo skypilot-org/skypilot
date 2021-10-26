@@ -1,3 +1,5 @@
+from typing import Dict
+
 import sky
 from sky import clouds
 
@@ -26,6 +28,10 @@ class Task(object):
         self.estimated_outputs_size_gigabytes = None
         self.resources = None
         self.time_estimator_func = None
+        self.file_mounts = None
+
+        # Filled in by the optimizer.  If None, this Task is not planned.
+        self.best_resources = None
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
@@ -79,6 +85,27 @@ class Task(object):
                 'Node [{}] does not have a cost model set; '
                 'call set_time_estimator() first'.format(self))
         return self.time_estimator_func(resources)
+
+    def set_file_mounts(self, file_mounts: Dict[str, str]):
+        """Sets the file mounts for this Task.
+
+        File mounts are local files/dirs to be synced to specific paths on the
+        remote VM(s) where this Task will run.  Can be used for syncing
+        datasets, dotfiles, etc.
+
+        Example:
+
+            task.set_file_mounts({
+                '~/.dotfile': '/local/.dotfile',
+                '/remote/dir': '/local/dir',
+            })
+
+        Args:
+          file_mounts: a dict of { remote_path: local_path }, where remote is
+            the VM on which this Task will eventually run on, and local is the
+            node from which the task is launched.
+        """
+        self.file_mounts = file_mounts
 
     def __rshift__(a, b):
         sky.DagContext.get_current_dag().add_edge(a, b)
