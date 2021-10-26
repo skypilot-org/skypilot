@@ -1,7 +1,14 @@
-from typing import Dict
+from typing import Dict, Optional
+import urllib.parse
 
 import sky
 from sky import clouds
+
+
+def _is_cloud_store_url(url):
+    result = urllib.parse.urlsplit(url)
+    # '' means non-cloud URLs.
+    return result.netloc
 
 
 class Task(object):
@@ -106,6 +113,34 @@ class Task(object):
             node from which the task is launched.
         """
         self.file_mounts = file_mounts
+
+    def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
+        """Returns file mounts of the form (dst=VM path, src=local path).
+
+        Any cloud object store URLs (gs://, s3://, etc.), either as source or
+        destination, are not included.
+        """
+        if self.file_mounts is None:
+            return None
+        d = {}
+        for k, v in self.file_mounts.items():
+            if not _is_cloud_store_url(k) and not _is_cloud_store_url(v):
+                d[k] = v
+        return d
+
+    def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
+        """Returns file mounts of the form (dst=VM path, src=cloud URL).
+
+        Local-to-remote file mounts are excluded (handled by
+        get_local_to_remote_file_mounts()).
+        """
+        if self.file_mounts is None:
+            return None
+        d = {}
+        for k, v in self.file_mounts.items():
+            if not _is_cloud_store_url(k) and _is_cloud_store_url(v):
+                d[k] = v
+        return d
 
     def __rshift__(a, b):
         sky.DagContext.get_current_dag().add_edge(a, b)
