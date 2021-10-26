@@ -72,6 +72,7 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
             'run_id': run_id,
             'setup_command': task.setup,
             'workdir': task.workdir,
+            'file_mounts': task.file_mounts or {},
         })
     )
 
@@ -193,6 +194,7 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     cluster_config_file = _write_cluster_config(
         run_id, task, _get_cluster_config_template(task))
     if dryrun:
+        print('Dry run finished.')
         return
 
     # FIXME: if a command fails, stop the rest.
