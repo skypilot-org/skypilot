@@ -25,6 +25,7 @@ from colorama import Fore, Style
 import jinja2
 
 import sky
+from sky import cloud_stores
 
 RunId = str
 
@@ -68,13 +69,13 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
     resources_vars = cloud.make_deploy_resources_variables(task)
     return _fill_template(
         cluster_config_template,
-        dict(resources_vars, **{
-            'run_id': run_id,
-            'setup_command': task.setup,
-            'workdir': task.workdir,
-            'file_mounts': task.file_mounts or {},
-        })
-    )
+        dict(
+            resources_vars, **{
+                'run_id': run_id,
+                'setup_command': task.setup,
+                'workdir': task.workdir,
+                'file_mounts': task.get_local_to_remote_file_mounts() or {},
+            }))
 
 
 def _get_run_id() -> RunId:
@@ -193,6 +194,7 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     run_id = _get_run_id()
     cluster_config_file = _write_cluster_config(
         run_id, task, _get_cluster_config_template(task))
+
     if dryrun:
         print('Dry run finished.')
         return
@@ -206,6 +208,24 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
             'sync', 'Sync files',
             f'ray rsync_up {cluster_config_file} {task.workdir} {SKY_REMOTE_WORKDIR}'
         )
+
+    if task.get_cloud_to_remote_file_mounts() is not None:
+        # Handle cloud -> remote file transfers.
+        mounts = task.get_cloud_to_remote_file_mounts()
+        for dst, src in mounts.items():
+            storage = cloud_stores.get_storage_from_path(src)
+            # TODO: room for improvement.  Here there are many moving parts
+            # (download gsutil on remote, run gsutil on remote).  Consider
+            # alternatives (smart_open, each provider's own sdk), a
+            # data-transfer container etc.  We also assumed 'src' is a
+            # directory.
+            download_command = storage.make_download_dir_command(
+                source=src, destination=dst)
+            runner.add_step(
+                'cloud_to_remote_download',
+                'Download files from cloud to remote',
+                f'ray exec {cluster_config_file} \'{download_command}\'')
+
     runner.add_step(
         'exec', 'Execute task',
         f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && {task.run}\''
