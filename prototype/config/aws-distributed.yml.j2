@@ -1,0 +1,83 @@
+cluster_name: sky-aws
+
+max_workers: 5
+upscaling_speed: 1.0
+
+docker:
+    image: {{ docker_image|default("''", True) }}
+    container_name: {{ container_name|default("''", True) }}
+    pull_before_run: True
+    run_options:
+        - --ulimit nofile=65536:65536
+        - -p 8008:8008
+
+idle_timeout_minutes: 5
+
+provider:
+  type: aws
+  region: us-west-2
+  availability_zone: us-west-2a,us-west-2b, us-west-2c
+  cache_stopped_nodes: True
+
+auth:
+  ssh_user: ubuntu
+  ssh_private_key: {{ private_key|default(null, True) }}
+
+available_node_types:
+  ray.head.default:
+    resources: {}
+    node_config:
+      InstanceType: {{instance_type}}
+      ImageId: ami-0e9c522a722725e62  # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 500
+
+  ray.worker.default:
+    min_workers: {{num_workers}}
+    max_workers: 5
+    resources: {}
+    node_config:
+      InstanceType: {{instance_type}}
+      ImageId: ami-0e9c522a722725e62  # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 500
+
+head_node_type: ray.head.default
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+{% if workdir is not none %}
+  "/tmp/workdir": "{{workdir}}",
+{% endif -%}
+{% for remote_path, local_path in file_mounts.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{% endfor -%}
+}
+
+# Patterns for files to exclude when running rsync up or rsync down
+rsync_exclude:
+  - "**/.git"
+  - "**/.git/**"
+
+rsync_filter:
+  - .gitignore
+
+initialization_commands: []
+
+# List of shell commands to run to set up nodes.
+setup_commands:
+  - pip3 install ray
+  - mkdir -p /tmp/workdir && cd /tmp/workdir && {{setup_command}}
+
+# Command to start ray on the head node. You don't need to change this.
+head_start_ray_commands:
+    - ray stop
+    - ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml
+
+worker_start_ray_commands:
+    - ray stop
+    - ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076
