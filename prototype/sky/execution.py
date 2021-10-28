@@ -248,7 +248,6 @@ class Runner:
                         commands = fn(self.cluster_ips)
                         for k, v in commands.items():
                             _execute_single_node_command(ip=k, command=v, private_key=TASK.private_key, container_name=TASK.container_name)
-                            import pdb; pdb.set_trace()
                     elif "exec" in step.step_id:
                         commands = fn(self.cluster_ips)
                         for k, v in commands.items():
