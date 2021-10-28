@@ -1,4 +1,4 @@
-cluster_name: {{run_id}}
+cluster_name: sky-aws
 
 max_workers: 5
 upscaling_speed: 1.0
@@ -50,7 +50,12 @@ head_node_type: ray.head.default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-  "/tmp/workdir": {{workdir}}
+{% if workdir is not none %}
+  "/tmp/workdir": "{{workdir}}",
+{% endif -%}
+{% for remote_path, local_path in file_mounts.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{% endfor -%}
 }
 
 # Patterns for files to exclude when running rsync up or rsync down
@@ -65,8 +70,12 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
+<<<<<<< HEAD
   - pip3 install ray
   - cd /tmp/workdir && {{setup_command}}
+=======
+  - mkdir -p /tmp/workdir && cd /tmp/workdir && {{setup_command}}
+>>>>>>> 931b41db5db6634cef59575bd0c4192525630cfc
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
