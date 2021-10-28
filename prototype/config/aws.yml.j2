@@ -21,6 +21,7 @@ provider:
 
 auth:
   ssh_user: ubuntu
+  ssh_private_key: {{ private_key|default(null, True) }}
 
 available_node_types:
   ray.head.default:
@@ -64,6 +65,7 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
+  - pip3 install ray
   - cd /tmp/workdir && {{setup_command}}
 
 # Command to start ray on the head node. You don't need to change this.

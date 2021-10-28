@@ -13,11 +13,13 @@ class Task(object):
             post_setup_fn = None,
             docker_image = None,
             container_name = None,
-            num_workers = None,
+            num_workers = 0,
+            private_key = "~/.ssh/sky_key",
             run=None,
             args=None,  # TODO: consider removing.
     ):
         self.name = name
+        self.best_resources = None
         # The script and args to run.
         self.run = run
         self.args = args
@@ -27,6 +29,7 @@ class Task(object):
         self.docker_image = docker_image
         self.container_name = container_name
         self.num_workers = num_workers
+        self.private_key = private_key
 
         self.inputs = None
         self.outputs = None
@@ -34,9 +37,18 @@ class Task(object):
         self.estimated_outputs_size_gigabytes = None
         self.resources = None
         self.time_estimator_func = None
+        # Check for proper assignment of Task variables
+        self.validate_config()
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
+
+    def validate_config(self):
+        if bool(self.docker_image) != bool(self.container_name):
+            raise ValueError("Either docker image and container are both None or valid strings")
+        if self.num_workers < 0:
+            raise ValueError("Worker nodes must be >=0")
+        return
 
     # E.g., 's3://bucket', 'gs://bucket', or None.
     def set_inputs(self, inputs, estimated_size_gigabytes):
