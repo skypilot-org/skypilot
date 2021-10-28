@@ -13,19 +13,19 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
+import colorama
+from colorama import Fore, Style
 import datetime
+import jinja2
 import json
 import os
+import re
 import subprocess
 import sys
 import time
-from typing import List, Optional, Callable
-
-import colorama
-from colorama import Fore, Style
-import jinja2
-import re
+from typing import List, Optional 
 import yaml
+
 import sky
 from sky.authentication import *
 
