@@ -48,6 +48,8 @@ _CLOUD_TO_TEMPLATE = {
 
 def _get_cluster_config_template(task):
     cloud = task.best_resources.cloud
+    if task.num_nodes > 1 and str(cloud) == 'AWS':
+        return 'config/aws-distributed.yml.j2'
     return _CLOUD_TO_TEMPLATE[type(cloud)]
 
 
@@ -80,7 +82,7 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,#'rayproject/ray-ml:latest-gpu',
                 'container_name': task.container_name, #'resnet_container',
-                'num_workers': task.num_workers,
+                'num_nodes': task.num_nodes,
                 'file_mounts': task.get_local_to_remote_file_mounts() or {},
             }))
 
@@ -232,14 +234,14 @@ class Runner:
                         output = step.run()
                         # Wait for all workers to setup post setup
                         while True:
-                            if TASK.num_workers <=0:
+                            if TASK.num_nodes <=1:
                                 break
                             proc = subprocess.run(
                             f"ray exec {CLUSTER_CONFIG_FILE} 'ray status'", shell=True, check=True, capture_output=True)
                             output = proc.stdout.decode("ascii")
                             print(output)
                             self.logger.log(output)
-                            if f"{TASK.num_workers} ray.worker.default" in output:
+                            if f"{TASK.num_nodes-1} ray.worker.default" in output:
                                 break
                             time.sleep(5)
                     else:
