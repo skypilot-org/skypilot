@@ -35,7 +35,7 @@ available_node_types:
             VolumeSize: 500
 
   ray.worker.default:
-    min_workers: {{num_workers}}
+    min_workers: {{num_nodes - 1}}
     max_workers: 5
     resources: {}
     node_config:
