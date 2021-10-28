@@ -32,7 +32,9 @@ with sky.Dag() as dag:
 
     docker_image = None #'rayproject/ray-ml:latest-gpu'
     container_name = None #'resnet_container'
-    num_workers = 1
+
+    # Total Nodes, INCLUDING Head Node
+    num_nodes = 2
 
     # The setup command.  Will be run under the working directory.
     setup = 'pip3 install --upgrade pip && \
@@ -44,9 +46,9 @@ with sky.Dag() as dag:
 
 
     # Post setup function. Run after `ray up *.yml` completes. Returns dictionary of commands to be run on each corresponding node.
-    def post_setup_fn(ip_dict):
+    # List of IPs, 0th index denoting head worker
+    def post_setup_fn(ip_list):
         command_dict = {}
-        ip_list = [ip_dict['head']] + ip_dict['workers']
         tf_config = {'cluster': {'worker': [ip + ':8008' for ip in ip_list]}, 'task': {'type': 'worker', 'index': -1}}
         for i, ip in enumerate(ip_list):
             tf_config['task']['index'] = i
@@ -55,8 +57,7 @@ with sky.Dag() as dag:
         return command_dict
 
     # The command to run.  Will be run under the working directory.
-    def run_fn(ip_dict):
-        ip_list = [ip_dict['head']] + ip_dict['workers']
+    def run_fn(ip_list):
         run_dict = {}
         for i, ip in enumerate(ip_list):
             run_dict[ip] = 'source ~/.bashrc && \
@@ -79,7 +80,7 @@ with sky.Dag() as dag:
         post_setup_fn = post_setup_fn,
         docker_image = docker_image,
         container_name = container_name,
-        num_workers = num_workers,
+        num_nodes = num_nodes,
         run=run,
     )
 

@@ -177,7 +177,7 @@ class Runner:
         self.logs_root = os.path.join(SKY_LOGS_DIRECTORY, run_id)
         os.makedirs(self.logs_root, exist_ok=True)
         self.logger = EventLogger(os.path.join(self.logs_root, '_events.jsonl'))
-        self.cluster_ips = {}
+        self.cluster_ips = []
         self.task = task
 
     def add_step(self, step_name: str, step_desc: str,
@@ -219,7 +219,7 @@ class Runner:
                         str_output = output.stdout.decode('utf-8')
                         ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",str_output)
                         assert len(ips)==1, "Only 1 Node can be Head Node!"
-                        self.cluster_ips['head'] = ips[0]
+                        self.cluster_ips.append(ips[0])
                     elif 'ray get-worker-ips' in step.execute_fn:
                         output = subprocess.run(
                             step.execute_fn,
@@ -229,7 +229,7 @@ class Runner:
                             stderr=subprocess.STDOUT)
                         str_output = output.stdout.decode('utf-8')
                         ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",str_output)
-                        self.cluster_ips['workers'] = ips
+                        self.cluster_ips.extend(ips)
                     elif 'ray up' in step.execute_fn:
                         output = step.run()
                         # Wait for all workers to setup post setup
