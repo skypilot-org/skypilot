@@ -21,13 +21,13 @@ import json
 import os
 import re
 import subprocess
-import sys
 import time
 from typing import List, Optional 
 import yaml
 
 import sky
 from sky.authentication import *
+from sky import cloud_stores
 
 RunId = str
 
@@ -81,6 +81,7 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
                 'docker_image': task.docker_image,#'rayproject/ray-ml:latest-gpu',
                 'container_name': task.container_name, #'resnet_container',
                 'num_workers': task.num_workers,
+                'file_mounts': task.get_local_to_remote_file_mounts() or {},
             }))
 
 
@@ -129,6 +130,7 @@ class Step:
         log_path = os.path.join(self.runner.logs_root, f'{self.step_id}.log')
         log_abs_path = os.path.abspath(log_path)
         tail_cmd = f'tail -n100 -f {log_abs_path}'
+        # @Frank Fix this
         if STREAM_LOGS_TO_CONSOLE:
             with open(log_path, 'w') as fout:
                 proc = subprocess.Popen(
@@ -297,7 +299,9 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     run_id = _get_run_id()
     cluster_config_file = _write_cluster_config(
         run_id, task, _get_cluster_config_template(task))
+
     if dryrun:
+        print('Dry run finished.')
         return
 
     CLUSTER_CONFIG_FILE = cluster_config_file
@@ -310,11 +314,30 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     runner = Runner(run_id)
     runner.add_step('provision', 'Provision resources',
                     f'ray up -y {cluster_config_file} --no-config-cache')
-    runner.add_step(
-        'sync', 'Sync files',
-        f'ray rsync_up {cluster_config_file} {task.workdir} {SKY_REMOTE_WORKDIR}'
-    )
 
+    if task.workdir is not None:
+        runner.add_step(
+            'sync', 'Sync files',
+            f'ray rsync_up {cluster_config_file} {task.workdir} {SKY_REMOTE_WORKDIR}'
+        )
+
+    if task.get_cloud_to_remote_file_mounts() is not None:
+        # Handle cloud -> remote file transfers.
+        mounts = task.get_cloud_to_remote_file_mounts()
+        for dst, src in mounts.items():
+            storage = cloud_stores.get_storage_from_path(src)
+            # TODO: room for improvement.  Here there are many moving parts
+            # (download gsutil on remote, run gsutil on remote).  Consider
+            # alternatives (smart_open, each provider's own sdk), a
+            # data-transfer container etc.  We also assumed 'src' is a
+            # directory.
+            download_command = storage.make_download_dir_command(
+                source=src, destination=dst)
+            runner.add_step(
+                'cloud_to_remote_download',
+                'Download files from cloud to remote',
+                f'ray exec {cluster_config_file} \'{download_command}\'')
+    
     runner.add_step(
         'get_head_ip', 'Get Head IP',
         f'ray get-head-ip {cluster_config_file}'

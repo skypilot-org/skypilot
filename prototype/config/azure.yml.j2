@@ -1,4 +1,4 @@
-cluster_name: {{run_id}}
+cluster_name: sky-azure
 
 max_workers: 0
 
@@ -12,7 +12,7 @@ provider:
     location: southcentralus
     resource_group: ray-cluster
     # set subscription id otherwise the default from az cli will be used
-    subscription_id: 891c5cd9-8f5d-4d87-ba70-d9525dbf691b
+    # subscription_id: 00000000-0000-0000-0000-000000000000
 
 # How Ray will authenticate with newly launched nodes.
 auth:
@@ -47,8 +47,14 @@ head_node_type: ray.head.gpu
 
 # Files or directories to copy to the head and worker nodes. The format is a
 # dictionary from REMOTE_PATH: LOCAL_PATH, e.g.
+# Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-  "/tmp/workdir": {{workdir}}
+{% if workdir is not none %}
+  "/tmp/workdir": "{{workdir}}",
+{% endif -%}
+{% for remote_path, local_path in file_mounts.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{% endfor -%}
 }
 
 # List of commands that will be run before `setup_commands`. If docker is
@@ -64,7 +70,7 @@ initialization_commands:
 # List of shell commands to run to set up nodes.
 # NOTE: rayproject/ray-ml:latest has ray latest bundled
 setup_commands:
-    - cd /tmp/workdir && {{setup_command}}
+  - mkdir -p /tmp/workdir && cd /tmp/workdir && {{setup_command}}
 
 # Custom commands that will be run on the head node after common setup.
 # NOTE: rayproject/ray-ml:latest has azure packages bundled

@@ -3,3 +3,6 @@ colorama
 jinja2
 networkx
 ray[default]
+tabulate
+
+azure-cli

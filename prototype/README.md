@@ -5,11 +5,12 @@
 ```bash
 pip install -e .
 
-# Clone the the ResNet repo (gpu_train branch)
-#   https://github.com/concretevitamin/tpu/tree/gpu_train/models/official/resnet
-# to your local machine's ~/Downloads/.
+git clone -b gpu_train https://github.com/concretevitamin/tpu ~/Downloads/tpu
+pushd ~/Downloads/tpu
+git checkout 222cc86b5
+popd
 
-python resnet_app.py
+python examples/resnet_app.py
 ```
 
 ## Cloud account setup
@@ -18,12 +19,13 @@ This should be run on your laptop/development machine where you will use Sky to 
 
 TODO: see https://github.com/banzaicloud/cloudinfo#cloud-credentials for a reference.
 
-**AWS**. TODO.
+**AWS**. Install boto (`pip install boto3`) and configure your AWS credentials in `~/.aws/credentials`, as described in the [boto docs](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html).
 
 **GCP**. Run:
 ```
 pip install google-api-python-client
 # Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart
+conda install -c conda-forge google-cloud-sdk
 
 # Init.
 gcloud init
@@ -32,7 +34,7 @@ gcloud init
 # This will generate ~/.config/gcloud/application_default_credentials.json.
 gcloud auth application-default login
 ```
-TODO: allow user to set up her own project_id and pass in somewhere.
+TODO: allow user to set up/create her own project_id and pass in somewhere.
 
 *Quotas.* Increase your GPU quotas according to
 * [Checking GPU quota](https://cloud.google.com/compute/docs/gpus/create-vm-with-gpus#check-quota)
@@ -50,7 +52,7 @@ ray attach config/gcp.yml
 ray down config/gcp.yml
 ```
 
-**Azure**. TODO.
+**Azure**. Install the Azure CLI (`pip install azure-cli`) then login using `az login`. Set the subscription to use from the command line (`az account set -s <subscription_id>`) or by modifying the provider section of the Azure template (`config/azure.yml.j2`).
 
 ## Open issues
 
