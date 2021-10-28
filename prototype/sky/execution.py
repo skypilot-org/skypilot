@@ -25,7 +25,9 @@ import colorama
 from colorama import Fore, Style
 import jinja2
 import re
+import yaml
 import sky
+from sky.authentication import *
 
 RunId = str
 
@@ -82,7 +84,7 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
             }))
 
 
-def _execute_single_node_command(ip, command, private_key="~/.ssh/ray-autoscaler_us-west-2.pem", container_name="resnet_container"):
+def _execute_single_node_command(ip, command, private_key, container_name):
     final_command = command
     if container_name:
         def nest_command(command):
@@ -245,12 +247,13 @@ class Runner:
                     if "post_setup" in step.step_id:
                         commands = fn(self.cluster_ips)
                         for k, v in commands.items():
-                            _execute_single_node_command(ip=k, command=v, container_name=TASK.container_name)
+                            _execute_single_node_command(ip=k, command=v, private_key=TASK.private_key, container_name=TASK.container_name)
+                            import pdb; pdb.set_trace()
                     elif "exec" in step.step_id:
                         commands = fn(self.cluster_ips)
                         for k, v in commands.items():
                             v = f'cd {SKY_REMOTE_WORKDIR} && ' + v
-                            _execute_single_node_command(ip=k, command=v, container_name=TASK.container_name)
+                            _execute_single_node_command(ip=k, command=v, private_key=TASK.private_key, container_name=TASK.container_name)
 
                 self.logger.log('finish_step')
                 print(f'{Fore.CYAN}Step {step.step_id} finished{Fore.RESET}\n')
@@ -267,7 +270,26 @@ class Runner:
             raise e
 
 
+def _verify_ssh_authentication(cloud_type, config):
+    cloud_type = str(cloud_type)
+    if cloud_type == 'AWS':
+        config = setup_aws_authentication(config)
+    elif cloud_type == 'GCP':
+        config = setup_gcp_authentication(config)
+    elif cloud_type == 'Azure':
+        config = setup_azure_authentication(config)
+    else:
+        raise ValueError("Cloud type not supported, must be [AWS, GCP, Azure]")
+
+    with open(CLUSTER_CONFIG_FILE, 'w') as yaml_file:
+        yaml.dump(config, yaml_file, default_flow_style=False)
+
+
+
 def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
+    global CLUSTER_CONFIG_FILE
+    global TASK
+
     colorama.init()
 
     assert len(dag) == 1, 'Job launcher assumes 1 task for now'
@@ -279,10 +301,12 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     if dryrun:
         return
 
-    global CLUSTER_CONFIG_FILE
     CLUSTER_CONFIG_FILE = cluster_config_file
-    global TASK
     TASK = task
+    autoscaler_dict = yaml.safe_load(open(CLUSTER_CONFIG_FILE))
+    _verify_ssh_authentication(task.best_resources.cloud, autoscaler_dict)
+
+    #_verify_ssh_authentication(cloud_type=task.best_resources.cloud,)
     # FIXME: if a command fails, stop the rest.
     runner = Runner(run_id)
     runner.add_step('provision', 'Provision resources',
