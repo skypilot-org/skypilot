@@ -70,13 +70,9 @@ with sky.Dag() as dag:
 
     # The command to run.  Will be run under the working directory.
     def run_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
-        run_dict = {}
-        # TODO: user shouldn't need to specify 'cd /tmp/workdir'
-        for i, ip in enumerate(ip_list):
-            run_dict[ip] = 'source ~/.bashrc && \
+        run = 'source ~/.bashrc && \
             source activate resnet && \
             rm -rf resnet_model-dir && \
-            cd /tmp/workdir && \
             python models/official/resnet/resnet_main.py --use_tpu=False \
             --mode=train --train_batch_size=256 --train_steps=2000 \
             --iterations_per_loop=125 \
@@ -84,7 +80,7 @@ with sky.Dag() as dag:
             --model_dir=resnet-model-dir \
             --amp --xla --loss_scale=128'
 
-        return run_dict
+        return {ip: run for ip in ip_list}
 
     run = run_fn
 
