@@ -1,5 +1,14 @@
+from typing import Dict, Optional
+import urllib.parse
+
 import sky
 from sky import clouds
+
+
+def _is_cloud_store_url(url):
+    result = urllib.parse.urlsplit(url)
+    # '' means non-cloud URLs.
+    return result.netloc
 
 
 class Task(object):
@@ -10,25 +19,52 @@ class Task(object):
             name=None,
             workdir=None,
             setup=None,
+            post_setup_fn=None,
+            docker_image=None,
+            container_name=None,
+            num_nodes=0,
+            max_nodes=1,
+            private_key="~/.ssh/sky-key",
             run=None,
             args=None,  # TODO: consider removing.
     ):
         self.name = name
+        self.best_resources = None
         # The script and args to run.
         self.run = run
         self.args = args
         self.setup = setup
+        self.post_setup_fn = post_setup_fn
         self.workdir = workdir
-
+        self.docker_image = docker_image
+        self.container_name = container_name
+        self.num_nodes = num_nodes
+        self.max_nodes = max_nodes
+        self.private_key = private_key
         self.inputs = None
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
         self.estimated_outputs_size_gigabytes = None
         self.resources = None
         self.time_estimator_func = None
+        self.file_mounts = None
+        # Filled in by the optimizer.  If None, this Task is not planned.
+        self.best_resources = None
+
+        # Check for proper assignment of Task variables
+        #self.validate_config()
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
+
+    def validate_config(self):
+        if bool(self.docker_image) != bool(self.container_name):
+            raise ValueError(
+                "Either docker image and container are both None or valid strings"
+            )
+        if self.num_nodes <= 0:
+            raise ValueError("Must be >0 total nodes")
+        return
 
     # E.g., 's3://bucket', 'gs://bucket', or None.
     def set_inputs(self, inputs, estimated_size_gigabytes):
@@ -79,6 +115,55 @@ class Task(object):
                 'Node [{}] does not have a cost model set; '
                 'call set_time_estimator() first'.format(self))
         return self.time_estimator_func(resources)
+
+    def set_file_mounts(self, file_mounts: Dict[str, str]):
+        """Sets the file mounts for this Task.
+
+        File mounts are local files/dirs to be synced to specific paths on the
+        remote VM(s) where this Task will run.  Can be used for syncing
+        datasets, dotfiles, etc.
+
+        Example:
+
+            task.set_file_mounts({
+                '~/.dotfile': '/local/.dotfile',
+                '/remote/dir': '/local/dir',
+            })
+
+        Args:
+          file_mounts: a dict of { remote_path: local_path }, where remote is
+            the VM on which this Task will eventually run on, and local is the
+            node from which the task is launched.
+        """
+        self.file_mounts = file_mounts
+
+    def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
+        """Returns file mounts of the form (dst=VM path, src=local path).
+
+        Any cloud object store URLs (gs://, s3://, etc.), either as source or
+        destination, are not included.
+        """
+        if self.file_mounts is None:
+            return None
+        d = {}
+        for k, v in self.file_mounts.items():
+            if not _is_cloud_store_url(k) and not _is_cloud_store_url(v):
+                d[k] = v
+        return d
+
+    def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
+        """Returns file mounts of the form (dst=VM path, src=cloud URL).
+
+        Local-to-remote file mounts are excluded (handled by
+        get_local_to_remote_file_mounts()).
+        """
+        if self.file_mounts is None:
+            return None
+        d = {}
+        for k, v in self.file_mounts.items():
+            if not _is_cloud_store_url(k) and _is_cloud_store_url(v):
+                d[k] = v
+        return d
 
     def __rshift__(a, b):
         sky.DagContext.get_current_dag().add_edge(a, b)

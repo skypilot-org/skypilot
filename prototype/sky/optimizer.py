@@ -6,6 +6,7 @@ import typing
 
 import networkx as nx
 import numpy as np
+import tabulate
 
 import sky
 from sky import clouds
@@ -52,7 +53,7 @@ class Optimizer(object):
         return egress_time
 
     @staticmethod
-    def optimize(dag: sky.Dag, minimize):
+    def optimize(dag: sky.Dag, minimize=COST):
         dag = copy.deepcopy(dag)
         # Optimization.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
@@ -114,6 +115,8 @@ class Optimizer(object):
 
     @staticmethod
     def _optimize_cost(dag: sky.Dag, minimize_cost=True):
+        # TODO: The output of this function is useful. Should generate a
+        # text plan and print to both console and a log file.
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
 
@@ -183,14 +186,17 @@ class Optimizer(object):
                                 estimated_runtime, estimated_runtime / 3600))
                         if minimize_cost:
                             print(
-                                '  estimated_cost (not incl. egress): ${:.1f}'.format(
-                                    estimated_cost))
+                                '  estimated_cost (not incl. egress): ${:.1f}'.
+                                format(estimated_cost))
 
                     def _egress(parent, parent_resources, node, resources):
                         if isinstance(parent_resources.cloud, DummyCloud):
                             # Special case.  The current 'node' is a real
                             # source node, and its input may be on a different
                             # cloud from 'resources'.
+                            if node.get_inputs() is None:
+                                # A Task may have no inputs specified.
+                                return 0
                             src_cloud = node.get_inputs_cloud()
                             nbytes = node.get_estimated_inputs_size_gigabytes()
                         else:
@@ -231,7 +237,7 @@ class Optimizer(object):
                             minimize_cost):
         # FIXME: this function assumes chain.
         node = topo_order[-1]
-        messages = []
+        message_data = []
         egress_cost = 0.0
         overall_best = None
         best_plan = {}
@@ -243,7 +249,7 @@ class Optimizer(object):
                     h = resources
                     c = best_costs[resources]
             if not isinstance(h, DummyResources):
-                messages.append('  {} : {}'.format(node, h))
+                message_data.append((node, h))
                 best_plan[node] = (h, c)
                 node.best_resources = h
             elif overall_best is None:
@@ -258,8 +264,10 @@ class Optimizer(object):
         else:
             print('\nOptimizer - plan minimizing run time (~{:.1f} hr):'.format(
                 overall_best / 3600))
-        for msg in reversed(messages):
-            print(msg)
+        print(tabulate.tabulate(reversed(message_data),
+                                headers=['TASK', 'BEST_RESOURCE'],
+                                tablefmt='plain'))
+        print()
         return best_plan
 
 

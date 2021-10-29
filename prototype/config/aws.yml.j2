@@ -1,4 +1,4 @@
-cluster_name: {{run_id}}
+cluster_name: sky-aws
 
 max_workers: 1
 
@@ -18,12 +18,21 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       ImageId: ami-0e9c522a722725e62  # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 256
 
 head_node_type: ray.head.default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-  "/tmp/workdir": {{workdir}}
+{% if workdir is not none %}
+  "/tmp/workdir": "{{workdir}}",
+{% endif -%}
+{% for remote_path, local_path in file_mounts.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{% endfor -%}
 }
 
 # Patterns for files to exclude when running rsync up or rsync down
@@ -36,7 +45,7 @@ rsync_filter:
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-  - cd /tmp/workdir && {{setup_command}}
+  - mkdir -p /tmp/workdir && cd /tmp/workdir && {{setup_command}}
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands: []
