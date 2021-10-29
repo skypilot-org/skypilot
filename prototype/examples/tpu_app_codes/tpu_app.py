@@ -25,7 +25,7 @@ from sky import clouds
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
-    workdir = '/Users/weichiang/Workspace/research/sky-experiments/prototype/examples/tpu_app_codes'
+    workdir = '/Users/weichiang/Workspace/research/sky-experiments/prototype/codes/'
 
     # The setup command.  Will be run under the working directory.
     setup = 'pip install --upgrade pip && \
