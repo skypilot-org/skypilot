@@ -2,13 +2,15 @@ import boto3
 import copy
 import os
 import time
-import yaml
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from functools import partial
 from googleapiclient import discovery, errors
+# TODO: Should tolerate if gcloud is not installed. Also,
+# https://pypi.org/project/google-api-python-client/ recommends
+# using Cloud Client Libraries for Python, where possible, for new code development.
 
 
 def generate_rsa_key_pair():
