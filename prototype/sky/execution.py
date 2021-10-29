@@ -368,10 +368,11 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     runner.add_step('get_worker_ips', 'Get Worker IP',
                     f'ray get-worker-ips {cluster_config_file}')
 
-    runner.add_step(
-        'post_setup',
-        'Additional Setup after Base Setup (includes custom setup on individual node)',
-        task.post_setup_fn)
+    if task.post_setup_fn is not None:
+        runner.add_step(
+            'post_setup',
+            'Additional Setup after Base Setup (includes custom setup on individual node)',
+            task.post_setup_fn)
 
     if isinstance(task.run, str):
         runner.add_step(
