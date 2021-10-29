@@ -342,7 +342,7 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     if task.workdir is not None:
         runner.add_step(
             'sync', 'Sync files',
-            f'ray rsync_up {cluster_config_file} {task.workdir} {SKY_REMOTE_WORKDIR}'
+            f'ray rsync_up {cluster_config_file} {task.workdir}/ {SKY_REMOTE_WORKDIR}'
         )
 
     if task.get_cloud_to_remote_file_mounts() is not None:
