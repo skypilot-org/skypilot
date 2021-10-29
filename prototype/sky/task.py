@@ -23,7 +23,8 @@ class Task(object):
             docker_image=None,
             container_name=None,
             num_nodes=0,
-            private_key="~/.ssh/sky_key",
+            max_nodes=1,
+            private_key="~/.ssh/sky-key",
             run=None,
             args=None,  # TODO: consider removing.
     ):
@@ -38,6 +39,7 @@ class Task(object):
         self.docker_image = docker_image
         self.container_name = container_name
         self.num_nodes = num_nodes
+        self.max_nodes = max_nodes
         self.private_key = private_key
         self.inputs = None
         self.outputs = None

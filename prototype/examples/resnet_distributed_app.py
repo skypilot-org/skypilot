@@ -37,6 +37,8 @@ with sky.Dag() as dag:
 
     # Total Nodes, INCLUDING Head Node
     num_nodes = 2
+    # Max number of nodes in Cluster
+    max_nodes = 5
 
     # The setup command.  Will be run under the working directory.
     setup = 'pip3 install --upgrade pip && \
@@ -92,6 +94,7 @@ with sky.Dag() as dag:
         docker_image=docker_image,
         container_name=container_name,
         num_nodes=num_nodes,
+        max_nodes=max_nodes,
         run=run,
     )
 
