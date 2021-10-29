@@ -41,8 +41,7 @@ class GcsCloudStorage(CloudStorage):
             'tar xzf gsutil.tar.gz)',
             'popd &>/dev/null',
         ]
-        download_via_gsutil = '/tmp/gsutil/gsutil -m rsync -r {} {}'.format(
-            source, destination)
+        download_via_gsutil = f'mkdir -p {destination} && /tmp/gsutil/gsutil -m rsync -r {source} {destination}'
 
         all_commands = get_gsutil
         all_commands.append(download_via_gsutil)
