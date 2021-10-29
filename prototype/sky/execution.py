@@ -13,9 +13,8 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
-import colorama
-from colorama import Fore, Style
 import datetime
+import functools
 import jinja2
 import json
 import os
@@ -23,8 +22,11 @@ import re
 import subprocess
 import sys
 import time
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 import yaml
+
+import colorama
+from colorama import Fore, Style
 
 import sky
 from sky.authentication import *
@@ -32,11 +34,13 @@ from sky import cloud_stores
 
 IPAddr = str
 RunId = str
+ShellCommand = str
+ShellCommandGenerator = Callable[[List[IPAddr]], Dict[IPAddr, ShellCommand]]
+ShellCommandOrGenerator = Union[ShellCommand, ShellCommandGenerator]
 
+IP_ADDR_REGEX = r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"
 SKY_LOGS_DIRECTORY = './logs'
 STREAM_LOGS_TO_CONSOLE = True
-CLUSTER_CONFIG_FILE = None
-TASK = None
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
@@ -90,22 +94,18 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
             }))
 
 
-def _execute_single_node_command(ip, command, private_key, container_name):
-    final_command = command
-    if container_name:
+def _execute_single_node_command(ip: IPAddr, command: ShellCommand,
+                                 private_key: str,
+                                 container_name: Optional[str]):
+    # TODO: Merge into Step; output also needs to be logged to file
+    if container_name is not None:
+        command = command.replace('\\', '\\\\').replace('"', '\\"')
+        command = f'docker exec {container_name} /bin/bash -c "{command}"'
 
-        def nest_command(command):
-            return command.replace('\\', '\\\\').replace('"', '\\"')
-
-        raw_command = nest_command(command)
-        final_command = "docker exec {} /bin/bash -c \"{}\"".format(
-            container_name, raw_command)
-    import pdb
-    pdb.set_trace()
-    ssh = subprocess.Popen([
-        "ssh", "-i", private_key, "-o", "StrictHostKeyChecking=no",
-        "ubuntu@{}".format(ip), final_command
-    ])
+    return subprocess.run(
+        f'ssh -i {private_key} -o StrictHostKeyChecking=no ubuntu@{ip} {command}',
+        shell=True,
+    )
 
 
 def _get_run_id() -> RunId:
@@ -131,13 +131,17 @@ class EventLogger:
 
 class Step:
 
-    def __init__(self, runner: 'Runner', step_id: str, step_desc: str,
-                 execute_fn: Union[str, Callable[[List[IPAddr]], Dict[IPAddr,
-                                                                      str]]]):
+    def __init__(self,
+                 runner: 'Runner',
+                 step_id: str,
+                 step_desc: str,
+                 shell_command: ShellCommandOrGenerator,
+                 callback: Callable[[str], Any] = None):
         self.runner = runner
         self.step_id = str(step_id)
         self.step_desc = step_desc
-        self.execute_fn = execute_fn
+        self.shell_command = shell_command
+        self.callback = callback
 
     def run(self, **kwargs) -> subprocess.CompletedProcess:
         log_path = os.path.join(self.runner.logs_root, f'{self.step_id}.log')
@@ -146,9 +150,10 @@ class Step:
         # @Frank Fix this
         if STREAM_LOGS_TO_CONSOLE:
             # TODO: `ray up` has a bug where if you redirect stdout and stderr, stdout is not flushed.
+            lines = []
             with open(log_path, 'w') as fout:
                 proc = subprocess.Popen(
-                    self.execute_fn,
+                    self.shell_command,
                     shell=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -157,32 +162,34 @@ class Step:
                 for line in proc.stdout:
                     sys.stdout.write(line)
                     fout.write(line)
+                    lines.append(line)
                 proc.communicate()
                 if proc.returncode != 0:
                     raise subprocess.CalledProcessError(
                         proc.returncode,
                         proc.args,
                     )
+                if self.callback:
+                    self.callback("".join(lines))
                 return proc
         else:
             print(
                 f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
-            return subprocess.run(
-                self.execute_fn + f' 2>&1 >{log_path}',
+            proc = subprocess.run(
+                self.shell_command + f' 2>&1 >{log_path}',
                 shell=True,
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
             )
+            # TODO: implement callback
+            return proc
 
 
 class Runner:
-    """
-    FIXME: This is a linear sequence of steps for now. Will upgrade to a DAG.
-    """
 
-    def __init__(self, run_id: RunId, steps: List[Step] = [], task=None):
+    def __init__(self, run_id: RunId, task, steps: List[Step] = []):
         self.run_id = run_id
         self.steps = steps
         self.next_step_id = 0
@@ -192,11 +199,15 @@ class Runner:
         self.cluster_ips = []
         self.task = task
 
-    def add_step(self, step_name: str, step_desc: str,
-                 execute_fn: str) -> 'Runner':
+    def add_step(self,
+                 step_name: str,
+                 step_desc: str,
+                 shell_command: ShellCommandOrGenerator,
+                 callback: Callable[[str], Any] = None) -> 'Runner':
         step_id = f'{self.next_step_id:03}_{step_name}'
         self.next_step_id += 1
-        self.steps.append(Step(self, step_id, step_desc, execute_fn))
+        self.steps.append(
+            Step(self, step_id, step_desc, shell_command, callback))
         return self
 
     def run(self) -> 'Runner':
@@ -214,72 +225,24 @@ class Runner:
                     {
                         'step_id': step.step_id,
                         'step_desc': step.step_desc,
-                        'execute_fn': str(step.execute_fn),
+                        'shell_command': str(step.shell_command),
                     },
                 )
-                print(
-                    f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{step.execute_fn}{Style.RESET_ALL}'
-                )
-                if isinstance(step.execute_fn, str):
-                    if 'ray get-head-ip' in step.execute_fn:
-                        output = subprocess.run(step.execute_fn,
-                                                shell=True,
-                                                check=True,
-                                                stdout=subprocess.PIPE,
-                                                stderr=subprocess.STDOUT)
-                        str_output = output.stdout.decode('utf-8')
-                        ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",
-                                         str_output)
-                        assert len(ips) == 1, "Only 1 Node can be Head Node!"
-                        self.cluster_ips.append(ips[0])
-                    elif 'ray get-worker-ips' in step.execute_fn:
-                        output = subprocess.run(step.execute_fn,
-                                                shell=True,
-                                                check=True,
-                                                stdout=subprocess.PIPE,
-                                                stderr=subprocess.STDOUT)
-                        str_output = output.stdout.decode('utf-8')
-                        ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",
-                                         str_output)
-                        self.cluster_ips.extend(ips)
-                    elif 'ray up' in step.execute_fn:
-                        output = step.run()
-                        # Wait for all workers to setup post setup
-                        while True:
-                            if TASK.num_nodes <= 1:
-                                break
-                            proc = subprocess.run(
-                                f"ray exec {CLUSTER_CONFIG_FILE} 'ray status'",
-                                shell=True,
-                                check=True,
-                                capture_output=True)
-                            output = proc.stdout.decode("ascii")
-                            print(output)
-                            self.logger.log(output)
-                            if f"{TASK.num_nodes-1} ray.worker.default" in output:
-                                break
-                            time.sleep(5)
-                    else:
-                        output = step.run()
+                if isinstance(step.shell_command, ShellCommand):
+                    print(
+                        f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{step.shell_command}{Style.RESET_ALL}'
+                    )
+                    step.run()
                 else:
-                    fn = step.execute_fn
-                    if "post_setup" in step.step_id:
-                        commands = fn(self.cluster_ips)
-                        for k, v in commands.items():
-                            _execute_single_node_command(
-                                ip=k,
-                                command=v,
-                                private_key=TASK.private_key,
-                                container_name=TASK.container_name)
-                    elif "exec" in step.step_id:
-                        commands = fn(self.cluster_ips)
-                        for k, v in commands.items():
-                            v = f'cd {SKY_REMOTE_WORKDIR} && ' + v
-                            _execute_single_node_command(
-                                ip=k,
-                                command=v,
-                                private_key=TASK.private_key,
-                                container_name=TASK.container_name)
+                    assert len(self.cluster_ips) >= 1, self.cluster_ips
+                    commands = step.shell_command(self.cluster_ips)
+                    print(
+                        f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{commands}{Style.RESET_ALL}'
+                    )
+                    for ip, cmd in commands.items():
+                        _execute_single_node_command(ip, cmd,
+                                                     self.task.private_key,
+                                                     self.task.container_name)
 
                 self.logger.log('finish_step')
                 print(f'{Fore.CYAN}Step {step.step_id} finished{Fore.RESET}\n')
@@ -311,10 +274,23 @@ def _verify_ssh_authentication(cloud_type, config, cluster_config_file):
         yaml.dump(config, yaml_file, default_flow_style=False)
 
 
-def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
-    global CLUSTER_CONFIG_FILE
-    global TASK
+def _wait_until_ready(cluster_config_file, task, _):
+    if task.num_nodes <= 1:
+        return
+    expected_worker_count = task.num_nodes - 1
+    while True:
+        proc = subprocess.run(f"ray exec {cluster_config_file} 'ray status'",
+                              shell=True,
+                              check=True,
+                              capture_output=True)
+        output = proc.stdout.decode("ascii")
+        print(output)
+        if f"{expected_worker_count} ray.worker.default" in output:
+            break
+        time.sleep(5)
 
+
+def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     colorama.init()
 
     assert len(dag) == 1, 'Job launcher assumes 1 task for now'
@@ -328,16 +304,17 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
         print('Dry run finished.')
         return
 
-    CLUSTER_CONFIG_FILE = cluster_config_file
-    TASK = task
-    autoscaler_dict = yaml.safe_load(open(CLUSTER_CONFIG_FILE))
+    autoscaler_dict = yaml.safe_load(open(cluster_config_file))
     _verify_ssh_authentication(task.best_resources.cloud, autoscaler_dict,
                                cluster_config_file)
 
     # FIXME: if a command fails, stop the rest.
-    runner = Runner(run_id)
-    runner.add_step('provision', 'Provision resources',
-                    f'ray up -y {cluster_config_file} --no-config-cache')
+    runner = Runner(run_id, task)
+    runner.add_step('provision',
+                    'Provision resources',
+                    f'ray up -y {cluster_config_file} --no-config-cache',
+                    callback=functools.partial(_wait_until_ready,
+                                               cluster_config_file, task))
 
     if task.workdir is not None:
         runner.add_step(
@@ -362,11 +339,23 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
                 'Download files from cloud to remote',
                 f'ray exec {cluster_config_file} \'{download_command}\'')
 
-    runner.add_step('get_head_ip', 'Get Head IP',
-                    f'ray get-head-ip {cluster_config_file}')
+    if task.num_nodes > 1:
 
-    runner.add_step('get_worker_ips', 'Get Worker IP',
-                    f'ray get-worker-ips {cluster_config_file}')
+        def collect_ips(stdout, expected_count=0):
+            ips = re.findall(IP_ADDR_REGEX, stdout)
+            if expected_count > 0:
+                assert len(ips) == expected_count, (ips, expected_count)
+            runner.cluster_ips.extend(ips)
+
+        runner.add_step('get_head_ip',
+                        'Get Head IP',
+                        f'ray get-head-ip {cluster_config_file}',
+                        callback=collect_ips)
+
+        runner.add_step('get_worker_ips',
+                        'Get Worker IP',
+                        f'ray get-worker-ips {cluster_config_file}',
+                        callback=collect_ips)
 
     if task.post_setup_fn is not None:
         runner.add_step(
