@@ -38,7 +38,7 @@ ShellCommand = str
 ShellCommandGenerator = Callable[[List[IPAddr]], Dict[IPAddr, ShellCommand]]
 ShellCommandOrGenerator = Union[ShellCommand, ShellCommandGenerator]
 
-IP_ADDR_REGEX = r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './logs'
 STREAM_LOGS_TO_CONSOLE = True
 
@@ -170,7 +170,7 @@ class Step:
                         proc.args,
                     )
                 if self.callback:
-                    self.callback("".join(lines))
+                    self.callback(''.join(lines))
                 return proc
         else:
             print(
@@ -268,7 +268,7 @@ def _verify_ssh_authentication(cloud_type, config, cluster_config_file):
     elif cloud_type == 'Azure':
         config = setup_azure_authentication(config)
     else:
-        raise ValueError("Cloud type not supported, must be [AWS, GCP, Azure]")
+        raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
 
     with open(cluster_config_file, 'w') as yaml_file:
         yaml.dump(config, yaml_file, default_flow_style=False)
@@ -283,9 +283,9 @@ def _wait_until_ready(cluster_config_file, task, _):
                               shell=True,
                               check=True,
                               capture_output=True)
-        output = proc.stdout.decode("ascii")
+        output = proc.stdout.decode('ascii')
         print(output)
-        if f"{expected_worker_count} ray.worker.default" in output:
+        if f'{expected_worker_count} ray.worker.default' in output:
             break
         time.sleep(5)
 
