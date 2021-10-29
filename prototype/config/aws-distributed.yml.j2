@@ -1,8 +1,10 @@
 cluster_name: sky-aws
-
-max_workers: 5
+{% if max_nodes <= 1 %}
+max_workers: 1
+{% else %}
+max_workers: {{max_nodes}}
+{% endif %}
 upscaling_speed: 1.0
-
 docker:
     image: {{ docker_image|default("''", True) }}
     container_name: {{ container_name|default("''", True) }}
@@ -36,7 +38,11 @@ available_node_types:
 
   ray.worker.default:
     min_workers: {{num_nodes - 1}}
-    max_workers: 5
+    {% if max_nodes <= 1 %}
+    max_workers: 1
+    {% else %}
+    max_workers: {{max_nodes}}
+    {% endif %}
     resources: {}
     node_config:
       InstanceType: {{instance_type}}
