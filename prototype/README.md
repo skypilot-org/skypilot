@@ -52,7 +52,7 @@ ray attach config/gcp.yml
 ray down config/gcp.yml
 ```
 
-**Azure**. Install the Azure CLI (`pip install azure-cli`) then login using `az login`. Set the subscription to use from the command line (`az account set -s <subscription_id>`) or by modifying the provider section of the Azure template (`config/azure.yml.j2`).
+**Azure**. Install the Azure CLI (`pip install azure-cli`) then login using `az login`. Set the subscription to use from the command line (`az account set -s <subscription_id>`) or by modifying the provider section of the Azure template (`config/azure.yml.j2`). Hotfix for Ray: `pip install azure-cli-core==2.22.0`
 
 ## Open issues
 
