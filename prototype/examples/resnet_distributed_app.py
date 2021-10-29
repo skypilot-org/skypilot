@@ -1,8 +1,7 @@
-import json 
+import json
 
 import sky
 import time_estimators
-
 from sky import clouds
 
 ##############################
@@ -30,8 +29,8 @@ with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
 
-    docker_image = None #'rayproject/ray-ml:latest-gpu'
-    container_name = None #'resnet_container'
+    docker_image = None  #'rayproject/ray-ml:latest-gpu'
+    container_name = None  #'resnet_container'
 
     # Total Nodes, INCLUDING Head Node
     num_nodes = 2
@@ -44,16 +43,24 @@ with sky.Dag() as dag:
            pip install tensorflow==2.4.0 pyyaml ray[default] awscli botocore boto3 && \
            cd models && pip install -e .'
 
-
     # Post setup function. Run after `ray up *.yml` completes. Returns dictionary of commands to be run on each corresponding node.
     # List of IPs, 0th index denoting head worker
     def post_setup_fn(ip_list):
         command_dict = {}
-        tf_config = {'cluster': {'worker': [ip + ':8008' for ip in ip_list]}, 'task': {'type': 'worker', 'index': -1}}
+        tf_config = {
+            'cluster': {
+                'worker': [ip + ':8008' for ip in ip_list]
+            },
+            'task': {
+                'type': 'worker',
+                'index': -1
+            }
+        }
         for i, ip in enumerate(ip_list):
             tf_config['task']['index'] = i
             str_tf_config = json.dumps(tf_config).replace('"', '\\"')
-            command_dict[ip] = "echo \"export TF_CONFIG='" + str_tf_config + "'\" >> ~/.bashrc"
+            command_dict[
+                ip] = "echo \"export TF_CONFIG='" + str_tf_config + "'\" >> ~/.bashrc"
         return command_dict
 
     # The command to run.  Will be run under the working directory.
@@ -69,6 +76,7 @@ with sky.Dag() as dag:
             --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
             --model_dir=resnet-model-dir \
             --amp --xla --loss_scale=128'
+
         return run_dict
 
     run = run_fn
@@ -77,10 +85,10 @@ with sky.Dag() as dag:
         'train',
         workdir=workdir,
         setup=setup,
-        post_setup_fn = post_setup_fn,
-        docker_image = docker_image,
-        container_name = container_name,
-        num_nodes = num_nodes,
+        post_setup_fn=post_setup_fn,
+        docker_image=docker_image,
+        container_name=container_name,
+        num_nodes=num_nodes,
         run=run,
     )
 
@@ -94,7 +102,7 @@ with sky.Dag() as dag:
         #sky.Resources(
         #     clouds.GCP(),
         #     'n1-standard-8',
-             # Options: 'V100', {'V100': <num>}.
+        # Options: 'V100', {'V100': <num>}.
         #     'V100',
         #),
         ##### Partially specified
