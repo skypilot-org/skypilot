@@ -21,8 +21,9 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
-from typing import List, Optional 
+from typing import List, Optional
 import yaml
 
 import sky
@@ -76,12 +77,14 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
     return _fill_template(
         cluster_config_template,
         dict(
-            resources_vars, **{
+            resources_vars,
+            **{
                 'run_id': run_id,
                 'setup_command': task.setup,
                 'workdir': task.workdir,
-                'docker_image': task.docker_image,#'rayproject/ray-ml:latest-gpu',
-                'container_name': task.container_name, #'resnet_container',
+                'docker_image':
+                    task.docker_image,  #'rayproject/ray-ml:latest-gpu',
+                'container_name': task.container_name,  #'resnet_container',
                 'num_nodes': task.num_nodes,
                 'file_mounts': task.get_local_to_remote_file_mounts() or {},
             }))
@@ -90,12 +93,17 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
 def _execute_single_node_command(ip, command, private_key, container_name):
     final_command = command
     if container_name:
+
         def nest_command(command):
             return command.replace('\\', '\\\\').replace('"', '\\"')
 
         raw_command = nest_command(command)
-        final_command = "docker exec {} /bin/bash -c \"{}\"".format(container_name, raw_command)
-    ssh = subprocess.Popen(["ssh",  "-i", private_key, "-o", "StrictHostKeyChecking=no",  "ubuntu@{}".format(ip), final_command])
+        final_command = "docker exec {} /bin/bash -c \"{}\"".format(
+            container_name, raw_command)
+    ssh = subprocess.Popen([
+        "ssh", "-i", private_key, "-o", "StrictHostKeyChecking=no",
+        "ubuntu@{}".format(ip), final_command
+    ])
 
 
 def _get_run_id() -> RunId:
@@ -208,36 +216,39 @@ class Runner:
                 print(
                     f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{step.execute_fn}{Style.RESET_ALL}'
                 )
-                if  isinstance(step.execute_fn, str):
+                if isinstance(step.execute_fn, str):
                     if 'ray get-head-ip' in step.execute_fn:
-                        output = subprocess.run(
-                            step.execute_fn,
-                            shell=True,
-                            check=True,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT)
+                        output = subprocess.run(step.execute_fn,
+                                                shell=True,
+                                                check=True,
+                                                stdout=subprocess.PIPE,
+                                                stderr=subprocess.STDOUT)
                         str_output = output.stdout.decode('utf-8')
-                        ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",str_output)
-                        assert len(ips)==1, "Only 1 Node can be Head Node!"
+                        ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",
+                                         str_output)
+                        assert len(ips) == 1, "Only 1 Node can be Head Node!"
                         self.cluster_ips.append(ips[0])
                     elif 'ray get-worker-ips' in step.execute_fn:
-                        output = subprocess.run(
-                            step.execute_fn,
-                            shell=True,
-                            check=True,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT)
+                        output = subprocess.run(step.execute_fn,
+                                                shell=True,
+                                                check=True,
+                                                stdout=subprocess.PIPE,
+                                                stderr=subprocess.STDOUT)
                         str_output = output.stdout.decode('utf-8')
-                        ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",str_output)
+                        ips = re.findall(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}",
+                                         str_output)
                         self.cluster_ips.extend(ips)
                     elif 'ray up' in step.execute_fn:
                         output = step.run()
                         # Wait for all workers to setup post setup
                         while True:
-                            if TASK.num_nodes <=1:
+                            if TASK.num_nodes <= 1:
                                 break
                             proc = subprocess.run(
-                            f"ray exec {CLUSTER_CONFIG_FILE} 'ray status'", shell=True, check=True, capture_output=True)
+                                f"ray exec {CLUSTER_CONFIG_FILE} 'ray status'",
+                                shell=True,
+                                check=True,
+                                capture_output=True)
                             output = proc.stdout.decode("ascii")
                             print(output)
                             self.logger.log(output)
@@ -251,12 +262,20 @@ class Runner:
                     if "post_setup" in step.step_id:
                         commands = fn(self.cluster_ips)
                         for k, v in commands.items():
-                            _execute_single_node_command(ip=k, command=v, private_key=TASK.private_key, container_name=TASK.container_name)
+                            _execute_single_node_command(
+                                ip=k,
+                                command=v,
+                                private_key=TASK.private_key,
+                                container_name=TASK.container_name)
                     elif "exec" in step.step_id:
                         commands = fn(self.cluster_ips)
                         for k, v in commands.items():
                             v = f'cd {SKY_REMOTE_WORKDIR} && ' + v
-                            _execute_single_node_command(ip=k, command=v, private_key=TASK.private_key, container_name=TASK.container_name)
+                            _execute_single_node_command(
+                                ip=k,
+                                command=v,
+                                private_key=TASK.private_key,
+                                container_name=TASK.container_name)
 
                 self.logger.log('finish_step')
                 print(f'{Fore.CYAN}Step {step.step_id} finished{Fore.RESET}\n')
@@ -273,7 +292,7 @@ class Runner:
             raise e
 
 
-def _verify_ssh_authentication(cloud_type, config):
+def _verify_ssh_authentication(cloud_type, config, cluster_config_file):
     cloud_type = str(cloud_type)
     if cloud_type == 'AWS':
         config = setup_aws_authentication(config)
@@ -284,9 +303,8 @@ def _verify_ssh_authentication(cloud_type, config):
     else:
         raise ValueError("Cloud type not supported, must be [AWS, GCP, Azure]")
 
-    with open(CLUSTER_CONFIG_FILE, 'w') as yaml_file:
+    with open(cluster_config_file, 'w') as yaml_file:
         yaml.dump(config, yaml_file, default_flow_style=False)
-
 
 
 def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
@@ -309,7 +327,8 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     CLUSTER_CONFIG_FILE = cluster_config_file
     TASK = task
     autoscaler_dict = yaml.safe_load(open(CLUSTER_CONFIG_FILE))
-    _verify_ssh_authentication(task.best_resources.cloud, autoscaler_dict)
+    _verify_ssh_authentication(task.best_resources.cloud, autoscaler_dict,
+                               cluster_config_file)
 
     #_verify_ssh_authentication(cloud_type=task.best_resources.cloud,)
     # FIXME: if a command fails, stop the rest.
@@ -339,21 +358,17 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
                 'cloud_to_remote_download',
                 'Download files from cloud to remote',
                 f'ray exec {cluster_config_file} \'{download_command}\'')
-    
-    runner.add_step(
-        'get_head_ip', 'Get Head IP',
-        f'ray get-head-ip {cluster_config_file}'
-    )
+
+    runner.add_step('get_head_ip', 'Get Head IP',
+                    f'ray get-head-ip {cluster_config_file}')
+
+    runner.add_step('get_worker_ips', 'Get Worker IP',
+                    f'ray get-worker-ips {cluster_config_file}')
 
     runner.add_step(
-        'get_worker_ips', 'Get Worker IP',
-        f'ray get-worker-ips {cluster_config_file}'
-    )
-
-    runner.add_step(
-        'post_setup', 'Additional Setup after Base Setup (includes custom setup on individual node)',
-        task.post_setup_fn
-    )
+        'post_setup',
+        'Additional Setup after Base Setup (includes custom setup on individual node)',
+        task.post_setup_fn)
 
     if isinstance(task.run, str):
         runner.add_step(
@@ -361,10 +376,7 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
             f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && {task.run}\''
         )
     else:
-        runner.add_step(
-            'exec', 'Execute task',
-            task.run
-        )
+        runner.add_step('exec', 'Execute task', task.run)
 
     if teardown:
         runner.add_step('teardown', 'Tear down resources',
