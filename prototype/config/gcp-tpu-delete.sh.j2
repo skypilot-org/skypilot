@@ -1,0 +1,7 @@
+#!/bin/bash
+export PROJECT_ID=intercloud-320520
+
+gcloud config set project $PROJECT_ID
+
+gcloud compute tpus delete {{tpu_name}} \
+--zone=us-central1-a

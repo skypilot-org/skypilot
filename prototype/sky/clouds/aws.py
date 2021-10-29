@@ -85,4 +85,7 @@ class AWS(clouds.Cloud):
             ('V100', 4): 'p3.8xlarge',
             ('V100', 8): 'p3.16xlarge',
         }
-        return _make(directory[(acc, acc_count)])
+        try:
+            return _make(directory[(acc, acc_count)])
+        except:
+            return []

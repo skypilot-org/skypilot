@@ -65,7 +65,9 @@ def _fill_template(template_path: str,
 def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
     cloud = task.best_resources.cloud
     resources_vars = cloud.make_deploy_resources_variables(task)
-    return _fill_template(
+    config_dict = {}
+
+    config_dict['ray'] = _fill_template(
         cluster_config_template,
         dict(resources_vars, **{
             'run_id': run_id,
@@ -73,7 +75,18 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
             'workdir': task.workdir,
         })
     )
-
+    if resources_vars['tpu_type'] is not None:
+        # FIXME: replace hard-coding paths
+        config_dict['gcloud'] = _fill_template(
+            'config/gcp-tpu-create.sh.j2',
+            dict(resources_vars)
+        )
+        # FIXME: return this somewhere
+        _fill_template(
+            'config/gcp-tpu-delete.sh.j2',
+            dict(resources_vars)
+        )
+    return config_dict
 
 def _get_run_id() -> RunId:
     return 'sky_' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
@@ -189,8 +202,9 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     task = dag.tasks[0]
 
     run_id = _get_run_id()
-    cluster_config_file = _write_cluster_config(
+    config_dict = _write_cluster_config(
         run_id, task, _get_cluster_config_template(task))
+    cluster_config_file = config_dict['ray']
     if dryrun:
         return
 
@@ -198,10 +212,18 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     runner = Runner(run_id)
     runner.add_step('provision', 'Provision resources',
                     f'ray up -y {cluster_config_file} --no-config-cache')
+    if 'gcloud' in config_dict:
+        runner.add_step('provision', 'Provision resources with gcloud',
+                        f'bash {config_dict["gcloud"]}')
     runner.add_step(
         'sync', 'Sync files',
         f'ray rsync_up {cluster_config_file} {task.workdir} {SKY_REMOTE_WORKDIR}'
     )
+    if task.best_resources.tpu_name is not None:
+        runner.add_step(
+            'setup', 'TPU setup',
+            f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={task.best_resources.tpu_name}\" >> ~/.bashrc\'"
+        )
     runner.add_step(
         'exec', 'Execute task',
         f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && {task.run}\''
