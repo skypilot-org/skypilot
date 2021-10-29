@@ -23,7 +23,7 @@ import re
 import subprocess
 import sys
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Union
 import yaml
 
 import sky
@@ -86,6 +86,7 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
                 'container_name': task.container_name,
                 'num_nodes': task.num_nodes,
                 'file_mounts': task.get_local_to_remote_file_mounts() or {},
+                'max_nodes': task.max_nodes,
             }))
 
 
@@ -99,6 +100,8 @@ def _execute_single_node_command(ip, command, private_key, container_name):
         raw_command = nest_command(command)
         final_command = "docker exec {} /bin/bash -c \"{}\"".format(
             container_name, raw_command)
+    import pdb
+    pdb.set_trace()
     ssh = subprocess.Popen([
         "ssh", "-i", private_key, "-o", "StrictHostKeyChecking=no",
         "ubuntu@{}".format(ip), final_command
@@ -129,7 +132,8 @@ class EventLogger:
 class Step:
 
     def __init__(self, runner: 'Runner', step_id: str, step_desc: str,
-                 execute_fn: Union[str, Callable[IPAddr, Dict[IPAddr, str]]]):
+                 execute_fn: Union[str, Callable[[List[IPAddr]], Dict[IPAddr,
+                                                                      str]]]):
         self.runner = runner
         self.step_id = str(step_id)
         self.step_desc = step_desc
@@ -330,7 +334,6 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     _verify_ssh_authentication(task.best_resources.cloud, autoscaler_dict,
                                cluster_config_file)
 
-    #_verify_ssh_authentication(cloud_type=task.best_resources.cloud,)
     # FIXME: if a command fails, stop the rest.
     runner = Runner(run_id)
     runner.add_step('provision', 'Provision resources',
