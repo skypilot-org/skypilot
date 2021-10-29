@@ -1,8 +1,11 @@
 import json
+from typing import Dict, List
 
 import sky
 import time_estimators
 from sky import clouds
+
+IPAddr = str
 
 ##############################
 # Options for inputs:
@@ -45,7 +48,7 @@ with sky.Dag() as dag:
 
     # Post setup function. Run after `ray up *.yml` completes. Returns dictionary of commands to be run on each corresponding node.
     # List of IPs, 0th index denoting head worker
-    def post_setup_fn(ip_list):
+    def post_setup_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
         command_dict = {}
         tf_config = {
             'cluster': {
@@ -64,7 +67,7 @@ with sky.Dag() as dag:
         return command_dict
 
     # The command to run.  Will be run under the working directory.
-    def run_fn(ip_list):
+    def run_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
         run_dict = {}
         for i, ip in enumerate(ip_list):
             run_dict[ip] = 'source ~/.bashrc && \
