@@ -32,7 +32,7 @@ import sky
 from sky.authentication import *
 from sky import cloud_stores
 import logging
-logger = logging.getLogger('sky')
+logger = logging.getLogger(__name__)
 
 IPAddr = str
 RunId = str
@@ -220,6 +220,7 @@ class Runner:
         logger.info('--------------------------')
         logger.info('  Sky execution started')
         logger.info('--------------------------'+f'{Fore.RESET}')
+        logger.info('')
 
         try:
             for step in self.steps:
@@ -257,6 +258,7 @@ class Runner:
             logger.info('---------------------------')
             logger.info('  Sky execution finished')
             logger.info('---------------------------'+f'{Fore.RESET}')
+            logger.info('')
             return self
         except subprocess.CalledProcessError as e:
             logger.info(f'{Fore.RED}Step failed! {e}{Fore.RESET}')

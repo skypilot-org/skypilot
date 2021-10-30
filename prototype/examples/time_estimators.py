@@ -1,6 +1,6 @@
 from sky import clouds
 import logging
-logger = logging.getLogger('sky')
+logger = logging.getLogger(__name__)
 
 
 def resnet50_estimate_runtime(resources):

@@ -4,7 +4,7 @@ import collections
 import sky
 from sky import clouds
 import logging
-logger = logging.getLogger('sky')
+logger = logging.getLogger(__name__)
 
 _CLOUDS = [
     clouds.AWS(),

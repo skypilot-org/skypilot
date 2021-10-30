@@ -11,7 +11,7 @@ import tabulate
 import sky
 from sky import clouds
 import logging
-logger = logging.getLogger('sky')
+logger = logging.getLogger(__name__)
 
 
 class Optimizer(object):
