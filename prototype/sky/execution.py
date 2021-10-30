@@ -240,7 +240,7 @@ class Runner:
                         f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{commands}{Style.RESET_ALL}'
                     )
                     for ip, cmd in commands.items():
-                        cmd = 'cd {SKY_REMOTE_WORKDIR} && ' + cmd
+                        cmd = f'cd {SKY_REMOTE_WORKDIR} && ' + cmd
                         _execute_single_node_command(ip, cmd,
                                                      self.task.private_key,
                                                      self.task.container_name)
