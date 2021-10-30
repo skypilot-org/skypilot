@@ -1,28 +1,6 @@
 import sky
 from sky import clouds
 
-
-##############################
-# Options for inputs:
-#
-#  P0:
-#    - read from the specified cloud store, continuously
-#    - sync submission-site local files to remote FS
-#
-#  1. egress from the specified cloud store, to local
-#
-#  TODO: if egress, what bucket to use for the destination cloud store?
-#
-##############################
-# Options for outputs:
-#
-#  P0. write to local only (don't destroy VM at the end)
-#
-#  P1. write to local, sync to a specified cloud's bucket
-#
-#  P2. continuously write checkpoints to a specified cloud's bucket
-#       TODO: this is data egress from run_cloud; not taken into account
-
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '/Users/weichiang/Workspace/research/sky-experiments/prototype/examples/tpu_app_codes'
@@ -44,9 +22,6 @@ with sky.Dag() as dag:
         setup=setup,
         run=run,
     )
-    train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
-                     estimated_size_gigabytes=70)
-    train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
         ##### Fully specified
         # sky.Resources(clouds.AWS(), 'p3.2xlarge'),
@@ -59,7 +34,7 @@ with sky.Dag() as dag:
         # ),
         ##### Partially specified
         #sky.Resources(accelerators='V100'),
-        sky.Resources(accelerators='tpu-v3-8', tf_version='2.5.0', tpu_name='weilin-bert-test-big'),
+        sky.Resources(accelerators='tpu-v3-8', accelerator_args={'tf_version': '2.5.0', 'tpu_name': 'weilin-bert-test-big'}),
         # sky.Resources(clouds.AWS(), accelerators={'V100': 4}),
         # sky.Resources(clouds.AWS(), accelerators='V100'),
     })

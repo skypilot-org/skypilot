@@ -34,6 +34,7 @@ class Resources(object):
             accelerators: Union[None, str, Dict[str, int]] = None,
             tf_version: str = None,
             tpu_name: str = None,
+            accelerator_args: Dict[str, str] = None,
     ):
         self.cloud = cloud
         self.instance_type = instance_type
@@ -41,12 +42,14 @@ class Resources(object):
             'If instance_type is specified, must specify the cloud'
         if accelerators is not None and type(accelerators) is str:
             if 'tpu' in accelerators:
-                assert tf_version is not None, 'TF version must be specified together with TPU'
-                assert tpu_name is not None, 'TPU name must be specified together with TPU'
+                assert accelerator_args is not None, 'accelerator_args must be specified together with TPU'
+                assert 'tf_version' in accelerator_args, 'missing tf_version in accelerator_args'
+                assert 'tpu_name' in accelerator_args, 'missing tpu_name in accelerator_args'
             accelerators = {accelerators: 1}
         self.accelerators = accelerators
         self.tf_version = tf_version
         self.tpu_name = tpu_name
+        self.accelerator_args = accelerator_args
 
     def __repr__(self) -> str:
         if self.accelerators is not None:
