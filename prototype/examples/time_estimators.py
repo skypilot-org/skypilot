@@ -1,4 +1,6 @@
 from sky import clouds
+import logging
+logger = logging.getLogger('sky')
 
 
 def resnet50_estimate_runtime(resources):
@@ -76,8 +78,8 @@ def resnet50_estimate_runtime(resources):
         utilized_flops = tpu_v3_8_flops * known_resnet50_utilization
         estimated_step_time_seconds = flops_for_one_batch / utilized_flops
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
-        print('  tpu-v3-8 estimated_step_time_seconds',
-              estimated_step_time_seconds)
+        logger.info('  tpu-v3-8 estimated_step_time_seconds',
+                    estimated_step_time_seconds)
         return estimated_run_time_seconds
 
     else:
@@ -97,7 +99,7 @@ def resnet50_infer_estimate_runtime(resources):
 
     if instance == 'p3.2xlarge':
         # 120 TFLOPS TensorCore.
-        print('****** trying 1/3 util for v100')
+        logger.info('****** trying 1/3 util for v100')
         utilized_flops = 120 * (10**12) / 3
 
         # # Max bs to keep p99 < 15ms.
