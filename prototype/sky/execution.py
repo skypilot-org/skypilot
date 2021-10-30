@@ -352,13 +352,13 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     runner = Runner(run_id)
     runner.add_step('provision', 'Provision resources',
                     f'ray up -y {cluster_config_file} --no-config-cache')
-    if 'gcloud' in config_dict:
+    if task.best_resources.accelerator_args['tpu_name'] is not None:
+        assert 'gcloud' in config_dict, 'Expect TPU provisioning with gcloud'
         runner.add_step('provision', 'Provision resources with gcloud',
                         f'bash {config_dict["gcloud"]}')
-    if task.best_resources.tpu_name is not None:
         runner.add_step(
             'setup', 'TPU setup',
-            f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={task.best_resources.tpu_name}\" >> ~/.bashrc\'"
+            f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={task.best_resources.accelerator_args['tpu_name']}\" >> ~/.bashrc\'"
         )
 
     if task.workdir is not None:

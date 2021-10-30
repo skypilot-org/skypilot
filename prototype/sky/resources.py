@@ -32,8 +32,6 @@ class Resources(object):
             cloud: Optional[clouds.Cloud] = None,
             instance_type: Optional[str] = None,
             accelerators: Union[None, str, Dict[str, int]] = None,
-            tf_version: str = None,
-            tpu_name: str = None,
             accelerator_args: Dict[str, str] = None,
     ):
         self.cloud = cloud
@@ -47,8 +45,6 @@ class Resources(object):
                 assert 'tpu_name' in accelerator_args, 'missing tpu_name in accelerator_args'
             accelerators = {accelerators: 1}
         self.accelerators = accelerators
-        self.tf_version = tf_version
-        self.tpu_name = tpu_name
         self.accelerator_args = accelerator_args
 
     def __repr__(self) -> str:
