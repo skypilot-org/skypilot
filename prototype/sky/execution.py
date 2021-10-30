@@ -219,8 +219,7 @@ class Runner:
         logger.info(f'{Fore.GREEN}')
         logger.info('--------------------------')
         logger.info('  Sky execution started')
-        logger.info('--------------------------')
-        logger.info(f'{Fore.RESET}')
+        logger.info('--------------------------'+f'{Fore.RESET}')
 
         try:
             for step in self.steps:
@@ -257,8 +256,7 @@ class Runner:
             logger.info(f'{Fore.GREEN}')
             logger.info('---------------------------')
             logger.info('  Sky execution finished')
-            logger.info('---------------------------')
-            logger.info(f'{Fore.RESET}')
+            logger.info('---------------------------'+f'{Fore.RESET}')
             return self
         except subprocess.CalledProcessError as e:
             logger.info(f'{Fore.RED}Step failed! {e}{Fore.RESET}')
