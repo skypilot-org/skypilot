@@ -21,4 +21,4 @@
 
 ## TODO: non-runnable apps
 1. [**`timm_app.py`**](./timm_app.py): the [PyTorch image models (timm)](https://github.com/rwightman/pytorch-image-models) package.
-  - Not runnable due to ImageNet data must be on a local disk, and we don't have data movement yet.
+  - Not runnable due to requiring ImageNet images, not tfrecords; consider using https://github.com/mlcommons/inference/blob/master/vision/classification_and_detection/tools/make_fake_imagenet.sh.
