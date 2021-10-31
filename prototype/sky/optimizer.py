@@ -10,8 +10,8 @@ import tabulate
 
 import sky
 from sky import clouds
-import logging
-logger = logging.getLogger(__name__)
+from sky.logging import init_logger
+logger = init_logger(__name__)
 
 
 class Optimizer(object):
@@ -157,7 +157,7 @@ class Optimizer(object):
 
             for orig_resources, launchable_list in launchable_resources.items():
                 if num_resources == 1 and node.time_estimator_func is None:
-                    logger.info(
+                    logger.warning(
                         'Time estimator not set and only one possible '
                         'resource choice; defaulting estimated time to 1 hr.')
                     estimated_runtime = 1 * 3600

@@ -31,8 +31,8 @@ from colorama import Fore, Style
 import sky
 from sky.authentication import *
 from sky import cloud_stores
-import logging
-logger = logging.getLogger(__name__)
+from sky.logging import init_logger
+logger = init_logger(__name__)
 
 IPAddr = str
 RunId = str
@@ -74,7 +74,7 @@ def _fill_template(template_path: str,
         output_path, _ = template_path.rsplit('.', 1)
     with open(output_path, 'w') as fout:
         fout.write(content)
-    logger.info(f'Created or updated file {output_path}')
+    logger.debug(f'Created or updated file {output_path}')
     return output_path
 
 
@@ -163,8 +163,7 @@ class Step:
                 )
                 for line in proc.stdout:
                     line = line.decode("utf-8")
-                    # sys.stdout.write(line + '\r')
-                    logger.info(line.rstrip() + '\r')
+                    logger.debug(line.rstrip() + '\r')
                     fout.write(line)
                     lines.append(line)
                 proc.communicate()
@@ -219,7 +218,7 @@ class Runner:
         logger.info(f'{Fore.GREEN}')
         logger.info('--------------------------')
         logger.info('  Sky execution started')
-        logger.info('--------------------------'+f'{Fore.RESET}')
+        logger.info(f'--------------------------{Fore.RESET}')
         logger.info('')
 
         try:
@@ -257,11 +256,11 @@ class Runner:
             logger.info(f'{Fore.GREEN}')
             logger.info('---------------------------')
             logger.info('  Sky execution finished')
-            logger.info('---------------------------'+f'{Fore.RESET}')
+            logger.info(f'---------------------------{Fore.RESET}')
             logger.info('')
             return self
         except subprocess.CalledProcessError as e:
-            logger.info(f'{Fore.RED}Step failed! {e}{Fore.RESET}')
+            logger.error(f'{Fore.RED}Step failed! {e}{Fore.RESET}')
             raise e
 
 
