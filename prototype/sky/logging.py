@@ -1,7 +1,7 @@
 import sys
 import logging
 
-FORMAT = '%(asctime)s | %(levelname)-7s | %(name)-30sL%(lineno)-5d || %(message)s'
+FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 DATE_FORMAT = '%m-%d %H:%M:%S'
 
 class NewLineFormatter(logging.Formatter):
