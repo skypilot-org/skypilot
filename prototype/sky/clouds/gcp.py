@@ -101,21 +101,25 @@ class GCP(clouds.Cloud):
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
         # Find GPU spec, if any.
-        gpu = None
-        gpu_count = 0
+        resources_vars = {
+            'instance_type': r.instance_type,
+            'gpu': None,
+            'gpu_count': None,
+            'tpu': None}
         accelerators = r.get_accelerators()
         if accelerators is not None:
             assert len(accelerators) == 1, r
-            for gpu, gpu_count in accelerators.items():
-                break
-        if gpu is not None:
-            # Convert to GCP names: https://cloud.google.com/compute/docs/gpus
-            gpu = 'nvidia-tesla-{}'.format(gpu.lower())
-        return {
-            'instance_type': r.instance_type,
-            'gpu': gpu,
-            'gpu_count': gpu_count,
-        }
+            acc, acc_count = list(accelerators.items())[0]
+            if 'tpu' in acc:
+                resources_vars['tpu_type'] = acc.replace('tpu-', '')
+                resources_vars['tf_version'] = r.accelerator_args['tf_version']
+                resources_vars['tpu_name'] = r.accelerator_args['tpu_name']
+            else:
+                # Convert to GCP names: https://cloud.google.com/compute/docs/gpus
+                resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
+                resources_vars['gpu_count'] = acc_count
+
+        return resources_vars
 
     @classmethod
     def get_default_instance_type(cls):

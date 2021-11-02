@@ -1,0 +1,9 @@
+#!/bin/bash
+export PROJECT_ID=intercloud-320520
+
+gcloud config set project $PROJECT_ID
+
+gcloud compute tpus create {{tpu_name}} \
+--zone=us-central1-a \
+--version={{tf_version}} \
+--accelerator-type={{tpu_type}}
