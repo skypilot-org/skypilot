@@ -32,7 +32,7 @@ class Resources(object):
             cloud: Optional[clouds.Cloud] = None,
             instance_type: Optional[str] = None,
             accelerators: Union[None, str, Dict[str, int]] = None,
-            accelerator_args: Dict[str, str] = None,
+            accelerator_args: Dict[str, str] = {},
     ):
         self.cloud = cloud
         self.instance_type = instance_type

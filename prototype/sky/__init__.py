@@ -6,6 +6,9 @@ from sky.task import Task
 from sky.registry import fill_in_launchable_resources
 from sky.optimizer import Optimizer
 
+# alias sky.Optimizer.optimize() as sky.optimize()
+optimize = Optimizer.optimize
+
 __all__ = [
     'Dag',
     'DagContext',

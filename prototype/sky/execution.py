@@ -85,29 +85,23 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
 
     config_dict['ray'] = _fill_template(
         cluster_config_template,
-        dict(resources_vars, **{
-            'run_id': run_id,
-            'setup_command': task.setup,
-            'workdir': task.workdir,
-            'docker_image': task.docker_image,
-            'container_name': task.container_name,
-            'num_nodes': task.num_nodes,
-            'file_mounts': task.get_local_to_remote_file_mounts() or {},
-            'max_nodes': task.max_nodes,
-        })
-    )
-    if resources_vars['tpu_type'] is not None:
+        dict(
+            resources_vars, **{
+                'run_id': run_id,
+                'setup_command': task.setup,
+                'workdir': task.workdir,
+                'docker_image': task.docker_image,
+                'container_name': task.container_name,
+                'num_nodes': task.num_nodes,
+                'file_mounts': task.get_local_to_remote_file_mounts() or {},
+                'max_nodes': task.max_nodes,
+            }))
+    if resources_vars.get('tpu_type') is not None:
         # FIXME: replace hard-coding paths
-        config_dict['gcloud'] = (
-            _fill_template(
-                'config/gcp-tpu-create.sh.j2',
-                dict(resources_vars)
-            ),
-            _fill_template(
-                'config/gcp-tpu-delete.sh.j2',
-                dict(resources_vars)
-            )
-        )
+        config_dict['gcloud'] = (_fill_template('config/gcp-tpu-create.sh.j2',
+                                                dict(resources_vars)),
+                                 _fill_template('config/gcp-tpu-delete.sh.j2',
+                                                dict(resources_vars)))
     return config_dict
 
 
@@ -317,8 +311,8 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     task = dag.tasks[0]
 
     run_id = _get_run_id()
-    config_dict = _write_cluster_config(
-        run_id, task, _get_cluster_config_template(task))
+    config_dict = _write_cluster_config(run_id, task,
+                                        _get_cluster_config_template(task))
     cluster_config_file = config_dict['ray']
     if dryrun:
         logger.info('Dry run finished.')
@@ -335,7 +329,7 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
                     f'ray up -y {cluster_config_file} --no-config-cache',
                     callback=functools.partial(_wait_until_ready,
                                                cluster_config_file, task))
-    if task.best_resources.accelerator_args['tpu_name'] is not None:
+    if task.best_resources.accelerator_args.get('tpu_name') is not None:
         assert 'gcloud' in config_dict, 'Expect TPU provisioning with gcloud'
         runner.add_step('provision', 'Provision resources with gcloud',
                         f'bash {config_dict["gcloud"][0]}')
@@ -402,7 +396,7 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     if teardown:
         runner.add_step('teardown', 'Tear down resources',
                         f'ray down -y {cluster_config_file}')
-        if task.best_resources.accelerator_args['tpu_name'] is not None:
+        if task.best_resources.accelerator_args.get('tpu_name') is not None:
             runner.add_step('teardown', 'Tear down resources with gcloud',
                             f'bash {config_dict["gcloud"][1]}')
     runner.run()
@@ -413,7 +407,7 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
         logger.info(
             f'  To teardown the resources:\t{Style.BRIGHT}ray down {cluster_config_file} -y {Style.RESET_ALL}\n'
         )
-        if task.best_resources.accelerator_args['tpu_name'] is not None:
+        if task.best_resources.accelerator_args.get('tpu_name') is not None:
             print(
                 f'  To teardown the TPU resources:\t{Style.BRIGHT}bash {config_dict["gcloud"][1]} {Style.RESET_ALL}\n'
             )

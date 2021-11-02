@@ -3,52 +3,67 @@ from sky import clouds
 
 import time_estimators
 
+import yaml
+
+CLOUD_REGISTRY = {
+    'aws': clouds.AWS(),
+    'gcp': clouds.GCP(),
+    'azure': clouds.Azure(),
+}
+
 with sky.Dag() as dag:
+    # Load the YAML file
+    with open("examples/resnet.yaml", "r") as f:
+        config = yaml.safe_load(f)
+
     # The working directory contains all code and will be synced to remote.
-    workdir = '~/Downloads/tpu'
+    workdir = config.get('workdir')
 
     # The setup command.  Will be run under the working directory.
-    setup = 'pip install --upgrade pip && \
-        conda activate resnet || \
-          (conda create -n resnet python=3.7 -y && \
-           conda activate resnet && \
-           pip install tensorflow==2.4.0 pyyaml && \
-           cd models && pip install -e .)'
+    setup = config['setup']['command']
 
     # The command to run.  Will be run under the working directory.
-    run = 'conda activate resnet && \
-        python -u models/official/resnet/resnet_main.py --use_tpu=False \
-        --mode=train --train_batch_size=256 --train_steps=250 \
-        --iterations_per_loop=125 \
-        --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
-        --model_dir=resnet-model-dir \
-        --amp --xla --loss_scale=128'
+    run = config['run']['command']
 
     ### Optional: download data to VM's local disks. ###
     # Format: {VM paths: local paths / cloud URLs}.
-    file_mounts = {
-        # Download from GCS before training starts.
-        '/tmp/fake_imagenet': 'gs://cloud-tpu-test-datasets/fake_imagenet',
-    }
-    # Refer to the VM local path.
-    run = run.replace('gs://cloud-tpu-test-datasets/fake_imagenet',
-                      '/tmp/fake_imagenet')
+    file_mounts = config.get('file_mounts')
+    if file_mounts is not None:
+        file_mounts = dict(file_mounts)
+
+        for src, dst in file_mounts.items():
+            run = run.replace(src, dst)
+
     ### Optional end ###
 
     train = sky.Task(
-        'train',
+        config['name'],
         workdir=workdir,
         setup=setup,
         run=run,
     )
-    train.set_file_mounts(file_mounts)
+
+    if file_mounts is not None:
+        train.set_file_mounts(file_mounts)
+
+    inputs = config['input']
+    outputs = config['output']
+
     # TODO: allow option to say (or detect) no download/egress cost.
-    train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
-                     estimated_size_gigabytes=70)
-    train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
+    train.set_inputs(**inputs)
+    train.set_outputs(**outputs)
+
+    resources = config['resources']
+    if resources.get('cloud') is not None:
+        resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
+    if resources.get('accelerators') is not None:
+        resources['accelerators'] = dict(resources['accelerators'])
+    resources = sky.Resources(**resources)
+
     train.set_resources({
+        resources,
+
         ##### Fully specified
-        sky.Resources(clouds.AWS(), 'p3.2xlarge'),
         # sky.Resources(clouds.GCP(), 'n1-standard-16'),
         # sky.Resources(
         #     clouds.GCP(),
