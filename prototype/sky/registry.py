@@ -3,6 +3,8 @@ import collections
 
 import sky
 from sky import clouds
+from sky.logging import init_logger
+logger = init_logger(__name__)
 
 _CLOUDS = [
     clouds.AWS(),
@@ -18,7 +20,6 @@ def fill_in_launchable_resources(task: sky.Task):
             launchable[resources] = [resources]
             continue
         if resources.cloud is not None:
-            print(resources.cloud)
             launchable[
                 resources] = resources.cloud.get_feasible_launchable_resources(
                     resources)
