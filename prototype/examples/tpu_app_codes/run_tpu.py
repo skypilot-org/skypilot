@@ -10,7 +10,7 @@ tf.config.experimental_connect_to_cluster(tpu)
 tf.tpu.experimental.initialize_tpu_system(tpu)
 strategy = tf.distribute.experimental.TPUStrategy(tpu)
 
-ds_train, ds_info = tfds.load('amazon_us_reviews/Books_v1_02', split='train[:80%]', with_info=True, data_dir="gs://weilin-bert-test")
+ds_train, ds_info = tfds.load('amazon_us_reviews/Books_v1_02', split='train[:5%]', with_info=True, data_dir="gs://weilin-bert-test")
 
 MAX_SEQ_LEN=512
 bert_tokenizer = tf_text.BertTokenizer(vocab_lookup_table='gs://weilin-bert-test/vocab.txt', 
@@ -76,7 +76,6 @@ def preprocessing_fn(inputs):
         )
 
     input_word_ids, input_mask, input_type_ids = preprocess_bert_input([inputs['data']['review_body']])
-    #input_word_ids, input_mask, input_type_ids = preprocess_bert_input(tf.squeeze(inputs['data']['review_body'], axis=1))
     
     return (dict({'input_ids': input_word_ids,
              'token_type_ids': input_type_ids,
@@ -97,20 +96,13 @@ def process_py(inp1, inp2):
     return [dict(tokenizer(inp1.numpy().decode('utf-8')), truncation=True, padding=True),
             inp2.numpy()]
 
-#ds_train_filtered_2 = ds_train_filtered.map(process)
-#ds_train_filtered.element_spec
-#y = tf.py_function(func=log_huber, inp=[x, m], Tout=tf.float32)
-#ds_train_filtered_2 = ds_train_filtered.map(lambda x: tf.py_function(process_py, inp=[x['data']['review_body'], x['data']['star_rating']], Tout=[tf.string, tf.int32]))
 ds_train_filtered_2 = ds_train_filtered.map(preprocessing_fn)
 
 
-#tf.keras.mixed_precision.experimental.set_policy('float32')
 tf.keras.mixed_precision.experimental.set_policy('mixed_bfloat16')
 
 with strategy.scope():
-    #model = TFDistilBertForSequenceClassification.from_pretrained('distilbert-base-uncased', num_labels=1)
-    #model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=1)
-    model = TFBertForSequenceClassification.from_pretrained('bert-large-uncased', num_labels=1)
+    model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=1)
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=5e-5)
     model.compile(optimizer=optimizer, loss=model.compute_loss) # can also use any keras loss fn
@@ -118,4 +110,4 @@ with strategy.scope():
 
 
 inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(256).prefetch(tf.data.experimental.AUTOTUNE)
-model.fit(inuse_dataset, epochs=10, batch_size=256)
+model.fit(inuse_dataset, epochs=1, batch_size=256)
