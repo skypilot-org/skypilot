@@ -1,0 +1,34 @@
+name: resnet-app
+workdir: ~/Downloads/tpu
+
+resources:
+  cloud: aws
+  instance_type: p3.2xlarge
+
+input:
+  inputs: gs://cloud-tpu-test-dataset/fake_imagenet
+  estimated_size_gigabytes: 70
+
+output:
+  outputs: resnet-model-dir
+  estimated_size_gigabytes: 0.1
+
+file_mounts:
+  - [/tmp/fake_imagenet, gs://cloud-tpu-test-datasets/fake_imagenet]
+
+setup:
+  command: 'pip install --upgrade pip &&
+        conda activate resnet ||
+          (conda create -n resnet python=3.7 -y &&
+           conda activate resnet &&
+           pip install tensorflow==2.4.0 pyyaml &&
+           cd models && pip install -e .)'
+run:
+  command: 'conda activate resnet &&
+        python -u models/official/resnet/resnet_main.py --use_tpu=False
+        --mode=train --train_batch_size=256 --train_steps=250
+        --iterations_per_loop=125
+        --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet
+        --model_dir=resnet-model-dir
+        --amp --xla --loss_scale=128'
+

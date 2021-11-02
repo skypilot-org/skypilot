@@ -17,6 +17,9 @@ AWS = clouds.AWS
 Azure = clouds.Azure
 GCP = clouds.GCP
 
+# alias sky.Optimizer.optimize() as sky.optimize()
+optimize = Optimizer.optimize
+
 __all__ = [
     'AWS',
     'Azure',
