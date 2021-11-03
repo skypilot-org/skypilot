@@ -33,7 +33,7 @@ available_node_types:
 {%- else %}
               sourceImage: projects/deeplearning-platform-release/global/images/family/common-cu110
         guestAccelerators:
-          - acceleratorType: projects/intercloud-320520/zones/us-west1-a/acceleratorTypes/{{gpu}}
+          - acceleratorType: projects/intercloud-320520/zones/us-central1-a/acceleratorTypes/{{gpu}}
             acceleratorCount: {{gpu_count}}
         metadata:
           items:
@@ -65,7 +65,10 @@ rsync_filter:
 
 # List of shell commands to run to set up nodes.
 setup_commands:
+  - pip install -U ray
   - mkdir -p /tmp/workdir && cd /tmp/workdir && {{setup_command}}
 
 # Command to start ray on the head node. You don't need to change this.
-head_start_ray_commands: []
+head_start_ray_commands:
+  - ray stop
+  - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8876 --resources='{{ custom_resources }}'
