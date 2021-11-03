@@ -96,7 +96,7 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
             'max_nodes': task.max_nodes,
         })
     )
-    if resources_vars['tpu_type'] is not None:
+    if resources_vars.get('tpu_type') is not None:
         # FIXME: replace hard-coding paths
         config_dict['gcloud'] = (
             _fill_template(
@@ -335,7 +335,8 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
                     f'ray up -y {cluster_config_file} --no-config-cache',
                     callback=functools.partial(_wait_until_ready,
                                                cluster_config_file, task))
-    if task.best_resources.accelerator_args['tpu_name'] is not None:
+    if task.best_resources.accelerator_args is not None and \
+        task.best_resources.accelerator_args.get('tpu_name') is not None:
         assert 'gcloud' in config_dict, 'Expect TPU provisioning with gcloud'
         runner.add_step('provision', 'Provision resources with gcloud',
                         f'bash {config_dict["gcloud"][0]}')
