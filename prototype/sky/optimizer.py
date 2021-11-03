@@ -116,8 +116,9 @@ class Optimizer(object):
         return dag
 
     @staticmethod
-    def _egress_cost_or_time(minimize_cost, parent, parent_resources, node,
-                             resources):
+    def _egress_cost_or_time(minimize_cost: bool, parent: sky.Task,
+                             parent_resources: sky.Resources, node: sky.Task,
+                             resources: sky.Resources):
         """Computes the egress cost or time depending on 'minimize_cost'."""
         if isinstance(parent_resources.cloud, DummyCloud):
             # Special case.  The current 'node' is a real
@@ -270,8 +271,9 @@ class Optimizer(object):
             logger.info('\nOptimizer - plan minimizing cost (~${:.1f}):'.format(
                 overall_best))
         else:
-            logger.info('\nOptimizer - plan minimizing run time (~{:.1f} hr):'.format(
-                overall_best / 3600))
+            logger.info(
+                '\nOptimizer - plan minimizing run time (~{:.1f} hr):'.format(
+                    overall_best / 3600))
         # Do not print Source or Sink.
         message_data = [
             t for t in message_data
