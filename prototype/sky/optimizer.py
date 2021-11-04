@@ -10,8 +10,8 @@ import tabulate
 
 import sky
 from sky import clouds
-from sky.logging import init_logger
-logger = init_logger(__name__)
+from sky import logging
+logging = logging.init_logger(__name__)
 
 
 class Optimizer(object):
@@ -31,7 +31,7 @@ class Optimizer(object):
         else:
             egress_cost = 0.0
         if egress_cost > 0:
-            logger.info('  {} -> {} egress cost: ${} for {:.1f} GB'.format(
+            logging.info('  {} -> {} egress cost: ${} for {:.1f} GB'.format(
                 src_cloud, dst_cloud, egress_cost, gigabytes))
         return egress_cost
 
@@ -48,7 +48,7 @@ class Optimizer(object):
             # (~128MB per file).
             bandwidth_gbps = 10
             egress_time = gigabytes * 8 / bandwidth_gbps
-            logger.info('  {} -> {} egress time: {} s for {:.1f} GB'.format(
+            logging.info('  {} -> {} egress time: {} s for {:.1f} GB'.format(
                 src_cloud, dst_cloud, egress_time, gigabytes))
         else:
             egress_time = 0.0
@@ -161,7 +161,7 @@ class Optimizer(object):
             # Don't print for the last node, Sink.
             do_print = node_i != len(topo_order) - 1
             if do_print:
-                logger.info('\n#### {} ####'.format(node))
+                logging.info('#### {} ####'.format(node))
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = sky.registry.fill_in_launchable_resources(
@@ -176,7 +176,7 @@ class Optimizer(object):
             parents = list(graph.predecessors(node))
             for orig_resources, launchable_list in launchable_resources.items():
                 if num_resources == 1 and node.time_estimator_func is None:
-                    logger.warning(
+                    logging.warning(
                         'Time estimator not set and only one possible '
                         'resource choice; defaulting estimated time to 1 hr.')
                     estimated_runtime = 1 * 3600
@@ -197,7 +197,7 @@ class Optimizer(object):
                     # where p in Parents(node).
                     assert resources not in dp_best_cost[node]
                     if do_print:
-                        logger.info(f'resources: {resources}')
+                        logging.info(f'resources: {resources}')
 
                     if minimize_cost:
                         estimated_cost = resources.get_cost(estimated_runtime)
@@ -205,11 +205,11 @@ class Optimizer(object):
                         # Minimize run time; overload the term 'cost'.
                         estimated_cost = estimated_runtime
                     if do_print:
-                        logger.info(
+                        logging.info(
                             '  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
                                 estimated_runtime, estimated_runtime / 3600))
                         if minimize_cost:
-                            logger.info(
+                            logging.info(
                                 '  estimated_cost (not incl. egress): ${:.1f}'.
                                 format(estimated_cost))
 
@@ -233,8 +233,8 @@ class Optimizer(object):
                     dp_best_cost[node][
                         resources] = estimated_cost + sum_parent_cost_and_egress
 
-        logger.info('\nOptimizer - dp_best_cost:')
-        logger.info(pprint.pformat(dict(dp_best_cost)))
+        logging.info('\nOptimizer - dp_best_cost:')
+        logging.info(pprint.pformat(dict(dp_best_cost)))
 
         # Dict: node -> (resources, cost).
         best_plan = Optimizer.read_optimized_plan(dp_best_cost, topo_order,
@@ -268,10 +268,11 @@ class Optimizer(object):
         _walk(node, h, overall_best)
 
         if minimize_cost:
-            logger.info('\nOptimizer - plan minimizing cost (~${:.1f}):'.format(
-                overall_best))
+            logging.info(
+                '\nOptimizer - plan minimizing cost (~${:.1f}):'.format(
+                    overall_best))
         else:
-            logger.info(
+            logging.info(
                 '\nOptimizer - plan minimizing run time (~{:.1f} hr):'.format(
                     overall_best / 3600))
         # Do not print Source or Sink.
@@ -282,7 +283,7 @@ class Optimizer(object):
         message = tabulate.tabulate(reversed(message_data),
                                     headers=['TASK', 'BEST_RESOURCE'],
                                     tablefmt='plain')
-        logger.info(f'\n{message}\n')
+        logging.info(f'\n{message}\n')
         return best_plan
 
 

@@ -1,4 +1,6 @@
 import copy
+import json
+from typing import Dict, Optional
 
 from sky import clouds
 
@@ -9,6 +11,12 @@ class AWS(clouds.Cloud):
     # In general, query this from the cloud.
     # https://instances.vantage.sh/
     _ON_DEMAND_PRICES = {
+        # m3.
+        'm3.medium': 0.067,
+        'm3.large': 0.133,
+        'm3.xlarge': 0.266,
+        'm3.2xlarge': 0.532,
+
         # p3.
         'p3.2xlarge': 3.06,
         'p3.8xlarge': 12.24,
@@ -60,12 +68,36 @@ class AWS(clouds.Cloud):
     def is_same_cloud(self, other):
         return isinstance(other, AWS)
 
-    def make_deploy_resources_variables(self, task):
-        return {'instance_type': task.best_resources.instance_type}
-
     @classmethod
     def get_default_instance_type(cls):
         return 'm4.2xlarge'
+
+    # TODO: factor the following three methods, as they are the same logic
+    # between Azure and AWS.
+
+    def get_accelerators_from_instance_type(
+            self,
+            instance_type: str,
+    ) -> Optional[Dict[str, int]]:
+        """Returns {acc: acc_count} held by 'instance_type', if any."""
+        inverse = {v: k for k, v in AWS._ACCELERATORS_DIRECTORY.items()}
+        res = inverse.get(instance_type)
+        if res is None:
+            return res
+        return {res[0]: res[1]}
+
+    def make_deploy_resources_variables(self, task):
+        r = task.best_resources
+        # r.accelerators is cleared but .instance_type encodes the info.
+        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        if acc_dict is not None:
+            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
+        else:
+            custom_resources = None
+        return {
+            'instance_type': r.instance_type,
+            'custom_resources': custom_resources,
+        }
 
     def get_feasible_launchable_resources(self, resources):
         if resources.instance_type is not None:
@@ -78,6 +110,8 @@ class AWS(clouds.Cloud):
             r = copy.deepcopy(resources)
             r.cloud = AWS()
             r.instance_type = instance_type
+            # Setting this to None as AWS doesn't separately bill / attach the
+            # accelerators.  Billed as part of the VM type.
             r.accelerators = None
             return [r]
 
@@ -89,8 +123,6 @@ class AWS(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        # TODO: support bin-packing; if requesting 2 V100s, should allow 2x
-        # p3.2xlarge rather than not returning anything.
         instance_type = AWS._ACCELERATORS_DIRECTORY.get((acc, acc_count))
         if instance_type is None:
             return []

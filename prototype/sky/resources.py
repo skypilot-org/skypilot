@@ -1,6 +1,8 @@
 from typing import Dict, Optional, Union
 
 from sky import clouds
+from sky import logging
+logging = logging.init_logger(__name__)
 
 
 class Resources(object):
@@ -32,31 +34,54 @@ class Resources(object):
             cloud: Optional[clouds.Cloud] = None,
             instance_type: Optional[str] = None,
             accelerators: Union[None, str, Dict[str, int]] = None,
-            accelerator_args: Dict[str, str] = None,
+            accelerator_args: Dict[str, str] = {},
     ):
         self.cloud = cloud
         self.instance_type = instance_type
         assert not (instance_type is not None and cloud is None), \
             'If instance_type is specified, must specify the cloud'
+        # Convert to Dict[str, int].
         if accelerators is not None and type(accelerators) is str:
             if 'tpu' in accelerators:
-                assert accelerator_args is not None, 'accelerator_args must be specified together with TPU'
-                assert 'tf_version' in accelerator_args, 'missing tf_version in accelerator_args'
-                assert 'tpu_name' in accelerator_args, 'missing tpu_name in accelerator_args'
+                assert accelerator_args is not None, \
+                    'accelerator_args must be specified together with TPU'
+                if 'tf_version' not in accelerator_args:
+                    logging.info('Missing tf_version in accelerator_args, using'
+                                 ' default (2.5.0)')
+                    accelerator_args['tf_version'] = '2.5.0'
+                if 'tpu_name' not in accelerator_args:
+                    logging.info('Missing tpu_name in accelerator_args, using'
+                                 ' default (sky_tpu)')
+                    accelerator_args['tpu_name'] = 'sky_tpu'
             accelerators = {accelerators: 1}
         self.accelerators = accelerators
         self.accelerator_args = accelerator_args
 
     def __repr__(self) -> str:
+        accelerators = ''
+        accelerator_args = ''
         if self.accelerators is not None:
-            return f'{self.cloud}({self.instance_type}, {self.accelerators})'
-        return f'{self.cloud}({self.instance_type})'
+            accelerators = f', {self.accelerators}'
+            if self.accelerator_args:
+                accelerator_args = f', accelerator_args={self.accelerator_args}'
+        return f'{self.cloud}({self.instance_type}{accelerators}{accelerator_args})'
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self.instance_type is not None
 
     def get_accelerators(self) -> Optional[Dict[str, int]]:
-        return self.accelerators
+        """Returns the accelerators field directly or by inferring.
+
+        For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
+        set to None, but this function will infer {'V100': 1} from the instance
+        type.
+        """
+        if self.accelerators is not None:
+            return self.accelerators
+        if self.cloud is not None and self.instance_type is not None:
+            return self.cloud.get_accelerators_from_instance_type(
+                self.instance_type)
+        return None
 
     def get_cost(self, seconds):
         """Returns cost in USD for the runtime in seconds."""
