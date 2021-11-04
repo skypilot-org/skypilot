@@ -1,0 +1,59 @@
+cluster_name: sky-aws
+
+max_workers: 1
+
+provider:
+  type: aws
+  region: us-west-2
+  availability_zone: us-west-2a,us-west-2b,us-west-2c,us-west-2d
+
+auth:
+  ssh_user: ubuntu
+
+available_node_types:
+  ray.head.default:
+    resources: {}
+    min_workers: 1
+    max_workers: 1
+    node_config:
+      InstanceType: {{instance_type}}
+      ImageId: ami-0e9c522a722725e62  # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 256
+
+head_node_type: ray.head.default
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+{%- if workdir is not none %}
+  "/tmp/workdir": "{{workdir}}",
+{%- endif %}
+{%- for remote_path, local_path in file_mounts.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
+}
+
+# Patterns for files to exclude when running rsync up or rsync down
+rsync_exclude:
+  - "**/.git"
+  - "**/.git/**"
+
+rsync_filter:
+  - .gitignore
+
+# List of shell commands to run to set up nodes.
+setup_commands:
+  # This AMI's system Python is version 2+.
+  - pip3 install -U ray==1.7.0
+{%- if setup_command is not none %}
+  - mkdir -p /tmp/workdir && cd /tmp/workdir && {{setup_command}}
+{%- else %}
+  - mkdir -p /tmp/workdir && cd /tmp/workdir
+{%- endif %}
+
+# Command to start ray on the head node. You don't need to change this.
+head_start_ray_commands:
+  - ray stop
+  - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8876 --resources='{{ custom_resources }}'
