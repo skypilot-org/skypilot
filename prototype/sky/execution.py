@@ -13,9 +13,7 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
-import datetime
 import functools
-import jinja2
 import json
 import os
 import re
@@ -29,13 +27,15 @@ import colorama
 from colorama import Fore, Style
 
 import sky
-from sky.authentication import *
+from sky import authentication as auth
+from sky import backends
+from sky import backend_utils
 from sky import cloud_stores
-from sky.logging import init_logger
-logger = init_logger(__name__)
+from sky import logging
+
+logging = logging.init_logger(__name__)
 
 IPAddr = str
-RunId = str
 ShellCommand = str
 ShellCommandGenerator = Callable[[List[IPAddr]], Dict[IPAddr, ShellCommand]]
 ShellCommandOrGenerator = Union[ShellCommand, ShellCommandGenerator]
@@ -44,71 +44,22 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './logs'
 STREAM_LOGS_TO_CONSOLE = True
 
-# NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_WORKDIR = '/tmp/workdir'
+App = backend_utils.App
+RunId = backend_utils.RunId
 
-_CLOUD_TO_TEMPLATE = {
-    sky.clouds.AWS: 'config/aws.yml.j2',
-    sky.clouds.Azure: 'config/azure.yml.j2',
-    sky.clouds.GCP: 'config/gcp.yml.j2',
-}
+SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 
 
 def _get_cluster_config_template(task):
+    _CLOUD_TO_TEMPLATE = {
+        sky.clouds.AWS: 'config/aws.yml.j2',
+        sky.clouds.Azure: 'config/azure.yml.j2',
+        sky.clouds.GCP: 'config/gcp.yml.j2',
+    }
     cloud = task.best_resources.cloud
     if task.num_nodes > 1 and str(cloud) == 'AWS':
         return 'config/aws-distributed.yml.j2'
     return _CLOUD_TO_TEMPLATE[type(cloud)]
-
-
-def _fill_template(template_path: str,
-                   variables: dict,
-                   output_path: Optional[str] = None) -> str:
-    """Create a file from a Jinja template and return the filename."""
-    assert template_path.endswith('.j2'), template_path
-    with open(template_path) as fin:
-        template = fin.read()
-    template = jinja2.Template(template)
-    content = template.render(**variables)
-    if output_path is None:
-        output_path, _ = template_path.rsplit('.', 1)
-    with open(output_path, 'w') as fout:
-        fout.write(content)
-    logger.debug(f'Created or updated file {output_path}')
-    return output_path
-
-
-def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
-    cloud = task.best_resources.cloud
-    resources_vars = cloud.make_deploy_resources_variables(task)
-    config_dict = {}
-
-    config_dict['ray'] = _fill_template(
-        cluster_config_template,
-        dict(resources_vars, **{
-            'run_id': run_id,
-            'setup_command': task.setup,
-            'workdir': task.workdir,
-            'docker_image': task.docker_image,
-            'container_name': task.container_name,
-            'num_nodes': task.num_nodes,
-            'file_mounts': task.get_local_to_remote_file_mounts() or {},
-            'max_nodes': task.max_nodes,
-        })
-    )
-    if resources_vars.get('tpu_type') is not None:
-        # FIXME: replace hard-coding paths
-        config_dict['gcloud'] = (
-            _fill_template(
-                'config/gcp-tpu-create.sh.j2',
-                dict(resources_vars)
-            ),
-            _fill_template(
-                'config/gcp-tpu-delete.sh.j2',
-                dict(resources_vars)
-            )
-        )
-    return config_dict
 
 
 def _execute_single_node_command(ip: IPAddr, command: ShellCommand,
@@ -123,10 +74,6 @@ def _execute_single_node_command(ip: IPAddr, command: ShellCommand,
         f'ssh -i {private_key} -o StrictHostKeyChecking=no ubuntu@{ip} {command}',
         shell=True,
     )
-
-
-def _get_run_id() -> RunId:
-    return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
 class EventLogger:
@@ -178,7 +125,7 @@ class Step:
                 )
                 for line in proc.stdout:
                     line = line.decode("utf-8")
-                    logger.debug(line.rstrip() + '\r')
+                    logging.debug(line.rstrip() + '\r')
                     fout.write(line)
                     lines.append(line)
                 proc.communicate()
@@ -191,7 +138,7 @@ class Step:
                     self.callback(''.join(lines))
                 return proc
         else:
-            logger.info(
+            logging.info(
                 f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
             proc = subprocess.run(
                 self.shell_command + f' 2>&1 >{log_path}',
@@ -230,11 +177,11 @@ class Runner:
 
     def run(self) -> 'Runner':
         self.logger.log('start_run')
-        logger.info(f'{Fore.GREEN}')
-        logger.info('--------------------------')
-        logger.info('  Sky execution started')
-        logger.info(f'--------------------------{Fore.RESET}')
-        logger.info('')
+        logging.info(f'{Fore.GREEN}')
+        logging.info('--------------------------')
+        logging.info('  Sky execution started')
+        logging.info(f'--------------------------{Fore.RESET}')
+        logging.info('')
 
         try:
             for step in self.steps:
@@ -247,14 +194,14 @@ class Runner:
                     },
                 )
                 if isinstance(step.shell_command, ShellCommand):
-                    logger.info(
+                    logging.info(
                         f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{step.shell_command}{Style.RESET_ALL}'
                     )
                     step.run()
                 else:
                     assert len(self.cluster_ips) >= 1, self.cluster_ips
                     commands = step.shell_command(self.cluster_ips)
-                    logger.info(
+                    logging.info(
                         f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{commands}{Style.RESET_ALL}'
                     )
                     for ip, cmd in commands.items():
@@ -264,29 +211,29 @@ class Runner:
                                                      self.task.container_name)
 
                 self.logger.log('finish_step')
-                logger.info(
+                logging.info(
                     f'{Fore.CYAN}Step {step.step_id} finished{Fore.RESET}\n')
 
             self.logger.log('finish_run')
-            logger.info(f'{Fore.GREEN}')
-            logger.info('---------------------------')
-            logger.info('  Sky execution finished')
-            logger.info(f'---------------------------{Fore.RESET}')
-            logger.info('')
+            logging.info(f'{Fore.GREEN}')
+            logging.info('---------------------------')
+            logging.info('  Sky execution finished')
+            logging.info(f'---------------------------{Fore.RESET}')
+            logging.info('')
             return self
         except subprocess.CalledProcessError as e:
-            logger.error(f'{Fore.RED}Step failed! {e}{Fore.RESET}')
+            logging.error(f'{Fore.RED}Step failed! {e}{Fore.RESET}')
             raise e
 
 
 def _verify_ssh_authentication(cloud_type, config, cluster_config_file):
     cloud_type = str(cloud_type)
     if cloud_type == 'AWS':
-        config = setup_aws_authentication(config)
+        config = auth.setup_aws_authentication(config)
     elif cloud_type == 'GCP':
-        config = setup_gcp_authentication(config)
+        config = auth.setup_gcp_authentication(config)
     elif cloud_type == 'Azure':
-        config = setup_azure_authentication(config)
+        config = auth.setup_azure_authentication(config)
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
 
@@ -302,26 +249,27 @@ def _wait_until_ready(cluster_config_file, task, _):
         proc = subprocess.run(f"ray exec {cluster_config_file} 'ray status'",
                               shell=True,
                               check=True,
-                              capture_output=True)
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
         output = proc.stdout.decode('ascii')
-        logger.info(output)
+        logging.info(output)
         if f'{expected_worker_count} ray.worker.default' in output:
             break
         time.sleep(5)
 
 
-def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
+def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     colorama.init()
 
     assert len(dag) == 1, 'Job launcher assumes 1 task for now'
     task = dag.tasks[0]
 
-    run_id = _get_run_id()
-    config_dict = _write_cluster_config(
+    run_id = backend_utils.get_run_id()
+    config_dict = backend_utils.write_cluster_config(
         run_id, task, _get_cluster_config_template(task))
     cluster_config_file = config_dict['ray']
     if dryrun:
-        logger.info('Dry run finished.')
+        logging.info('Dry run finished.')
         return
 
     autoscaler_dict = yaml.safe_load(open(cluster_config_file))
@@ -408,13 +356,54 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
                             f'bash {config_dict["gcloud"][1]}')
     runner.run()
     if not teardown:
-        logger.info(
+        logging.info(
             f'  To log into the cloud VM:\t{Style.BRIGHT}ray attach {cluster_config_file} {Style.RESET_ALL}\n'
         )
-        logger.info(
+        logging.info(
             f'  To teardown the resources:\t{Style.BRIGHT}ray down {cluster_config_file} -y {Style.RESET_ALL}\n'
         )
-        if task.best_resources.accelerator_args['tpu_name'] is not None:
-            print(
+        if task.best_resources.accelerator_args.get('tpu_name') is not None:
+            logging.info(
                 f'  To teardown the TPU resources:\t{Style.BRIGHT}bash {config_dict["gcloud"][1]} {Style.RESET_ALL}\n'
             )
+
+
+def execute_v2(dag: sky.Dag, dryrun: bool = False,
+               teardown: bool = False) -> None:
+    # TODO: test distributed; port the auth stuff; azure.
+    # TODO: port some of execute_v0()'s nice logging messages to this function.
+    assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
+    task = dag.tasks[0]
+    best_resources = task.best_resources
+    assert best_resources is not None, \
+        'Run sky.Optimize.optimize() before sky.execute().'
+
+    # Future backends: K8S, SLURM, VM, LOCAL, LOCAL_DOCKER, etc.
+    backend = backends.CloudVmRayBackend()
+
+    handle = backend.provision(task, best_resources, dryrun=dryrun)
+    if dryrun:
+        logging.info('Dry run finished.')
+        return
+
+    if task.workdir is not None:
+        backend.sync_workdir(handle, task.workdir)
+
+    backend.sync_file_mounts(handle, task.file_mounts,
+                             task.get_cloud_to_remote_file_mounts())
+
+    logging.warn('Skipping running post_setup; need to merge with V1.')
+    # backend.run_post_setup(handle, post_setup_fn)
+
+    try:
+        backend.execute(handle, task)
+    finally:
+        # Enables post_execute() to be run after KeyboardInterrupt.
+        backend.post_execute(handle, teardown)
+
+    if teardown:
+        backend.teardown(handle)
+
+
+execute = execute_v1
+execute = execute_v2

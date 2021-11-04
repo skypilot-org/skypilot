@@ -8,7 +8,7 @@ with sky.Dag() as dag:
 
     # Share the total resources among the inner Tasks.  The inner Tasks will be
     # bin-packed and scheduled according to their individual demands.
-    total = sky.Resources(sky.clouds.AWS(), accelerators={'K80': 1})
+    total = sky.Resources(accelerators={'K80': 1})
     task.set_resources(total)
 
 dag = sky.Optimizer.optimize(dag)

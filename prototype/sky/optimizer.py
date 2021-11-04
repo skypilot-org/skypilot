@@ -175,6 +175,10 @@ class Optimizer(object):
             num_resources = len(node.get_resources())
             parents = list(graph.predecessors(node))
             for orig_resources, launchable_list in launchable_resources.items():
+                if not launchable_list:
+                    raise ValueError(
+                        f'No launchable resource found for task {node}; '
+                        f'To fix: relax its Resources() requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logging.warning(
                         'Time estimator not set and only one possible '
