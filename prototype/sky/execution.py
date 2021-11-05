@@ -85,29 +85,22 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
 
     config_dict['ray'] = _fill_template(
         cluster_config_template,
-        dict(resources_vars, **{
-            'run_id': run_id,
-            'setup_command': task.setup,
-            'workdir': task.workdir,
-            'docker_image': task.docker_image,
-            'container_name': task.container_name,
-            'num_nodes': task.num_nodes,
-            'file_mounts': task.get_local_to_remote_file_mounts() or {},
-            'max_nodes': task.max_nodes,
-        })
-    )
+        dict(
+            resources_vars, **{
+                'run_id': run_id,
+                'setup_command': task.setup,
+                'workdir': task.workdir,
+                'docker_image': task.docker_image,
+                'container_name': task.container_name,
+                'num_nodes': task.num_nodes,
+                'file_mounts': task.get_local_to_remote_file_mounts() or {},
+            }))
     if resources_vars.get('tpu_type') is not None:
         # FIXME: replace hard-coding paths
-        config_dict['gcloud'] = (
-            _fill_template(
-                'config/gcp-tpu-create.sh.j2',
-                dict(resources_vars)
-            ),
-            _fill_template(
-                'config/gcp-tpu-delete.sh.j2',
-                dict(resources_vars)
-            )
-        )
+        config_dict['gcloud'] = (_fill_template('config/gcp-tpu-create.sh.j2',
+                                                dict(resources_vars)),
+                                 _fill_template('config/gcp-tpu-delete.sh.j2',
+                                                dict(resources_vars)))
     return config_dict
 
 
@@ -119,10 +112,10 @@ def _execute_single_node_command(ip: IPAddr, command: ShellCommand,
         command = command.replace('\\', '\\\\').replace('"', '\\"')
         command = f'docker exec {container_name} /bin/bash -c "{command}"'
 
-    return subprocess.run(
-        f'ssh -i {private_key} -o StrictHostKeyChecking=no ubuntu@{ip} {command}',
-        shell=True,
-    )
+    return subprocess.Popen([
+        "ssh", "-i", private_key, "-o", "StrictHostKeyChecking=no",
+        "ubuntu@{}".format(ip), command
+    ])
 
 
 def _get_run_id() -> RunId:
@@ -317,8 +310,8 @@ def execute(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     task = dag.tasks[0]
 
     run_id = _get_run_id()
-    config_dict = _write_cluster_config(
-        run_id, task, _get_cluster_config_template(task))
+    config_dict = _write_cluster_config(run_id, task,
+                                        _get_cluster_config_template(task))
     cluster_config_file = config_dict['ray']
     if dryrun:
         logger.info('Dry run finished.')
