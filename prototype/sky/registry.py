@@ -3,8 +3,6 @@ import collections
 
 import sky
 from sky import clouds
-from sky.logging import init_logger
-logger = init_logger(__name__)
 
 _CLOUDS = [
     clouds.AWS(),
