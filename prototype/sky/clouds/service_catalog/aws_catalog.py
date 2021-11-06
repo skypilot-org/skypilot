@@ -1,18 +1,13 @@
-import os
-from typing import List, Optional
+"""This module loads the service catalog file and can be used to query
+instance types and pricing information for AWS.
+"""
+from typing import Optional
 
-import pandas as pd
+from sky.clouds.service_catalog.common import read_catalog
 
 InstanceType = str
 
-
-def _read_catalog() -> pd.DataFrame:
-    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             'data/aws.csv')
-    return pd.read_csv(data_path)
-
-
-_df = _read_catalog()
+_df = read_catalog("aws.csv")
 
 
 def get_hourly_cost(instance_type: InstanceType,
