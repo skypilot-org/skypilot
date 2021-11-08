@@ -61,7 +61,6 @@ def write_cluster_config(run_id: RunId, task, cluster_config_template: str):
                 'container_name': task.container_name,
                 'num_nodes': task.num_nodes,
                 'file_mounts': task.get_local_to_remote_file_mounts() or {},
-                'max_nodes': task.max_nodes,
             }))
     _add_ssh_to_cluster_config(cloud, yaml_path)
     config_dict['ray'] = yaml_path
