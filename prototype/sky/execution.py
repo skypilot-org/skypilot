@@ -21,13 +21,11 @@ import subprocess
 import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
-import yaml
 
 import colorama
 from colorama import Fore, Style
 
 import sky
-from sky import authentication as auth
 from sky import backends
 from sky import backend_utils
 from sky import cloud_stores
@@ -40,7 +38,6 @@ ShellCommand = str
 ShellCommandGenerator = Callable[[List[IPAddr]], Dict[IPAddr, ShellCommand]]
 ShellCommandOrGenerator = Union[ShellCommand, ShellCommandGenerator]
 
-IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './logs'
 STREAM_LOGS_TO_CONSOLE = True
 
@@ -60,20 +57,6 @@ def _get_cluster_config_template(task):
     if task.num_nodes > 1 and str(cloud) == 'AWS':
         return 'config/aws-distributed.yml.j2'
     return _CLOUD_TO_TEMPLATE[type(cloud)]
-
-
-def _execute_single_node_command(ip: IPAddr, command: ShellCommand,
-                                 private_key: str,
-                                 container_name: Optional[str]):
-    # TODO: Merge into Step; output also needs to be logged to file
-    if container_name is not None:
-        command = command.replace('\\', '\\\\').replace('"', '\\"')
-        command = f'docker exec {container_name} /bin/bash -c "{command}"'
-
-    return subprocess.run(
-        f'ssh -i {private_key} -o StrictHostKeyChecking=no ubuntu@{ip} {command}',
-        shell=True,
-    )
 
 
 class EventLogger:
@@ -206,9 +189,9 @@ class Runner:
                     )
                     for ip, cmd in commands.items():
                         cmd = f'cd {SKY_REMOTE_WORKDIR} && ' + cmd
-                        _execute_single_node_command(ip, cmd,
-                                                     self.task.private_key,
-                                                     self.task.container_name)
+                        backend_utils.run_command_on_ip_via_ssh(
+                            ip, cmd, self.task.private_key,
+                            self.task.container_name)
 
                 self.logger.log('finish_step')
                 logging.info(
@@ -226,38 +209,6 @@ class Runner:
             raise e
 
 
-def _verify_ssh_authentication(cloud_type, config, cluster_config_file):
-    cloud_type = str(cloud_type)
-    if cloud_type == 'AWS':
-        config = auth.setup_aws_authentication(config)
-    elif cloud_type == 'GCP':
-        config = auth.setup_gcp_authentication(config)
-    elif cloud_type == 'Azure':
-        config = auth.setup_azure_authentication(config)
-    else:
-        raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
-
-    with open(cluster_config_file, 'w') as yaml_file:
-        yaml.dump(config, yaml_file, default_flow_style=False)
-
-
-def _wait_until_ready(cluster_config_file, task, _):
-    if task.num_nodes <= 1:
-        return
-    expected_worker_count = task.num_nodes - 1
-    while True:
-        proc = subprocess.run(f"ray exec {cluster_config_file} 'ray status'",
-                              shell=True,
-                              check=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
-        output = proc.stdout.decode('ascii')
-        logging.info(output)
-        if f'{expected_worker_count} ray.worker.default' in output:
-            break
-        time.sleep(5)
-
-
 def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     colorama.init()
 
@@ -272,17 +223,14 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
         logging.info('Dry run finished.')
         return
 
-    autoscaler_dict = yaml.safe_load(open(cluster_config_file))
-    _verify_ssh_authentication(task.best_resources.cloud, autoscaler_dict,
-                               cluster_config_file)
-
     # FIXME: if a command fails, stop the rest.
     runner = Runner(run_id, task)
     runner.add_step('provision',
                     'Provision resources',
                     f'ray up -y {cluster_config_file} --no-config-cache',
-                    callback=functools.partial(_wait_until_ready,
-                                               cluster_config_file, task))
+                    callback=functools.partial(
+                        backend_utils.wait_until_ray_cluster_ready,
+                        cluster_config_file, task.num_nodes))
     if task.best_resources.accelerator_args is not None and \
         task.best_resources.accelerator_args.get('tpu_name') is not None:
         assert 'gcloud' in config_dict, 'Expect TPU provisioning with gcloud'
@@ -319,7 +267,7 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     if task.num_nodes > 1:
 
         def collect_ips(stdout, expected_count=0):
-            ips = re.findall(IP_ADDR_REGEX, stdout)
+            ips = re.findall(backend_utils.IP_ADDR_REGEX, stdout)
             if expected_count > 0:
                 assert len(ips) == expected_count, (ips, expected_count)
             runner.cluster_ips.extend(ips)
@@ -392,8 +340,8 @@ def execute_v2(dag: sky.Dag, dryrun: bool = False,
     backend.sync_file_mounts(handle, task.file_mounts,
                              task.get_cloud_to_remote_file_mounts())
 
-    logging.warn('Skipping running post_setup; need to merge with V1.')
-    # backend.run_post_setup(handle, post_setup_fn)
+    if task.post_setup_fn is not None:
+        backend.run_post_setup(handle, task.post_setup_fn, task)
 
     try:
         backend.execute(handle, task)

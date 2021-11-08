@@ -97,6 +97,7 @@ class AWS(clouds.Cloud):
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
+            'num_nodes': task.num_nodes,
         }
 
     def get_feasible_launchable_resources(self, resources):

@@ -1,11 +1,13 @@
 """Sky backends: for provisioning, setup, scheduling, and execution."""
 import json
 import os
+import re
 import shlex
 import subprocess
 import tempfile
 import textwrap
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
+import yaml
 
 import colorama
 
@@ -27,7 +29,7 @@ SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 
 
 def _run(cmd, **kwargs):
-    subprocess.run(cmd, shell=True, check=True, **kwargs)
+    return subprocess.run(cmd, shell=True, check=True, **kwargs)
 
 
 def _get_cluster_config_template(task):
@@ -62,8 +64,8 @@ class Backend(object):
     ) -> None:
         raise NotImplementedError
 
-    def run_post_setup(self, handle: ResourceHandle,
-                       post_setup_fn: PostSetupFn) -> None:
+    def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
+                       task: App) -> None:
         raise NotImplementedError
 
     def execute(self, handle: ResourceHandle, task: App) -> None:
@@ -104,7 +106,7 @@ class CloudVmRayBackend(Backend):
             return
         # ray up: the VMs.
         cluster_config_file = config_dict['ray']
-        _run(f'ray up -y {cluster_config_file} --no-config-cache')
+        _run(f'ray up -y {cluster_config_file}')
         # gcloud: TPU.
         tpu_name = to_provision.accelerator_args.get('tpu_name')
         if tpu_name is not None:
@@ -125,6 +127,8 @@ class CloudVmRayBackend(Backend):
                 f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={tpu_name}\" >> ~/.bashrc\'"
             )
             self._managed_tpu = config_dict['gcloud']
+        backend_utils.wait_until_ray_cluster_ready(cluster_config_file,
+                                                   task.num_nodes)
         return cluster_config_file
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -155,12 +159,15 @@ class CloudVmRayBackend(Backend):
                     source=src, destination=dst)
                 _run(f'ray exec {handle} \'{download_command}\'')
 
-    def run_post_setup(self, handle: ResourceHandle,
-                       post_setup_fn: PostSetupFn) -> None:
-        # ips = 'ray get-head-ip' + 'ray get-worker-ips'
-        # cmds_per_ip = task.post_setup_fn(ips)
-        # TODO: run this on each node; ssh ip bash -c for ip in ips?
-        pass
+    def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
+                       task: App) -> None:
+        ip_list = self._get_node_ips(handle, task.num_nodes)
+        ip_to_command = post_setup_fn(ip_list)
+        for ip, cmd in ip_to_command.items():
+            cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
+                   f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
+            backend_utils.run_command_on_ip_via_ssh(ip, cmd, task.private_key,
+                                                    task.container_name)
 
     def _execute_par_task(self, handle: ResourceHandle,
                           par_task: task_mod.ParTask) -> None:
@@ -186,7 +193,7 @@ class CloudVmRayBackend(Backend):
         #
         # TODO: possible to open the port in the yaml?  Run Ray inside docker?
         codegen = [
-            textwrap.dedent(f"""\
+            textwrap.dedent("""\
         import ray
         import subprocess
         ray.init('auto', namespace='__sky__')
@@ -211,9 +218,11 @@ class CloudVmRayBackend(Backend):
         # Block.
         codegen.append('ray.get(futures)\n')
         codegen = '\n'.join(codegen)
+        self._exec_code_on_head(handle, codegen)
 
-        # Write out the generated code.
-        with tempfile.NamedTemporaryFile('w', prefix='sky_') as fp:
+    def _exec_code_on_head(self, handle: ResourceHandle, codegen: str) -> None:
+        """Executes generated code on the head node."""
+        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
             fp.flush()
             basename = os.path.basename(fp.name)
@@ -221,7 +230,7 @@ class CloudVmRayBackend(Backend):
             # may not work as the remote VM may use system python (python2) to
             # execute the script.  Happens for AWS.
             _run(f'ray rsync_up {handle} {fp.name} /tmp/{basename}')
-        # Note the use of python3.
+        # Note the use of python3 (for AWS AMI).
         _run(f'ray exec {handle} \'python3 /tmp/{basename}\'')
 
     def execute(self, handle: ResourceHandle, task: App) -> None:
@@ -239,18 +248,68 @@ class CloudVmRayBackend(Backend):
         # Case: Task(run, num_nodes=1)
         if task.num_nodes == 1:
             # Launch the command as a Ray task.
+            assert type(task.run) is str, \
+                f'Task(run=...) should be a string (found {type(task.run)}).'
             cmd = 'ray exec {} {}'.format(
                 handle, shlex.quote(f'cd {SKY_REMOTE_WORKDIR} && {task.run}'))
             _run(cmd)
             return
 
         # Case: Task(run, num_nodes=N)
-        # Hacky solution: for ip: ssh ip bashc -c cmd
-        # Ray solution:
-        #  - ray.init(..., log_to_driver=False); otherwise too many logs.
-        #  - for node:
-        #    - submit _run_cmd(cmd) with resource {node_i: 1}
-        assert False, 'No support for Task(..., num_nodes=N) for now.'
+        assert task.num_nodes > 1, task.num_nodes
+        return self._execute_task_n_nodes(handle, task)
+
+    def _execute_task_n_nodes(self, handle: ResourceHandle, task: App) -> None:
+        # Strategy:
+        #   ray.init(..., log_to_driver=False); otherwise too many logs.
+        #   for node:
+        #     submit _run_cmd(cmd) with resource {node_i: 1}
+        codegen = [
+            textwrap.dedent("""\
+        import subprocess
+        import ray
+        ray.init('auto', namespace='__sky__')
+        futures = []
+        """)
+        ]
+        acc = task.best_resources.get_accelerators()
+        acc_count = 0
+        if acc is not None:
+            assert len(acc) == 1, acc
+            acc, acc_count = list(acc.items())[0]
+        # Get private ips here as Ray internally uses 'node:private_ip' as
+        # per-node custom resources.
+        ips = self._get_node_ips(handle,
+                                 task.num_nodes,
+                                 return_private_ips=True)
+        ips_dict = task.run(ips)
+        for ip in ips_dict:
+            command_for_ip = ips_dict[ip]
+            # TODO: need /bin/bash -c ?
+            cmd = shlex.quote(
+                f'/bin/bash -c \'cd {SKY_REMOTE_WORKDIR} && {command_for_ip}\'')
+            # Ray's per-node resources, to constrain scheduling each command to
+            # the corresponding node, represented by private IPs.
+            demand = {f'node:{ip}': 1}
+            resources_str = f', resources={json.dumps(demand)}'
+            num_gpus_str = ''
+            if acc_count > 0:
+                # Passing this ensures that the Ray remote task gets
+                # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
+                # would be force-set to empty by Ray.
+                num_gpus_str = f', num_gpus={acc_count}'
+            codegen.append(
+                textwrap.dedent(f"""\
+        futures.append(ray.remote(lambda: subprocess.run(
+            {cmd},
+                shell=True, check=True)) \\
+                .options(name='task-{ip}'{resources_str}{num_gpus_str}) \\
+                .remote())
+        """))
+        # Block.
+        codegen.append('ray.get(futures)\n')
+        codegen = '\n'.join(codegen)
+        self._exec_code_on_head(handle, codegen)
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
@@ -269,3 +328,31 @@ class CloudVmRayBackend(Backend):
         _run(f'ray down -y {handle}', shell=True, check=True)
         if self._managed_tpu is not None:
             _run(f'bash {self._managed_tpu[1]}')
+
+    def _get_node_ips(self,
+                      handle: ResourceHandle,
+                      expected_num_nodes: int,
+                      return_private_ips: bool = False) -> List[str]:
+        """Returns the IPs of all nodes in the cluster."""
+        yaml_handle = handle
+        if return_private_ips:
+            with open(handle, 'r') as f:
+                config = yaml.safe_load(f)
+            # Add this field to a temp file to get private ips.
+            config['provider']['use_internal_ips'] = True
+            yaml_handle = handle + '.tmp'
+            backend_utils.yaml_dump(yaml_handle, config)
+
+        out = _run(f'ray get-head-ip {yaml_handle}',
+                   stdout=subprocess.PIPE).stdout.decode().strip()
+        head_ip = re.findall(backend_utils.IP_ADDR_REGEX, out)
+        assert 1 == len(head_ip), out
+
+        out = _run(f'ray get-worker-ips {yaml_handle}',
+                   stdout=subprocess.PIPE).stdout.decode()
+        worker_ips = re.findall(backend_utils.IP_ADDR_REGEX, out)
+        assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes -
+                                                           1, out)
+        if return_private_ips:
+            os.remove(yaml_handle)
+        return head_ip + worker_ips
