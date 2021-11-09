@@ -1,11 +1,20 @@
 from typing import Dict, List, Optional, Set, Union
+import os
 import urllib.parse
+import uuid
+import yaml
 
 import sky
 from sky import clouds
 from sky import resources
 
 Resources = resources.Resources
+
+CLOUD_REGISTRY = {
+    'aws': clouds.AWS(),
+    'gcp': clouds.GCP(),
+    'azure': clouds.Azure(),
+}
 
 
 def _is_cloud_store_url(url):
@@ -54,6 +63,50 @@ class Task(object):
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
+
+    @staticmethod
+    def from_yaml(yaml_path):
+        with open(os.path.expanduser(yaml_path), 'r') as f:
+            config = yaml.safe_load(f)
+
+        workdir = config.get('workdir')
+
+        setup = config['setup']
+        run = config['run']
+
+        file_mounts = config.get('file_mounts')
+        if file_mounts is not None:
+            for src, dst in file_mounts.items():
+                run = run.replace(dst, src)
+
+        task = Task(
+            config['name'],
+            workdir=workdir,
+            setup=setup,
+            run=run,
+        )
+
+        if file_mounts is not None:
+            task.set_file_mounts(file_mounts)
+
+        if config.get('input') is not None:
+            inputs = config['input']
+            # TODO: allow option to say (or detect) no download/egress cost.
+            task.set_inputs(**inputs)
+
+        if config.get('output') is not None:
+            outputs = config['output']
+            task.set_outputs(**outputs)
+
+        resources = config['resources']
+        if resources.get('cloud') is not None:
+            resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
+        if resources.get('accelerators') is not None:
+            resources['accelerators'] = dict(resources['accelerators'])
+        resources = sky.Resources(**resources)
+
+        task.set_resources({resources})
+        return task
 
     def validate_config(self):
         if bool(self.docker_image) != bool(self.container_name):

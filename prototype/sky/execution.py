@@ -85,7 +85,6 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
         dict(
             resources_vars, **{
                 'run_id': run_id,
-                'setup_command': task.setup,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
                 'container_name': task.container_name,
@@ -298,9 +297,24 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
         runner.add_step('provision', 'Provision resources with gcloud',
                         f'bash {config_dict["gcloud"][0]}')
         runner.add_step(
-            'setup', 'TPU setup',
+            'tpu_setup', 'TPU setup',
             f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={task.best_resources.accelerator_args['tpu_name']}\" >> ~/.bashrc\'"
         )
+
+    with open(f'{SKY_LOGS_DIRECTORY}/{run_id}/run.sh', 'w') as f:
+        f.write(task.run)
+    with open(f'{SKY_LOGS_DIRECTORY}/{run_id}/setup.sh', 'w') as f:
+        f.write(task.setup)
+
+    runner.add_step(
+        'configure', 'Configure',
+        f'ray rsync_up {cluster_config_file} {SKY_LOGS_DIRECTORY}/{run_id}/ {SKY_REMOTE_WORKDIR}/.sky/{run_id}'
+    )
+
+    runner.add_step(
+        'setup', 'Task setup',
+        f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && sh .sky/{run_id}/setup.sh \''
+    )
 
     if task.workdir is not None:
         runner.add_step(
@@ -352,7 +366,7 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     if isinstance(task.run, str):
         runner.add_step(
             'exec', 'Execute task',
-            f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && {task.run}\''
+            f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && sh .sky/{run_id}/run.sh \''
         )
     else:
         runner.add_step('exec', 'Execute task', task.run)
