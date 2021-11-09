@@ -1,4 +1,5 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
+import ast
 import json
 import os
 import re
@@ -6,7 +7,7 @@ import shlex
 import subprocess
 import tempfile
 import textwrap
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import yaml
 
 import colorama
@@ -54,6 +55,156 @@ def _to_accelerator_and_count(resources: Optional[Resources]
     return acc, acc_count
 
 
+class RetryingVmProvisioner(object):
+    """A provisioner that retries different regions/zones."""
+
+    def __init__(self):
+        self._blocked_regions = set()
+        self._blocked_zones = set()
+
+    def _in_blocklist(self, cloud, region, zones):
+        if region in self._blocked_regions:
+            return True
+        assert zones, (cloud, region, zones)
+        for zone in zones:
+            if zone not in self._blocked_zones:
+                return False
+        return True
+
+    def _clear_blocklist(self):
+        self._blocked_regions.clear()
+        self._blocked_zones.clear()
+
+    def _update_blocklist_on_gcp_error(self, region, zones, exception):
+        colorama.init()
+        Style = colorama.Style
+        assert len(zones) == 1, zones
+        zone = zones[0]
+        stderr = exception.stderr.decode()
+        splits = stderr.split('\n')
+        exception_str = [s for s in splits if s.startswith('Exception: ')]
+        if len(exception_str) == 1:
+            # Parse structured response {'errors': [...]}.
+            exception_str = exception_str[0][len('Exception: '):]
+            exception_dict = ast.literal_eval(exception_str)
+            for error in exception_dict['errors']:
+                code = error['code']
+                message = error['message']
+                logging.warn(f'Got {code} in {zone.name} '
+                             f'{Style.DIM}(message: {message})'
+                             f'{Style.RESET_ALL}')
+                if code == 'QUOTA_EXCEEDED':  # Per region.
+                    self._blocked_regions.add(region)
+                    if message.startswith(
+                            'Quota \'GPUS_ALL_REGIONS\' exceeded.'):
+                        return False, message
+                elif code == 'ZONE_RESOURCE_POOL_EXHAUSTED':  # Per zone.
+                    self._blocked_zones.add(zone)
+                else:
+                    assert False, error
+        else:
+            # No such structured error response found.
+            assert not exception_str, stderr
+            if 'was not found' in stderr:
+                # Example: The resource
+                # 'projects/<id>/zones/.../acceleratorTypes/nvidia-tesla-v100'
+                # was not found.
+                logging.warn(f'Got \'resource not found\' in {zone.name}.')
+                self._blocked_zones.add(zone)
+            else:
+                assert False, stderr
+        return True, None
+
+    def _update_blocklist_on_aws_error(self, region, zones, exception):
+        # The underlying ray autoscaler / boto3 will try all zones of a region
+        # at once.
+        colorama.init()
+        Style = colorama.Style
+        stdout = exception.stdout.decode()
+        stderr = exception.stderr.decode()
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits
+            if 'An error occurred' in s.strip()
+        ]
+        errors.extend([
+            s.strip()
+            for s in stderr_splits
+            if 'An error occurred' in s.strip()
+        ])
+        logging.warn(f'Got multiple errors in all zones of {region.name}:')
+        messages = '\n\t'.join(errors)
+        logging.warn(f'{Style.DIM}{messages}{Style.RESET_ALL}')
+
+        self._blocked_regions.add(region)
+        return True, None
+
+    def _update_blocklist_on_error(self, cloud, region, zones,
+                                   exception) -> Tuple[bool, Optional[str]]:
+        """Cloud-specific error message handling.
+
+        Returns (should_continue_trying, reason).
+        """
+        if isinstance(cloud, clouds.GCP):
+            return self._update_blocklist_on_gcp_error(region, zones, exception)
+
+        if isinstance(cloud, clouds.AWS):
+            return self._update_blocklist_on_aws_error(region, zones, exception)
+
+        if isinstance(cloud, clouds.Azure):
+            assert False, exception  # TODO
+        else:
+            assert False, f'Unknown cloud: {cloud}.'
+
+        return True, None
+
+    def provision_with_retries(self, task, to_provision, dryrun):
+        """The provision retry loop."""
+        self._clear_blocklist()
+        cloud = to_provision.cloud
+        for region, zones in cloud.region_zones_provision_loop():
+            logging.info(f'\nTrying {cloud} {region.name} '
+                         f'({",".join(z.name for z in zones)}).')
+            if self._in_blocklist(cloud, region, zones):
+                continue
+
+            config_dict = backend_utils.write_cluster_config(
+                None,
+                task,
+                _get_cluster_config_template(task),
+                region=region,
+                zones=zones)
+
+            if dryrun:
+                return
+
+            cluster_config_file = config_dict['ray']
+            success = False
+            try:
+                _run(f'ray up -y {cluster_config_file}',
+                     stdout=subprocess.PIPE,
+                     stderr=subprocess.PIPE)
+                success = True
+            except Exception as e:
+                should_continue, reason = self._update_blocklist_on_error(
+                    cloud, region, zones, e)
+                if not should_continue:
+                    logging.warn(f'Skipping the rest of the regions/zones; '
+                                 f'reason: {reason}')
+                    break
+            if success:
+                logging.info('Successfully provisioned VM(s).')
+                return config_dict
+
+        # assert False, ('Failed to acquire resources in different regions/zones.'
+        #                '  Try other resource requirements or different clouds.')
+        logging.error('Failed to acquire resources in different regions/zones.'
+                      '  Try other resource requirements or different clouds.')
+        assert False
+
+
 class CloudVmRayBackend(backends.Backend):
     """Backend: runs on cloud virtual machines, managed by Ray.
 
@@ -71,17 +222,13 @@ class CloudVmRayBackend(backends.Backend):
     def provision(self, task: App, to_provision: Resources,
                   dryrun: bool) -> ResourceHandle:
         """Provisions using 'ray up'."""
-        # For each node (head or workers)
-        #   --resources = {acc: acc_cnt} from task.best_resources
-        #                   (cpu/mem etc. set by Ray automatically)
-        run_id = backend_utils.get_run_id()
-        config_dict = backend_utils.write_cluster_config(
-            run_id, task, _get_cluster_config_template(task))
+        # ray up: the VMs.
+        provisioner = RetryingVmProvisioner()
+        config_dict = provisioner.provision_with_retries(
+            task, to_provision, dryrun)
+        cluster_config_file = config_dict['ray']
         if dryrun:
             return
-        # ray up: the VMs.
-        cluster_config_file = config_dict['ray']
-        _run(f'ray up -y {cluster_config_file}')
         # gcloud: TPU.
         tpu_name = to_provision.accelerator_args.get('tpu_name')
         if tpu_name is not None:

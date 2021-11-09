@@ -6,8 +6,8 @@ idle_timeout_minutes: 60
 
 provider:
   type: aws
-  region: us-west-2
-  availability_zone: us-west-2a,us-west-2b,us-west-2c,us-west-2d
+  region: {{region}}
+  availability_zone: {{zones}}
 
 auth:
   ssh_user: ubuntu
@@ -17,7 +17,7 @@ available_node_types:
     resources: {}
     node_config:
       InstanceType: {{instance_type}}
-      ImageId: ami-0e9c522a722725e62  # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+      ImageId: {{aws_default_ami}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -29,7 +29,7 @@ available_node_types:
     resources: {}
     node_config:
       InstanceType: {{instance_type}}
-      ImageId: ami-0e9c522a722725e62  # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+      ImageId: {{aws_default_ami}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:

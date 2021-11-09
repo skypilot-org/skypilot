@@ -7,8 +7,8 @@ max_workers: 1
 
 provider:
   type: gcp
-  region: us-central1
-  availability_zone: us-central1-a
+  region: {{region}}
+  availability_zone: {{zones}}
   project_id: intercloud-320520  # Globally unique project id
 
 auth:
@@ -33,7 +33,7 @@ available_node_types:
 {%- else %}
               sourceImage: projects/deeplearning-platform-release/global/images/family/common-cu110
         guestAccelerators:
-          - acceleratorType: projects/intercloud-320520/zones/us-central1-a/acceleratorTypes/{{gpu}}
+          - acceleratorType: projects/intercloud-320520/zones/{{zones}}/acceleratorTypes/{{gpu}}
             acceleratorCount: {{gpu_count}}
         metadata:
           items:

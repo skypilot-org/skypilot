@@ -1,13 +1,15 @@
 import copy
 import json
-from typing import Dict, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds.service_catalog import aws_catalog
 
 
 class AWS(clouds.Cloud):
+
     _REPR = 'AWS'
+    _regions: List[clouds.Region] = []
 
     # TODO: make aws_catalog support this.
     _ACCELERATORS_DIRECTORY = {
@@ -16,6 +18,63 @@ class AWS(clouds.Cloud):
         ('V100', 8): 'p3.16xlarge',
     }
 
+    #### Regions/Zones ####
+
+    @classmethod
+    def regions(cls):
+        if not cls._regions:
+            # https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/
+            cls._regions = [
+                # TODO: troubles launching AMIs.
+                # clouds.Region('us-west-1').set_zones([
+                #     clouds.Zone('us-west-1a'),
+                #     clouds.Zone('us-west-1b'),
+                # ]),
+                clouds.Region('us-east-1').set_zones([
+                    clouds.Zone('us-east-1a'),
+                    clouds.Zone('us-east-1b'),
+                    clouds.Zone('us-east-1c'),
+                    clouds.Zone('us-east-1d'),
+                    clouds.Zone('us-east-1e'),
+                    clouds.Zone('us-east-1f'),
+                ]),
+                clouds.Region('us-east-2').set_zones([
+                    clouds.Zone('us-east-2a'),
+                    clouds.Zone('us-east-2b'),
+                    clouds.Zone('us-east-2c'),
+                ]),
+                clouds.Region('us-west-2').set_zones([
+                    clouds.Zone('us-west-2a'),
+                    clouds.Zone('us-west-2b'),
+                    clouds.Zone('us-west-2c'),
+                    clouds.Zone('us-west-2d'),
+                ]),
+            ]
+        return cls._regions
+
+    @classmethod
+    def region_zones_provision_loop(
+            cls) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+        # AWS provisioner can handle batched requests, so yield all zones under
+        # each region.
+        for region in cls.regions():
+            yield (region, region.zones)
+
+    @classmethod
+    def get_default_ami(cls, region_name: str) -> str:
+        # AWS Deep Learning AMI (Ubuntu 18.04), version 50.0
+        # https://aws.amazon.com/marketplace/pp/prodview-x5nivojpquy6y
+        amis = {
+            'us-east-1': 'ami-0e3c68b57d50caf64',
+            'us-east-2': 'ami-0ae79682024fe31cd',
+            # 'us-west-1': 'TODO: cannot launch',
+            'us-west-2': 'ami-0050625d58fa27b6d',
+        }
+        assert region_name in amis, region_name
+        return amis[region_name]
+
+    #### Normal methods ####
+
     def instance_type_to_hourly_cost(self, instance_type):
         return aws_catalog.get_hourly_cost(instance_type)
 
@@ -23,7 +82,8 @@ class AWS(clouds.Cloud):
         # In general, query this from the cloud:
         #   https://aws.amazon.com/s3/pricing/
         # NOTE: egress from US East (Ohio).
-        # NOTE: Not accurate as the pricing tier is based on cumulative monthly usage.
+        # NOTE: Not accurate as the pricing tier is based on cumulative monthly
+        # usage.
         if num_gigabytes > 150 * 1024:
             return 0.05 * num_gigabytes
         cost = 0.0
