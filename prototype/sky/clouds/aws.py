@@ -1,36 +1,14 @@
 import copy
 
 from sky import clouds
+from sky.clouds.service_catalog import aws_catalog
 
 
 class AWS(clouds.Cloud):
     _REPR = 'AWS'
 
-    # In general, query this from the cloud.
-    # https://instances.vantage.sh/
-    _ON_DEMAND_PRICES = {
-        # p3.
-        'p3.2xlarge': 3.06,
-        'p3.8xlarge': 12.24,
-        'p3.16xlarge': 24.48,
-
-        # inf1.
-        'inf1.xlarge': 0.228,
-        'inf1.2xlarge': 0.362,
-        'inf1.6xlarge': 1.18,
-        'inf1.24xlarge': 4.721,
-    }
-
-    # TODO: add other GPUs c.f. https://aws.amazon.com/ec2/instance-types/
-    # e.g., g4 instances with T4 GPUs
-    _ACCELERATORS_DIRECTORY = {
-        ('V100', 1): 'p3.2xlarge',
-        ('V100', 4): 'p3.8xlarge',
-        ('V100', 8): 'p3.16xlarge',
-    }
-
     def instance_type_to_hourly_cost(self, instance_type):
-        return AWS._ON_DEMAND_PRICES[instance_type]
+        return aws_catalog.get_hourly_cost(instance_type)
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -91,7 +69,7 @@ class AWS(clouds.Cloud):
         acc, acc_count = list(accelerators.items())[0]
         # TODO: support bin-packing; if requesting 2 V100s, should allow 2x
         # p3.2xlarge rather than not returning anything.
-        instance_type = AWS._ACCELERATORS_DIRECTORY.get((acc, acc_count))
+        instance_type = aws_catalog.get_instance_type_for_gpu(acc, acc_count)
         if instance_type is None:
             return []
         return _make(instance_type)
