@@ -1,4 +1,5 @@
 """A script that queries AWS API to get instance types and pricing information.
+
 This script takes about 1 minute to finish.
 """
 from typing import Tuple
