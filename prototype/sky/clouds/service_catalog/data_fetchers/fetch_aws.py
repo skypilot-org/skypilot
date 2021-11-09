@@ -10,6 +10,7 @@ import boto3
 import numpy as np
 import pandas as pd
 import ray
+import datetime
 
 REGIONS = ['us-west-1', 'us-west-2', 'us-east-1', 'us-east-2']
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -25,7 +26,12 @@ def get_instance_types(region: str) -> pd.DataFrame:
     for i, resp in enumerate(paginator.paginate()):
         print(f'{region} getting instance types page {i}')
         items += resp['InstanceTypes']
-    return pd.DataFrame(items)
+
+    zones = []
+    response = client.describe_availability_zones()
+    for resp in response['AvailabilityZones']:
+        zones.append({'AvailabilityZone': resp['ZoneName']})
+    return pd.DataFrame(items).merge(pd.DataFrame(zones), how='cross')
 
 
 @ray.remote
@@ -40,12 +46,25 @@ def get_pricing_table(region: str) -> pd.DataFrame:
               (df['Tenancy'].isin(['Host', 'Shared'])) &
               df['PricePerUnit'] > 0].set_index('Instance Type')
 
+@ray.remote
+def get_spot_pricing_table(region: str) -> pd.DataFrame:
+    print(f'{region} downloading spot pricing table')
+    client = boto3.client('ec2', region_name=region)
+    response = client.describe_spot_price_history(
+        ProductDescriptions=['Linux/UNIX'],
+        StartTime=datetime.datetime.utcnow(),
+    )
+    df = pd.DataFrame(response['SpotPriceHistory']).set_index(
+        ['InstanceType', 'AvailabilityZone'])
+    return df
+
 
 @ray.remote
 def get_instance_types_df(region: str) -> pd.DataFrame:
-    df, pricing_df = ray.get(
+    df, pricing_df, spot_pricing_df = ray.get(
         [get_instance_types.remote(region),
-         get_pricing_table.remote(region)])
+         get_pricing_table.remote(region),
+         get_spot_pricing_table.remote(region)])
     print(f'{region} Processing dataframes')
 
     def get_price(row):
@@ -54,6 +73,15 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
             return pricing_df.loc[t]['PricePerUnit']
         except KeyError:
             print(f'{region} WARNING: cannot find pricing for {t}')
+            return np.nan
+
+    def get_spot_price(row):
+        instance = row['InstanceType']
+        zone = row['AvailabilityZone']
+        try:
+            return spot_pricing_df.loc[(instance, zone)]['SpotPrice']
+        except KeyError:
+            print(f'{region} WARNING: cannot find spot pricing for {instance} {(zone)}')
             return np.nan
 
     def get_gpu_info(row) -> Tuple[str, float]:
@@ -67,6 +95,7 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
         gpu_name, gpu_count = get_gpu_info(row)
         return pd.Series({
             'PricePerHour': get_price(row),
+            'SpotPricePerHour': get_spot_price(row),
             'GpuName': gpu_name,
             'GpuCount': gpu_count,
         })
