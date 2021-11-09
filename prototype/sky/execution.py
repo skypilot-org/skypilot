@@ -317,9 +317,21 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
 
 
 def execute_v2(dag: sky.Dag, dryrun: bool = False,
-               teardown: bool = False) -> None:
-    # TODO: test distributed; port the auth stuff; azure.
-    # TODO: port some of execute_v0()'s nice logging messages to this function.
+               teardown: bool = False,
+               stream_logs: bool = True) -> None:
+    """Executes a planned DAG.
+
+    Args:
+      dag: sky.Dag.
+      dryrun: bool; if True, only print the provision info (e.g., cluster
+        yaml).
+      teardown: bool; whether to teardown the launched resources after
+        execution.
+      stream_logs: bool; whether to stream all tasks' outputs to the client.
+        Hint: for a ParTask, set this to False to avoid a lot of log outputs;
+        each task's output can be redirected to their own files.
+    """
+    # TODO: Azure. Port some of execute_v1()'s nice logging messages.
     assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
     task = dag.tasks[0]
     best_resources = task.best_resources
@@ -344,7 +356,7 @@ def execute_v2(dag: sky.Dag, dryrun: bool = False,
         backend.run_post_setup(handle, task.post_setup_fn, task)
 
     try:
-        backend.execute(handle, task)
+        backend.execute(handle, task, stream_logs)
     finally:
         # Enables post_execute() to be run after KeyboardInterrupt.
         backend.post_execute(handle, teardown)

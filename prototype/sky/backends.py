@@ -42,6 +42,18 @@ def _get_cluster_config_template(task):
     return _CLOUD_TO_TEMPLATE[type(cloud)]
 
 
+def _to_accelerator_and_count(resources: Optional[Resources]
+                             ) -> (Optional[str], int):
+    acc = None
+    acc_count = 0
+    if resources is not None:
+        d = resources.get_accelerators()
+        if d is not None:
+            assert len(d) == 1, d
+            acc, acc_count = list(d.items())[0]
+    return acc, acc_count
+
+
 class Backend(object):
     """Backend interface: handles provisioning, setup, and scheduling."""
 
@@ -68,7 +80,8 @@ class Backend(object):
                        task: App) -> None:
         raise NotImplementedError
 
-    def execute(self, handle: ResourceHandle, task: App) -> None:
+    def execute(self, handle: ResourceHandle, task: App,
+                stream_logs: bool) -> None:
         raise NotImplementedError
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
@@ -170,7 +183,8 @@ class CloudVmRayBackend(Backend):
                                                     task.container_name)
 
     def _execute_par_task(self, handle: ResourceHandle,
-                          par_task: task_mod.ParTask) -> None:
+                          par_task: task_mod.ParTask,
+                          stream_logs: bool) -> None:
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         for t in par_task.tasks:
             assert t.num_nodes == 1, \
@@ -193,10 +207,13 @@ class CloudVmRayBackend(Backend):
         #
         # TODO: possible to open the port in the yaml?  Run Ray inside docker?
         codegen = [
-            textwrap.dedent("""\
+            textwrap.dedent(f"""\
         import ray
         import subprocess
-        ray.init('auto', namespace='__sky__')
+        ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
+        print('cluster_resources:', ray.cluster_resources())
+        print('available_resources:', ray.available_resources())
+        print('live nodes:', ray.state.node_ids())
         futures = []
         """)
         ]
@@ -207,17 +224,41 @@ class CloudVmRayBackend(Backend):
             resources = par_task.get_task_resource_demands(i)
             if resources is not None:
                 resources_str = f', resources={json.dumps(resources)}'
+                assert len(resources) == 1, \
+                    ('There can only be one type of accelerator per instance.'
+                    f' Found: {resources}.')
+                # Passing this ensures that the Ray remote task gets
+                # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
+                # would be force-set to empty by Ray.
+                num_gpus_str = f', num_gpus={list(resources.values())[0]}'
             else:
                 resources_str = ''
-            name = f'task-{i}'
+                num_gpus_str = ''
+            name = f'task-{i}' if t.name is None else t.name
             task_i_codegen = textwrap.dedent(f"""\
         futures.append(ray.remote(lambda: subprocess.run(
-            {cmd}, shell=True, check=True)).options(name='{name}'{resources_str}).remote())
+            {cmd},
+              shell=True, check=True)) \\
+              .options(name='{name}'{resources_str}{num_gpus_str}) \\
+              .remote())
         """)
             codegen.append(task_i_codegen)
         # Block.
         codegen.append('ray.get(futures)\n')
         codegen = '\n'.join(codegen)
+
+        # Logging.
+        colorama.init()
+        Fore = colorama.Fore
+        Style = colorama.Style
+        logging.info(
+            f'\n{Fore.CYAN}Starting ParTask execution.{Style.RESET_ALL}')
+        if not stream_logs:
+            logging.info(
+                f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
+                f'{Style.RESET_ALL} Hint: in the run command, redirect each'
+                ' task\'s output to a file, and use `tail -f` to monitor.\n')
+
         self._exec_code_on_head(handle, codegen)
 
     def _exec_code_on_head(self, handle: ResourceHandle, codegen: str) -> None:
@@ -233,12 +274,13 @@ class CloudVmRayBackend(Backend):
         # Note the use of python3 (for AWS AMI).
         _run(f'ray exec {handle} \'python3 /tmp/{basename}\'')
 
-    def execute(self, handle: ResourceHandle, task: App) -> None:
+    def execute(self, handle: ResourceHandle, task: App,
+                stream_logs: bool) -> None:
         # Execution logic differs for three types of tasks.
 
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):
-            return self._execute_par_task(handle, task)
+            return self._execute_par_task(handle, task, stream_logs)
 
         # Otherwise, handle a basic Task.
         if task.run is None:
@@ -247,36 +289,47 @@ class CloudVmRayBackend(Backend):
 
         # Case: Task(run, num_nodes=1)
         if task.num_nodes == 1:
-            # Launch the command as a Ray task.
-            assert type(task.run) is str, \
-                f'Task(run=...) should be a string (found {type(task.run)}).'
-            cmd = 'ray exec {} {}'.format(
-                handle, shlex.quote(f'cd {SKY_REMOTE_WORKDIR} && {task.run}'))
-            _run(cmd)
-            return
+            return self._execute_task_one_node(handle, task, stream_logs)
 
         # Case: Task(run, num_nodes=N)
         assert task.num_nodes > 1, task.num_nodes
-        return self._execute_task_n_nodes(handle, task)
+        return self._execute_task_n_nodes(handle, task, stream_logs)
 
-    def _execute_task_n_nodes(self, handle: ResourceHandle, task: App) -> None:
+    def _execute_task_one_node(self, handle: ResourceHandle, task: App,
+                               stream_logs: bool) -> None:
+        # Launch the command as a Ray task.
+        assert type(task.run) is str, \
+            f'Task(run=...) should be a string (found {type(task.run)}).'
+        cmd = 'ray exec {} {}'.format(
+            handle, shlex.quote(f'cd {SKY_REMOTE_WORKDIR} && {task.run}'))
+        if not stream_logs:
+            out = tempfile.NamedTemporaryFile('w', prefix='sky_',
+                                              suffix='.out').name
+            cmd += f' >{out}'
+            colorama.init()
+            Style = colorama.Style
+            logging.info(f'Redirecting stdout, to monitor: '
+                         f'{Style.BRIGHT}tail -f {out}{Style.RESET_ALL}')
+        _run(cmd)
+
+    def _execute_task_n_nodes(self, handle: ResourceHandle, task: App,
+                              stream_logs: bool) -> None:
         # Strategy:
         #   ray.init(..., log_to_driver=False); otherwise too many logs.
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         codegen = [
-            textwrap.dedent("""\
+            textwrap.dedent(f"""\
         import subprocess
         import ray
-        ray.init('auto', namespace='__sky__')
+        ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
+        print('cluster_resources:', ray.cluster_resources())
+        print('available_resources:', ray.available_resources())
+        print('live nodes:', ray.state.node_ids())
         futures = []
         """)
         ]
-        acc = task.best_resources.get_accelerators()
-        acc_count = 0
-        if acc is not None:
-            assert len(acc) == 1, acc
-            acc, acc_count = list(acc.items())[0]
+        acc, acc_count = _to_accelerator_and_count(task.best_resources)
         # Get private ips here as Ray internally uses 'node:private_ip' as
         # per-node custom resources.
         ips = self._get_node_ips(handle,
@@ -285,7 +338,9 @@ class CloudVmRayBackend(Backend):
         ips_dict = task.run(ips)
         for ip in ips_dict:
             command_for_ip = ips_dict[ip]
-            # TODO: need /bin/bash -c ?
+            # By default /bin/sh is used, and if 'source ~/.bashrc' or 'source
+            # activate conda_env' is used, we get /bin/sh: 1: source: not
+            # found.  Use /bin/bash -c as a workaround.
             cmd = shlex.quote(
                 f'/bin/bash -c \'cd {SKY_REMOTE_WORKDIR} && {command_for_ip}\'')
             # Ray's per-node resources, to constrain scheduling each command to
@@ -309,6 +364,17 @@ class CloudVmRayBackend(Backend):
         # Block.
         codegen.append('ray.get(futures)\n')
         codegen = '\n'.join(codegen)
+        # Logging.
+        colorama.init()
+        Fore = colorama.Fore
+        Style = colorama.Style
+        logging.info(
+            f'\n{Fore.CYAN}Starting Task execution.{Style.RESET_ALL}')
+        if not stream_logs:
+            logging.info(
+                f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
+                f'{Style.RESET_ALL} Hint: in the run command, redirect each'
+                ' task\'s output to a file, and use `tail -f` to monitor.\n')
         self._exec_code_on_head(handle, codegen)
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
