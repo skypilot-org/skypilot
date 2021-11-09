@@ -1,21 +1,17 @@
-"""This module loads the service catalog file and can be used to query
+"""AWS Offerings Catalog.
+
+This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
 from typing import Optional
-
 from numpy import isnan
 
-import sky.clouds.service_catalog.common as common
-
-InstanceType = str
-Region = str
+from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('aws.csv')
 
 
-def get_hourly_cost(instance_type: InstanceType,
-                    region: Optional[Region] = 'us-west-2',
-                    spot: bool = False) -> float:
+def get_hourly_cost(instance_type: str, region: str = 'us-west-2',spot: bool = False) -> float:
     mask = _df['InstanceType'] == instance_type
     if region is not None:
         mask &= _df['Region'] == region
@@ -32,13 +28,12 @@ def get_hourly_cost(instance_type: InstanceType,
     return cheapest['SpotPricePerHour'], cheapest['AvailabilityZone']
 
 
-def get_instance_type_for_gpu(gpu_name: str,
-                              count: int) -> Optional[InstanceType]:
+def get_instance_type_for_gpu(gpu_name: str, count: int) -> Optional[str]:
     """Returns the cheapest instance type that offers the required count of GPUs.
     """
     # TODO: Reorganize _df to support any accelerator (Inferentia, etc.)
-    result = _df[(_df['GpuName'] == gpu_name) &
-                 (_df['GpuCount'] == count)].sort_values('PricePerHour')
+    result = _df[(_df['GpuName'] == gpu_name) & (_df['GpuCount'] == count)]
     if len(result) == 0:
         return None
+    assert len(result) == 1, (result, gpu_name, count)
     return result.iloc[0]['InstanceType']
