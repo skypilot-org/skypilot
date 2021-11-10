@@ -78,7 +78,7 @@ def resnet50_estimate_runtime(resources):
         utilized_flops = tpu_v3_8_flops * known_resnet50_utilization
         estimated_step_time_seconds = flops_for_one_batch / utilized_flops
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
-        logger.debug('  tpu-v3-8 estimated_step_time_seconds',
+        logger.debug('  tpu-v3-8 estimated_step_time_seconds %f',
                      estimated_step_time_seconds)
         return estimated_run_time_seconds
 

@@ -66,7 +66,11 @@ rsync_filter:
 # List of shell commands to run to set up nodes.
 setup_commands:
   - pip install -U ray
+{%- if setup_command is not none %}
   - mkdir -p /tmp/workdir && cd /tmp/workdir && {{setup_command}}
+{%- else %}
+  - mkdir -p /tmp/workdir && cd /tmp/workdir
+{%- endif %}
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
