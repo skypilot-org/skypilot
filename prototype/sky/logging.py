@@ -18,16 +18,15 @@ class NewlineFormatter(logging.Formatter):
         return msg
 
 
-FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)-3d] %(message)s'
-DATE_FORMAT = '%m-%d %H:%M:%S'
-
-newline_handler = logging.StreamHandler(sys.stdout)
-newline_handler.flush = sys.stdout.flush
-fmt = NewlineFormatter(FORMAT, datefmt=DATE_FORMAT)
-newline_handler.setFormatter(fmt)
-
-
 def init_logger(name):
+    FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)-3d] %(message)s'
+    DATE_FORMAT = '%m-%d %H:%M:%S'
+
+    newline_handler = logging.StreamHandler(sys.stdout)
+    newline_handler.flush = sys.stdout.flush
+    fmt = NewlineFormatter(FORMAT, datefmt=DATE_FORMAT)
+    newline_handler.setFormatter(fmt)
+
     logger = logging.getLogger(name)
     logger.addHandler(newline_handler)
     logger.setLevel(logging.DEBUG)
