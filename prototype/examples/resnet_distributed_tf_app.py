@@ -1,39 +1,21 @@
 import json
+import subprocess
 from typing import Dict, List
 
 import sky
-import time_estimators
 from sky import clouds
 
 IPAddr = str
 
-##############################
-# Options for inputs:
-#
-#  P0:
-#    - read from the specified cloud store, continuously
-#    - sync submission-site local files to remote FS
-#
-#  1. egress from the specified cloud store, to local
-#
-#  TODO: if egress, what bucket to use for the destination cloud store?
-#
-##############################
-# Options for outputs:
-#
-#  P0. write to local only (don't destroy VM at the end)
-#
-#  P1. write to local, sync to a specified cloud's bucket
-#
-#  P2. continuously write checkpoints to a specified cloud's bucket
-#       TODO: this is data egress from run_cloud; not taken into account
-
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
+    subprocess.run(f'cd {workdir} && git checkout 9459fee',
+                   shell=True,
+                   check=True)
 
-    docker_image = None  #'rayproject/ray-ml:latest-gpu'
-    container_name = None  #'resnet_container'
+    docker_image = None  # 'rayproject/ray-ml:latest-gpu'
+    container_name = None  # 'resnet_container'
 
     # Total Nodes, INCLUDING Head Node
     num_nodes = 2
@@ -46,8 +28,9 @@ with sky.Dag() as dag:
            pip install tensorflow==2.4.0 pyyaml ray[default] awscli botocore boto3 && \
            cd models && pip install -e .'
 
-    # Post setup function. Run after `ray up *.yml` completes. Returns dictionary of commands to be run on each corresponding node.
-    # List of IPs, 0th index denoting head worker
+    # Post setup function. Run after `ray up *.yml` completes. Returns
+    # dictionary of commands to be run on each corresponding node.
+    # 'ip_list': List of IPs, 0th index denoting head worker.
     def post_setup_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
         command_dict = {}
         tf_config = {
@@ -67,20 +50,20 @@ with sky.Dag() as dag:
         return command_dict
 
     # The command to run.  Will be run under the working directory.
+    # If a str, run the same command on all nodes.
+    # If a function, run per-node command on each node.
     def run_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
         run = 'source ~/.bashrc && \
             source activate resnet && \
             rm -rf resnet_model-dir && \
             python models/official/resnet/resnet_main.py --use_tpu=False \
-            --mode=train --train_batch_size=256 --train_steps=2000 \
+            --mode=train --train_batch_size=256 --train_steps=500 \
             --iterations_per_loop=125 \
             --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
             --model_dir=resnet-model-dir \
             --amp --xla --loss_scale=128'
 
         return {ip: run for ip in ip_list}
-
-    run = run_fn
 
     train = sky.Task(
         'train',
@@ -90,31 +73,13 @@ with sky.Dag() as dag:
         docker_image=docker_image,
         container_name=container_name,
         num_nodes=num_nodes,
-        run=run,
+        run=run_fn,
     )
 
     train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
                      estimated_size_gigabytes=70)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
-    train.set_resources({
-        ##### Fully specified
-        sky.Resources(clouds.AWS(), 'p3.2xlarge'),
-        # sky.Resources(clouds.GCP(), 'n1-standard-16'),
-        #sky.Resources(
-        #     clouds.GCP(),
-        #     'n1-standard-8',
-        # Options: 'V100', {'V100': <num>}.
-        #     'V100',
-        #),
-        ##### Partially specified
-        #sky.Resources(accelerators='V100'),
-        # sky.Resources(accelerators='tpu-v3-8'),
-        # sky.Resources(clouds.AWS(), accelerators={'V100': 4}),
-        # sky.Resources(clouds.AWS(), accelerators='V100'),
-    })
-
-    # Optionally, specify a time estimator: Resources -> time in seconds.
-    # train.set_time_estimator(time_estimators.resnet50_estimate_runtime)
+    train.set_resources(sky.Resources(clouds.AWS(), 'p3.2xlarge'))
 
 dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
 # sky.execute(dag, dryrun=True)

@@ -1,4 +1,6 @@
 import copy
+import json
+from typing import Dict, Optional
 
 from sky import clouds
 
@@ -54,15 +56,38 @@ class Azure(clouds.Cloud):
     def is_same_cloud(self, other):
         return isinstance(other, Azure)
 
-    def make_deploy_resources_variables(self, task):
-        return {'instance_type': task.best_resources.instance_type}
-
     @classmethod
     def get_default_instance_type(cls):
         return 'Standard_D2_v4'
 
+    # TODO: factor the following three methods, as they are the same logic
+    # between Azure and AWS.
+
+    def get_accelerators_from_instance_type(
+            self,
+            instance_type: str,
+    ) -> Optional[Dict[str, int]]:
+        """Returns {acc: acc_count} held by 'instance_type', if any."""
+        inverse = {v: k for k, v in Azure._ACCELERATORS_DIRECTORY.items()}
+        res = inverse.get(instance_type)
+        if res is None:
+            return res
+        return {res[0]: res[1]}
+
+    def make_deploy_resources_variables(self, task):
+        r = task.best_resources
+        # r.accelerators is cleared but .instance_type encodes the info.
+        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        if acc_dict is not None:
+            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
+        else:
+            custom_resources = None
+        return {
+            'instance_type': r.instance_type,
+            'custom_resources': custom_resources,
+        }
+
     def get_feasible_launchable_resources(self, resources):
-        # TODO: refactor this method (AWS and Azure are similar)?
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
@@ -73,6 +98,8 @@ class Azure(clouds.Cloud):
             r = copy.deepcopy(resources)
             r.cloud = Azure()
             r.instance_type = instance_type
+            # Setting this to None as Azure doesn't separately bill / attach
+            # the accelerators.  Billed as part of the VM type.
             r.accelerators = None
             return [r]
 
@@ -84,8 +111,6 @@ class Azure(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        # TODO: support bin-packing; if requesting 2 V100s, should allow 2x
-        # Standard_NC6s_v3 rather than not returning anything.
         instance_type = Azure._ACCELERATORS_DIRECTORY.get((acc, acc_count))
         if instance_type is None:
             return []
