@@ -11,7 +11,9 @@ from sky.clouds.service_catalog import common
 _df = common.read_catalog('aws.csv')
 
 
-def get_hourly_cost(instance_type: str, region: str = 'us-west-2',spot: bool = False) -> float:
+def get_hourly_cost(instance_type: str,
+                    region: str = 'us-west-2',
+                    spot: bool = False) -> float:
     result = _df[(_df['InstanceType'] == instance_type) &
                  (_df['Region'] == region)]
 

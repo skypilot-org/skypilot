@@ -47,6 +47,7 @@ def get_pricing_table(region: str) -> pd.DataFrame:
               (df['Tenancy'].isin(['Host', 'Shared'])) &
               df['PricePerUnit'] > 0].set_index('Instance Type')
 
+
 @ray.remote
 def get_spot_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading spot pricing table')
@@ -62,10 +63,11 @@ def get_spot_pricing_table(region: str) -> pd.DataFrame:
 
 @ray.remote
 def get_instance_types_df(region: str) -> pd.DataFrame:
-    df, pricing_df, spot_pricing_df = ray.get(
-        [get_instance_types.remote(region),
-         get_pricing_table.remote(region),
-         get_spot_pricing_table.remote(region)])
+    df, pricing_df, spot_pricing_df = ray.get([
+        get_instance_types.remote(region),
+        get_pricing_table.remote(region),
+        get_spot_pricing_table.remote(region)
+    ])
     print(f'{region} Processing dataframes')
 
     def get_price(row):
@@ -82,7 +84,9 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
         try:
             return spot_pricing_df.loc[(instance, zone)]['SpotPrice']
         except KeyError:
-            print(f'{region} WARNING: cannot find spot pricing for {instance} {(zone)}')
+            print(
+                f'{region} WARNING: cannot find spot pricing for {instance} {(zone)}'
+            )
             return np.nan
 
     def get_gpu_info(row) -> Tuple[str, float]:
