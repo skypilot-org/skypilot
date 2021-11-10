@@ -1,3 +1,5 @@
+import subprocess
+
 import sky
 from sky import clouds
 
@@ -6,9 +8,13 @@ import time_estimators
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
+    subprocess.run(f'cd {workdir} && git checkout 222cc86',
+                   shell=True,
+                   check=True)
 
     # The setup command.  Will be run under the working directory.
     setup = 'pip install --upgrade pip && \
+        conda init bash && \
         conda activate resnet || \
           (conda create -n resnet python=3.7 -y && \
            conda activate resnet && \
@@ -28,11 +34,11 @@ with sky.Dag() as dag:
     # Format: {VM paths: local paths / cloud URLs}.
     file_mounts = {
         # Download from GCS before training starts.
-        '/tmp/fake_imagenet': 'gs://cloud-tpu-test-datasets/fake_imagenet',
+        # '/tmp/fake_imagenet': 'gs://cloud-tpu-test-datasets/fake_imagenet',
     }
     # Refer to the VM local path.
-    run = run.replace('gs://cloud-tpu-test-datasets/fake_imagenet',
-                      '/tmp/fake_imagenet')
+    # run = run.replace('gs://cloud-tpu-test-datasets/fake_imagenet',
+    #                   '/tmp/fake_imagenet')
     ### Optional end ###
 
     train = sky.Task(
@@ -48,7 +54,7 @@ with sky.Dag() as dag:
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
         ##### Fully specified
-        sky.Resources(clouds.AWS(), 'p3.2xlarge'),
+        # sky.Resources(clouds.AWS(), 'p3.2xlarge'),
         # sky.Resources(clouds.GCP(), 'n1-standard-16'),
         # sky.Resources(
         #     clouds.GCP(),
@@ -57,7 +63,8 @@ with sky.Dag() as dag:
         #     'V100',
         # ),
         ##### Partially specified
-        # sky.Resources(accelerators='V100'),
+        # sky.Resources(accelerators='T4'),
+        sky.Resources(clouds.AWS(), accelerators='V100'),
         # sky.Resources(accelerators='tpu-v3-8'),
         # sky.Resources(clouds.AWS(), accelerators={'V100': 4}),
         # sky.Resources(clouds.AWS(), accelerators='V100'),

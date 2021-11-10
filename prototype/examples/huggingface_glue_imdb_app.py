@@ -36,7 +36,7 @@ with sky.Dag() as dag:
         setup=setup,
         run=run,
     )
-    train.set_resources({sky.Resources(accelerators='V100')})
+    train.set_resources({sky.Resources(accelerators='K80')})
 
 dag = sky.Optimizer.optimize(dag)
 sky.execute(dag)

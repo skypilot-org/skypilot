@@ -5,6 +5,7 @@ plotting/*.pdf
 plotting/*.png
 
 prototype/**/*.yml
+prototype/config/*.sh
 prototype/*.egg-info/
 prototype/**/*.tmp
 
