@@ -1,8 +1,11 @@
 absl-py
+boto3
 colorama
 jinja2
 networkx
 ray[default]
 tabulate
 
+awscli
 azure-cli
+google-api-python-client

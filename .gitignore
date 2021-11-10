@@ -4,7 +4,7 @@
 plotting/*.pdf
 plotting/*.png
 
-prototype/_airflow_dags/
+prototype/**/*.yml
 prototype/*.egg-info/
 prototype/**/*.tmp
 
