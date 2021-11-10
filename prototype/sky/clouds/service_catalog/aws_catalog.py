@@ -4,7 +4,7 @@ This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
 from typing import Optional
-from numpy import isnan
+import numpy as np
 
 from sky.clouds.service_catalog import common
 
@@ -14,18 +14,19 @@ _df = common.read_catalog('aws.csv')
 def get_hourly_cost(instance_type: str,
                     region: str = 'us-west-2',
                     spot: bool = False) -> float:
+    """Returns the cost, or the cheapest cost and zone among all zones for spot.
+    """
     result = _df[(_df['InstanceType'] == instance_type) &
                  (_df['Region'] == region)]
 
-    assert len(set(result['PricePerHour'])) == 1, (result, instance_type,
-                                                   region)
+    assert len(set(result['Price'])) == 1, (result, instance_type, region)
     if not spot:
-        return result['PricePerHour'].iloc[0]
+        return result['Price'].iloc[0]
 
-    cheapest_idx = result['SpotPricePerHour'].idxmin()
-    assert not isnan(cheapest_idx), (result, instance_type, region)
-    cheapest = result.iloc[cheapest_idx]
-    return cheapest['SpotPricePerHour'], cheapest['AvailabilityZone']
+    cheapest_idx = result['SpotPrice'].idxmin()
+    assert not np.isnan(cheapest_idx), (result, instance_type, region)
+    cheapest = result.loc[cheapest_idx]
+    return cheapest['SpotPrice'], cheapest['AvailabilityZone']
 
 
 def get_instance_type_for_gpu(gpu_name: str,

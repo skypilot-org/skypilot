@@ -28,11 +28,17 @@ def get_instance_types(region: str) -> pd.DataFrame:
         print(f'{region} getting instance types page {i}')
         items += resp['InstanceTypes']
 
+    return pd.DataFrame(items)
+
+
+@ray.remote
+def get_availability_zones(region: str) -> pd.DataFrame:
+    client = boto3.client('ec2', region_name=region)
     zones = []
     response = client.describe_availability_zones()
     for resp in response['AvailabilityZones']:
         zones.append({'AvailabilityZone': resp['ZoneName']})
-    return pd.DataFrame(items).merge(pd.DataFrame(zones), how='cross')
+    return pd.DataFrame(zones)
 
 
 @ray.remote
@@ -63,8 +69,9 @@ def get_spot_pricing_table(region: str) -> pd.DataFrame:
 
 @ray.remote
 def get_instance_types_df(region: str) -> pd.DataFrame:
-    df, pricing_df, spot_pricing_df = ray.get([
+    df, zone_df, pricing_df, spot_pricing_df = ray.get([
         get_instance_types.remote(region),
+        get_availability_zones.remote(region),
         get_pricing_table.remote(region),
         get_spot_pricing_table.remote(region)
     ])
@@ -99,13 +106,14 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
     def get_additional_columns(row):
         gpu_name, gpu_count = get_gpu_info(row)
         return pd.Series({
-            'PricePerHour': get_price(row),
-            'SpotPricePerHour': get_spot_price(row),
+            'Price': get_price(row),
+            'SpotPrice': get_spot_price(row),
             'GpuName': gpu_name,
             'GpuCount': gpu_count,
         })
 
     df['Region'] = region
+    df = df.merge(pd.DataFrame(zone_df), how='cross')
     df = pd.concat([df, df.apply(get_additional_columns, axis='columns')],
                    axis='columns')
     return df
