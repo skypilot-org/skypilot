@@ -25,10 +25,10 @@ import colorama
 from colorama import Fore, Style
 
 import sky
-from sky import backends
-from sky import backend_utils
 from sky import cloud_stores
 from sky import logging
+from sky import backends
+from sky.backends import backend_utils
 
 logger = logging.init_logger(__name__)
 
@@ -365,5 +365,4 @@ def execute_v2(dag: sky.Dag,
         backend.teardown(handle)
 
 
-execute = execute_v1
 execute = execute_v2

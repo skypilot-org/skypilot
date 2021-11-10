@@ -1,4 +1,4 @@
-"""Sky backends: for provisioning, setup, scheduling, and execution."""
+"""Backend: runs on cloud virtual machines, managed by Ray."""
 import json
 import os
 import re
@@ -11,21 +11,21 @@ import yaml
 
 import colorama
 
-from sky import backend_utils
+from sky import backends
 from sky import clouds
 from sky import cloud_stores
 from sky import logging
-from sky import task as task_mod
 from sky import resources
-
-logger = logging.init_logger(__name__)
+from sky import task as task_mod
+from sky.backends import backend_utils
 
 App = backend_utils.App
 Resources = resources.Resources
 Path = str
 PostSetupFn = Callable[[str], Any]
-
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
+
+logger = logging.init_logger(__name__)
 
 
 def _run(cmd, **kwargs):
@@ -54,45 +54,7 @@ def _to_accelerator_and_count(resources: Optional[Resources]
     return acc, acc_count
 
 
-class Backend(object):
-    """Backend interface: handles provisioning, setup, and scheduling."""
-
-    # Backend-specific handle to the launched resources (e.g., a cluster).
-    # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
-    ResourceHandle = Any
-
-    def provision(self, task: App, to_provision: Resources,
-                  dryrun: bool) -> ResourceHandle:
-        raise NotImplementedError
-
-    def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
-        raise NotImplementedError
-
-    def sync_file_mounts(
-            self,
-            handle: ResourceHandle,
-            all_file_mounts: Dict[Path, Path],
-            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
-    ) -> None:
-        raise NotImplementedError
-
-    def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
-                       task: App) -> None:
-        raise NotImplementedError
-
-    def execute(self, handle: ResourceHandle, task: App,
-                stream_logs: bool) -> None:
-        raise NotImplementedError
-
-    def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
-        """Post execute(): e.g., print helpful inspection messages."""
-        raise NotImplementedError
-
-    def teardown(self, handle: ResourceHandle) -> None:
-        raise NotImplementedError
-
-
-class CloudVmRayBackend(Backend):
+class CloudVmRayBackend(backends.Backend):
     """Backend: runs on cloud virtual machines, managed by Ray.
 
     Changing this class may also require updates to:
