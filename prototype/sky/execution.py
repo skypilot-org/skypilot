@@ -169,15 +169,17 @@ class Step:
                     stderr=subprocess.STDOUT,
                     # text=True,
                 )
-                out_stream = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
-                
+                out_stream = io.TextIOWrapper(proc.stdout,
+                                              encoding='utf-8',
+                                              newline='')
+
                 disable_newline(logger)
                 for line in out_stream:
                     logger.debug(line)
                     fout.write(line)
                     lines.append(line)
                 enable_newline(logger)
-                
+
                 proc.communicate()
                 if proc.returncode != 0:
                     raise subprocess.CalledProcessError(

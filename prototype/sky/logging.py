@@ -3,6 +3,7 @@ import logging
 
 
 class NewlineFormatter(logging.Formatter):
+
     def __init__(self, fmt, datefmt=None):
         logging.Formatter.__init__(self, fmt, datefmt)
 
@@ -15,6 +16,7 @@ class NewlineFormatter(logging.Formatter):
             msg = msg[:-1].replace('\n', '\n' + parts[0])
             msg += last
         return msg
+
 
 FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)-3d] %(message)s'
 DATE_FORMAT = '%m-%d %H:%M:%S'
@@ -30,6 +32,7 @@ def init_logger(name):
     logger.addHandler(newline_handler)
     logger.setLevel(logging.DEBUG)
     return logger
+
 
 def enable_newline(logger):
     logger.handlers[0].terminator = '\n'
