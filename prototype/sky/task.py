@@ -23,6 +23,10 @@ def _is_cloud_store_url(url):
     return result.netloc
 
 
+def _dict_to_cmd_args(d):
+    return ' '.join(['--{}={}'.format(k, v) for k, v in d.items()])
+
+
 class Task(object):
     """Task: a coarse-grained stage in an application."""
 
@@ -66,6 +70,9 @@ class Task(object):
 
     @staticmethod
     def from_yaml(yaml_path):
+        # TODO(gmittal): Investigate better config tooling: https://confuse.readthedocs.io/en/latest/.
+        # TODO: Add support for command line modification
+
         with open(os.path.expanduser(yaml_path), 'r') as f:
             config = yaml.safe_load(f)
 
@@ -73,6 +80,17 @@ class Task(object):
 
         setup = config['setup']
         run = config['run']
+
+        if isinstance(setup, dict):
+            base_cmd_args = _dict_to_cmd_args(setup.get('flags', {}))
+            setup = '{}\n{} {}'.format(setup['preamble'],
+                                       setup.get('base_cmd', ''), base_cmd_args)
+
+        if isinstance(run, dict):
+            base_cmd_args = _dict_to_cmd_args(run.get('flags', {}))
+            run = '{}\n{} {}'.format(run['preamble'],
+                                     run.get('base_cmd', '').strip(),
+                                     base_cmd_args)
 
         file_mounts = config.get('file_mounts')
         if file_mounts is not None:

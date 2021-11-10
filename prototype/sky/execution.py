@@ -301,6 +301,12 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
             f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={task.best_resources.accelerator_args['tpu_name']}\" >> ~/.bashrc\'"
         )
 
+    if task.workdir is not None:
+        runner.add_step(
+            'sync', 'Sync files',
+            f'ray rsync_up {cluster_config_file} {task.workdir}/ {SKY_REMOTE_WORKDIR}'
+        )
+
     with open(f'{SKY_LOGS_DIRECTORY}/{run_id}/run.sh', 'w') as f:
         f.write(f'#!/bin/bash\n')
         f.write(task.run)
@@ -317,12 +323,6 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
         'setup', 'Task setup',
         f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && bash .sky/{run_id}/setup.sh \''
     )
-
-    if task.workdir is not None:
-        runner.add_step(
-            'sync', 'Sync files',
-            f'ray rsync_up {cluster_config_file} {task.workdir}/ {SKY_REMOTE_WORKDIR}'
-        )
 
     if task.get_cloud_to_remote_file_mounts() is not None:
         # Handle cloud -> remote file transfers.
