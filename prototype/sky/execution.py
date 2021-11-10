@@ -20,7 +20,7 @@ import json
 import os
 import re
 import subprocess
-import sys
+import io
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import yaml
@@ -31,7 +31,7 @@ from colorama import Fore, Style
 import sky
 from sky.authentication import *
 from sky import cloud_stores
-from sky.logging import init_logger
+from sky.logging import init_logger, enable_newline, disable_newline
 logger = init_logger(__name__)
 
 IPAddr = str
@@ -169,11 +169,15 @@ class Step:
                     stderr=subprocess.STDOUT,
                     # text=True,
                 )
-                for line in proc.stdout:
-                    line = line.decode("utf-8")
-                    logger.debug(line.rstrip() + '\r')
+                out_stream = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
+                
+                disable_newline(logger)
+                for line in out_stream:
+                    logger.debug(line)
                     fout.write(line)
                     lines.append(line)
+                enable_newline(logger)
+                
                 proc.communicate()
                 if proc.returncode != 0:
                     raise subprocess.CalledProcessError(
