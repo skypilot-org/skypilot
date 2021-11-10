@@ -302,8 +302,10 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
         )
 
     with open(f'{SKY_LOGS_DIRECTORY}/{run_id}/run.sh', 'w') as f:
+        f.write(f'#!/bin/bash\n')
         f.write(task.run)
     with open(f'{SKY_LOGS_DIRECTORY}/{run_id}/setup.sh', 'w') as f:
+        f.write(f'#!/bin/bash\n')
         f.write(task.setup)
 
     runner.add_step(
@@ -313,7 +315,7 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
 
     runner.add_step(
         'setup', 'Task setup',
-        f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && sh .sky/{run_id}/setup.sh \''
+        f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && bash .sky/{run_id}/setup.sh \''
     )
 
     if task.workdir is not None:
@@ -366,7 +368,7 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     if isinstance(task.run, str):
         runner.add_step(
             'exec', 'Execute task',
-            f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && sh .sky/{run_id}/run.sh \''
+            f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && bash .sky/{run_id}/run.sh \''
         )
     else:
         runner.add_step('exec', 'Execute task', task.run)

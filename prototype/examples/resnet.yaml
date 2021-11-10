@@ -18,6 +18,7 @@ file_mounts: {
 }
 
 run: |
+  source /home/ubuntu/anaconda3/etc/profile.d/conda.sh
   conda activate resnet
 
   python -u models/official/resnet/resnet_main.py \
@@ -31,7 +32,10 @@ run: |
 setup: |
   pip install --upgrade pip
 
-  if $(conda activate resnet); then
+  source /home/ubuntu/anaconda3/etc/profile.d/conda.sh
+  conda activate resnet
+
+  if [ $? -eq 0 ]; then
     echo "conda env exists"
   else
     conda create -n resnet python=3.7 -y
