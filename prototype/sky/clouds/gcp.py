@@ -1,4 +1,5 @@
 import copy
+import json
 
 from sky import clouds
 
@@ -98,6 +99,10 @@ class GCP(clouds.Cloud):
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
 
+    @classmethod
+    def get_default_instance_type(cls):
+        return 'n1-highmem-8'
+
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
         # Find GPU spec, if any.
@@ -105,11 +110,16 @@ class GCP(clouds.Cloud):
             'instance_type': r.instance_type,
             'gpu': None,
             'gpu_count': None,
-            'tpu': None}
+            'tpu': None,
+            'custom_resources': None,
+        }
         accelerators = r.get_accelerators()
         if accelerators is not None:
             assert len(accelerators) == 1, r
             acc, acc_count = list(accelerators.items())[0]
+            resources_vars['custom_resources'] = json.dumps(accelerators,
+                                                            separators=(',',
+                                                                        ':'))
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 resources_vars['tf_version'] = r.accelerator_args['tf_version']
@@ -120,10 +130,6 @@ class GCP(clouds.Cloud):
                 resources_vars['gpu_count'] = acc_count
 
         return resources_vars
-
-    @classmethod
-    def get_default_instance_type(cls):
-        return 'n1-highmem-8'
 
     def get_feasible_launchable_resources(self, resources):
         if resources.instance_type is not None:

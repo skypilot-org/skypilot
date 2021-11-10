@@ -1,8 +1,6 @@
 import collections
 import copy
-import enum
 import pprint
-import typing
 
 import networkx as nx
 import numpy as np
@@ -10,8 +8,9 @@ import tabulate
 
 import sky
 from sky import clouds
-from sky.logging import init_logger
-logger = init_logger(__name__)
+from sky import logging
+
+logger = logging.init_logger(__name__)
 
 
 class Optimizer(object):
@@ -161,7 +160,7 @@ class Optimizer(object):
             # Don't print for the last node, Sink.
             do_print = node_i != len(topo_order) - 1
             if do_print:
-                logger.info('\n#### {} ####'.format(node))
+                logger.info('#### {} ####'.format(node))
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = sky.registry.fill_in_launchable_resources(
@@ -175,6 +174,10 @@ class Optimizer(object):
             num_resources = len(node.get_resources())
             parents = list(graph.predecessors(node))
             for orig_resources, launchable_list in launchable_resources.items():
+                if not launchable_list:
+                    raise ValueError(
+                        f'No launchable resource found for task {node}; '
+                        f'To fix: relax its Resources() requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.warning(
                         'Time estimator not set and only one possible '
