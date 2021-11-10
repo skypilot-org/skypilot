@@ -28,24 +28,22 @@ def attach(task_id):
 
 
 @cli.command()
-@click.option(
-    "--n-gpus",
-    "-N",
-    default=1,
-    type=int,
-    help="Select number of GPUs to allocate.")
+@click.option("--n-gpus",
+              "-N",
+              default=1,
+              type=int,
+              help="Select number of GPUs to allocate.")
 def gpunode(n_gpus):
     """Create an interactive GPU session."""
     click.echo(n_gpus)
 
 
 @cli.command()
-@click.option(
-    "--n-cpus",
-    "-N",
-    default=4,
-    type=int,
-    help="Select number of CPUs to allocate.")
+@click.option("--n-cpus",
+              "-N",
+              default=4,
+              type=int,
+              help="Select number of CPUs to allocate.")
 def cpunode(n_cpus):
     """Create an interactive CPU session."""
     click.echo(n_cpus)
