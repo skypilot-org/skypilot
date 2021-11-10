@@ -9,6 +9,13 @@ from sky.clouds.service_catalog import aws_catalog
 class AWS(clouds.Cloud):
     _REPR = 'AWS'
 
+    # TODO: make aws_catalog support this.
+    _ACCELERATORS_DIRECTORY = {
+        ('V100', 1): 'p3.2xlarge',
+        ('V100', 4): 'p3.8xlarge',
+        ('V100', 8): 'p3.16xlarge',
+    }
+
     def instance_type_to_hourly_cost(self, instance_type):
         return aws_catalog.get_hourly_cost(instance_type)
 
