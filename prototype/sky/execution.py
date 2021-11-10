@@ -18,9 +18,8 @@ import json
 import os
 import re
 import subprocess
-import sys
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Union
 
 import colorama
 from colorama import Fore, Style
@@ -31,7 +30,7 @@ from sky import backend_utils
 from sky import cloud_stores
 from sky import logging
 
-logging = logging.init_logger(__name__)
+logger = logging.init_logger(__name__)
 
 IPAddr = str
 ShellCommand = str
@@ -108,7 +107,7 @@ class Step:
                 )
                 for line in proc.stdout:
                     line = line.decode("utf-8")
-                    logging.debug(line.rstrip() + '\r')
+                    logger.debug(line.rstrip() + '\r')
                     fout.write(line)
                     lines.append(line)
                 proc.communicate()
@@ -121,7 +120,7 @@ class Step:
                     self.callback(''.join(lines))
                 return proc
         else:
-            logging.info(
+            logger.info(
                 f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
             proc = subprocess.run(
                 self.shell_command + f' 2>&1 >{log_path}',
@@ -160,11 +159,11 @@ class Runner:
 
     def run(self) -> 'Runner':
         self.logger.log('start_run')
-        logging.info(f'{Fore.GREEN}')
-        logging.info('--------------------------')
-        logging.info('  Sky execution started')
-        logging.info(f'--------------------------{Fore.RESET}')
-        logging.info('')
+        logger.info(f'{Fore.GREEN}')
+        logger.info('--------------------------')
+        logger.info('  Sky execution started')
+        logger.info(f'--------------------------{Fore.RESET}')
+        logger.info('')
 
         try:
             for step in self.steps:
@@ -177,14 +176,14 @@ class Runner:
                     },
                 )
                 if isinstance(step.shell_command, ShellCommand):
-                    logging.info(
+                    logger.info(
                         f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{step.shell_command}{Style.RESET_ALL}'
                     )
                     step.run()
                 else:
                     assert len(self.cluster_ips) >= 1, self.cluster_ips
                     commands = step.shell_command(self.cluster_ips)
-                    logging.info(
+                    logger.info(
                         f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{commands}{Style.RESET_ALL}'
                     )
                     for ip, cmd in commands.items():
@@ -194,18 +193,18 @@ class Runner:
                             self.task.container_name)
 
                 self.logger.log('finish_step')
-                logging.info(
+                logger.info(
                     f'{Fore.CYAN}Step {step.step_id} finished{Fore.RESET}\n')
 
             self.logger.log('finish_run')
-            logging.info(f'{Fore.GREEN}')
-            logging.info('---------------------------')
-            logging.info('  Sky execution finished')
-            logging.info(f'---------------------------{Fore.RESET}')
-            logging.info('')
+            logger.info(f'{Fore.GREEN}')
+            logger.info('---------------------------')
+            logger.info('  Sky execution finished')
+            logger.info(f'---------------------------{Fore.RESET}')
+            logger.info('')
             return self
         except subprocess.CalledProcessError as e:
-            logging.error(f'{Fore.RED}Step failed! {e}{Fore.RESET}')
+            logger.error(f'{Fore.RED}Step failed! {e}{Fore.RESET}')
             raise e
 
 
@@ -220,7 +219,7 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
         run_id, task, _get_cluster_config_template(task))
     cluster_config_file = config_dict['ray']
     if dryrun:
-        logging.info('Dry run finished.')
+        logger.info('Dry run finished.')
         return
 
     # FIXME: if a command fails, stop the rest.
@@ -304,19 +303,20 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
                             f'bash {config_dict["gcloud"][1]}')
     runner.run()
     if not teardown:
-        logging.info(
+        logger.info(
             f'  To log into the cloud VM:\t{Style.BRIGHT}ray attach {cluster_config_file} {Style.RESET_ALL}\n'
         )
-        logging.info(
+        logger.info(
             f'  To teardown the resources:\t{Style.BRIGHT}ray down {cluster_config_file} -y {Style.RESET_ALL}\n'
         )
         if task.best_resources.accelerator_args.get('tpu_name') is not None:
-            logging.info(
+            logger.info(
                 f'  To teardown the TPU resources:\t{Style.BRIGHT}bash {config_dict["gcloud"][1]} {Style.RESET_ALL}\n'
             )
 
 
-def execute_v2(dag: sky.Dag, dryrun: bool = False,
+def execute_v2(dag: sky.Dag,
+               dryrun: bool = False,
                teardown: bool = False,
                stream_logs: bool = True) -> None:
     """Executes a planned DAG.
@@ -343,7 +343,7 @@ def execute_v2(dag: sky.Dag, dryrun: bool = False,
 
     handle = backend.provision(task, best_resources, dryrun=dryrun)
     if dryrun:
-        logging.info('Dry run finished.')
+        logger.info('Dry run finished.')
         return
 
     if task.workdir is not None:

@@ -1,6 +1,5 @@
 """Util constants/functions for the backends."""
 import datetime
-import shlex
 import subprocess
 import time
 from typing import Optional, Union
@@ -12,7 +11,7 @@ from sky import authentication as auth
 from sky import logging
 from sky import task
 
-logging = logging.init_logger(__name__)
+logger = logging.init_logger(__name__)
 
 # An application.  These are the task types to support.
 App = Union[task.Task, task.ParTask]
@@ -35,7 +34,7 @@ def _fill_template(template_path: str,
         output_path, _ = template_path.rsplit('.', 1)
     with open(output_path, 'w') as fout:
         fout.write(content)
-    logging.info(f'Created or updated file {output_path}')
+    logger.info(f'Created or updated file {output_path}')
     return output_path
 
 
@@ -124,7 +123,7 @@ def wait_until_ray_cluster_ready(cluster_config_file: str, num_nodes: int):
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         output = proc.stdout.decode('ascii')
-        logging.info(output)
+        logger.info(output)
         if f'{expected_worker_count} ray.worker.default' in output:
             break
         time.sleep(10)
@@ -153,8 +152,8 @@ def run_command_on_ip_via_ssh(ip: str,
                             universal_newlines=True)
     outs, errs = proc.communicate()
     if outs:
-        logging.info(outs)
+        logger.info(outs)
     if proc.returncode:
         if errs:
-            logging.error(errs)
+            logger.error(errs)
         raise subprocess.CalledProcessError(proc.returncode, cmd)

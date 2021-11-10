@@ -18,7 +18,7 @@ from sky import logging
 from sky import task as task_mod
 from sky import resources
 
-logging = logging.init_logger(__name__)
+logger = logging.init_logger(__name__)
 
 App = backend_utils.App
 Resources = resources.Resources
@@ -132,7 +132,7 @@ class CloudVmRayBackend(Backend):
             except subprocess.CalledProcessError as e:
                 stderr = e.stderr.decode('ascii')
                 if 'ALREADY_EXISTS' in stderr:
-                    logging.info(
+                    logger.info(
                         f'TPU {tpu_name} already exists; skipped creation.')
                 else:
                     raise e
@@ -247,14 +247,14 @@ class CloudVmRayBackend(Backend):
         codegen.append('ray.get(futures)\n')
         codegen = '\n'.join(codegen)
 
-        # Logging.
+        # Logger.
         colorama.init()
         Fore = colorama.Fore
         Style = colorama.Style
-        logging.info(
+        logger.info(
             f'\n{Fore.CYAN}Starting ParTask execution.{Style.RESET_ALL}')
         if not stream_logs:
-            logging.info(
+            logger.info(
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
                 f'{Style.RESET_ALL} Hint: in the run command, redirect each'
                 ' task\'s output to a file, and use `tail -f` to monitor.\n')
@@ -284,7 +284,7 @@ class CloudVmRayBackend(Backend):
 
         # Otherwise, handle a basic Task.
         if task.run is None:
-            logging.info(f'Nothing to run; run command not specified:\n{task}')
+            logger.info(f'Nothing to run; run command not specified:\n{task}')
             return
 
         # Case: Task(run, num_nodes=1)
@@ -308,8 +308,8 @@ class CloudVmRayBackend(Backend):
             cmd += f' >{out}'
             colorama.init()
             Style = colorama.Style
-            logging.info(f'Redirecting stdout, to monitor: '
-                         f'{Style.BRIGHT}tail -f {out}{Style.RESET_ALL}')
+            logger.info(f'Redirecting stdout, to monitor: '
+                        f'{Style.BRIGHT}tail -f {out}{Style.RESET_ALL}')
         _run(cmd)
 
     def _execute_task_n_nodes(self, handle: ResourceHandle, task: App,
@@ -364,14 +364,13 @@ class CloudVmRayBackend(Backend):
         # Block.
         codegen.append('ray.get(futures)\n')
         codegen = '\n'.join(codegen)
-        # Logging.
+        # Logger.
         colorama.init()
         Fore = colorama.Fore
         Style = colorama.Style
-        logging.info(
-            f'\n{Fore.CYAN}Starting Task execution.{Style.RESET_ALL}')
+        logger.info(f'\n{Fore.CYAN}Starting Task execution.{Style.RESET_ALL}')
         if not stream_logs:
-            logging.info(
+            logger.info(
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
                 f'{Style.RESET_ALL} Hint: in the run command, redirect each'
                 ' task\'s output to a file, and use `tail -f` to monitor.\n')
@@ -381,12 +380,12 @@ class CloudVmRayBackend(Backend):
         colorama.init()
         Style = colorama.Style
         if not teardown:
-            logging.info(
+            logger.info(
                 f'\nTo log into the head VM:\t{Style.BRIGHT}ray attach {handle} {Style.RESET_ALL}\n'
                 f'\nTo teardown the resources:\t{Style.BRIGHT}ray down {handle} -y {Style.RESET_ALL}\n'
             )
             if self._managed_tpu is not None:
-                logging.info(
+                logger.info(
                     f'To teardown the TPU resources:\t{Style.BRIGHT}bash {self._managed_tpu[1]} {Style.RESET_ALL}\n'
                 )
 

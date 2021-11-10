@@ -237,6 +237,9 @@ class ParTask(Task):
 
     (2) ParTask.set_resources(...) must be called, providing the total
     resources to share among all tasks.
+
+    TODO: allow an option to make this optional, which should have the
+    semantics "use as many resources as required".
     """
 
     def __init__(self, tasks: List[Task]):

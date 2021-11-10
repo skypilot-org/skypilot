@@ -25,7 +25,7 @@ with sky.Dag() as dag:
             --num_train_epochs 1 \
             --fp16 2>&1 | tee run-{lr}.log'
 
-    per_trial_resources = sky.Resources(clouds.AWS(), accelerators={'V100': 1})
+    per_trial_resources = sky.Resources(accelerators={'V100': 1})
     resources_to_launch = sky.Resources(clouds.AWS(), accelerators={'V100': 4})
 
     tasks = []

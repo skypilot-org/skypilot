@@ -2,7 +2,8 @@ from typing import Dict, Optional, Union
 
 from sky import clouds
 from sky import logging
-logging = logging.init_logger(__name__)
+
+logger = logging.init_logger(__name__)
 
 
 class Resources(object):
@@ -46,12 +47,12 @@ class Resources(object):
                 assert accelerator_args is not None, \
                     'accelerator_args must be specified together with TPU'
                 if 'tf_version' not in accelerator_args:
-                    logging.info('Missing tf_version in accelerator_args, using'
-                                 ' default (2.5.0)')
+                    logger.info('Missing tf_version in accelerator_args, using'
+                                ' default (2.5.0)')
                     accelerator_args['tf_version'] = '2.5.0'
                 if 'tpu_name' not in accelerator_args:
-                    logging.info('Missing tpu_name in accelerator_args, using'
-                                 ' default (sky_tpu)')
+                    logger.info('Missing tpu_name in accelerator_args, using'
+                                ' default (sky_tpu)')
                     accelerator_args['tpu_name'] = 'sky_tpu'
             accelerators = {accelerators: 1}
         self.accelerators = accelerators
