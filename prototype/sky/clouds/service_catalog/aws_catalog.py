@@ -3,7 +3,7 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 
@@ -43,3 +43,7 @@ def get_instance_type_for_gpu(gpu_name: str,
     assert len(set(result['InstanceType'])) == 1, (result, gpu_name, count,
                                                    region)
     return result.iloc[0]['InstanceType']
+
+
+def list_accelerators() -> List[str]:
+    return _df['GpuName'].dropna().unique().tolist()

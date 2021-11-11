@@ -1,5 +1,5 @@
 from sky import backends
-from sky import clouds
+from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag, DagContext
 from sky.execution import execute
 from sky.resources import Resources
@@ -17,4 +17,5 @@ __all__ = [
     'backends',
     'execute',
     'fill_in_launchable_resources',
+    'list_accelerators',
 ]
