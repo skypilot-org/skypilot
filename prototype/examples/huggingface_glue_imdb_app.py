@@ -11,7 +11,8 @@ import sky
 with sky.Dag() as dag:
     # The setup command.  Will be run under the working directory.
     # https://github.com/huggingface/transformers/tree/master/examples#important-note
-    setup = 'git clone https://github.com/huggingface/transformers/ && \
+    setup = '\
+      (git clone https://github.com/huggingface/transformers/ || true) && \
       cd transformers && pip install . && \
       cd examples/pytorch/text-classification && \
       pip install -r requirements.txt'

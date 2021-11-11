@@ -69,10 +69,10 @@ setup_commands:
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
   - ray stop
-  - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --resources='{{ custom_resources }}'
+  - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
   - ray stop
-  - ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --resources='{{ custom_resources }}'
+  - ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
 {%- endif %}

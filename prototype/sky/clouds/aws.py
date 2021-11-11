@@ -12,10 +12,34 @@ class AWS(clouds.Cloud):
     _regions: List[clouds.Region] = []
 
     # TODO: make aws_catalog support this.
+    # Used in reverse matching to fill out --resources when launching clusters.
+    # https://aws.amazon.com/ec2/instance-types/
     _ACCELERATORS_DIRECTORY = {
+        # A100
+        ('A100', 8): 'p4d.24xlarge',
+        # V100
         ('V100', 1): 'p3.2xlarge',
         ('V100', 4): 'p3.8xlarge',
         ('V100', 8): 'p3.16xlarge',
+        # V100-32GB
+        ('V100-32GB', 8): 'p3dn.24xlarge',
+        # K80
+        ('K80', 1): 'p2.xlarge',
+        ('K80', 8): 'p2.8xlarge',
+        ('K80', 16): 'p2.16xlarge',
+        # T4
+        ('T4', 1): (
+            'g4dn.xlarge',
+            'g4dn.2xlarge',
+            'g4dn.4xlarge',
+            'g4dn.8xlarge',
+            'g4dn.16xlarge',
+        ),  # FIXME: what's the story here?
+        ('T4', 8): 'g4dn.metal',
+        # M60
+        ('M60', 1): ('g3s.xlarge', 'g3.4xlarge'),  # FIXME
+        ('M60', 2): 'g3.8xlarge',
+        ('M60', 4): 'g3.16xlarge',
     }
 
     #### Regions/Zones ####
@@ -30,6 +54,11 @@ class AWS(clouds.Cloud):
                 #     clouds.Zone('us-west-1a'),
                 #     clouds.Zone('us-west-1b'),
                 # ]),
+                clouds.Region('us-east-2').set_zones([
+                    clouds.Zone('us-east-2a'),
+                    clouds.Zone('us-east-2b'),
+                    clouds.Zone('us-east-2c'),
+                ]),
                 clouds.Region('us-east-1').set_zones([
                     clouds.Zone('us-east-1a'),
                     clouds.Zone('us-east-1b'),
@@ -37,11 +66,6 @@ class AWS(clouds.Cloud):
                     clouds.Zone('us-east-1d'),
                     clouds.Zone('us-east-1e'),
                     clouds.Zone('us-east-1f'),
-                ]),
-                clouds.Region('us-east-2').set_zones([
-                    clouds.Zone('us-east-2a'),
-                    clouds.Zone('us-east-2b'),
-                    clouds.Zone('us-east-2c'),
                 ]),
                 clouds.Region('us-west-2').set_zones([
                     clouds.Zone('us-west-2a'),

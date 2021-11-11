@@ -26,7 +26,7 @@ available_node_types:
             autoDelete: true
             type: PERSISTENT
             initializeParams:
-              diskSizeGb: 500
+              diskSizeGb: 256
               # See https://cloud.google.com/deep-learning-vm/docs/images
 {%- if gpu is none %}
               sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu
@@ -75,4 +75,4 @@ setup_commands:
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
   - ray stop
-  - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8876 --resources='{{ custom_resources }}'
+  - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8876 {{"--resources='%s'" % custom_resources if custom_resources}}
