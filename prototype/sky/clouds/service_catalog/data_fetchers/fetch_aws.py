@@ -105,6 +105,10 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
 
     def get_additional_columns(row):
         gpu_name, gpu_count = get_gpu_info(row)
+        # AWS p3dn.24xlarge offers a different V100 GPU.
+        # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/
+        if row['InstanceType'] == 'p3dn.24xlarge':
+            gpu_name = 'V100-32GB'
         return pd.Series({
             'Price': get_price(row),
             'SpotPrice': get_spot_price(row),

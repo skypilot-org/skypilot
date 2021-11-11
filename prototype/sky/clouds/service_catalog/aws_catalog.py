@@ -35,8 +35,8 @@ def get_instance_type_for_gpu(gpu_name: str,
     """Returns the cheapest instance type that offers the required count of GPUs.
     """
     # TODO: Reorganize _df to support any accelerator (Inferentia, etc.)
-    result = _df[(_df["GpuName"] == gpu_name) & (_df["GpuCount"] == count) &
-                 (_df["Region"] == region)]
+    result = _df[(_df['GpuName'] == gpu_name) & (_df['GpuCount'] == count) &
+                 (_df['Region'] == region)]
     if len(result) == 0:
         return None
     assert len(result) == 1, (result, gpu_name, count, region)

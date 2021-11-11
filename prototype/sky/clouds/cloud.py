@@ -1,3 +1,6 @@
+from typing import Dict, Optional
+
+
 class Cloud(object):
 
     # TODO: incorporate region/zone into the API.
@@ -31,6 +34,13 @@ class Cloud(object):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
+        raise NotImplementedError
+
+    def get_accelerators_from_instance_type(
+            self,
+            instance_type: str,
+    ) -> Optional[Dict[str, int]]:
+        """Returns {acc: acc_count} held by 'instance_type', if any."""
         raise NotImplementedError
 
     def get_default_instance_type(self):
