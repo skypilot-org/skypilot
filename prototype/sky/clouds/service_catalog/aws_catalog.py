@@ -31,19 +31,22 @@ def get_hourly_cost(instance_type: str,
     return cheapest['SpotPrice']
 
 
-def get_instance_type_for_gpu(gpu_name: str,
-                              count: int,
-                              region: str = 'us-west-2') -> Optional[str]:
-    """Returns the cheapest instance type that offers the required count of GPUs."""
-    # TODO: Reorganize _df to support any accelerator (Inferentia, etc.)
-    result = _df[(_df['GpuName'] == gpu_name) & (_df['GpuCount'] == count) &
+def get_instance_type_for_accelerator(
+        acc_name: str,
+        acc_count: int,
+        region: str = 'us-west-2') -> Optional[str]:
+    """Returns the cheapest instance type that offers the required count of
+    accelerators."""
+    result = _df[(_df['AcceleratorName'] == acc_name) &
+                 (_df['AcceleratorCount'] == acc_count) &
                  (_df['Region'] == region)]
     if len(result) == 0:
         return None
-    assert len(set(result['InstanceType'])) == 1, (result, gpu_name, count,
+    assert len(set(result['InstanceType'])) == 1, (result, acc_name, acc_count,
                                                    region)
     return result.iloc[0]['InstanceType']
 
 
 def list_accelerators() -> List[str]:
-    return _df['GpuName'].dropna().unique().tolist()
+    """List the canonical names of all accelerators offered by this cloud."""
+    return _df['AcceleratorName'].dropna().unique().tolist()

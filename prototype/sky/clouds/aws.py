@@ -139,8 +139,8 @@ class AWS(clouds.Cloud):
     # between Azure and AWS.
 
     def get_accelerators_from_instance_type(
-            self,
-            instance_type: str,
+        self,
+        instance_type: str,
     ) -> Optional[Dict[str, int]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
         inverse = {v: k for k, v in AWS._ACCELERATORS_DIRECTORY.items()}
@@ -188,7 +188,8 @@ class AWS(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        instance_type = aws_catalog.get_instance_type_for_gpu(acc, acc_count)
+        instance_type = aws_catalog.get_instance_type_for_accelerator(
+            acc, acc_count)
         if instance_type is None:
             return []
         return _make(instance_type)
