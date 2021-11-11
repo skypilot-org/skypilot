@@ -12,8 +12,7 @@ with sky.Dag() as dag:
                    check=True)
 
     # The setup command.  Will be run under the working directory.
-    setup = 'pip install --upgrade pip && \
-        conda init bash && \
+    setup = 'source /home/ubuntu/anaconda3/etc/profile.d/conda.sh && pip install --upgrade pip && \
         conda activate resnet || \
           (conda create -n resnet python=3.7 -y && \
            conda activate resnet && \
@@ -21,7 +20,7 @@ with sky.Dag() as dag:
            cd models && pip install -e .)'
 
     # The command to run.  Will be run under the working directory.
-    run = 'conda activate resnet && \
+    run = 'source /home/ubuntu/anaconda3/etc/profile.d/conda.sh && conda activate resnet && \
         python -u models/official/resnet/resnet_main.py --use_tpu=False \
         --mode=train --train_batch_size=256 --train_steps=250 \
         --iterations_per_loop=125 \

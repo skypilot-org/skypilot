@@ -90,7 +90,7 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
                 'container_name': task.container_name,
                 'num_nodes': task.num_nodes,
                 'file_mounts': task.get_local_to_remote_file_mounts() or {},
-                'max_nodes': task.max_nodes,
+                # 'max_nodes': task.max_nodes,
             }))
     if resources_vars.get('tpu_type') is not None:
         # FIXME: replace hard-coding paths

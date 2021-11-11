@@ -17,37 +17,16 @@ file_mounts: {
   /tmp/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet,
 }
 
-run: 
-  preamble: |
-    source /home/ubuntu/anaconda3/etc/profile.d/conda.sh
-    conda activate resnet
-  
-  base_cmd: |  
-    python -u models/official/resnet/resnet_main.py
+run: |
+  source /home/ubuntu/anaconda3/etc/profile.d/conda.sh
+  conda activate resnet
 
-  flags:
-    use_tpu: False
-    mode: train
-    train_batch_size: 256
-    train_steps: 250
-    iterations_per_loop: 125
-    data_dir: gs://cloud-tpu-test-datasets/fake_imagenet
-    model_dir: resnet-model-dir
-    amp: 1
-    xla: 1
-    loss_scale: 128
-
-# NOTE: Alternatively, can do something like the following.
-# run: |
-#   source /home/ubuntu/anaconda3/etc/profile.d/conda.sh
-#   conda activate resnet
-
-#   python -u models/official/resnet/resnet_main.py --use_tpu=False \
-#       --mode=train --train_batch_size=256 --train_steps=250 \
-#       --iterations_per_loop=125 \
-#       --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
-#       --model_dir=resnet-model-dir \
-#       --amp --xla --loss_scale=128
+  python -u models/official/resnet/resnet_main.py --use_tpu=False \
+      --mode=train --train_batch_size=256 --train_steps=250 \
+      --iterations_per_loop=125 \
+      --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
+      --model_dir=resnet-model-dir \
+      --amp --xla --loss_scale=128
 
 setup: |
   pip install --upgrade pip
@@ -64,25 +43,3 @@ setup: |
     cd models
     pip install -e .
   fi
-
-# NOTE: Alternatively, can do something like the following.
-# setup:
-#   preamble: |
-#     pip install --upgrade pip
-
-#     source /home/ubuntu/anaconda3/etc/profile.d/conda.sh
-#     conda activate resnet
-
-#     if [ $? -eq 0 ]; then
-#       echo "conda env exists"
-#     else
-#       conda create -n resnet python=3.7 -y
-#       conda activate resnet
-#       pip install tensorflow==2.4.0 pyyaml
-#       cd models
-#       pip install -e .
-#     fi
-
-#   # optional
-#   # base_cmd: ...
-#   # flags: ...

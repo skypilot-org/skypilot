@@ -1,5 +1,10 @@
+import os
+import subprocess
+
 import click
+
 import sky
+from sky import clouds
 
 
 @click.group()
@@ -9,7 +14,7 @@ def cli():
 
 @cli.command()
 @click.argument("task_id", required=True, type=str)
-def log(task_id):
+def logs(task_id):
     """View log output for a task."""
     click.echo(task_id)
 
@@ -35,7 +40,51 @@ def attach(task_id):
               help="Select number of GPUs to allocate.")
 def gpunode(n_gpus):
     """Create an interactive GPU session."""
-    click.echo(n_gpus)
+
+    # Export current conda environment
+    subprocess.run(f'mkdir -p .sky && conda env export --no-builds | grep -v "^prefix: " > .sky/environment.yml',
+                    shell=True,
+                    check=True,
+                    capture_output=True)
+    
+    env_name = os.environ['CONDA_DEFAULT_ENV']
+
+    run = f"""
+    source /home/ubuntu/anaconda3/etc/profile.d/conda.sh
+    conda env create -f .sky/environment.yml
+    conda activate {env_name}
+    """
+
+    with sky.Dag() as dag:
+
+        task = sky.Task(
+            'gpunode',
+            workdir=os.getcwd(),
+            setup='',
+            run=run,
+        )
+
+        task.set_resources({
+            ##### Fully specified
+            # sky.Resources(clouds.AWS(), 'p3.2xlarge'),
+            # sky.Resources(clouds.GCP(), 'n1-standard-16'),
+            # sky.Resources(
+            #     clouds.GCP(),
+            #     'n1-standard-8',
+            #     # Options: 'V100', {'V100': <num>}.
+            #     'V100',
+            # ),
+            ##### Partially specified
+            # sky.Resources(accelerators='V100'),
+            # sky.Resources(accelerators='tpu-v3-8'),
+            sky.Resources(clouds.AWS(), accelerators={'V100': n_gpus}),
+            # sky.Resources(clouds.AWS(), accelerators='V100'),
+        })
+    
+    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
+    sky.execute(dag)
+
+    # TODO(gmittal): Handle graceful attach + detach and automatic activation of conda env
 
 
 @cli.command()
@@ -46,7 +95,10 @@ def gpunode(n_gpus):
               help="Select number of CPUs to allocate.")
 def cpunode(n_cpus):
     """Create an interactive CPU session."""
-    click.echo(n_cpus)
+
+    # TODO: Currently no way to ask for number of CPUs as resources.
+    # These kinds of nodes are very useful for data preprocessing/downloading.
+    raise NotImplementedError
 
 
 @cli.command()
@@ -72,8 +124,12 @@ def cancel(task_id):
 
 @cli.command()
 def ls():
-    """View all jobs and their state."""
-    click.echo("nothing")
+    """View all jobs and their state.
+    
+    TODO: Current framework only supports one job at a time. Need to fix
+    https://github.com/concretevitamin/sky-experiments/issues/18 before this.
+    """
+    raise NotImplementedError()
 
 
 def main():
