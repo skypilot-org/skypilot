@@ -3,23 +3,38 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
-from typing import List, Optional
+from typing import Dict, List, Optional
+
+import pandas as pd
 
 import numpy as np
 
-from sky import logging
 from sky.clouds.service_catalog import common
 
-logger = logging.init_logger(__name__)
 _df = common.read_catalog('aws.csv')
 
 
-def get_hourly_cost(instance_type: str,
-                    region: str = 'us-west-2',
-                    use_spot: bool = False) -> float:
-    """Returns the cost, or the cheapest cost among all zones for spot."""
+def _get_instance_type(instance_type: str, region: str) -> pd.Series:
     result = _df[(_df['InstanceType'] == instance_type) &
                  (_df['Region'] == region)]
+    assert len(result) == 1, (result, instance_type, region)
+    return result
+
+
+def get_hourly_cost(instance_type: str, region: str = 'us-west-2') -> float:
+    entry = _get_instance_type(instance_type, region)
+    return entry['PricePerHour'].iloc[0]
+
+
+def get_accelerators_from_instance_type(instance_type: str,
+                                        region: str = 'us-west-2'
+                                       ) -> Dict[str, int]:
+    entry = _get_instance_type(instance_type, region)
+    acc_name, acc_count = entry['AcceleratorName'].item(), int(
+        entry['AcceleratorCount'].item())
+    if len(acc_name) == 0 and acc_count == 0:
+        return {}
+    return {acc_name: acc_count}
 
     assert len(set(result['Price'])) == 1, (result, instance_type, region)
     cheapest_idx = result['SpotPrice'].idxmin()

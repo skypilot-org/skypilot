@@ -11,96 +11,8 @@ class AWS(clouds.Cloud):
     _REPR = 'AWS'
     _regions: List[clouds.Region] = []
 
-    # TODO: make aws_catalog support this.
-    # Used in reverse matching to fill out --resources when launching clusters.
-    # https://aws.amazon.com/ec2/instance-types/
-    _ACCELERATORS_DIRECTORY = {
-        # A100
-        ('A100', 8): 'p4d.24xlarge',
-        # V100
-        ('V100', 1): 'p3.2xlarge',
-        ('V100', 4): 'p3.8xlarge',
-        ('V100', 8): 'p3.16xlarge',
-        # V100-32GB
-        ('V100-32GB', 8): 'p3dn.24xlarge',
-        # K80
-        ('K80', 1): 'p2.xlarge',
-        ('K80', 8): 'p2.8xlarge',
-        ('K80', 16): 'p2.16xlarge',
-        # T4
-        ('T4', 1): (
-            'g4dn.xlarge',
-            'g4dn.2xlarge',
-            'g4dn.4xlarge',
-            'g4dn.8xlarge',
-            'g4dn.16xlarge',
-        ),  # FIXME: what's the story here?
-        ('T4', 8): 'g4dn.metal',
-        # M60
-        ('M60', 1): ('g3s.xlarge', 'g3.4xlarge'),  # FIXME
-        ('M60', 2): 'g3.8xlarge',
-        ('M60', 4): 'g3.16xlarge',
-    }
-
-    #### Regions/Zones ####
-
-    @classmethod
-    def regions(cls):
-        if not cls._regions:
-            # https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/
-            cls._regions = [
-                # TODO: troubles launching AMIs.
-                # clouds.Region('us-west-1').set_zones([
-                #     clouds.Zone('us-west-1a'),
-                #     clouds.Zone('us-west-1b'),
-                # ]),
-                clouds.Region('us-east-2').set_zones([
-                    clouds.Zone('us-east-2a'),
-                    clouds.Zone('us-east-2b'),
-                    clouds.Zone('us-east-2c'),
-                ]),
-                clouds.Region('us-east-1').set_zones([
-                    clouds.Zone('us-east-1a'),
-                    clouds.Zone('us-east-1b'),
-                    clouds.Zone('us-east-1c'),
-                    clouds.Zone('us-east-1d'),
-                    clouds.Zone('us-east-1e'),
-                    clouds.Zone('us-east-1f'),
-                ]),
-                clouds.Region('us-west-2').set_zones([
-                    clouds.Zone('us-west-2a'),
-                    clouds.Zone('us-west-2b'),
-                    clouds.Zone('us-west-2c'),
-                    clouds.Zone('us-west-2d'),
-                ]),
-            ]
-        return cls._regions
-
-    @classmethod
-    def region_zones_provision_loop(
-            cls) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        # AWS provisioner can handle batched requests, so yield all zones under
-        # each region.
-        for region in cls.regions():
-            yield (region, region.zones)
-
-    @classmethod
-    def get_default_ami(cls, region_name: str) -> str:
-        # AWS Deep Learning AMI (Ubuntu 18.04), version 50.0
-        # https://aws.amazon.com/marketplace/pp/prodview-x5nivojpquy6y
-        amis = {
-            'us-east-1': 'ami-0e3c68b57d50caf64',
-            'us-east-2': 'ami-0ae79682024fe31cd',
-            # 'us-west-1': 'TODO: cannot launch',
-            'us-west-2': 'ami-0050625d58fa27b6d',
-        }
-        assert region_name in amis, region_name
-        return amis[region_name]
-
-    #### Normal methods ####
-
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
-        return aws_catalog.get_hourly_cost(instance_type, use_spot=use_spot)
+    def instance_type_to_hourly_cost(self, instance_type):
+        return aws_catalog.get_hourly_cost(instance_type)
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -138,22 +50,12 @@ class AWS(clouds.Cloud):
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
 
-    def get_accelerators_from_instance_type(
-        self,
-        instance_type: str,
-    ) -> Optional[Dict[str, int]]:
-        """Returns {acc: acc_count} held by 'instance_type', if any."""
-        inverse = {v: k for k, v in AWS._ACCELERATORS_DIRECTORY.items()}
-        res = inverse.get(instance_type)
-        if res is None:
-            return res
-        return {res[0]: res[1]}
-
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
         # r.accelerators is cleared but .instance_type encodes the info.
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
+        acc_dict = aws_catalog.get_accelerators_from_instance_type(
+            r.instance_type)
+        if len(acc_dict) > 0:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
