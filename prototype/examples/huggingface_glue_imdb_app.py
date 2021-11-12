@@ -13,14 +13,14 @@ with sky.Dag() as dag:
     # https://github.com/huggingface/transformers/tree/master/examples#important-note
     setup = '\
       (git clone https://github.com/huggingface/transformers/ || true) && \
-      cd transformers && pip install . && \
+      cd transformers && pip3 install . && \
       cd examples/pytorch/text-classification && \
-      pip install -r requirements.txt'
+      pip3 install -r requirements.txt'
 
     # The command to run.  Will be run under the working directory.
     # https://github.com/huggingface/transformers/tree/master/examples/pytorch/text-classification
     run = 'cd transformers/examples/pytorch/text-classification && \
-    python run_glue.py \
+    python3 run_glue.py \
   --model_name_or_path bert-base-cased \
   --dataset_name imdb  \
   --do_train \

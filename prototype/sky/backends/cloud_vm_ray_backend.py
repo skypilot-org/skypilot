@@ -64,11 +64,11 @@ class RetryingVmProvisioner(object):
         colorama.init()
 
     def _in_blocklist(self, cloud, region, zones):
-        if region in self._blocked_regions:
+        if region.name in self._blocked_regions:
             return True
         assert zones, (cloud, region, zones)
         for zone in zones:
-            if zone not in self._blocked_zones:
+            if zone.name not in self._blocked_zones:
                 return False
         return True
 
@@ -94,9 +94,9 @@ class RetryingVmProvisioner(object):
                             f'{Style.DIM}(message: {message})'
                             f'{Style.RESET_ALL}')
                 if code == 'QUOTA_EXCEEDED':  # Per region.
-                    self._blocked_regions.add(region)
+                    self._blocked_regions.add(region.name)
                 elif code == 'ZONE_RESOURCE_POOL_EXHAUSTED':  # Per zone.
-                    self._blocked_zones.add(zone)
+                    self._blocked_zones.add(zone.name)
                 else:
                     assert False, error
         else:
@@ -107,7 +107,7 @@ class RetryingVmProvisioner(object):
                 # 'projects/<id>/zones/zone/acceleratorTypes/nvidia-tesla-v100'
                 # was not found.
                 logger.warn(f'Got \'resource not found\' in {zone.name}.')
-                self._blocked_zones.add(zone)
+                self._blocked_zones.add(zone.name)
             else:
                 logger.info('====== stdout ======')
                 for s in stdout.decode().split('\n'):
@@ -142,8 +142,8 @@ class RetryingVmProvisioner(object):
 
         logger.warn(f'Got error(s) in all zones of {region.name}:')
         messages = '\n\t'.join(errors)
-        logger.warn(f'{Style.DIM}{messages}{Style.RESET_ALL}')
-        self._blocked_regions.add(region)
+        logger.warn(f'{Style.DIM}\t{messages}{Style.RESET_ALL}')
+        self._blocked_regions.add(region.name)
         return True, None
 
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
@@ -171,12 +171,40 @@ class RetryingVmProvisioner(object):
 
         return True, None
 
+    def _yield_region_zones(self, task: App, cloud: clouds.Cloud):
+        # Try reading previously launched region/zones and try them first,
+        # because we may have an existing cluster there.
+        region = None
+        zones = None
+        try:
+            path = _get_cluster_config_template(task)[:-len('.j2')]
+            with open(path, 'r') as f:
+                config = yaml.safe_load(f)
+            if type(cloud) in (clouds.AWS, clouds.GCP):
+                region = config['provider']['region']
+                zones = config['provider']['availability_zone']
+            elif type(cloud) is clouds.Azure:
+                region = config['provider']['location']
+                zones = None
+            else:
+                assert False, cloud
+        except Exception:
+            pass
+        if region is not None:
+            region = clouds.Region(name=region)
+            if zones is not None:
+                zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
+                region.set_zones(zones)
+            yield (region, zones)  # Ok to yield again in the next loop.
+        for region, zones in cloud.region_zones_provision_loop():
+            yield (region, zones)
+
     def provision_with_retries(self, task: App, cloud: clouds.Cloud,
                                dryrun: bool):
         """The provision retry loop."""
         self._clear_blocklist()
         Style = colorama.Style
-        for region, zones in cloud.region_zones_provision_loop():
+        for region, zones in self._yield_region_zones(task, cloud):
             if self._in_blocklist(cloud, region, zones):
                 continue
             logger.info(
@@ -207,11 +235,12 @@ class RetryingVmProvisioner(object):
                                 f'reason: {reason}')
                     break
             else:
-                logger.info(f'{Style.BRIGHT}Successfully provisioned or found'
-                            f' existing VM(s).{Style.RESET_ALL}')
+                logger.info(
+                    f'{Style.BRIGHT}Successfully provisioned or found'
+                    f' existing VM(s). Setup completed.{Style.RESET_ALL}')
                 logger.info(
                     f'\nTo log into the head VM:\t{Style.BRIGHT}ray attach'
-                    f'  {cluster_config_file}{Style.RESET_ALL}\n')
+                    f' {cluster_config_file}{Style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones.'
                    '  Try other resource requirements or different clouds.')
