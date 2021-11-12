@@ -1,4 +1,5 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
+import ast
 import json
 import os
 import re
@@ -6,7 +7,7 @@ import shlex
 import subprocess
 import tempfile
 import textwrap
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import yaml
 
 import colorama
@@ -54,6 +55,199 @@ def _to_accelerator_and_count(resources: Optional[Resources]
     return acc, acc_count
 
 
+class RetryingVmProvisioner(object):
+    """A provisioner that retries different regions/zones within a cloud."""
+
+    def __init__(self):
+        self._blocked_regions = set()
+        self._blocked_zones = set()
+        colorama.init()
+
+    def _in_blocklist(self, cloud, region, zones):
+        if region.name in self._blocked_regions:
+            return True
+        assert zones, (cloud, region, zones)
+        for zone in zones:
+            if zone.name not in self._blocked_zones:
+                return False
+        return True
+
+    def _clear_blocklist(self):
+        self._blocked_regions.clear()
+        self._blocked_zones.clear()
+
+    def _update_blocklist_on_gcp_error(self, region, zones, stdout, stderr):
+        Style = colorama.Style
+        assert len(zones) == 1, zones
+        zone = zones[0]
+        stderr = stderr.decode()
+        splits = stderr.split('\n')
+        exception_str = [s for s in splits if s.startswith('Exception: ')]
+        if len(exception_str) == 1:
+            # Parse structured response {'errors': [...]}.
+            exception_str = exception_str[0][len('Exception: '):]
+            exception_dict = ast.literal_eval(exception_str)
+            for error in exception_dict['errors']:
+                code = error['code']
+                message = error['message']
+                logger.warn(f'Got {code} in {zone.name} '
+                            f'{Style.DIM}(message: {message})'
+                            f'{Style.RESET_ALL}')
+                if code == 'QUOTA_EXCEEDED':  # Per region.
+                    self._blocked_regions.add(region.name)
+                elif code == 'ZONE_RESOURCE_POOL_EXHAUSTED':  # Per zone.
+                    self._blocked_zones.add(zone.name)
+                else:
+                    assert False, error
+        else:
+            # No such structured error response found.
+            assert not exception_str, stderr
+            if 'was not found' in stderr:
+                # Example: The resource
+                # 'projects/<id>/zones/zone/acceleratorTypes/nvidia-tesla-v100'
+                # was not found.
+                logger.warn(f'Got \'resource not found\' in {zone.name}.')
+                self._blocked_zones.add(zone.name)
+            else:
+                logger.info('====== stdout ======')
+                for s in stdout.decode().split('\n'):
+                    print(s)
+                logger.info('====== stderr ======')
+                for s in splits:
+                    print(s)
+                assert False, \
+                    'Errors occurred during setup command; check logs above.'
+        return True, None
+
+    def _update_blocklist_on_aws_error(self, region, zones, stdout, stderr):
+        # The underlying ray autoscaler / boto3 will try all zones of a region
+        # at once.
+        Style = colorama.Style
+        stdout_splits = stdout.decode().split('\n')
+        stderr_splits = stderr.decode().split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'An error occurred' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            assert False, \
+                'Errors occurred during setup command; check logs above.'
+
+        logger.warn(f'Got error(s) in all zones of {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warn(f'{Style.DIM}\t{messages}{Style.RESET_ALL}')
+        self._blocked_regions.add(region.name)
+        return True, None
+
+    def _update_blocklist_on_error(self, cloud, region, zones, stdout,
+                                   stderr) -> Tuple[bool, Optional[str]]:
+        """Cloud-specific error message handling.
+
+        This parses textual stdout/stderr because we don't directly use the
+        underlying clouds' SDKs.  If we did that, we could catch proper
+        exceptions instead.
+
+        Returns (should_continue_trying, reason).
+        """
+        if isinstance(cloud, clouds.GCP):
+            return self._update_blocklist_on_gcp_error(region, zones, stdout,
+                                                       stderr)
+
+        if isinstance(cloud, clouds.AWS):
+            return self._update_blocklist_on_aws_error(region, zones, stdout,
+                                                       stderr)
+
+        if isinstance(cloud, clouds.Azure):
+            assert False, (stdout, stderr)  # TODO
+        else:
+            assert False, f'Unknown cloud: {cloud}.'
+
+        return True, None
+
+    def _yield_region_zones(self, task: App, cloud: clouds.Cloud):
+        # Try reading previously launched region/zones and try them first,
+        # because we may have an existing cluster there.
+        region = None
+        zones = None
+        try:
+            path = _get_cluster_config_template(task)[:-len('.j2')]
+            with open(path, 'r') as f:
+                config = yaml.safe_load(f)
+            if type(cloud) in (clouds.AWS, clouds.GCP):
+                region = config['provider']['region']
+                zones = config['provider']['availability_zone']
+            elif type(cloud) is clouds.Azure:
+                region = config['provider']['location']
+                zones = None
+            else:
+                assert False, cloud
+        except Exception:
+            pass
+        if region is not None:
+            region = clouds.Region(name=region)
+            if zones is not None:
+                zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
+                region.set_zones(zones)
+            yield (region, zones)  # Ok to yield again in the next loop.
+        for region, zones in cloud.region_zones_provision_loop():
+            yield (region, zones)
+
+    def provision_with_retries(self, task: App, cloud: clouds.Cloud,
+                               dryrun: bool):
+        """The provision retry loop."""
+        self._clear_blocklist()
+        Style = colorama.Style
+        for region, zones in self._yield_region_zones(task, cloud):
+            if self._in_blocklist(cloud, region, zones):
+                continue
+            logger.info(
+                f'\n{Style.BRIGHT}Launching on {cloud} {region.name} '
+                f'({",".join(z.name for z in zones)}).{Style.RESET_ALL}')
+            logger.info('If this takes longer than ~30 seconds,'
+                        ' provisioning is likely successful.'
+                        ' Setting up may take a few minutes.')
+            config_dict = backend_utils.write_cluster_config(
+                None,
+                task,
+                _get_cluster_config_template(task),
+                region=region,
+                zones=zones)
+            if dryrun:
+                return
+            cluster_config_file = config_dict['ray']
+            # Captures stdout/err.  Otherwise, too many repeated messages.
+            proc = subprocess.Popen(['ray', 'up', '-y', cluster_config_file],
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
+            stdout, stderr = proc.communicate()
+            if proc.returncode != 0:
+                should_continue, reason = self._update_blocklist_on_error(
+                    cloud, region, zones, stdout, stderr)
+                if not should_continue:
+                    logger.warn(f'Skipping the rest of the regions/zones; '
+                                f'reason: {reason}')
+                    break
+            else:
+                logger.info(
+                    f'{Style.BRIGHT}Successfully provisioned or found'
+                    f' existing VM(s). Setup completed.{Style.RESET_ALL}')
+                logger.info(
+                    f'\nTo log into the head VM:\t{Style.BRIGHT}ray attach'
+                    f' {cluster_config_file}{Style.RESET_ALL}\n')
+                return config_dict
+        message = ('Failed to acquire resources in all regions/zones.'
+                   '  Try other resource requirements or different clouds.')
+        logger.error(message)
+        assert False, message
+
+
 class CloudVmRayBackend(backends.Backend):
     """Backend: runs on cloud virtual machines, managed by Ray.
 
@@ -71,17 +265,13 @@ class CloudVmRayBackend(backends.Backend):
     def provision(self, task: App, to_provision: Resources,
                   dryrun: bool) -> ResourceHandle:
         """Provisions using 'ray up'."""
-        # For each node (head or workers)
-        #   --resources = {acc: acc_cnt} from task.best_resources
-        #                   (cpu/mem etc. set by Ray automatically)
-        run_id = backend_utils.get_run_id()
-        config_dict = backend_utils.write_cluster_config(
-            run_id, task, _get_cluster_config_template(task))
+        # ray up: the VMs.
+        provisioner = RetryingVmProvisioner()
+        config_dict = provisioner.provision_with_retries(
+            task, to_provision.cloud, dryrun)
+        cluster_config_file = config_dict['ray']
         if dryrun:
             return
-        # ray up: the VMs.
-        cluster_config_file = config_dict['ray']
-        _run(f'ray up -y {cluster_config_file}')
         # gcloud: TPU.
         tpu_name = to_provision.accelerator_args.get('tpu_name')
         if tpu_name is not None:
@@ -344,11 +534,11 @@ class CloudVmRayBackend(backends.Backend):
         if not teardown:
             logger.info(
                 f'\nTo log into the head VM:\t{Style.BRIGHT}ray attach {handle} {Style.RESET_ALL}\n'
-                f'\nTo teardown the resources:\t{Style.BRIGHT}ray down {handle} -y {Style.RESET_ALL}\n'
+                f'\nTo down the resources:\t{Style.BRIGHT}ray down {handle} -y {Style.RESET_ALL}\n'
             )
             if self._managed_tpu is not None:
                 logger.info(
-                    f'To teardown the TPU resources:\t{Style.BRIGHT}bash {self._managed_tpu[1]} {Style.RESET_ALL}\n'
+                    f'To down the TPU resources:\t{Style.BRIGHT}bash {self._managed_tpu[1]} {Style.RESET_ALL}\n'
                 )
 
     def teardown(self, handle: ResourceHandle) -> None:
