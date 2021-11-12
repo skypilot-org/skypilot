@@ -64,10 +64,10 @@ with sky.Dag() as dag:
         # ),
         ##### Partially specified
         # sky.Resources(accelerators='T4'),
-        # sky.Resources(clouds.AWS(), accelerators='V100'),
+        # sky.Resources(clouds.AWS(), accelerators='K80'),
         sky.Resources(clouds.AWS(), accelerators='V100', use_spot=True),
         # sky.Resources(accelerators='tpu-v3-8'),
-        # sky.Resources(clouds.AWS(), accelerators={'V100': 4}),
+        # sky.Resources(clouds.AWS(), accelerators={'V100': 8}),
         # sky.Resources(clouds.AWS(), accelerators='V100'),
     })
 

@@ -1,23 +1,30 @@
 # Example Sky apps
 
-1. [**`resnet_app.py`**](./resnet_app.py): ResNet50 training on GPUs, adapted from [tensorflow/tpu](https://github.com/tensorflow/tpu).
+To run an example:
+```python
+python examples/<name>.py
+```
 
-    Do the following before running the app:
-    ```bash
-    # To run on GPUs, we prepared a fork that added a few changes.
-    git clone -b gpu_train https://github.com/concretevitamin/tpu ~/Downloads/tpu
-    pushd ~/Downloads/tpu
-    git checkout 222cc86b5
-    # See diff against the last common commit with upstream: git diff adecd6
-    popd
-    ```
+Machine learning examples:
+
+1. [**`resnet_app.py`**](./resnet_app.py): ResNet50 training on GPUs, adapted from [tensorflow/tpu](https://github.com/tensorflow/tpu). 
+  
     The training data is currently a public, "fake_imagenet" dataset (`gs://cloud-tpu-test-datasets/fake_imagenet`, 70GB).
+    
+2. [**`resnet_distributed_tf_app.py`**](./resnet_distributed_tf_app.py): **Distributed training** variant of the above, via TensorFlow Distributed.
 
-2. [**`huggingface_glue_imdb_app.py`**](./huggingface_glue_imdb_app.py): use [huggingface/transformers](https://github.com/huggingface/transformers/) to finetune a pretrained BERT model.
+3. [**`resnet_distributed_torch_app.py`**](./resnet_distributed_torch_app.py): Distributed training variant of the above, via PyTorch Distributed.
 
-    ```bash
-    python huggingface_glue_imdb_app.py
-    ```
+4. [**`huggingface_glue_imdb_app.py`**](./huggingface_glue_imdb_app.py): Use [Huggingface Transformers](https://github.com/huggingface/transformers/) to finetune a pretrained BERT model.
+ 
+5. [**`huggingface_glue_imdb_grid_search_app.py`**](./huggingface_glue_imdb_grid_search_app.py): Run **grid search** on the above.  Run many trials concurrently on the same VM.
+
+6. [**`tpu_app.py`**](./tpu_app.py): **Train on a TPU** (v3-8) on GCP.  Finetune BERT on Amazon Reviews for sentiment analysis.
+
+
+General examples:
+
+1. [**`multi_echo.py`**](./multi_echo.py): Launch and schedule hundreds of bash commands in the cloud, with configurable resources.  Similar to grid search.
 
 ## TODO: non-runnable apps
 1. [**`timm_app.py`**](./timm_app.py): the [PyTorch image models (timm)](https://github.com/rwightman/pytorch-image-models) package.

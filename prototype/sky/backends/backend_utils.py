@@ -2,12 +2,13 @@
 import datetime
 import subprocess
 import time
-from typing import Optional, Union
+from typing import List, Optional, Union
 import yaml
 
 import jinja2
 
 from sky import authentication as auth
+from sky import clouds
 from sky import logging
 from sky import task
 
@@ -38,7 +39,11 @@ def _fill_template(template_path: str,
     return output_path
 
 
-def write_cluster_config(run_id: RunId, task, cluster_config_template: str):
+def write_cluster_config(run_id: RunId,
+                         task,
+                         cluster_config_template: str,
+                         region: Optional[clouds.Region] = None,
+                         zones: Optional[List[clouds.Zone]] = None):
     """Returns {provisioner: path to yaml, the provisioning spec}.
 
     'provisioner' can be
@@ -49,10 +54,29 @@ def write_cluster_config(run_id: RunId, task, cluster_config_template: str):
     resources_vars = cloud.make_deploy_resources_variables(task)
     config_dict = {}
 
+    if region is None:
+        assert zones is None, 'Set either both or neither for: region, zones.'
+        region = cloud.get_default_region()
+        zones = region.zones
+    else:
+        assert zones is not None, \
+            'Set either both or neither for: region, zones.'
+    region = region.name
+    if isinstance(cloud, clouds.AWS):
+        # Only AWS supports multiple zones in the 'availability_zone' field.
+        zones = [zone.name for zone in zones]
+    else:
+        zones = [zones[0].name]
+
+    aws_default_ami = None
+    if isinstance(cloud, clouds.AWS):
+        aws_default_ami = cloud.get_default_ami(region)
+
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
-            resources_vars, **{
+            resources_vars,
+            **{
                 'run_id': run_id,
                 'setup_command': task.setup,
                 'workdir': task.workdir,
@@ -60,6 +84,11 @@ def write_cluster_config(run_id: RunId, task, cluster_config_template: str):
                 'container_name': task.container_name,
                 'num_nodes': task.num_nodes,
                 'file_mounts': task.get_local_to_remote_file_mounts() or {},
+                # Region/zones.
+                'region': region,
+                'zones': ','.join(zones),
+                # AWS only.
+                'aws_default_ami': aws_default_ami,
             }))
     _add_ssh_to_cluster_config(cloud, yaml_path)
     config_dict['ray'] = yaml_path
