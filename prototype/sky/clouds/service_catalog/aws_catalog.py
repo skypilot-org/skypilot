@@ -7,8 +7,12 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+<<<<<<< HEAD
 import numpy as np
 
+=======
+from sky import clouds
+>>>>>>> 9bd5b55 (Return counts and clouds also)
 from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('aws.csv')
@@ -62,6 +66,11 @@ def get_instance_type_for_accelerator(
     return result.iloc[0]['InstanceType']
 
 
-def list_accelerators() -> List[str]:
-    """List the canonical names of all accelerators offered by this cloud."""
-    return _df['AcceleratorName'].dropna().unique().tolist()
+def list_accelerators() -> Dict[str, List[int]]:
+    """Returns a mapping from the canonical names of accelerators to
+    the counts offered by this cloud.
+    """
+    df = _df[['AcceleratorName', 'AcceleratorCount']].dropna().drop_duplicates()
+    df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
+    groupby = df.groupby('AcceleratorName')
+    return groupby['AcceleratorCount'].apply(list).to_dict()
