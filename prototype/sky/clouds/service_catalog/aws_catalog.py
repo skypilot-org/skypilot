@@ -73,4 +73,5 @@ def list_accelerators() -> Dict[str, List[int]]:
     df = _df[['AcceleratorName', 'AcceleratorCount']].dropna().drop_duplicates()
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
     groupby = df.groupby('AcceleratorName')
-    return groupby['AcceleratorCount'].apply(list).to_dict()
+    return groupby['AcceleratorCount'].apply(
+        lambda xs: sorted(list(xs))).to_dict()
