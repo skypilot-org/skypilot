@@ -13,14 +13,14 @@ _df = common.read_catalog('aws.csv')
 
 def get_hourly_cost(instance_type: str,
                     region: str = 'us-west-2',
-                    spot: bool = False) -> float:
-    """Returns the cost, or the cheapest cost and zone among all zones for spot.
+                    use_spot: bool = False) -> float:
+    """Returns the cost, or the cheapest cost and zone among all zones for use_spot.
     """
     result = _df[(_df['InstanceType'] == instance_type) &
                  (_df['Region'] == region)]
 
     assert len(set(result['Price'])) == 1, (result, instance_type, region)
-    if not spot:
+    if not use_spot:
         return result['Price'].iloc[0]
 
     cheapest_idx = result['SpotPrice'].idxmin()
@@ -39,5 +39,5 @@ def get_instance_type_for_gpu(gpu_name: str,
                  (_df['Region'] == region)]
     if len(result) == 0:
         return None
-    assert len(result) == 1, (result, gpu_name, count, region)
+    assert len(set(result['InstanceType'])) == 1, (result, gpu_name, count, region)
     return result.iloc[0]['InstanceType']

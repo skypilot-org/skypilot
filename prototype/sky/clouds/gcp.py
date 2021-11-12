@@ -68,7 +68,9 @@ class GCP(clouds.Cloud):
     _ON_DEMAND_PRICES.update(_ON_DEMAND_PRICES_GPUS)
     _ON_DEMAND_PRICES.update(_ON_DEMAND_PRICES_TPUS)
 
-    def instance_type_to_hourly_cost(self, instance_type):
+    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+        # TODO: use_spot support
+        assert not use_spot
         return GCP._ON_DEMAND_PRICES[instance_type]
 
     def accelerators_to_hourly_cost(self, accelerators):

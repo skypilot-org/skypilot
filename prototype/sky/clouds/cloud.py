@@ -4,7 +4,7 @@ from typing import Dict, Optional
 class Cloud(object):
 
     # TODO: incorporate region/zone into the API.
-    def instance_type_to_hourly_cost(self, instance_type):
+    def instance_type_to_hourly_cost(self, instance_type, use_spot):
         """Returns the hourly on-demand price for an instance type."""
         raise NotImplementedError
 

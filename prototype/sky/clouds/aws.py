@@ -16,8 +16,8 @@ class AWS(clouds.Cloud):
         ('V100', 8): 'p3.16xlarge',
     }
 
-    def instance_type_to_hourly_cost(self, instance_type):
-        return aws_catalog.get_hourly_cost(instance_type)
+    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+        return aws_catalog.get_hourly_cost(instance_type, use_spot=use_spot)
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -77,6 +77,7 @@ class AWS(clouds.Cloud):
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'num_nodes': task.num_nodes,
+            'use_spot': r.use_spot,
         }
 
     def get_feasible_launchable_resources(self, resources):
