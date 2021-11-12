@@ -6,8 +6,8 @@ idle_timeout_minutes: 60
 
 provider:
   type: aws
-  region: us-west-2
-  availability_zone: us-west-2a,us-west-2b,us-west-2c,us-west-2d
+  region: {{region}}
+  availability_zone: {{zones}}
 
 auth:
   ssh_user: ubuntu
@@ -17,7 +17,7 @@ available_node_types:
     resources: {}
     node_config:
       InstanceType: {{instance_type}}
-      ImageId: ami-0e9c522a722725e62  # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+      ImageId: {{aws_default_ami}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -29,7 +29,7 @@ available_node_types:
     resources: {}
     node_config:
       InstanceType: {{instance_type}}
-      ImageId: ami-0e9c522a722725e62  # Deep Learning AMI (Ubuntu 18.04) Version 49.0
+      ImageId: {{aws_default_ami}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -69,10 +69,10 @@ setup_commands:
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
   - ray stop
-  - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --resources='{{ custom_resources }}'
+  - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
   - ray stop
-  - ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --resources='{{ custom_resources }}'
+  - ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
 {%- endif %}
