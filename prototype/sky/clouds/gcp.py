@@ -1,5 +1,6 @@
 import copy
 import json
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 
@@ -7,6 +8,7 @@ from sky import clouds
 class GCP(clouds.Cloud):
 
     _REPR = 'GCP'
+    _regions: List[clouds.Region] = []
 
     # Pricing.  All info assumes us-central1.
     # In general, query pricing from the cloud.
@@ -68,6 +70,58 @@ class GCP(clouds.Cloud):
     _ON_DEMAND_PRICES.update(_ON_DEMAND_PRICES_GPUS)
     _ON_DEMAND_PRICES.update(_ON_DEMAND_PRICES_TPUS)
 
+    #### Regions/Zones ####
+
+    @classmethod
+    def regions(cls) -> List[clouds.Region]:
+        if not cls._regions:
+            # https://cloud.google.com/compute/docs/regions-zones
+            cls._regions = [
+                clouds.Region('us-west1').set_zones([
+                    clouds.Zone('us-west1-a'),
+                    clouds.Zone('us-west1-b'),
+                    # clouds.Zone('us-west1-c'),  # No GPUs.
+                ]),
+                clouds.Region('us-central1').set_zones([
+                    clouds.Zone('us-central1-a'),
+                    clouds.Zone('us-central1-b'),
+                    clouds.Zone('us-central1-c'),
+                    clouds.Zone('us-central1-f'),
+                ]),
+                clouds.Region('us-east1').set_zones([
+                    clouds.Zone('us-east1-b'),
+                    clouds.Zone('us-east1-c'),
+                    clouds.Zone('us-east1-d'),
+                ]),
+                clouds.Region('us-east4').set_zones([
+                    clouds.Zone('us-east4-a'),
+                    clouds.Zone('us-east4-b'),
+                    clouds.Zone('us-east4-c'),
+                ]),
+                clouds.Region('us-west2').set_zones([
+                    # clouds.Zone('us-west2-a'),  # No GPUs.
+                    clouds.Zone('us-west2-b'),
+                    clouds.Zone('us-west2-c'),
+                ]),
+                # Ignoring us-west3 as it doesn't have GPUs.
+                clouds.Region('us-west4').set_zones([
+                    clouds.Zone('us-west4-a'),
+                    clouds.Zone('us-west4-b'),
+                    # clouds.Zone('us-west4-c'),  # No GPUs.
+                ]),
+            ]
+        return cls._regions
+
+    @classmethod
+    def region_zones_provision_loop(
+            cls) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+        # GCP provisioner currently takes 1 zone per request.
+        for region in cls.regions():
+            for zone in region.zones:
+                yield (region, [zone])
+
+    #### Normal methods ####
+
     def instance_type_to_hourly_cost(self, instance_type):
         return GCP._ON_DEMAND_PRICES[instance_type]
 
@@ -102,6 +156,10 @@ class GCP(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls):
         return 'n1-highmem-8'
+
+    @classmethod
+    def get_default_region(cls) -> clouds.Region:
+        return cls.regions()[-1]
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
