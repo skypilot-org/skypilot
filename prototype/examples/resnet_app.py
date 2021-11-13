@@ -63,11 +63,15 @@ with sky.Dag() as dag:
         #     'V100',
         # ),
         ##### Partially specified
-        # sky.Resources(accelerators={'T4': 4}),
-        # sky.Resources(clouds.GCP(), accelerators='K80'),
+        # sky.Resources(accelerators='T4'),
+        # sky.Resources(accelerators={'T4': 8}, use_spot=True),
+        # sky.Resources(clouds.AWS(), accelerators={'T4': 8}, use_spot=True),
+        # sky.Resources(clouds.AWS(), accelerators='K80'),
+        # sky.Resources(clouds.AWS(), accelerators='K80', use_spot=True),
         # sky.Resources(accelerators='tpu-v3-8'),
-        sky.Resources(clouds.AWS(), accelerators={'V100': 8}),
         # sky.Resources(clouds.AWS(), accelerators='V100'),
+        sky.Resources(clouds.AWS(), accelerators='V100', use_spot=True),
+        # sky.Resources(clouds.AWS(), accelerators={'V100': 8}),
     })
 
     # Optionally, specify a time estimator: Resources -> time in seconds.

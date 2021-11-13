@@ -23,6 +23,8 @@ class Zone(collections.namedtuple('Zone', ['name'])):
 
 class Cloud(object):
 
+    UNKNOWN_COST = int(1e9)
+
     #### Regions/Zones ####
 
     @classmethod
@@ -50,8 +52,8 @@ class Cloud(object):
     #### Normal methods ####
 
     # TODO: incorporate region/zone into the API.
-    def instance_type_to_hourly_cost(self, instance_type):
-        """Returns the hourly on-demand price for an instance type."""
+    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+        """Returns the hourly on-demand/spot price for an instance type."""
         raise NotImplementedError
 
     def accelerators_to_hourly_cost(self, accelerators):

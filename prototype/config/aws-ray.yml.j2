@@ -22,6 +22,13 @@ available_node_types:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: 256
+      {% if use_spot %}
+      InstanceMarketOptions:
+          MarketType: spot
+          # Additional options can be found in the boto docs, e.g.
+          #   SpotOptions:
+          #       MaxPrice: MAX_HOURLY_PRICE
+      {% endif %}
 {% if num_nodes > 1 %}
   ray.worker.default:
     min_workers: {{num_nodes - 1}}
@@ -34,6 +41,13 @@ available_node_types:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: 256
+      {% if use_spot %}
+      InstanceMarketOptions:
+          MarketType: spot
+          # Additional options can be found in the boto docs, e.g.
+          #   SpotOptions:
+          #       MaxPrice: MAX_HOURLY_PRICE
+      {% endif %}
 {%- endif %}
 
 head_node_type: ray.head.default
