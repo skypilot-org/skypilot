@@ -251,7 +251,7 @@ class RetryingVmProvisioner(object):
                 should_continue, reason = self._update_blocklist_on_error(
                     to_provision.cloud, region, zones, stdout, stderr)
                 if tpu_name is not None:
-                    logger.info("Tearing down TPU resource...")
+                    logger.info('Failed to provision VM. Tearing down TPU resource...')
                     _run(f'bash {config_dict["gcloud"][1]}',
                          stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE)
