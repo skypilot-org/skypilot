@@ -94,10 +94,16 @@ def write_cluster_config(run_id: RunId,
     config_dict['ray'] = yaml_path
     if resources_vars.get('tpu_type') is not None:
         # FIXME: replace hard-coding paths
-        config_dict['gcloud'] = (_fill_template('config/gcp-tpu-create.sh.j2',
-                                                dict(resources_vars)),
-                                 _fill_template('config/gcp-tpu-delete.sh.j2',
-                                                dict(resources_vars)))
+        config_dict['gcloud'] = (_fill_template(
+            'config/gcp-tpu-create.sh.j2',
+            dict(resources_vars, **{
+                'zones': ','.join(zones),
+            })),
+                                 _fill_template(
+                                     'config/gcp-tpu-delete.sh.j2',
+                                     dict(resources_vars, **{
+                                         'zones': ','.join(zones),
+                                     })))
     return config_dict
 
 

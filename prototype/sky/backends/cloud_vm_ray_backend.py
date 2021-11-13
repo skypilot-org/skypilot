@@ -199,16 +199,16 @@ class RetryingVmProvisioner(object):
         for region, zones in cloud.region_zones_provision_loop():
             yield (region, zones)
 
-    def provision_with_retries(self, task: App, cloud: clouds.Cloud,
+    def provision_with_retries(self, task: App, to_provision: Resources,
                                dryrun: bool):
         """The provision retry loop."""
         self._clear_blocklist()
         Style = colorama.Style
-        for region, zones in self._yield_region_zones(task, cloud):
-            if self._in_blocklist(cloud, region, zones):
+        for region, zones in self._yield_region_zones(task, to_provision.cloud):
+            if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
             logger.info(
-                f'\n{Style.BRIGHT}Launching on {cloud} {region.name} '
+                f'\n{Style.BRIGHT}Launching on {to_provision.cloud} {region.name} '
                 f'({",".join(z.name for z in zones)}).{Style.RESET_ALL}')
             logger.info('If this takes longer than ~30 seconds,'
                         ' provisioning is likely successful.'
@@ -221,6 +221,26 @@ class RetryingVmProvisioner(object):
                 zones=zones)
             if dryrun:
                 return
+            tpu_name = to_provision.accelerator_args.get('tpu_name')
+            if tpu_name is not None:
+                assert 'gcloud' in config_dict, \
+                    'Expect TPU provisioning with gcloud'
+                try:
+                    _run(f'bash {config_dict["gcloud"][0]}',
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
+                except subprocess.CalledProcessError as e:
+                    stderr = e.stderr.decode('ascii')
+                    if 'ALREADY_EXISTS' in stderr:
+                        logger.info(
+                            f'TPU {tpu_name} already exists; skipped creation.')
+                    elif 'PERMISSION_DENIED' in stderr:
+                        logger.info(
+                            f'TPU resource is not available in this zone.')
+                        continue
+                    else:
+                        logger.error(stderr)
+                        raise e
             cluster_config_file = config_dict['ray']
             # Captures stdout/err.  Otherwise, too many repeated messages.
             proc = subprocess.Popen(['ray', 'up', '-y', cluster_config_file],
@@ -229,12 +249,21 @@ class RetryingVmProvisioner(object):
             stdout, stderr = proc.communicate()
             if proc.returncode != 0:
                 should_continue, reason = self._update_blocklist_on_error(
-                    cloud, region, zones, stdout, stderr)
+                    to_provision.cloud, region, zones, stdout, stderr)
+                if tpu_name is not None:
+                    logger.info("Tearing down TPU resource...")
+                    _run(f'bash {config_dict["gcloud"][1]}',
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
                 if not should_continue:
                     logger.warn(f'Skipping the rest of the regions/zones; '
                                 f'reason: {reason}')
                     break
             else:
+                if tpu_name is not None:
+                    _run(
+                        f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={tpu_name}\" >> ~/.bashrc\'"
+                    )
                 logger.info(
                     f'{Style.BRIGHT}Successfully provisioned or found'
                     f' existing VM(s). Setup completed.{Style.RESET_ALL}')
@@ -268,30 +297,12 @@ class CloudVmRayBackend(backends.Backend):
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner()
         config_dict = provisioner.provision_with_retries(
-            task, to_provision.cloud, dryrun)
+            task, to_provision, dryrun)
         cluster_config_file = config_dict['ray']
         if dryrun:
             return
         # gcloud: TPU.
-        tpu_name = to_provision.accelerator_args.get('tpu_name')
-        if tpu_name is not None:
-            assert 'gcloud' in config_dict, \
-                'Expect TPU provisioning with gcloud'
-            try:
-                _run(f'bash {config_dict["gcloud"][0]}',
-                     stdout=subprocess.PIPE,
-                     stderr=subprocess.PIPE)
-            except subprocess.CalledProcessError as e:
-                stderr = e.stderr.decode('ascii')
-                if 'ALREADY_EXISTS' in stderr:
-                    logger.info(
-                        f'TPU {tpu_name} already exists; skipped creation.')
-                else:
-                    raise e
-            _run(
-                f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={tpu_name}\" >> ~/.bashrc\'"
-            )
-            self._managed_tpu = config_dict['gcloud']
+        self._managed_tpu = config_dict['gcloud']
         backend_utils.wait_until_ray_cluster_ready(cluster_config_file,
                                                    task.num_nodes)
         return cluster_config_file
