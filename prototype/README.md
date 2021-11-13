@@ -5,12 +5,10 @@
 ```bash
 pip install -e .
 
-git clone -b gpu_train https://github.com/concretevitamin/tpu ~/Downloads/tpu
-pushd ~/Downloads/tpu
-git checkout 222cc86b5
-popd
-
 python examples/resnet_app.py
+
+# Or try other examples:
+ls examples/
 ```
 
 ## Cloud account setup
