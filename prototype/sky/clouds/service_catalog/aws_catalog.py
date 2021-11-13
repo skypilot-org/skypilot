@@ -23,16 +23,10 @@ def get_hourly_cost(instance_type: str,
                  (_df['Region'] == region)]
 
     assert len(set(result['Price'])) == 1, (result, instance_type, region)
-    if not use_spot:
-        return result['Price'].iloc[0]
-
     cheapest_idx = result['SpotPrice'].idxmin()
-    if np.isnan(cheapest_idx):
-        result = _df[_df['InstanceType'] == instance_type]
-        cheapest_idx = result['SpotPrice'].idxmin()
-        assert not np.isnan(
-            cheapest_idx
-        ), f"Spot instance of {instance_type} is not avaiable in all regions"
+
+    if  not use_spot or np.isnan(cheapest_idx):
+        return result['Price'].iloc[0]
 
     cheapest = result.loc[cheapest_idx]
     return cheapest['SpotPrice']
