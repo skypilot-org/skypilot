@@ -2,16 +2,15 @@
 
 This script takes about 1 minute to finish.
 """
+import datetime
 from typing import Tuple
 
 from absl import app
-from absl import flags
 from absl import logging
 import boto3
 import numpy as np
 import pandas as pd
 import ray
-import datetime
 
 REGIONS = ['us-west-1', 'us-west-2', 'us-east-1', 'us-east-2']
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is

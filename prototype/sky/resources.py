@@ -36,7 +36,7 @@ class Resources(object):
             instance_type: Optional[str] = None,
             accelerators: Union[None, str, Dict[str, int]] = None,
             accelerator_args: Dict[str, str] = {},
-            use_spot: Optional[bool] = False,
+            use_spot: bool = False,
     ):
         self.cloud = cloud
         self.instance_type = instance_type
@@ -95,8 +95,6 @@ class Resources(object):
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
             self.instance_type, self.use_spot)
-        if self.use_spot:
-            hourly_cost = hourly_cost[0]
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(

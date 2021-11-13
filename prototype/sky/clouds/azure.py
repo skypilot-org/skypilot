@@ -27,7 +27,8 @@ class Azure(clouds.Cloud):
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
         # TODO: use_spot support
-        assert not use_spot
+        if use_spot:
+            return clouds.Cloud.UNKNOWN_COST
         return Azure._ON_DEMAND_PRICES[instance_type]
 
     def get_egress_cost(self, num_gigabytes):
