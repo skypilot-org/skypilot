@@ -122,7 +122,10 @@ class GCP(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type):
+    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+        # TODO: use_spot support
+        if use_spot:
+            return clouds.Cloud.UNKNOWN_COST
         return GCP._ON_DEMAND_PRICES[instance_type]
 
     def accelerators_to_hourly_cost(self, accelerators):
