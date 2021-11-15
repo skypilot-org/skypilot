@@ -11,3 +11,4 @@ python "$DIR"/resnet_app.py
 python "$DIR"/huggingface_glue_imdb_app.py
 python "$DIR"/multi_echo.py
 python "$DIR"/huggingface_glue_imdb_grid_search_app.py
+python "$DIR"/tpu_app.py

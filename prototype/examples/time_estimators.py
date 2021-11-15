@@ -1,5 +1,6 @@
-from sky import clouds
+import sky
 from sky.logging import init_logger
+
 logger = init_logger(__name__)
 
 
@@ -35,7 +36,7 @@ def resnet50_estimate_runtime(resources):
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
         return estimated_run_time_seconds
 
-    if isinstance(resources.cloud, clouds.AWS):
+    if isinstance(resources.cloud, sky.AWS):
         instance = resources.instance_type
         if instance == 'p3.2xlarge':
             num_v100s = 1
@@ -47,7 +48,7 @@ def resnet50_estimate_runtime(resources):
             assert False, 'Not supported: {}'.format(resources)
         return _v100(num_v100s)
 
-    elif isinstance(resources.cloud, clouds.GCP):
+    elif isinstance(resources.cloud, sky.GCP):
         accelerators = resources.get_accelerators()
         if accelerators is None:
             assert False, 'not supported'

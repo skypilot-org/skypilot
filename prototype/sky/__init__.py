@@ -1,4 +1,7 @@
+import os
+
 from sky import backends
+from sky import clouds
 from sky.dag import Dag, DagContext
 from sky.execution import execute
 from sky.resources import Resources
@@ -6,11 +9,17 @@ from sky.task import ParTask, Task
 from sky.registry import fill_in_launchable_resources
 from sky.optimizer import Optimizer
 
-import os
-
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
+# Aliases.
+AWS = clouds.AWS
+Azure = clouds.Azure
+GCP = clouds.GCP
+
 __all__ = [
+    'AWS',
+    'Azure',
+    'GCP',
     'Dag',
     'DagContext',
     'Optimizer',
