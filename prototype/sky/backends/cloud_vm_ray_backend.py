@@ -303,7 +303,8 @@ class CloudVmRayBackend(backends.Backend):
         # gcloud: TPU.
         self._managed_tpu = config_dict.get('gcloud')
 
-        backend_utils.wait_until_ray_cluster_ready(cluster_config_file,
+        backend_utils.wait_until_ray_cluster_ready(to_provision.cloud,
+                                                   cluster_config_file,
                                                    task.num_nodes)
         return cluster_config_file
 
