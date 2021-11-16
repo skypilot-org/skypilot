@@ -83,7 +83,8 @@ def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
     config_dict['ray'] = _fill_template(
         cluster_config_template,
         dict(
-            resources_vars, **{
+            resources_vars,
+            **{
                 'run_id': run_id,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
