@@ -19,7 +19,7 @@ import os
 import re
 import subprocess
 import time
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import colorama
 from colorama import Fore, Style

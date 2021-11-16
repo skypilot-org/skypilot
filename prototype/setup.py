@@ -9,7 +9,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'skynet = scripts.cli:cli',
+            'sky = scripts.cli:cli',
         ],
     },
     include_package_data=True,
