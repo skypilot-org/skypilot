@@ -5,52 +5,45 @@ instance types and pricing information for AWS.
 """
 from typing import Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-import numpy as np
-
-=======
-from sky import clouds
->>>>>>> 9bd5b55 (Return counts and clouds also)
-=======
->>>>>>> 78c652c (gpus_only by default)
 from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('aws.csv')
 
 
-def _get_instance_type(instance_type: str, region: str) -> pd.Series:
-    result = _df[(_df['InstanceType'] == instance_type) &
-                 (_df['Region'] == region)]
-    assert len(result) == 1, (result, instance_type, region)
-    return result
+def _get_instance_type(instance_type: str, region: str) -> pd.DataFrame:
+    return _df[(_df['InstanceType'] == instance_type) &
+               (_df['Region'] == region)]
 
 
-def get_hourly_cost(instance_type: str, region: str = 'us-west-2') -> float:
-    entry = _get_instance_type(instance_type, region)
-    return entry['PricePerHour'].iloc[0]
+def get_hourly_cost(instance_type: str,
+                    region: str = 'us-west-2',
+                    use_spot: bool = False) -> float:
+    """Returns the cost, or the cheapest cost among all zones for spot."""
+    df = _get_instance_type(instance_type, region)
+    assert len(set(df['Price'])) == 1, (df, instance_type, region)
+    if not use_spot:
+        return df['Price'].iloc[0]
+
+    cheapest_idx = df['SpotPrice'].idxmin()
+    if np.isnan(cheapest_idx):
+        return df['Price'].iloc[0]
+
+    cheapest = df.loc[cheapest_idx]
+    return cheapest['SpotPrice']
 
 
 def get_accelerators_from_instance_type(instance_type: str,
                                         region: str = 'us-west-2'
                                        ) -> Dict[str, int]:
-    entry = _get_instance_type(instance_type, region)
-    acc_name, acc_count = entry['AcceleratorName'].item(), int(
-        entry['AcceleratorCount'].item())
+    df = _get_instance_type(instance_type, region)
+    row = df.iloc[0]
+    acc_name, acc_count = row['AcceleratorName'], int(row['AcceleratorCount'])
     if len(acc_name) == 0 and acc_count == 0:
         return {}
     return {acc_name: acc_count}
-
-    assert len(set(result['Price'])) == 1, (result, instance_type, region)
-    cheapest_idx = result['SpotPrice'].idxmin()
-
-    if not use_spot or np.isnan(cheapest_idx):
-        return result['Price'].iloc[0]
-
-    cheapest = result.loc[cheapest_idx]
-    return cheapest['SpotPrice']
 
 
 def get_instance_type_for_accelerator(
@@ -58,19 +51,11 @@ def get_instance_type_for_accelerator(
         acc_count: int,
         region: str = 'us-west-2') -> Optional[str]:
     """Returns the cheapest instance type that offers the required count of
-<<<<<<< HEAD
-    accelerators."""
+    accelerators.
+    """
     result = _df[(_df['AcceleratorName'] == acc_name) &
                  (_df['AcceleratorCount'] == acc_count) &
                  (_df['Region'] == region)]
-=======
-    accelerators.
-    """
-    import IPython
-    IPython.embed()
-    result = _df[(_df['AcceleratorName'] == gpu_name) &
-                 (_df['AcceleratorCount'] == count) & (_df['Region'] == region)]
->>>>>>> 78c652c (gpus_only by default)
     if len(result) == 0:
         return None
     assert len(set(result['InstanceType'])) == 1, (result, acc_name, acc_count,
