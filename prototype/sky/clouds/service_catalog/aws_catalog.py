@@ -8,11 +8,14 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 import numpy as np
 
 =======
 from sky import clouds
 >>>>>>> 9bd5b55 (Return counts and clouds also)
+=======
+>>>>>>> 78c652c (gpus_only by default)
 from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('aws.csv')
@@ -55,10 +58,19 @@ def get_instance_type_for_accelerator(
         acc_count: int,
         region: str = 'us-west-2') -> Optional[str]:
     """Returns the cheapest instance type that offers the required count of
+<<<<<<< HEAD
     accelerators."""
     result = _df[(_df['AcceleratorName'] == acc_name) &
                  (_df['AcceleratorCount'] == acc_count) &
                  (_df['Region'] == region)]
+=======
+    accelerators.
+    """
+    import IPython
+    IPython.embed()
+    result = _df[(_df['AcceleratorName'] == gpu_name) &
+                 (_df['AcceleratorCount'] == count) & (_df['Region'] == region)]
+>>>>>>> 78c652c (gpus_only by default)
     if len(result) == 0:
         return None
     assert len(set(result['InstanceType'])) == 1, (result, acc_name, acc_count,
@@ -66,11 +78,14 @@ def get_instance_type_for_accelerator(
     return result.iloc[0]['InstanceType']
 
 
-def list_accelerators() -> Dict[str, List[int]]:
-    """Returns a mapping from the canonical names of accelerators to
-    the counts offered by this cloud.
+def list_accelerators(gpus_only: bool) -> Dict[str, List[int]]:
+    """Returns a mapping from the canonical names of accelerators to a list of
+    counts, each representing an instance type offered by this cloud.
     """
-    df = _df[['AcceleratorName', 'AcceleratorCount']].dropna().drop_duplicates()
+    df = _df
+    if gpus_only:
+        df = df[~pd.isna(df['GpuInfo'])]
+    df = df[['AcceleratorName', 'AcceleratorCount']].dropna().drop_duplicates()
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
     groupby = df.groupby('AcceleratorName')
     return groupby['AcceleratorCount'].apply(
