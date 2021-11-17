@@ -28,7 +28,7 @@ import sky
 from sky import cloud_stores
 from sky import logging
 from sky import backends
-from sky.backends import backend_utils
+from sky.backends import backend_utils, Backend
 
 logger = logging.init_logger(__name__)
 
@@ -318,7 +318,8 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
 def execute_v2(dag: sky.Dag,
                dryrun: bool = False,
                teardown: bool = False,
-               stream_logs: bool = True) -> None:
+               stream_logs: bool = True,
+               backend: Backend = sky.backends.CloudVmRayBackend) -> None:
     """Executes a planned DAG.
 
     Args:
@@ -330,6 +331,7 @@ def execute_v2(dag: sky.Dag,
       stream_logs: bool; whether to stream all tasks' outputs to the client.
         Hint: for a ParTask, set this to False to avoid a lot of log outputs;
         each task's output can be redirected to their own files.
+      backend: Backend; Which backend to use for executing the tasks.
     """
     # TODO: Azure. Port some of execute_v1()'s nice logging messages.
     assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
@@ -338,8 +340,9 @@ def execute_v2(dag: sky.Dag,
     assert best_resources is not None, \
         'Run sky.Optimize.optimize() before sky.execute().'
 
-    # Future backends: K8S, SLURM, VM, LOCAL, LOCAL_DOCKER, etc.
-    backend = backends.CloudVmRayBackend()
+    # TODO(romilb): This is a hack to avoid refactoring - rename to backend_cls in args
+    backend_cls = backend
+    backend = backend_cls()
 
     handle = backend.provision(task, best_resources, dryrun=dryrun)
     if dryrun:
