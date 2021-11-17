@@ -17,7 +17,7 @@ def test_resources_aws():
     _test_resources(sky.Resources(clouds.AWS(), 'p3.2xlarge'))
 
 
-@pytest.mark.skip(reason="TODO: this requires GCP credentials")
+@pytest.mark.skip(reason="TODO: fix gcp.py")
 def test_resources_gcp():
     _test_resources(sky.Resources(clouds.GCP(), 'n1-standard-16'))
 
@@ -28,7 +28,6 @@ def test_partial_t4():
     _test_resources(sky.Resources(accelerators={'T4': 8}, use_spot=True))
 
 
-@pytest.mark.skip(reason="TODO: this requires GCP credentials")
 def test_partial_tpu():
     _test_resources(sky.Resources(accelerators='tpu-v3-8'))
 
