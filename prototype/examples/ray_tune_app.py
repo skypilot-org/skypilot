@@ -19,7 +19,7 @@ with sky.Dag() as dag:
     # The command to run.  Will be run under the working directory.
     def run_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
         return {
-            ip_list[0]: f'python3 tune_basic_example.py',
+            ip_list[0]: f'python3 tune_basic_example.py --server-address=auto',
         }
 
     train = sky.Task(
