@@ -40,10 +40,11 @@ def _fill_template(template_path: str,
 
 
 def write_cluster_config(run_id: RunId,
-                         task,
+                         task: task.Task,
                          cluster_config_template: str,
                          region: Optional[clouds.Region] = None,
-                         zones: Optional[List[clouds.Zone]] = None):
+                         zones: Optional[List[clouds.Zone]] = None,
+                         dryrun: bool = False):
     """Returns {provisioner: path to yaml, the provisioning spec}.
 
     'provisioner' can be
@@ -90,8 +91,10 @@ def write_cluster_config(run_id: RunId,
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
             }))
-    _add_ssh_to_cluster_config(cloud, yaml_path)
     config_dict['ray'] = yaml_path
+    if dryrun:
+        return config_dict
+    _add_ssh_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
         # FIXME: replace hard-coding paths
         config_dict['gcloud'] = (_fill_template(

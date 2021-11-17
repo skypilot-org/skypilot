@@ -216,7 +216,7 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
 
     run_id = backend_utils.get_run_id()
     config_dict = backend_utils.write_cluster_config(
-        run_id, task, _get_cluster_config_template(task))
+        run_id, task, _get_cluster_config_template(task), dryrun=dryrun)
     cluster_config_file = config_dict['ray']
     if dryrun:
         logger.info('Dry run finished.')
