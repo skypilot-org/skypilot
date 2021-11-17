@@ -192,3 +192,11 @@ def run_command_on_ip_via_ssh(ip: str,
         if errs:
             logger.error(errs)
         raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+
+def make_list(x):
+    if x is None:
+        return []
+    if isinstance(x, list):
+        return x
+    return [x]

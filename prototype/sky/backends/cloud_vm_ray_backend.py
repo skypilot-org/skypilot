@@ -251,7 +251,8 @@ class RetryingVmProvisioner(object):
                 should_continue, reason = self._update_blocklist_on_error(
                     to_provision.cloud, region, zones, stdout, stderr)
                 if tpu_name is not None:
-                    logger.info('Failed to provision VM. Tearing down TPU resource...')
+                    logger.info(
+                        'Failed to provision VM. Tearing down TPU resource...')
                     _run(f'bash {config_dict["gcloud"][1]}',
                          stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE)
@@ -464,8 +465,11 @@ class CloudVmRayBackend(backends.Backend):
         # Launch the command as a Ray task.
         assert type(task.run) is str, \
             f'Task(run=...) should be a string (found {type(task.run)}).'
-        cmd = 'ray exec {} {}'.format(
-            handle, shlex.quote(f'cd {SKY_REMOTE_WORKDIR} && {task.run}'))
+        ports = backend_utils.make_list(task.port)
+        port_str = ' '.join([f'-p {p}' for p in ports])
+        cmd = 'ray exec {} {} {}'.format(
+            port_str, handle,
+            shlex.quote(f'cd {SKY_REMOTE_WORKDIR} && {task.run}'))
         if not stream_logs:
             out = tempfile.NamedTemporaryFile('w', prefix='sky_',
                                               suffix='.out').name

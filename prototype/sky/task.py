@@ -28,6 +28,7 @@ class Task(object):
             num_nodes=1,
             private_key='~/.ssh/sky-key',
             run=None,
+            port=None,
     ):
         self.name = name
         self.best_resources = None
@@ -35,6 +36,7 @@ class Task(object):
         self.setup = setup
         self.post_setup_fn = post_setup_fn
         self.workdir = workdir
+        self.port = port
         self.docker_image = docker_image
         self.container_name = container_name
         self.num_nodes = num_nodes
