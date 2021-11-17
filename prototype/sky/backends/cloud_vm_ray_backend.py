@@ -12,6 +12,7 @@ import yaml
 
 import colorama
 
+import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
@@ -40,11 +41,12 @@ def _get_cluster_config_template(task):
         clouds.GCP: 'config/gcp-ray.yml.j2',
     }
     cloud = task.best_resources.cloud
-    return _CLOUD_TO_TEMPLATE[type(cloud)]
+    path = _CLOUD_TO_TEMPLATE[type(cloud)]
+    return os.path.join(sky.__root_dir__, '..', path)
 
 
 def _to_accelerator_and_count(
-        resources: Optional[Resources]) -> (Optional[str], int):
+        resources: Optional[Resources]) -> Tuple[Optional[str], int]:
     acc = None
     acc_count = 0
     if resources is not None:
