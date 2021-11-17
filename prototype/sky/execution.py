@@ -187,10 +187,11 @@ class Runner:
                         f'{Fore.CYAN}Step {step.step_id} started: {step.step_desc}{Fore.RESET}\n{Style.DIM}{commands}{Style.RESET_ALL}'
                     )
                     for ip, cmd in commands.items():
-                        cmd = f'cd {SKY_REMOTE_WORKDIR} && ' + cmd
-                        backend_utils.run_command_on_ip_via_ssh(
-                            ip, cmd, self.task.private_key,
-                            self.task.container_name)
+                        if cmd is not None:
+                            cmd = f'cd {SKY_REMOTE_WORKDIR} && ' + cmd
+                            backend_utils.run_command_on_ip_via_ssh(
+                                ip, cmd, self.task.private_key,
+                                self.task.container_name)
 
                 self.logger.log('finish_step')
                 logger.info(
