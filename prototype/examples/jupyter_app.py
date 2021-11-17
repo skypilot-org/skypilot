@@ -19,7 +19,7 @@ def make_application():
                               run=run,
                               setup=setup,
                               workdir='~/local/workspace',
-                              port=8888)  # int or List[int]
+                              ports=8888)  # int or List[int]
 
         jupyter_op.set_resources({
             sky.Resources(accelerators='K80', use_spot=True),

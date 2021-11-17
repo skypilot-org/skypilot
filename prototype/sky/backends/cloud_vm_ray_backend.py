@@ -423,10 +423,13 @@ class CloudVmRayBackend(backends.Backend):
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
                 f'{Style.RESET_ALL} Hint: in the run command, redirect each'
                 ' task\'s output to a file, and use `tail -f` to monitor.\n')
-
+        # TODO: how to get port for ParTask?
         self._exec_code_on_head(handle, codegen)
 
-    def _exec_code_on_head(self, handle: ResourceHandle, codegen: str) -> None:
+    def _exec_code_on_head(self,
+                           handle: ResourceHandle,
+                           codegen: str,
+                           exec_options: str = '') -> None:
         """Executes generated code on the head node."""
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
@@ -437,7 +440,7 @@ class CloudVmRayBackend(backends.Backend):
             # execute the script.  Happens for AWS.
             _run(f'ray rsync_up {handle} {fp.name} /tmp/{basename}')
         # Note the use of python3 (for AWS AMI).
-        _run(f'ray exec {handle} \'python3 /tmp/{basename}\'')
+        _run(f'ray exec {exec_options} {handle} \'python3 /tmp/{basename}\'')
 
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
@@ -465,10 +468,9 @@ class CloudVmRayBackend(backends.Backend):
         # Launch the command as a Ray task.
         assert type(task.run) is str, \
             f'Task(run=...) should be a string (found {type(task.run)}).'
-        ports = backend_utils.make_list(task.port)
-        port_str = ' '.join([f'-p {p}' for p in ports])
+        port_cmd = self._get_port_cmd(task)
         cmd = 'ray exec {} {} {}'.format(
-            port_str, handle,
+            port_cmd, handle,
             shlex.quote(f'cd {SKY_REMOTE_WORKDIR} && {task.run}'))
         if not stream_logs:
             out = tempfile.NamedTemporaryFile('w', prefix='sky_',
@@ -542,7 +544,8 @@ class CloudVmRayBackend(backends.Backend):
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
                 f'{Style.RESET_ALL} Hint: in the run command, redirect each'
                 ' task\'s output to a file, and use `tail -f` to monitor.\n')
-        self._exec_code_on_head(handle, codegen)
+        port_cmd = self._get_port_cmd(task)
+        self._exec_code_on_head(handle, codegen, port_cmd)
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
@@ -589,3 +592,8 @@ class CloudVmRayBackend(backends.Backend):
         if return_private_ips:
             os.remove(yaml_handle)
         return head_ip + worker_ips
+
+    def _get_port_cmd(self, task: App) -> str:
+        ports = backend_utils.make_list(task.ports)
+        port_str = ' '.join([f'--port-forward {p}' for p in ports])
+        return port_str
