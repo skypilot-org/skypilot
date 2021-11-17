@@ -220,7 +220,8 @@ class RetryingVmProvisioner(object):
                 task,
                 _get_cluster_config_template(task),
                 region=region,
-                zones=zones)
+                zones=zones,
+                dryrun=dryrun)
             if dryrun:
                 return
             tpu_name = to_provision.accelerator_args.get('tpu_name')
