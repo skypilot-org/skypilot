@@ -3,6 +3,8 @@ boto3
 colorama
 jinja2
 networkx
+pandas
+pytest
 ray[default]
 tabulate
 
