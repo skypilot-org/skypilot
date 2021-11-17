@@ -16,7 +16,7 @@ def list_accelerators(
     Example response: {'V100': {AWS: [1, 4, 8]}}, representing that AWS offers
     instance types that provide 1, 4 or 8 V100 GPUs.
     """
-    # TODO: write a test, e.g. V100 should be present in this list
+    # TODO: Azure and GCP (especially TPU offerings) should be included too.
     results = {clouds.AWS(): aws_catalog.list_accelerators(gpus_only)}
     ret = collections.defaultdict(dict)
     for cloud, result in results.items():
