@@ -209,6 +209,4 @@ class GCP(clouds.Cloud):
         self,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        # TODO: check if this is okay with attached accelerators like
-        # `sky.Resources(clouds.GCP(), 'n1-standard-16', 'V100)`
         return None
