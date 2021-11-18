@@ -12,6 +12,7 @@ import yaml
 
 import colorama
 
+import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
@@ -40,11 +41,12 @@ def _get_cluster_config_template(task):
         clouds.GCP: 'config/gcp-ray.yml.j2',
     }
     cloud = task.best_resources.cloud
-    return _CLOUD_TO_TEMPLATE[type(cloud)]
+    path = _CLOUD_TO_TEMPLATE[type(cloud)]
+    return os.path.join(sky.__root_dir__, '..', path)
 
 
-def _to_accelerator_and_count(resources: Optional[Resources]
-                             ) -> (Optional[str], int):
+def _to_accelerator_and_count(
+        resources: Optional[Resources]) -> Tuple[Optional[str], int]:
     acc = None
     acc_count = 0
     if resources is not None:
@@ -218,7 +220,8 @@ class RetryingVmProvisioner(object):
                 task,
                 _get_cluster_config_template(task),
                 region=region,
-                zones=zones)
+                zones=zones,
+                dryrun=dryrun)
             if dryrun:
                 return
             tpu_name = to_provision.accelerator_args.get('tpu_name')
@@ -251,7 +254,8 @@ class RetryingVmProvisioner(object):
                 should_continue, reason = self._update_blocklist_on_error(
                     to_provision.cloud, region, zones, stdout, stderr)
                 if tpu_name is not None:
-                    logger.info('Failed to provision VM. Tearing down TPU resource...')
+                    logger.info(
+                        'Failed to provision VM. Tearing down TPU resource...')
                     _run(f'bash {config_dict["gcloud"][1]}',
                          stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE)
@@ -298,9 +302,9 @@ class CloudVmRayBackend(backends.Backend):
         provisioner = RetryingVmProvisioner()
         config_dict = provisioner.provision_with_retries(
             task, to_provision, dryrun)
-        cluster_config_file = config_dict['ray']
         if dryrun:
             return
+        cluster_config_file = config_dict['ray']
         # gcloud: TPU.
         if config_dict.get('gcloud') is not None:
             self._managed_tpu = config_dict['gcloud']
@@ -315,10 +319,10 @@ class CloudVmRayBackend(backends.Backend):
         _run(f'ray rsync_up {handle} {workdir}/ {SKY_REMOTE_WORKDIR}')
 
     def sync_file_mounts(
-            self,
-            handle: ResourceHandle,
-            all_file_mounts: Dict[Path, Path],
-            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        self,
+        handle: ResourceHandle,
+        all_file_mounts: Dict[Path, Path],
+        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         # TODO: this only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
