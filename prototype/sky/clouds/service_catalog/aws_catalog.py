@@ -35,14 +35,14 @@ def get_hourly_cost(instance_type: str,
     return cheapest['SpotPrice']
 
 
-def get_accelerators_from_instance_type(instance_type: str,
-                                        region: str = 'us-west-2'
-                                       ) -> Dict[str, int]:
+def get_accelerators_from_instance_type(
+        instance_type: str,
+        region: str = 'us-west-2') -> Optional[Dict[str, int]]:
     df = _get_instance_type(instance_type, region)
     row = df.iloc[0]
     acc_name, acc_count = row['AcceleratorName'], int(row['AcceleratorCount'])
     if len(acc_name) == 0 and acc_count == 0:
-        return {}
+        return None
     return {acc_name: acc_count}
 
 

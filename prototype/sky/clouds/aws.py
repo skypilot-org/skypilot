@@ -104,15 +104,20 @@ class AWS(clouds.Cloud):
     def get_default_instance_type(cls):
         return 'm4.2xlarge'
 
-    # TODO: factor the following 2 methods, as they are the same logic
+    # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
+
+    def get_accelerators_from_instance_type(
+        self,
+        instance_type: str,
+    ) -> Optional[Dict[str, int]]:
+        return aws_catalog.get_accelerators_from_instance_type(instance_type)
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
         # r.accelerators is cleared but .instance_type encodes the info.
-        acc_dict = aws_catalog.get_accelerators_from_instance_type(
-            r.instance_type)
-        if len(acc_dict) > 0:
+        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
