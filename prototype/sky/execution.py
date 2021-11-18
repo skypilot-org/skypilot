@@ -58,68 +58,6 @@ def _get_cluster_config_template(task):
     return _CLOUD_TO_TEMPLATE[type(cloud)]
 
 
-def _fill_template(template_path: str,
-                   variables: dict,
-                   output_path: Optional[str] = None) -> str:
-    """Create a file from a Jinja template and return the filename."""
-    assert template_path.endswith('.j2'), template_path
-    with open(template_path) as fin:
-        template = fin.read()
-    template = jinja2.Template(template)
-    content = template.render(**variables)
-    if output_path is None:
-        output_path, _ = template_path.rsplit('.', 1)
-    with open(output_path, 'w') as fout:
-        fout.write(content)
-    logger.debug(f'Created or updated file {output_path}')
-    return output_path
-
-
-def _write_cluster_config(run_id: RunId, task, cluster_config_template: str):
-    cloud = task.best_resources.cloud
-    resources_vars = cloud.make_deploy_resources_variables(task)
-    config_dict = {}
-
-    config_dict['ray'] = _fill_template(
-        cluster_config_template,
-        dict(
-            resources_vars,
-            **{
-                'run_id': run_id,
-                'workdir': task.workdir,
-                'docker_image': task.docker_image,
-                'container_name': task.container_name,
-                'num_nodes': task.num_nodes,
-                'file_mounts': task.get_local_to_remote_file_mounts() or {},
-                # 'max_nodes': task.max_nodes,
-            }))
-    if resources_vars.get('tpu_type') is not None:
-        # FIXME: replace hard-coding paths
-        config_dict['gcloud'] = (_fill_template('config/gcp-tpu-create.sh.j2',
-                                                dict(resources_vars)),
-                                 _fill_template('config/gcp-tpu-delete.sh.j2',
-                                                dict(resources_vars)))
-    return config_dict
-
-
-def _execute_single_node_command(ip: IPAddr, command: ShellCommand,
-                                 private_key: str,
-                                 container_name: Optional[str]):
-    # TODO: Merge into Step; output also needs to be logged to file
-    if container_name is not None:
-        command = command.replace('\\', '\\\\').replace('"', '\\"')
-        command = f'docker exec {container_name} /bin/bash -c "{command}"'
-
-    return subprocess.Popen([
-        "ssh", "-i", private_key, "-o", "StrictHostKeyChecking=no",
-        "ubuntu@{}".format(ip), command
-    ])
-
-
-def _get_run_id() -> RunId:
-    return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
-
-
 class EventLogger:
 
     def __init__(self, log_file_path: str):
