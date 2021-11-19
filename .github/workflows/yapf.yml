@@ -1,0 +1,13 @@
+name: yapf
+on: [push]
+jobs:
+  formatting-check:
+    name: Formatting Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: run YAPF to test if python code is correctly formatted
+      # https://github.com/AlexanderMelde/yapf-action
+      uses: AlexanderMelde/yapf-action@master
+      with:
+        args: --verbose --style google --recursive
