@@ -19,7 +19,7 @@ import os
 import re
 import subprocess
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Union
 
 import colorama
 from colorama import Fore, Style
@@ -236,7 +236,7 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
         runner.add_step('provision', 'Provision resources with gcloud',
                         f'bash {config_dict["gcloud"][0]}')
         runner.add_step(
-            'tpu_setup', 'TPU setup',
+            'setup', 'TPU setup',
             f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={task.best_resources.accelerator_args['tpu_name']}\" >> ~/.bashrc\'"
         )
 
@@ -245,23 +245,6 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
             'sync', 'Sync files',
             f'ray rsync_up {cluster_config_file} {task.workdir}/ {SKY_REMOTE_WORKDIR}'
         )
-
-    with open(f'{SKY_LOGS_DIRECTORY}/{run_id}/run.sh', 'w') as f:
-        f.write(f'#!/bin/bash\n')
-        f.write(task.run)
-    with open(f'{SKY_LOGS_DIRECTORY}/{run_id}/setup.sh', 'w') as f:
-        f.write(f'#!/bin/bash\n')
-        f.write(task.setup)
-
-    runner.add_step(
-        'configure', 'Configure',
-        f'ray rsync_up {cluster_config_file} {SKY_LOGS_DIRECTORY}/{run_id}/ {SKY_REMOTE_WORKDIR}/.sky/{run_id}'
-    )
-
-    runner.add_step(
-        'setup', 'Task setup',
-        f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && bash .sky/{run_id}/setup.sh \''
-    )
 
     if task.get_cloud_to_remote_file_mounts() is not None:
         # Handle cloud -> remote file transfers.
@@ -307,7 +290,7 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     if isinstance(task.run, str):
         runner.add_step(
             'exec', 'Execute task',
-            f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && bash .sky/{run_id}/run.sh \''
+            f'ray exec {cluster_config_file} \'cd {SKY_REMOTE_WORKDIR} && {task.run}\''
         )
     else:
         runner.add_step('exec', 'Execute task', task.run)
@@ -315,7 +298,7 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
     if teardown:
         runner.add_step('teardown', 'Tear down resources',
                         f'ray down -y {cluster_config_file}')
-        if task.best_resources.accelerator_args.get('tpu_name') is not None:
+        if task.best_resources.accelerator_args['tpu_name'] is not None:
             runner.add_step('teardown', 'Tear down resources with gcloud',
                             f'bash {config_dict["gcloud"][1]}')
     runner.run()

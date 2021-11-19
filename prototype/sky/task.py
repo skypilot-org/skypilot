@@ -94,6 +94,10 @@ class Task(object):
             resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
         if resources.get('accelerators') is not None:
             resources['accelerators'] = dict(resources['accelerators'])
+        if resources.get('accelerator_args') is not None:
+            resources['accelerators_args'] = dict(resources['accelerator_args'])
+        if resources.get('use_spot') is not None:
+            resources['use_spot'] = resources['use_spot']
         resources = sky.Resources(**resources)
 
         task.set_resources({resources})
