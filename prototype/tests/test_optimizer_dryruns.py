@@ -17,7 +17,6 @@ def test_resources_aws():
     _test_resources(sky.Resources(clouds.AWS(), 'p3.2xlarge'))
 
 
-@pytest.mark.skip(reason="TODO: fix gcp.py")
 def test_resources_gcp():
     _test_resources(sky.Resources(clouds.GCP(), 'n1-standard-16'))
 

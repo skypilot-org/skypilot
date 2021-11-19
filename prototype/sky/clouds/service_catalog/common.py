@@ -3,7 +3,10 @@ import os
 import pandas as pd
 
 
+def get_data_path(filename: str) -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data',
+                        filename)
+
+
 def read_catalog(filename: str) -> pd.DataFrame:
-    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data',
-                             filename)
-    return pd.read_csv(data_path)
+    return pd.read_csv(get_data_path(filename))
