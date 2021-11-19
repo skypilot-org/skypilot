@@ -1,13 +1,24 @@
 name: yapf
-on: [push]
+
+on:
+  - push
+
 jobs:
-  formatting-check:
-    name: Formatting Check
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.6"]
     steps:
     - uses: actions/checkout@v2
-    - name: run YAPF to test if python code is correctly formatted
-      # https://github.com/AlexanderMelde/yapf-action
-      uses: AlexanderMelde/yapf-action@master
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
       with:
-        args: --verbose --style google --recursive
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install yapf==0.27.0
+    - name: Analysing the code with pylint
+      run: |
+        yapf --verbose --style google --recursive prototype/sky
