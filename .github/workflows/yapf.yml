@@ -21,4 +21,4 @@ jobs:
         pip install yapf==0.27.0
     - name: Analysing the code with pylint
       run: |
-        yapf --verbose --style google --recursive prototype/sky
+        yapf --diff --style .style.yapf --recursive prototype/

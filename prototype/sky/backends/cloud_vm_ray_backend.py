@@ -45,8 +45,8 @@ def _get_cluster_config_template(task):
     return os.path.join(sky.__root_dir__, '..', path)
 
 
-def _to_accelerator_and_count(
-        resources: Optional[Resources]) -> Tuple[Optional[str], int]:
+def _to_accelerator_and_count(resources: Optional[Resources]
+                             ) -> Tuple[Optional[str], int]:
     acc = None
     acc_count = 0
     if resources is not None:
@@ -319,10 +319,10 @@ class CloudVmRayBackend(backends.Backend):
         _run(f'ray rsync_up {handle} {workdir}/ {SKY_REMOTE_WORKDIR}')
 
     def sync_file_mounts(
-        self,
-        handle: ResourceHandle,
-        all_file_mounts: Dict[Path, Path],
-        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+            self,
+            handle: ResourceHandle,
+            all_file_mounts: Dict[Path, Path],
+            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         # TODO: this only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
