@@ -204,3 +204,9 @@ class GCP(clouds.Cloud):
         r.cloud = GCP()
         r.instance_type = GCP.get_default_instance_type()
         return [r]
+
+    def get_accelerators_from_instance_type(
+        self,
+        instance_type: str,
+    ) -> Optional[Dict[str, int]]:
+        return None
