@@ -47,7 +47,7 @@ with sky.Dag() as dag:
         'tensorboard',
         workdir=workdir,
         setup=setup,
-        run='sleep 120 && conda activate resnet && \
+        run='conda activate resnet && \
             tensorboard --logdir resnet-model-dir --port 4650',
     )
 
