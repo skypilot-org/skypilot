@@ -11,16 +11,18 @@ with sky.Dag() as dag:
     num_nodes = 2
 
     workdir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           'ray_tune_example')
+                           'ray_tune_examples')
 
     # The setup command.  Will be run under the working directory.
-    setup = 'pip3 install ray[tune]'
+    setup = 'pip3 install --upgrade pip && \
+        pip3 install ray[tune] pytorch-lightning lightning-bolts'
+
+    # head_run = 'python3 tune_basic_example.py --smoke-test'
+    head_run = 'python3 tune_ptl_example.py'
 
     # The command to run.  Will be run under the working directory.
     def run_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
-        return {
-            ip_list[0]: f'python3 tune_basic_example.py --smoke-test',
-        }
+        return {ip_list[0]: head_run}
 
     train = sky.Task(
         'train',
