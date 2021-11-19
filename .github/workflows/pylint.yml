@@ -1,7 +1,6 @@
 name: Pylint
 
 on:
-  - push
   - pull_request
   
 jobs:
