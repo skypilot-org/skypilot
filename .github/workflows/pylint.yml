@@ -1,0 +1,27 @@
+name: Pylint
+
+on:
+  - pull_request
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.6"]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pylint==2.8.2
+        # https://github.com/edaniszewski/pylint-quotes
+        pip install pylint-quotes
+        pip install -e prototype
+    - name: Analysing the code with pylint
+      run: |
+        pylint --load-plugins pylint_quotes prototype/sky
