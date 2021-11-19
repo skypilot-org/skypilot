@@ -1,10 +1,5 @@
-import os
-import subprocess
-
 import click
-
 import sky
-from sky import clouds
 
 
 @click.group()
