@@ -45,8 +45,8 @@ def _get_cluster_config_template(task):
     return os.path.join(sky.__root_dir__, '..', path)
 
 
-def _to_accelerator_and_count(
-        resources: Optional[Resources]) -> Tuple[Optional[str], int]:
+def _to_accelerator_and_count(resources: Optional[Resources]
+                             ) -> Tuple[Optional[str], int]:
     acc = None
     acc_count = 0
     if resources is not None:
@@ -319,10 +319,10 @@ class CloudVmRayBackend(backends.Backend):
         _run(f'ray rsync_up {handle} {workdir}/ {SKY_REMOTE_WORKDIR}')
 
     def sync_file_mounts(
-        self,
-        handle: ResourceHandle,
-        all_file_mounts: Dict[Path, Path],
-        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+            self,
+            handle: ResourceHandle,
+            all_file_mounts: Dict[Path, Path],
+            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         # TODO: this only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
@@ -386,7 +386,11 @@ class CloudVmRayBackend(backends.Backend):
         """)
         ]
         for i, t in enumerate(par_task.tasks):
-            cmd = shlex.quote(f'cd {SKY_REMOTE_WORKDIR} && {t.run}')
+            # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used to initialize
+            # conda, so that 'conda activate ...' works.
+            cmd = shlex.quote(
+                f'. $(conda info --base)/etc/profile.d/conda.sh || true && \
+                    cd {SKY_REMOTE_WORKDIR} && source ~/.bashrc && {t.run}')
             # We can't access t.best_resources because the inner task doesn't
             # undergo optimization.
             resources = par_task.get_task_resource_demands(i)
@@ -406,7 +410,7 @@ class CloudVmRayBackend(backends.Backend):
             task_i_codegen = textwrap.dedent(f"""\
         futures.append(ray.remote(lambda: subprocess.run(
             {cmd},
-              shell=True, check=True)) \\
+              shell=True, check=True, executable='/bin/bash')) \\
               .options(name='{name}'{resources_str}{num_gpus_str}) \\
               .remote())
         """)
@@ -506,11 +510,11 @@ class CloudVmRayBackend(backends.Backend):
         ips_dict = task.run(ips)
         for ip in ips_dict:
             command_for_ip = ips_dict[ip]
-            # By default /bin/sh is used, and if 'source ~/.bashrc' or 'source
-            # activate conda_env' is used, we get /bin/sh: 1: source: not
-            # found.  Use /bin/bash -c as a workaround.
+            # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used to initialize
+            # conda, so that 'conda activate ...' works.
             cmd = shlex.quote(
-                f'/bin/bash -c \'cd {SKY_REMOTE_WORKDIR} && {command_for_ip}\'')
+                f'. $(conda info --base)/etc/profile.d/conda.sh || true && \
+                    cd {SKY_REMOTE_WORKDIR} && {command_for_ip}')
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
             demand = {f'node:{ip}': 1}
@@ -521,11 +525,13 @@ class CloudVmRayBackend(backends.Backend):
                 # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
                 # would be force-set to empty by Ray.
                 num_gpus_str = f', num_gpus={acc_count}'
+            # Set the executable to /bin/bash, so that the 'source ~/.bashrc'
+            # and 'source activate conda_env' can be used.
             codegen.append(
                 textwrap.dedent(f"""\
         futures.append(ray.remote(lambda: subprocess.run(
             {cmd},
-                shell=True, check=True)) \\
+                shell=True, check=True, executable='/bin/bash')) \\
                 .options(name='task-{ip}'{resources_str}{num_gpus_str}) \\
                 .remote())
         """))
