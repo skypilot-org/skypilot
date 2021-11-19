@@ -34,6 +34,10 @@ def _run(cmd, **kwargs):
     return subprocess.run(cmd, shell=True, check=True, **kwargs)
 
 
+def _run_no_outputs(cmd, **kwargs):
+    return _run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+
+
 def _get_cluster_config_template(task):
     _CLOUD_TO_TEMPLATE = {
         clouds.AWS: 'config/aws-ray.yml.j2',
@@ -119,7 +123,6 @@ class RetryingVmProvisioner(object):
                     print(s)
                 assert False, \
                     'Errors occurred during setup command; check logs above.'
-        return True, None
 
     def _update_blocklist_on_aws_error(self, region, zones, stdout, stderr):
         # The underlying ray autoscaler / boto3 will try all zones of a region
@@ -146,17 +149,14 @@ class RetryingVmProvisioner(object):
         messages = '\n\t'.join(errors)
         logger.warn(f'{Style.DIM}\t{messages}{Style.RESET_ALL}')
         self._blocked_regions.add(region.name)
-        return True, None
 
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
-                                   stderr) -> Tuple[bool, Optional[str]]:
-        """Cloud-specific error message handling.
+                                   stderr) -> None:
+        """Handles cloud-specific errors and updates the block list.
 
         This parses textual stdout/stderr because we don't directly use the
         underlying clouds' SDKs.  If we did that, we could catch proper
         exceptions instead.
-
-        Returns (should_continue_trying, reason).
         """
         if isinstance(cloud, clouds.GCP):
             return self._update_blocklist_on_gcp_error(region, zones, stdout,
@@ -170,8 +170,6 @@ class RetryingVmProvisioner(object):
             assert False, (stdout, stderr)  # TODO
         else:
             assert False, f'Unknown cloud: {cloud}.'
-
-        return True, None
 
     def _yield_region_zones(self, task: App, cloud: clouds.Cloud):
         # Try reading previously launched region/zones and try them first,
@@ -214,7 +212,7 @@ class RetryingVmProvisioner(object):
                 f'({",".join(z.name for z in zones)}).{Style.RESET_ALL}')
             logger.info('If this takes longer than ~30 seconds,'
                         ' provisioning is likely successful.'
-                        ' Setting up may take a few minutes.')
+                        ' Setup may take a few minutes.')
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
@@ -251,18 +249,14 @@ class RetryingVmProvisioner(object):
                                     stderr=subprocess.PIPE)
             stdout, stderr = proc.communicate()
             if proc.returncode != 0:
-                should_continue, reason = self._update_blocklist_on_error(
-                    to_provision.cloud, region, zones, stdout, stderr)
+                self._update_blocklist_on_error(to_provision.cloud, region,
+                                                zones, stdout, stderr)
                 if tpu_name is not None:
                     logger.info(
                         'Failed to provision VM. Tearing down TPU resource...')
                     _run(f'bash {config_dict["gcloud"][1]}',
                          stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE)
-                if not should_continue:
-                    logger.warn(f'Skipping the rest of the regions/zones; '
-                                f'reason: {reason}')
-                    break
             else:
                 if tpu_name is not None:
                     _run(
@@ -275,8 +269,9 @@ class RetryingVmProvisioner(object):
                     f'\nTo log into the head VM:\t{Style.BRIGHT}ray attach'
                     f' {cluster_config_file}{Style.RESET_ALL}\n')
                 return config_dict
-        message = ('Failed to acquire resources in all regions/zones.'
-                   '  Try other resource requirements or different clouds.')
+        message = ('Failed to acquire resources in all regions/zones'
+                   f' (requested {to_provision}).'
+                   ' Try changing resource requirements or use another cloud.')
         logger.error(message)
         assert False, message
 
@@ -306,9 +301,10 @@ class CloudVmRayBackend(backends.Backend):
             return
         cluster_config_file = config_dict['ray']
         # gcloud: TPU.
-        if config_dict.get('gcloud') is not None:
-            self._managed_tpu = config_dict['gcloud']
-        backend_utils.wait_until_ray_cluster_ready(cluster_config_file,
+        self._managed_tpu = config_dict.get('gcloud')
+
+        backend_utils.wait_until_ray_cluster_ready(to_provision.cloud,
+                                                   cluster_config_file,
                                                    task.num_nodes)
         return cluster_config_file
 
@@ -423,8 +419,7 @@ class CloudVmRayBackend(backends.Backend):
         colorama.init()
         Fore = colorama.Fore
         Style = colorama.Style
-        logger.info(
-            f'\n{Fore.CYAN}Starting ParTask execution.{Style.RESET_ALL}')
+        logger.info(f'{Fore.CYAN}Starting ParTask execution.{Style.RESET_ALL}')
         if not stream_logs:
             logger.info(
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
@@ -442,7 +437,7 @@ class CloudVmRayBackend(backends.Backend):
             # Rather than 'rsync_up' & 'exec', the alternative of 'ray submit'
             # may not work as the remote VM may use system python (python2) to
             # execute the script.  Happens for AWS.
-            _run(f'ray rsync_up {handle} {fp.name} /tmp/{basename}')
+            _run_no_outputs(f'ray rsync_up {handle} {fp.name} /tmp/{basename}')
         # Note the use of python3 (for AWS AMI).
         _run(f'ray exec {handle} \'python3 /tmp/{basename}\'')
 
@@ -556,11 +551,11 @@ class CloudVmRayBackend(backends.Backend):
         if not teardown:
             logger.info(
                 f'\nTo log into the head VM:\t{Style.BRIGHT}ray attach {handle} {Style.RESET_ALL}\n'
-                f'\nTo down the resources:\t{Style.BRIGHT}ray down {handle} -y {Style.RESET_ALL}\n'
+                f'\nTo tear down the cluster:\t{Style.BRIGHT}ray down {handle} -y {Style.RESET_ALL}\n'
             )
             if self._managed_tpu is not None:
                 logger.info(
-                    f'To down the TPU resources:\t{Style.BRIGHT}bash {self._managed_tpu[1]} {Style.RESET_ALL}\n'
+                    f'To tear down the TPU(s):\t{Style.BRIGHT}bash {self._managed_tpu[1]} {Style.RESET_ALL}\n'
                 )
 
     def teardown(self, handle: ResourceHandle) -> None:

@@ -150,10 +150,17 @@ def get_run_id() -> RunId:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
-def wait_until_ray_cluster_ready(cluster_config_file: str, num_nodes: int):
+def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
+                                 num_nodes: int):
     if num_nodes <= 1:
         return
     expected_worker_count = num_nodes - 1
+    if isinstance(cloud, clouds.AWS):
+        worker_str = 'ray.worker.default'
+    elif isinstance(cloud, clouds.GCP):
+        worker_str = 'ray_worker_default'
+    else:
+        assert False, f'No support for distributed clusters for {cloud}.'
     while True:
         proc = subprocess.run(f"ray exec {cluster_config_file} 'ray status'",
                               shell=True,
@@ -162,7 +169,7 @@ def wait_until_ray_cluster_ready(cluster_config_file: str, num_nodes: int):
                               stderr=subprocess.PIPE)
         output = proc.stdout.decode('ascii')
         logger.info(output)
-        if f'{expected_worker_count} ray.worker.default' in output:
+        if f'{expected_worker_count} {worker_str}' in output:
             break
         time.sleep(10)
 
