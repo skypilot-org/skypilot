@@ -23,10 +23,6 @@ def _is_cloud_store_url(url):
     return result.netloc
 
 
-def _dict_to_cmd_args(d):
-    return ' '.join(['--{}={}'.format(k, v) for k, v in d.items()])
-
-
 class Task(object):
     """Task: a coarse-grained stage in an application."""
 
@@ -70,40 +66,17 @@ class Task(object):
 
     @staticmethod
     def from_yaml(yaml_path):
-        # TODO(gmittal): Investigate better config tooling: https://confuse.readthedocs.io/en/latest/.
-        # TODO: Add support for command line modification
-
         with open(os.path.expanduser(yaml_path), 'r') as f:
             config = yaml.safe_load(f)
 
-        workdir = config.get('workdir')
-
-        setup = config['setup']
-        run = config['run']
-
-        if isinstance(setup, dict):
-            base_cmd_args = _dict_to_cmd_args(setup.get('flags', {}))
-            setup = '{}\n{} {}'.format(setup['preamble'],
-                                       setup.get('base_cmd', ''), base_cmd_args)
-
-        if isinstance(run, dict):
-            base_cmd_args = _dict_to_cmd_args(run.get('flags', {}))
-            run = '{}\n{} {}'.format(run['preamble'],
-                                     run.get('base_cmd', '').strip(),
-                                     base_cmd_args)
-
-        file_mounts = config.get('file_mounts')
-        if file_mounts is not None:
-            for src, dst in file_mounts.items():
-                run = run.replace(dst, src)
-
         task = Task(
-            config['name'],
-            workdir=workdir,
-            setup=setup,
-            run=run,
+            config.get('name'),
+            workdir=config.get('workdir'),
+            setup=config.get('setup'),
+            run=config['run'],
         )
 
+        file_mounts = config.get('file_mounts')
         if file_mounts is not None:
             task.set_file_mounts(file_mounts)
 
@@ -116,7 +89,7 @@ class Task(object):
             outputs = config['output']
             task.set_outputs(**outputs)
 
-        resources = config['resources']
+        resources = config.get('resources')
         if resources.get('cloud') is not None:
             resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
         if resources.get('accelerators') is not None:

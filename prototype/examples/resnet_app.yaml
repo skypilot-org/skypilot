@@ -18,9 +18,9 @@ output:
 # }
 
 setup: |
+  . $(conda info --base)/etc/profile.d/conda.sh
   pip install --upgrade pip
 
-  source /home/ubuntu/anaconda3/etc/profile.d/conda.sh
   conda activate resnet
 
   if [ $? -eq 0 ]; then
@@ -34,7 +34,7 @@ setup: |
   fi
 
 run: |
-  source /home/ubuntu/anaconda3/etc/profile.d/conda.sh
+  . $(conda info --base)/etc/profile.d/conda.sh
   conda activate resnet
 
   python -u models/official/resnet/resnet_main.py --use_tpu=False \

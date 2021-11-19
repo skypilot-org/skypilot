@@ -1,6 +1,8 @@
 """Util constants/functions for the backends."""
 import datetime
+import os
 import subprocess
+import tempfile
 import time
 from typing import List, Optional, Union
 import yaml
@@ -73,13 +75,20 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
+    if task.setup is not None:
+        with open('config/setup.sh', 'w') as f:
+            f.write('#!/bin/bash\n')
+            f.write(task.setup)
+            f.flush()
+        task.setup = 'config/setup.sh'
+
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
             resources_vars,
             **{
                 'run_id': run_id,
-                'setup_command': task.setup,
+                'setup_sh_path': task.setup,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
                 'container_name': task.container_name,

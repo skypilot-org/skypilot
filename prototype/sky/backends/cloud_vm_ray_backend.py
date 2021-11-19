@@ -262,6 +262,18 @@ class RetryingVmProvisioner(object):
                     _run(
                         f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={tpu_name}\" >> ~/.bashrc\'"
                     )
+
+                # Upload run script and modify task.run
+                with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+                    fp.write(f'#!/bin/bash\n')
+                    fp.write(task.run)
+                    fp.flush()
+                    basename = os.path.basename(fp.name)
+                    _run(
+                        f'ray rsync_up {cluster_config_file} {fp.name} /tmp/{basename}'
+                    )
+                task.run = f'bash /tmp/{basename}'
+
                 logger.info(
                     f'{Style.BRIGHT}Successfully provisioned or found'
                     f' existing VM(s). Setup completed.{Style.RESET_ALL}')
