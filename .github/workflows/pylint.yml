@@ -19,7 +19,9 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pylint==2.8.2
+        # https://github.com/edaniszewski/pylint-quotes
+        pip install pylint-quotes
         pip install -e prototype
     - name: Analysing the code with pylint
       run: |
-        pylint prototype/sky
+        pylint --load-plugins pylint_quotes prototype/sky
