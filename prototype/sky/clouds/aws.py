@@ -108,8 +108,8 @@ class AWS(clouds.Cloud):
     # between Azure and AWS.
 
     def get_accelerators_from_instance_type(
-        self,
-        instance_type: str,
+            self,
+            instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return aws_catalog.get_accelerators_from_instance_type(instance_type)
 
