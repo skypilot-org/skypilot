@@ -263,17 +263,6 @@ class RetryingVmProvisioner(object):
                         f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={tpu_name}\" >> ~/.bashrc\'"
                     )
 
-                # Upload run script and modify task.run
-                with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-                    fp.write(f'#!/bin/bash\n')
-                    fp.write(task.run)
-                    fp.flush()
-                    basename = os.path.basename(fp.name)
-                    _run(
-                        f'ray rsync_up {cluster_config_file} {fp.name} /tmp/{basename}'
-                    )
-                task.run = f'bash /tmp/{basename}'
-
                 logger.info(
                     f'{Style.BRIGHT}Successfully provisioned or found'
                     f' existing VM(s). Setup completed.{Style.RESET_ALL}')
@@ -440,7 +429,12 @@ class CloudVmRayBackend(backends.Backend):
 
         self._exec_code_on_head(handle, codegen)
 
-    def _exec_code_on_head(self, handle: ResourceHandle, codegen: str) -> None:
+    def _exec_code_on_head(self,
+                           handle: ResourceHandle,
+                           codegen: str,
+                           stream_logs=True,
+                           exec_env='python3',
+                           target_dir=None) -> None:
         """Executes generated code on the head node."""
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
@@ -450,8 +444,18 @@ class CloudVmRayBackend(backends.Backend):
             # may not work as the remote VM may use system python (python2) to
             # execute the script.  Happens for AWS.
             _run_no_outputs(f'ray rsync_up {handle} {fp.name} /tmp/{basename}')
-        # Note the use of python3 (for AWS AMI).
-        _run(f'ray exec {handle} \'python3 /tmp/{basename}\'')
+
+        cd_target_dir = f'cd {target_dir} &&' if target_dir is not None else ''
+        cmd = f'ray exec {handle} \'{cd_target_dir} {exec_env} /tmp/{basename}\''
+        if not stream_logs:
+            out = tempfile.NamedTemporaryFile('w', prefix='sky_',
+                                              suffix='.out').name
+            cmd += f' >{out}'
+            colorama.init()
+            Style = colorama.Style
+            logger.info(f'Redirecting stdout, to monitor: '
+                        f'{Style.BRIGHT}tail -f {out}{Style.RESET_ALL}')
+        _run(cmd)
 
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
@@ -479,17 +483,13 @@ class CloudVmRayBackend(backends.Backend):
         # Launch the command as a Ray task.
         assert type(task.run) is str, \
             f'Task(run=...) should be a string (found {type(task.run)}).'
-        cmd = 'ray exec {} {}'.format(
-            handle, shlex.quote(f'cd {SKY_REMOTE_WORKDIR} && {task.run}'))
-        if not stream_logs:
-            out = tempfile.NamedTemporaryFile('w', prefix='sky_',
-                                              suffix='.out').name
-            cmd += f' >{out}'
-            colorama.init()
-            Style = colorama.Style
-            logger.info(f'Redirecting stdout, to monitor: '
-                        f'{Style.BRIGHT}tail -f {out}{Style.RESET_ALL}')
-        _run(cmd)
+
+        codegen = f'!/bin/bash\n{task.run}'
+        self._exec_code_on_head(handle,
+                                codegen,
+                                stream_logs,
+                                exec_env='bash',
+                                target_dir=SKY_REMOTE_WORKDIR)
 
     def _execute_task_n_nodes(self, handle: ResourceHandle, task: App,
                               stream_logs: bool) -> None:

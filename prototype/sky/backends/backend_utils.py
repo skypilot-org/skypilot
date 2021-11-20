@@ -1,6 +1,5 @@
 """Util constants/functions for the backends."""
 import datetime
-import os
 import subprocess
 import tempfile
 import time
@@ -75,12 +74,14 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
+    setup_sh_path = None
     if task.setup is not None:
-        with open('config/setup.sh', 'w') as f:
-            f.write('#!/bin/bash\n')
-            f.write(task.setup)
-            f.flush()
-        task.setup = 'config/setup.sh'
+        with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
+                                         delete=False) as fp:
+            fp.write(f'#!/bin/bash\n')
+            fp.write(task.setup)
+            fp.flush()
+            setup_sh_path = fp.name
 
     yaml_path = _fill_template(
         cluster_config_template,
@@ -88,7 +89,7 @@ def write_cluster_config(run_id: RunId,
             resources_vars,
             **{
                 'run_id': run_id,
-                'setup_sh_path': task.setup,
+                'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
                 'container_name': task.container_name,

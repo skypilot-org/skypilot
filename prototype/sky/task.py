@@ -1,7 +1,6 @@
 from typing import Dict, List, Optional, Set, Union
 import os
 import urllib.parse
-import uuid
 import yaml
 
 import sky
@@ -80,14 +79,20 @@ class Task(object):
         if file_mounts is not None:
             task.set_file_mounts(file_mounts)
 
-        if config.get('input') is not None:
-            inputs = config['input']
+        if config.get('inputs') is not None:
+            inputs_dict = config['inputs']
+            inputs = list(inputs_dict.keys())[0]
+            estimated_size_gigabytes = list(inputs_dict.values())[0]
             # TODO: allow option to say (or detect) no download/egress cost.
-            task.set_inputs(**inputs)
+            task.set_inputs(inputs=inputs,
+                            estimated_size_gigabytes=estimated_size_gigabytes)
 
-        if config.get('output') is not None:
-            outputs = config['output']
-            task.set_outputs(**outputs)
+        if config.get('outputs') is not None:
+            outputs_dict = config['outputs']
+            outputs = list(outputs_dict.keys())[0]
+            estimated_size_gigabytes = list(outputs_dict.values())[0]
+            task.set_outputs(outputs=outputs,
+                             estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources = config.get('resources')
         if resources.get('cloud') is not None:
