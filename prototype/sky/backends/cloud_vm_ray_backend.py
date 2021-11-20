@@ -46,7 +46,7 @@ def _get_cluster_config_template(task):
     }
     cloud = task.best_resources.cloud
     path = _CLOUD_TO_TEMPLATE[type(cloud)]
-    return os.path.join(sky.__root_dir__, '..', path)
+    return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
 
 def _to_accelerator_and_count(resources: Optional[Resources]
