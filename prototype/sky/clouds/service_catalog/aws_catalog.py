@@ -35,9 +35,9 @@ def get_hourly_cost(instance_type: str,
     return cheapest['SpotPrice']
 
 
-def get_accelerators_from_instance_type(
-        instance_type: str,
-        region: str = 'us-west-2') -> Optional[Dict[str, int]]:
+def get_accelerators_from_instance_type(instance_type: str,
+                                        region: str = 'us-west-2'
+                                       ) -> Optional[Dict[str, int]]:
     df = _get_instance_type(instance_type, region)
     row = df.iloc[0]
     acc_name, acc_count = row['AcceleratorName'], int(row['AcceleratorCount'])
@@ -46,10 +46,10 @@ def get_accelerators_from_instance_type(
     return {acc_name: acc_count}
 
 
-def get_instance_type_for_accelerator(
-        acc_name: str,
-        acc_count: int,
-        region: str = 'us-west-2') -> Optional[str]:
+def get_instance_type_for_accelerator(acc_name: str,
+                                      acc_count: int,
+                                      region: str = 'us-west-2'
+                                     ) -> Optional[str]:
     """Returns the cheapest instance type that offers the required count of
     accelerators.
     """
@@ -73,5 +73,5 @@ def list_accelerators(gpus_only: bool) -> Dict[str, List[int]]:
     df = df[['AcceleratorName', 'AcceleratorCount']].dropna().drop_duplicates()
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
     groupby = df.groupby('AcceleratorName')
-    return groupby['AcceleratorCount'].apply(
-        lambda xs: sorted(list(xs))).to_dict()
+    return groupby['AcceleratorCount'].apply(lambda xs: sorted(list(xs))
+                                            ).to_dict()
