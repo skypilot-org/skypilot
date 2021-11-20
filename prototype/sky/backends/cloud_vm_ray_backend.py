@@ -40,6 +40,21 @@ def _run_no_outputs(cmd, **kwargs):
     return _run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
 
 
+def _run_with_log(cmd,
+                  log_path,
+                  stream_logs=False,
+                  start_streaming_at='',
+                  **kwargs):
+    proc = subprocess.Popen(cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            **kwargs)
+    stdout, stderr = logging.subprocess_output(
+        proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
+    proc.wait()
+    return proc, stdout, stderr
+
+
 def _get_cluster_config_template(task):
     _CLOUD_TO_TEMPLATE = {
         clouds.AWS: 'config/aws-ray.yml.j2',
@@ -66,12 +81,10 @@ def _to_accelerator_and_count(resources: Optional[Resources]
 class RetryingVmProvisioner(object):
     """A provisioner that retries different regions/zones within a cloud."""
 
-    def __init__(self):
+    def __init__(self, logs_root):
         self._blocked_regions = set()
         self._blocked_zones = set()
-        run_id = backend_utils.get_run_id()
-        self.logs_root = os.path.join(SKY_LOGS_DIRECTORY, run_id)
-        os.makedirs(self.logs_root, exist_ok=True)
+        self.logs_root = logs_root
         colorama.init()
 
     def _in_blocklist(self, cloud, region, zones):
@@ -250,25 +263,21 @@ class RetryingVmProvisioner(object):
                         logger.error(stderr)
                         raise e
             cluster_config_file = config_dict['ray']
-            # Captures stdout/err.  Otherwise, too many repeated messages.
-            proc = subprocess.Popen(['ray', 'up', '-y', cluster_config_file],
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE)
             # Get log_path name
             filename = f'{to_provision.cloud}-{region.name}'
             out_path = os.path.join(log_root, f'{filename}.out')
             log_abs_path = os.path.abspath(out_path)
+            # Redirect stdout/err to the file and streaming (if stream_logs).
+            proc, stdout, stderr = _run_with_log(
+                ['ray', 'up', '-y', cluster_config_file],
+                log_abs_path,
+                stream_logs,
+                start_streaming_at='Shared connection to')
+
             tail_cmd = f'tail -n100 -f {log_abs_path}'
             logger.info(
                 f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
 
-            # Redirect stdout/err to the file and streaming (if stream_logs).
-            stdout, stderr = logging.subprocess_output(
-                proc,
-                out_path,
-                stream_logs,
-                start_streaming_at='Shared connection to')
-            proc.wait()
             if proc.returncode != 0:
                 self._update_blocklist_on_error(to_provision.cloud, region,
                                                 zones, stdout, stderr)
@@ -311,12 +320,15 @@ class CloudVmRayBackend(backends.Backend):
     def __init__(self):
         # TODO: should include this as part of the handle.
         self._managed_tpu = None
+        run_id = backend_utils.get_run_id()
+        self.logs_root = os.path.join(SKY_LOGS_DIRECTORY, run_id)
+        os.makedirs(self.logs_root, exist_ok=True)
 
     def provision(self, task: App, to_provision: Resources, dryrun: bool,
                   stream_logs: bool) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # ray up: the VMs.
-        provisioner = RetryingVmProvisioner()
+        provisioner = RetryingVmProvisioner(self.logs_root)
         config_dict = provisioner.provision_with_retries(
             task, to_provision, dryrun, stream_logs)
         if dryrun:
@@ -468,15 +480,14 @@ class CloudVmRayBackend(backends.Backend):
             executable = 'python3'
         cd = f'cd {SKY_REMOTE_WORKDIR}'
         cmd = f'ray exec {handle} \'{cd} && {executable} /tmp/{basename}\''
+        log_path = os.path.join(self.logs_root, f'run.log')
         if not stream_logs:
-            out = tempfile.NamedTemporaryFile('w', prefix='sky_',
-                                              suffix='.out').name
-            cmd += f' >{out}'
             colorama.init()
             Style = colorama.Style
             logger.info(f'Redirecting stdout, to monitor: '
-                        f'{Style.BRIGHT}tail -f {out}{Style.RESET_ALL}')
-        _run(cmd)
+                        f'{Style.BRIGHT}tail -f {log_path}{Style.RESET_ALL}')
+
+        _run_with_log(cmd, log_path, stream_logs, shell=True)
 
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
@@ -506,7 +517,7 @@ class CloudVmRayBackend(backends.Backend):
             f'Task(run=...) should be a string (found {type(task.run)}).'
         codegen = textwrap.dedent(f"""\
             #!/bin/bash
-            . $(conda info --base)/etc/profile.d/conda.sh
+            . $(conda info --base)/etc/profile.d/conda.sh || true
             {task.run}
         """)
         self._exec_code_on_head(handle, codegen, stream_logs, executable='bash')
