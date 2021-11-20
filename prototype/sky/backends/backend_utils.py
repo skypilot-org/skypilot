@@ -2,6 +2,7 @@
 import datetime
 import subprocess
 import tempfile
+import textwrap
 import time
 from typing import List, Optional, Union
 import yaml
@@ -76,12 +77,15 @@ def write_cluster_config(run_id: RunId,
 
     setup_sh_path = None
     if task.setup is not None:
-        with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
-                                         delete=False) as fp:
-            fp.write(f'#!/bin/bash\n')
-            fp.write(task.setup)
-            fp.flush()
-            setup_sh_path = fp.name
+        codegen = textwrap.dedent(f"""\
+            #!/bin/bash
+            . $(conda info --base)/etc/profile.d/conda.sh
+            {task.setup}
+        """)
+        f = tempfile.NamedTemporaryFile('w', prefix='sky_setup_', delete=False)
+        f.write(codegen)
+        f.flush()
+        setup_sh_path = f.name
 
     yaml_path = _fill_template(
         cluster_config_template,

@@ -39,6 +39,8 @@ available_node_types:
         items:
           - key: install-nvidia-driver
             value: "True"
+      scheduling:
+        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
 {%- endif %}
 {% if num_nodes > 1 %}
   ray_worker_default:
@@ -65,6 +67,8 @@ available_node_types:
         items:
           - key: install-nvidia-driver
             value: "True"
+      scheduling:
+        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
 {%- endif %}
 {%- endif %}
 
