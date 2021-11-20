@@ -15,7 +15,7 @@ with sky.Dag() as dag:
 
     # The setup command.  Will be run under the working directory.
     setup = 'pip3 install --upgrade pip && \
-        pip3 install ray[tune] pytorch-lightning lightning-bolts'
+        pip3 install ray[tune] pytorch-lightning==1.4.9 lightning-bolts torchvision'
 
     # head_run = 'python3 tune_basic_example.py --smoke-test'
     head_run = 'python3 tune_ptl_example.py'
