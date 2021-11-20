@@ -24,6 +24,7 @@ RunId = str
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+SKY_LOGS_DIRECTORY = './logs'
 
 
 def _fill_template(template_path: str,

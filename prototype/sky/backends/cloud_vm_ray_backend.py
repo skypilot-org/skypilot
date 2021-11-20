@@ -2,6 +2,7 @@
 import ast
 import json
 import os
+import io
 import re
 import shlex
 import subprocess
@@ -26,6 +27,7 @@ Resources = resources.Resources
 Path = str
 PostSetupFn = Callable[[str], Any]
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
+SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
 
 logger = logging.init_logger(__name__)
 
@@ -67,6 +69,9 @@ class RetryingVmProvisioner(object):
     def __init__(self):
         self._blocked_regions = set()
         self._blocked_zones = set()
+        run_id = backend_utils.get_run_id()
+        self.logs_root = os.path.join(SKY_LOGS_DIRECTORY, run_id)
+        os.makedirs(self.logs_root, exist_ok=True)
         colorama.init()
 
     def _in_blocklist(self, cloud, region, zones):
@@ -86,7 +91,6 @@ class RetryingVmProvisioner(object):
         Style = colorama.Style
         assert len(zones) == 1, zones
         zone = zones[0]
-        stderr = stderr.decode()
         splits = stderr.split('\n')
         exception_str = [s for s in splits if s.startswith('Exception: ')]
         if len(exception_str) == 1:
@@ -116,7 +120,7 @@ class RetryingVmProvisioner(object):
                 self._blocked_zones.add(zone.name)
             else:
                 logger.info('====== stdout ======')
-                for s in stdout.decode().split('\n'):
+                for s in stdout.split('\n'):
                     print(s)
                 logger.info('====== stderr ======')
                 for s in splits:
@@ -128,8 +132,8 @@ class RetryingVmProvisioner(object):
         # The underlying ray autoscaler / boto3 will try all zones of a region
         # at once.
         Style = colorama.Style
-        stdout_splits = stdout.decode().split('\n')
-        stderr_splits = stderr.decode().split('\n')
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
@@ -200,8 +204,11 @@ class RetryingVmProvisioner(object):
             yield (region, zones)
 
     def provision_with_retries(self, task: App, to_provision: Resources,
-                               dryrun: bool):
+                               dryrun: bool, stream_logs: bool):
         """The provision retry loop."""
+        log_root = os.path.join(self.logs_root, 'provision')
+        os.makedirs(log_root, exist_ok=True)
+
         self._clear_blocklist()
         Style = colorama.Style
         for region, zones in self._yield_region_zones(task, to_provision.cloud):
@@ -247,7 +254,21 @@ class RetryingVmProvisioner(object):
             proc = subprocess.Popen(['ray', 'up', '-y', cluster_config_file],
                                     stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE)
-            stdout, stderr = proc.communicate()
+            # Get log_path name
+            filename = f'{to_provision.cloud}-{region.name}'
+            out_path = os.path.join(log_root, f'{filename}.out')
+            log_abs_path = os.path.abspath(out_path)
+            tail_cmd = f'tail -n100 -f {log_abs_path}'
+            logger.info(
+                f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
+
+            # Redirect stdout/err to the file and streaming (if stream_logs).
+            stdout, stderr = logging.subprocess_output(
+                proc,
+                out_path,
+                stream_logs,
+                start_streaming_at='Shared connection to')
+            proc.wait()
             if proc.returncode != 0:
                 self._update_blocklist_on_error(to_provision.cloud, region,
                                                 zones, stdout, stderr)
@@ -291,13 +312,13 @@ class CloudVmRayBackend(backends.Backend):
         # TODO: should include this as part of the handle.
         self._managed_tpu = None
 
-    def provision(self, task: App, to_provision: Resources,
-                  dryrun: bool) -> ResourceHandle:
+    def provision(self, task: App, to_provision: Resources, dryrun: bool,
+                  stream_logs: bool) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner()
         config_dict = provisioner.provision_with_retries(
-            task, to_provision, dryrun)
+            task, to_provision, dryrun, stream_logs)
         if dryrun:
             return
         cluster_config_file = config_dict['ray']

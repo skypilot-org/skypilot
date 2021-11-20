@@ -341,7 +341,7 @@ def execute_v2(dag: sky.Dag,
     # Future backends: K8S, SLURM, VM, LOCAL, LOCAL_DOCKER, etc.
     backend = backends.CloudVmRayBackend()
 
-    handle = backend.provision(task, best_resources, dryrun=dryrun)
+    handle = backend.provision(task, best_resources, dryrun=dryrun, stream_logs=stream_logs)
     if dryrun:
         logger.info('Dry run finished.')
         return
