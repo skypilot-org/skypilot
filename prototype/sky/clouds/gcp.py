@@ -207,7 +207,7 @@ class GCP(clouds.Cloud):
         return [r]
 
     def get_accelerators_from_instance_type(
-        self,
-        instance_type: str,
+            self,
+            instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return None
