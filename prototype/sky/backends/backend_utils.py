@@ -1,6 +1,8 @@
 """Util constants/functions for the backends."""
 import datetime
 import subprocess
+import tempfile
+import textwrap
 import time
 from typing import List, Optional, Union
 import yaml
@@ -73,13 +75,25 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
+    setup_sh_path = None
+    if task.setup is not None:
+        codegen = textwrap.dedent(f"""\
+            #!/bin/bash
+            . $(conda info --base)/etc/profile.d/conda.sh
+            {task.setup}
+        """)
+        f = tempfile.NamedTemporaryFile('w', prefix='sky_setup_', delete=False)
+        f.write(codegen)
+        f.flush()
+        setup_sh_path = f.name
+
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
             resources_vars,
             **{
                 'run_id': run_id,
-                'setup_command': task.setup,
+                'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
                 'container_name': task.container_name,
