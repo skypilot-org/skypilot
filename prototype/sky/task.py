@@ -1,11 +1,19 @@
 from typing import Dict, List, Optional, Set, Union
+import os
 import urllib.parse
+import yaml
 
 import sky
 from sky import clouds
 from sky import resources
 
 Resources = resources.Resources
+
+CLOUD_REGISTRY = {
+    'aws': clouds.AWS(),
+    'gcp': clouds.GCP(),
+    'azure': clouds.Azure(),
+}
 
 
 def _is_cloud_store_url(url):
@@ -54,6 +62,51 @@ class Task(object):
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
+
+    @staticmethod
+    def from_yaml(yaml_path):
+        with open(os.path.expanduser(yaml_path), 'r') as f:
+            config = yaml.safe_load(f)
+
+        task = Task(
+            config.get('name'),
+            workdir=config.get('workdir'),
+            setup=config.get('setup'),
+            run=config['run'],
+        )
+
+        file_mounts = config.get('file_mounts')
+        if file_mounts is not None:
+            task.set_file_mounts(file_mounts)
+
+        if config.get('inputs') is not None:
+            inputs_dict = config['inputs']
+            inputs = list(inputs_dict.keys())[0]
+            estimated_size_gigabytes = list(inputs_dict.values())[0]
+            # TODO: allow option to say (or detect) no download/egress cost.
+            task.set_inputs(inputs=inputs,
+                            estimated_size_gigabytes=estimated_size_gigabytes)
+
+        if config.get('outputs') is not None:
+            outputs_dict = config['outputs']
+            outputs = list(outputs_dict.keys())[0]
+            estimated_size_gigabytes = list(outputs_dict.values())[0]
+            task.set_outputs(outputs=outputs,
+                             estimated_size_gigabytes=estimated_size_gigabytes)
+
+        resources = config.get('resources')
+        if resources.get('cloud') is not None:
+            resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
+        if resources.get('accelerators') is not None:
+            resources['accelerators'] = dict(resources['accelerators'])
+        if resources.get('accelerator_args') is not None:
+            resources['accelerators_args'] = dict(resources['accelerator_args'])
+        if resources.get('use_spot') is not None:
+            resources['use_spot'] = resources['use_spot']
+        resources = sky.Resources(**resources)
+
+        task.set_resources({resources})
+        return task
 
     def validate_config(self):
         if bool(self.docker_image) != bool(self.container_name):
