@@ -10,3 +10,4 @@ def test_list_accelerators():
 def test_list_ccelerators_all():
     result = sky.list_accelerators(gpus_only=False)
     assert 'Inferentia' in result, result
+    assert 'tpu-v3-8' in result, result

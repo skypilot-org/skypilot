@@ -4,6 +4,7 @@ from typing import Dict, List
 
 from sky import clouds
 from sky.clouds.service_catalog import aws_catalog
+from sky.clouds.service_catalog import gcp_catalog
 
 
 def list_accelerators(gpus_only: bool = True
@@ -17,8 +18,11 @@ def list_accelerators(gpus_only: bool = True
     Example response: {'V100': {AWS: [1, 4, 8]}}, representing that AWS offers
     instance types that provide 1, 4 or 8 V100 GPUs.
     """
-    # TODO: Azure and GCP (especially TPU offerings) should be included too.
-    results = {clouds.AWS(): aws_catalog.list_accelerators(gpus_only)}
+    # TODO: Azure should be included too.
+    results = {
+        clouds.AWS(): aws_catalog.list_accelerators(gpus_only),
+        clouds.GCP(): gcp_catalog.list_accelerators(gpus_only),
+    }
     ret = collections.defaultdict(dict)
     for cloud, result in results.items():
         for name, counts in result.items():
@@ -28,5 +32,6 @@ def list_accelerators(gpus_only: bool = True
 
 __all__ = [
     'aws_catalog',
+    'gcp_catalog',
     'list_accelerators',
 ]

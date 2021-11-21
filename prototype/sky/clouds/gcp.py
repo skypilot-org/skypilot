@@ -214,4 +214,6 @@ class GCP(clouds.Cloud):
             self,
             instance_type: str,
     ) -> Optional[Dict[str, int]]:
+        # GCP handles accelerators separately from regular instance types,
+        # hence return none here.
         return None
