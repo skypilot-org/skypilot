@@ -448,7 +448,8 @@ class CloudVmRayBackend(backends.Backend):
         # manipulating the futures).
         #
         # TODO: possible to open the port in the yaml?  Run Ray inside docker?
-        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}')
+        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
+                               'tasks')
         codegen = [
             textwrap.dedent(
                 TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
@@ -580,7 +581,8 @@ class CloudVmRayBackend(backends.Backend):
         #   ray.init(..., log_to_driver=False); otherwise too many logs.
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
-        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}')
+        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
+                               'tasks')
         codegen = [
             textwrap.dedent(
                 TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
