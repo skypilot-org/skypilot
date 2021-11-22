@@ -502,8 +502,9 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             logger.info(
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
-                f'{Style.RESET_ALL} Hint: task\'s output will be redirect to {Style.BRIGHT} {log_dir} {Style.RESET_ALL}, and use `tail -f` to monitor.\n'
-            )
+                f'{Style.RESET_ALL} Hint: task\'s output will be redirect to'
+                f'{Style.BRIGHT} {log_dir} {Style.RESET_ALL}. Please use'
+                '`ray attach` and `tail -f` to monitor.\n')
 
         self._exec_code_on_head(handle, codegen)
         task_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
@@ -531,7 +532,7 @@ class CloudVmRayBackend(backends.Backend):
             executable = 'python3'
         cd = f'cd {SKY_REMOTE_WORKDIR}'
         cmd = f'ray exec {handle} \'{cd} && {executable} /tmp/{basename}\''
-        log_path = os.path.join(self.logs_root, f'run.log')
+        log_path = os.path.join(self.log_dir, f'run.log')
         if not stream_logs:
             colorama.init()
             Style = colorama.Style
@@ -637,8 +638,9 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             logger.info(
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
-                f'{Style.RESET_ALL} Hint: task\'s output will be redirect to {Style.BRIGHT} {log_dir} {Style.RESET_ALL}, and use `tail -f` to monitor.\n'
-            )
+                f'{Style.RESET_ALL} Hint: task\'s output will be redirect to'
+                f'{Style.BRIGHT} {log_dir} {Style.RESET_ALL}. Please use'
+                '`ray attach` and `tail -f` to monitor.\n')
 
         self._exec_code_on_head(handle, codegen)
         task_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
