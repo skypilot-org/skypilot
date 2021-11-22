@@ -2,7 +2,6 @@
 import ast
 import json
 import os
-import io
 import re
 import shlex
 import subprocess
@@ -31,6 +30,53 @@ SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
 
 logger = logging.init_logger(__name__)
 
+TASK_LAUNCH_CODE_GENERATOR = """
+        import io
+        import os
+        import ray
+        import selectors
+        import subprocess
+        ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
+        print('cluster_resources:', ray.cluster_resources())
+        print('available_resources:', ray.available_resources())
+        print('live nodes:', ray.state.node_ids())
+        
+        def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
+            dirname = os.path.dirname(log_path)
+            os.makedirs(dirname, exist_ok=True)
+
+            out_io = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
+            err_io = io.TextIOWrapper(proc.stderr, encoding='utf-8', newline='')
+            sel = selectors.DefaultSelector()
+            sel.register(out_io, selectors.EVENT_READ)
+            sel.register(err_io, selectors.EVENT_READ)
+
+            stdout = ''
+            stderr = ''
+
+            start_streaming_flag = False
+            with open(log_path, 'a') as fout:
+                while True:
+                    for key, _ in sel.select():
+                        line = key.fileobj.readline()
+                        if not line:
+                            return stdout, stderr
+                        if start_streaming_at in line:
+                            start_streaming_flag = True
+                        if key.fileobj is out_io:
+                            stdout += line
+                            fout.write(line)
+                            fout.flush()
+                        else:
+                            stderr += line
+                            fout.write(line)
+                            fout.flush()
+                        if stream_logs and start_streaming_flag:
+                            print(line, end='')
+        
+        futures = []
+    """
+
 
 def _run(cmd, **kwargs):
     return subprocess.run(cmd, shell=True, check=True, **kwargs)
@@ -49,7 +95,7 @@ def _run_with_log(cmd,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
                             **kwargs)
-    stdout, stderr = logging.subprocess_output(
+    stdout, stderr = backend_utils.redirect_process_output(
         proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
     proc.wait()
     return proc, stdout, stderr
@@ -81,10 +127,10 @@ def _to_accelerator_and_count(resources: Optional[Resources]
 class RetryingVmProvisioner(object):
     """A provisioner that retries different regions/zones within a cloud."""
 
-    def __init__(self, logs_root):
+    def __init__(self, log_dir):
         self._blocked_regions = set()
         self._blocked_zones = set()
-        self.logs_root = logs_root
+        self.log_dir = log_dir
         colorama.init()
 
     def _in_blocklist(self, cloud, region, zones):
@@ -219,8 +265,9 @@ class RetryingVmProvisioner(object):
     def provision_with_retries(self, task: App, to_provision: Resources,
                                dryrun: bool, stream_logs: bool):
         """The provision retry loop."""
-        log_root = os.path.join(self.logs_root, 'provision')
-        os.makedirs(log_root, exist_ok=True)
+        # Get log_path name
+        log_path = os.path.join(self.log_dir, 'provision.log')
+        log_abs_path = os.path.abspath(log_path)
 
         self._clear_blocklist()
         Style = colorama.Style
@@ -263,10 +310,7 @@ class RetryingVmProvisioner(object):
                         logger.error(stderr)
                         raise e
             cluster_config_file = config_dict['ray']
-            # Get log_path name
-            filename = f'{to_provision.cloud}-{region.name}'
-            out_path = os.path.join(log_root, f'{filename}.out')
-            log_abs_path = os.path.abspath(out_path)
+
             # Redirect stdout/err to the file and streaming (if stream_logs).
             proc, stdout, stderr = _run_with_log(
                 ['ray', 'up', '-y', cluster_config_file],
@@ -274,7 +318,7 @@ class RetryingVmProvisioner(object):
                 stream_logs,
                 start_streaming_at='Shared connection to')
 
-            tail_cmd = f'tail -n100 -f {log_abs_path}'
+            tail_cmd = f'tail -n100 -f {log_path}'
             logger.info(
                 f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
 
@@ -321,14 +365,14 @@ class CloudVmRayBackend(backends.Backend):
         # TODO: should include this as part of the handle.
         self._managed_tpu = None
         run_id = backend_utils.get_run_id()
-        self.logs_root = os.path.join(SKY_LOGS_DIRECTORY, run_id)
-        os.makedirs(self.logs_root, exist_ok=True)
+        self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, run_id)
+        os.makedirs(self.log_dir, exist_ok=True)
 
     def provision(self, task: App, to_provision: Resources, dryrun: bool,
                   stream_logs: bool) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # ray up: the VMs.
-        provisioner = RetryingVmProvisioner(self.logs_root)
+        provisioner = RetryingVmProvisioner(self.log_dir)
         config_dict = provisioner.provision_with_retries(
             task, to_provision, dryrun, stream_logs)
         if dryrun:
@@ -404,16 +448,10 @@ class CloudVmRayBackend(backends.Backend):
         # manipulating the futures).
         #
         # TODO: possible to open the port in the yaml?  Run Ray inside docker?
+        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}')
         codegen = [
-            textwrap.dedent(f"""\
-        import ray
-        import subprocess
-        ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
-        print('cluster_resources:', ray.cluster_resources())
-        print('available_resources:', ray.available_resources())
-        print('live nodes:', ray.state.node_ids())
-        futures = []
-        """)
+            textwrap.dedent(
+                TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
         ]
         for i, t in enumerate(par_task.tasks):
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used to initialize
@@ -437,10 +475,17 @@ class CloudVmRayBackend(backends.Backend):
                 resources_str = ''
                 num_gpus_str = ''
             name = f'task-{i}' if t.name is None else t.name
+            log_path = os.path.join(f'{log_dir}', f'{name}.log')
+
             task_i_codegen = textwrap.dedent(f"""\
-        futures.append(ray.remote(lambda: subprocess.run(
-            {cmd},
-              shell=True, check=True, executable='/bin/bash')) \\
+        def start_task():
+            proc = subprocess.Popen({cmd},
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    shell=True,
+                                    executable='/bin/bash')
+            redirect_process_output(proc, '{log_path}', {stream_logs})
+        futures.append(ray.remote(start_task) \\
               .options(name='{name}'{resources_str}{num_gpus_str}) \\
               .remote())
         """)
@@ -457,10 +502,16 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             logger.info(
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
-                f'{Style.RESET_ALL} Hint: in the run command, redirect each'
-                ' task\'s output to a file, and use `tail -f` to monitor.\n')
+                f'{Style.RESET_ALL} Hint: task\'s output will be redirect to {Style.BRIGHT} {log_dir} {Style.RESET_ALL}, and use `tail -f` to monitor.\n'
+            )
 
         self._exec_code_on_head(handle, codegen)
+        task_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
+        logger.info(
+            f'Syncing down the loggings to {Style.BRIGHT}{task_log_dir}{Style.RESET_ALL}.'
+        )
+        os.makedirs(task_log_dir, exist_ok=True)
+        _run(f'ray rsync_down {handle} {log_dir}/* {task_log_dir}')
 
     def _exec_code_on_head(self,
                            handle: ResourceHandle,
@@ -528,16 +579,10 @@ class CloudVmRayBackend(backends.Backend):
         #   ray.init(..., log_to_driver=False); otherwise too many logs.
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
+        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}')
         codegen = [
-            textwrap.dedent(f"""\
-        import subprocess
-        import ray
-        ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
-        print('cluster_resources:', ray.cluster_resources())
-        print('available_resources:', ray.available_resources())
-        print('live nodes:', ray.state.node_ids())
-        futures = []
-        """)
+            textwrap.dedent(
+                TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
         ]
         acc, acc_count = _to_accelerator_and_count(task.best_resources)
         # Get private ips here as Ray internally uses 'node:private_ip' as
@@ -565,13 +610,21 @@ class CloudVmRayBackend(backends.Backend):
                 num_gpus_str = f', num_gpus={acc_count}'
             # Set the executable to /bin/bash, so that the 'source ~/.bashrc'
             # and 'source activate conda_env' can be used.
+            name = f'task-{ip}'
+            log_path = os.path.join(f'{log_dir}', f'{name}.log')
+
             codegen.append(
                 textwrap.dedent(f"""\
-        futures.append(ray.remote(lambda: subprocess.run(
-            {cmd},
-                shell=True, check=True, executable='/bin/bash')) \\
-                .options(name='task-{ip}'{resources_str}{num_gpus_str}) \\
-                .remote())
+        def start_task():
+            proc = subprocess.Popen({cmd},
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    shell=True,
+                                    executable='/bin/bash')
+            redirect_process_output(proc, '{log_path}', {stream_logs})
+        futures.append(ray.remote(start_task) \\
+              .options(name='{name}'{resources_str}{num_gpus_str}) \\
+              .remote())
         """))
         # Block.
         codegen.append('ray.get(futures)\n')
@@ -584,9 +637,16 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             logger.info(
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
-                f'{Style.RESET_ALL} Hint: in the run command, redirect each'
-                ' task\'s output to a file, and use `tail -f` to monitor.\n')
+                f'{Style.RESET_ALL} Hint: task\'s output will be redirect to {Style.BRIGHT} {log_dir} {Style.RESET_ALL}, and use `tail -f` to monitor.\n'
+            )
+
         self._exec_code_on_head(handle, codegen)
+        task_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
+        logger.info(
+            f'Syncing down the loggings to {Style.BRIGHT}{task_log_dir}{Style.RESET_ALL}.'
+        )
+        os.makedirs(task_log_dir, exist_ok=True)
+        _run(f'ray rsync_down {handle} {log_dir}/* {task_log_dir}')
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
