@@ -8,7 +8,7 @@ def _test_resources(resources):
     with sky.Dag() as dag:
         train = sky.Task('train')
         train.set_resources({resources})
-    dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
+    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
     sky.execute(dag, dryrun=True)
     assert True
 
@@ -21,7 +21,7 @@ def test_resources_gcp():
     _test_resources(sky.Resources(clouds.GCP(), 'n1-standard-16'))
 
 
-@pytest.mark.skip(reason="TODO: need to fix service catalog")
+@pytest.mark.skip(reason='TODO: need to fix service catalog')
 def test_partial_t4():
     _test_resources(sky.Resources(accelerators='T4'))
     _test_resources(sky.Resources(accelerators={'T4': 8}, use_spot=True))
