@@ -75,5 +75,5 @@ def make_application():
 
 
 dag = make_application()
-sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
-# sky.Optimizer.optimize(dag, minimize=Optimizer.TIME)
+sky.optimize(dag, minimize=sky.Optimizer.COST)
+# sky.optimize(dag, minimize=Optimizer.TIME)

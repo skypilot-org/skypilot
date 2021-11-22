@@ -2,7 +2,7 @@
 
 Usage:
 
-   >> planned_dag = sky.Optimizer.optimize(dag)
+   >> planned_dag = sky.optimize(dag)
    >> sky.execute(planned_dag)
 
 Current resource privisioners:

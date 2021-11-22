@@ -1,11 +1,13 @@
 """Util constants/functions for the backends."""
 import datetime
+import os
 import subprocess
 import tempfile
 import textwrap
 import time
 from typing import List, Optional, Union
 import yaml
+import zlib
 
 import jinja2
 
@@ -47,11 +49,12 @@ def write_cluster_config(run_id: RunId,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
                          dryrun: bool = False):
-    """Returns {provisioner: path to yaml, the provisioning spec}.
+    """Fills in cluster configuration templates and writes them out.
 
-    'provisioner' can be
-      - 'ray'
-      - 'gcloud' (if TPU is requested)
+    Returns: {provisioner: path to yaml, the provisioning spec}.
+      'provisioner' can be
+        - 'ray'
+        - 'gcloud' (if TPU is requested)
     """
     cloud = task.best_resources.cloud
     resources_vars = cloud.make_deploy_resources_variables(task)
@@ -77,14 +80,19 @@ def write_cluster_config(run_id: RunId,
 
     setup_sh_path = None
     if task.setup is not None:
-        codegen = textwrap.dedent(f"""\
-            #!/bin/bash
+        codegen = textwrap.dedent(f"""#!/bin/bash
             . $(conda info --base)/etc/profile.d/conda.sh
             {task.setup}
         """)
-        f = tempfile.NamedTemporaryFile('w', prefix='sky_setup_', delete=False)
-        f.write(codegen)
-        f.flush()
+        # Use a stable path, /<tempdir>/sky_setup_<checksum>.sh, because
+        # rerunning the same task without any changes to the content of the
+        # setup command should skip the setup step.  Using NamedTemporaryFile()
+        # would generate a random path every time, hence re-triggering setup.
+        checksum = zlib.crc32(codegen.encode())
+        tempdir = tempfile.gettempdir()
+        # TODO: file lock on this path, in case tasks have the same setup cmd.
+        with open(os.path.join(tempdir, f'sky_setup_{checksum}.sh'), 'w') as f:
+            f.write(codegen)
         setup_sh_path = f.name
 
     yaml_path = _fill_template(

@@ -28,5 +28,5 @@ with sky.Dag() as dag:
                       }),
     })
 
-dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
+dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
 sky.execute(dag)
