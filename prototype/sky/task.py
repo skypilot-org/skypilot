@@ -98,9 +98,9 @@ class Task(object):
         if resources.get('cloud') is not None:
             resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
         if resources.get('accelerators') is not None:
-            resources['accelerators'] = dict(resources['accelerators'])
+            resources['accelerators'] = resources['accelerators']
         if resources.get('accelerator_args') is not None:
-            resources['accelerators_args'] = dict(resources['accelerator_args'])
+            resources['accelerator_args'] = dict(resources['accelerator_args'])
         if resources.get('use_spot') is not None:
             resources['use_spot'] = resources['use_spot']
         resources = sky.Resources(**resources)
@@ -110,11 +110,10 @@ class Task(object):
 
     def validate_config(self):
         if bool(self.docker_image) != bool(self.container_name):
-            raise ValueError(
-                "Either docker image and container are both None or valid strings"
-            )
+            raise ValueError('Either docker_image and container_name are both'
+                             ' None or valid strings.')
         if self.num_nodes <= 0:
-            raise ValueError("Must be >0 total nodes")
+            raise ValueError('Must set Task.num_nodes to >0.')
         return
 
     # E.g., 's3://bucket', 'gs://bucket', or None.
