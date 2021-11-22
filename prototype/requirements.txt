@@ -5,6 +5,7 @@ jinja2
 networkx
 ray[default]
 tabulate
+docker
 
 awscli
 azure-cli

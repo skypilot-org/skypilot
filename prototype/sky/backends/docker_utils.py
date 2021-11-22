@@ -1,24 +1,23 @@
 """Utilities for docker image generation."""
 import os
-import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 
 import docker
+
 from sky import logging
 from sky import task as task_mod
 
 logger = logging.init_logger(__name__)
 
-DOCKERFILE_TEMPLATE = """
+DOCKERFILE_TEMPLATE = '''
 FROM {base_image}
-""".strip()
+'''.strip()
 
-DOCKERFILE_SETUPCMD = """RUN {setup_command}"""
-DOCKERFILE_COPYCMD= """COPY {copy_command}"""
-DOCKERFILE_RUNCMD = """CMD {run_command}"""
+DOCKERFILE_SETUPCMD = '''RUN {setup_command}'''
+DOCKERFILE_COPYCMD= '''COPY {copy_command}'''
+DOCKERFILE_RUNCMD = '''CMD {run_command}'''
 
 
 def create_dockerfile(base_image: str,
@@ -28,31 +27,35 @@ def create_dockerfile(base_image: str,
                       run_command: str = None,
                       ) -> str:
     """
-    Writes a valid dockerfile to the specified path. Supports only three operations:
-    1. Load base_image
-    2. Run some setup commands
-    3. Copy a directory to the image.
-    The run/entrypoint can be optionally specified in the dockerfile or at execution time.
+    Writes a valid dockerfile to the specified path.
 
-    :param base_image: base image to inherit from
-    :param setup_command: commands to run for setup. Eg. "pip install numpy && apt install htop"
-    :param copy_paths: Local path to copy into the image. These are placed in the root of the container.
-    :param output_path: if specified - where to write the dockerfile. Else dockerfile is not written to disk.
-    :param run_command: CMD argument to the dockerfile. Optional - can also be specified at runtime.
-    :return: contents of the dockerfile
+    performs three operations:
+    1. load base_image
+    2. run some setup commands
+    3. copy a directory to the image.
+    the run/entrypoint can be optionally specified in the dockerfile or at execution time.
+
+    Args:
+        base_image: base image to inherit from
+        setup_command: commands to run for setup. eg. "pip install numpy && apt install htop"
+        copy_path: local path to copy into the image. these are placed in the root of the container.
+        output_path: if specified - where to write the dockerfile. else dockerfile is not written to disk.
+        run_command: cmd argument to the dockerfile. optional - can also be specified at runtime.
+    Returns
+        String containing contents of the dockerfile
     """
     dockerfile_contents = DOCKERFILE_TEMPLATE.format(base_image=base_image)
 
     if copy_path:
         dir_name = os.path.basename(os.path.dirname(copy_path))
-        copy_docker_cmd = f"{dir_name} /{dir_name}/"  # NOTE: This relies on copy_path being copied to build context.
-        dockerfile_contents += "\n" + DOCKERFILE_COPYCMD.format(copy_command=copy_docker_cmd)
+        copy_docker_cmd = f'{dir_name} /{dir_name}/'  # NOTE: This relies on copy_path being copied to build context.
+        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(copy_command=copy_docker_cmd)
 
     if setup_command:
-        dockerfile_contents += "\n" + DOCKERFILE_SETUPCMD.format(setup_command=setup_command)
+        dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(setup_command=setup_command)
 
     if run_command:
-        dockerfile_contents += "\n" + DOCKERFILE_RUNCMD.format(run_command=run_command)
+        dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=run_command)
 
     if output_path:
         with open(output_path, 'w') as f:
@@ -75,6 +78,8 @@ def _execute_build(tag, context_path):
 
 def build_dockerimage(dockerfile_contents, copy_path, tag):
     """
+    Builds a docker image for the given dockerfile and paths to add in context.
+
     This method is responsible for:
     1. Create a temp directory to set the build context.
     2. Copy dockerfile to this directory and copy contents
@@ -93,19 +98,19 @@ def build_dockerimage(dockerfile_contents, copy_path, tag):
         copy_dir_name = os.path.basename(os.path.dirname(copy_path))
         dst = os.path.join(temp_dir, copy_dir_name)
         shutil.copytree(copy_path, dst)
-    logger.info(f"Using tempdir {temp_dir} for docker build.")
+    logger.info(f'Using tempdir {temp_dir} for docker build.')
 
     # Run docker image build
     _execute_build(tag, context_path=temp_dir)
 
     # Clean up temp dir
-    subprocess.run(["rm", "-rf", temp_dir])
+    subprocess.run(['rm', '-rf', temp_dir])
 
     return tag
 
 
-def build_dockerimage_from_task(task: task_mod):
-    """ Builds a docker image from a tag"""
+def build_dockerimage_from_task(task: task_mod.Task):
+    """ Builds a docker image from a Task"""
     dockerfile_contents = create_dockerfile(base_image=task.docker_image,
                                             setup_command=task.setup,
                                             copy_path=task.workdir,
@@ -114,27 +119,5 @@ def build_dockerimage_from_task(task: task_mod):
     return tag
 
 
-def run_shell_command(command: str,
-                      stream_output: bool = True):
-    """
-    Runs a shell command and waits for it to complete. This is a blocking call.
-    :param stream_output: Whether to stream the output to the terminal while the command is running
-    """
-    process = subprocess.Popen(shlex.split(command), shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               universal_newlines=True)
-    all_output = ""
-    # Poll process.stdout to show stdout live
-    while True:
-        output = process.stdout.readline()
-        if output:
-            if stream_output:
-                sys.stdout.write(output)
-            all_output += output
-        if process.poll() is not None:
-            break
-    retcode = process.poll()
-    return retcode, all_output
-
-
 def push_dockerimage(local_tag, remote_name):
-    raise NotImplementedError("Pushing images is not yet implemented.")
+    raise NotImplementedError('Pushing images is not yet implemented.')
