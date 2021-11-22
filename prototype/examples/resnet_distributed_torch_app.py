@@ -55,5 +55,5 @@ with sky.Dag() as dag:
         # sky.Resources(sky.AWS(), accelerators='V100'),
     })
 
-dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
+dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
 sky.execute(dag)

@@ -1,0 +1,27 @@
+name: tpu_app
+
+# The working directory contains all code and will be synced to remote.
+workdir: ./examples/tpu_app_codes
+
+resources:
+  accelerators: tpu-v3-8
+  accelerator_args:
+    tf_version: 2.5.0
+
+# The setup command.  Will be run under the working directory.
+setup: |
+  pip install --upgrade pip
+
+  conda activate huggingface
+  if [ $? -eq 0 ]; then
+    echo 'conda env exists'
+  else
+    conda create -n huggingface python=3.8 -y
+    conda activate huggingface
+    pip install -r requirements.txt
+  fi
+
+# The command to run.  Will be run under the working directory.
+run: |
+  conda activate huggingface
+  python -u run_tpu.py
