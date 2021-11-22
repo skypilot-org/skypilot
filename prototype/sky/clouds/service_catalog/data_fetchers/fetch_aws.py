@@ -2,15 +2,17 @@
 
 This script takes about 1 minute to finish.
 """
+import datetime
 from typing import Tuple
 
 from absl import app
-from absl import flags
 from absl import logging
 import boto3
 import numpy as np
 import pandas as pd
 import ray
+
+from sky.clouds.service_catalog import common
 
 REGIONS = ['us-west-1', 'us-west-2', 'us-east-1', 'us-east-2']
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -26,7 +28,18 @@ def get_instance_types(region: str) -> pd.DataFrame:
     for i, resp in enumerate(paginator.paginate()):
         print(f'{region} getting instance types page {i}')
         items += resp['InstanceTypes']
+
     return pd.DataFrame(items)
+
+
+@ray.remote
+def get_availability_zones(region: str) -> pd.DataFrame:
+    client = boto3.client('ec2', region_name=region)
+    zones = []
+    response = client.describe_availability_zones()
+    for resp in response['AvailabilityZones']:
+        zones.append({'AvailabilityZone': resp['ZoneName']})
+    return pd.DataFrame(zones)
 
 
 @ray.remote
@@ -43,10 +56,26 @@ def get_pricing_table(region: str) -> pd.DataFrame:
 
 
 @ray.remote
+def get_spot_pricing_table(region: str) -> pd.DataFrame:
+    print(f'{region} downloading spot pricing table')
+    client = boto3.client('ec2', region_name=region)
+    response = client.describe_spot_price_history(
+        ProductDescriptions=['Linux/UNIX'],
+        StartTime=datetime.datetime.utcnow(),
+    )
+    df = pd.DataFrame(response['SpotPriceHistory']).set_index(
+        ['InstanceType', 'AvailabilityZone'])
+    return df
+
+
+@ray.remote
 def get_instance_types_df(region: str) -> pd.DataFrame:
-    df, pricing_df = ray.get(
-        [get_instance_types.remote(region),
-         get_pricing_table.remote(region)])
+    df, zone_df, pricing_df, spot_pricing_df = ray.get([
+        get_instance_types.remote(region),
+        get_availability_zones.remote(region),
+        get_pricing_table.remote(region),
+        get_spot_pricing_table.remote(region)
+    ])
     print(f'{region} Processing dataframes')
 
     def get_price(row):
@@ -57,26 +86,44 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
             print(f'{region} WARNING: cannot find pricing for {t}')
             return np.nan
 
-    def get_gpu_info(row) -> Tuple[str, float]:
-        info = row['GpuInfo']
-        if not isinstance(info, dict):
+    def get_spot_price(row):
+        instance = row['InstanceType']
+        zone = row['AvailabilityZone']
+        try:
+            return spot_pricing_df.loc[(instance, zone)]['SpotPrice']
+        except KeyError:
+            print(
+                f'{region} WARNING: cannot find spot pricing for {instance} {zone}'
+            )
+            return np.nan
+
+    def get_acc_info(row) -> Tuple[str, float]:
+        accelerator = None
+        for col, info_key in [('GpuInfo', 'Gpus'),
+                              ('InferenceAcceleratorInfo', 'Accelerators'),
+                              ('FpgaInfo', 'Fpgas')]:
+            info = row.get(col)
+            if isinstance(info, dict):
+                accelerator = info[info_key][0]
+        if accelerator is None:
             return None, np.nan
-        gpu = info['Gpus'][0]
-        return gpu['Name'], gpu['Count']
+        return accelerator['Name'], accelerator['Count']
 
     def get_additional_columns(row):
-        gpu_name, gpu_count = get_gpu_info(row)
+        acc_name, acc_count = get_acc_info(row)
         # AWS p3dn.24xlarge offers a different V100 GPU.
         # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/
         if row['InstanceType'] == 'p3dn.24xlarge':
-            gpu_name = 'V100-32GB'
+            acc_name = 'V100-32GB'
         return pd.Series({
-            'PricePerHour': get_price(row),
-            'GpuName': gpu_name,
-            'GpuCount': gpu_count,
+            'Price': get_price(row),
+            'SpotPrice': get_spot_price(row),
+            'AcceleratorName': acc_name,
+            'AcceleratorCount': acc_count,
         })
 
     df['Region'] = region
+    df = df.merge(pd.DataFrame(zone_df), how='cross')
     df = pd.concat([df, df.apply(get_additional_columns, axis='columns')],
                    axis='columns')
     return df
@@ -94,7 +141,7 @@ def main(argv):
     ray.init()
     logging.set_verbosity(logging.DEBUG)
     df = get_all_regions_instance_types_df()
-    df.to_csv('aws.csv', index=False)
+    df.to_csv(common.get_data_path('aws.csv'), index=False)
     print('AWS Service Catalog saved to aws.csv')
 
 

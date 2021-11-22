@@ -36,6 +36,7 @@ class Resources(object):
             instance_type: Optional[str] = None,
             accelerators: Union[None, str, Dict[str, int]] = None,
             accelerator_args: Dict[str, str] = {},
+            use_spot: bool = False,
     ):
         self.cloud = cloud
         self.instance_type = instance_type
@@ -57,6 +58,7 @@ class Resources(object):
             accelerators = {accelerators: 1}
         self.accelerators = accelerators
         self.accelerator_args = accelerator_args
+        self.use_spot = use_spot
 
     def __repr__(self) -> str:
         accelerators = ''
@@ -65,7 +67,10 @@ class Resources(object):
             accelerators = f', {self.accelerators}'
             if self.accelerator_args:
                 accelerator_args = f', accelerator_args={self.accelerator_args}'
-        return f'{self.cloud}({self.instance_type}{accelerators}{accelerator_args})'
+        use_spot = ''
+        if self.use_spot:
+            use_spot = '[Spot]'
+        return f'{self.cloud}({self.instance_type}{use_spot}{accelerators}{accelerator_args})'
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self.instance_type is not None
@@ -89,7 +94,7 @@ class Resources(object):
         hours = seconds / 3600
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
-            self.instance_type)
+            self.instance_type, self.use_spot)
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(

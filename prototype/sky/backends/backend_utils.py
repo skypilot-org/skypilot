@@ -1,13 +1,16 @@
 """Util constants/functions for the backends."""
 import datetime
 import subprocess
+import tempfile
+import textwrap
 import time
-from typing import Optional, Union
+from typing import List, Optional, Union
 import yaml
 
 import jinja2
 
 from sky import authentication as auth
+from sky import clouds
 from sky import logging
 from sky import task
 
@@ -38,7 +41,12 @@ def _fill_template(template_path: str,
     return output_path
 
 
-def write_cluster_config(run_id: RunId, task, cluster_config_template: str):
+def write_cluster_config(run_id: RunId,
+                         task: task.Task,
+                         cluster_config_template: str,
+                         region: Optional[clouds.Region] = None,
+                         zones: Optional[List[clouds.Zone]] = None,
+                         dryrun: bool = False):
     """Returns {provisioner: path to yaml, the provisioning spec}.
 
     'provisioner' can be
@@ -49,26 +57,70 @@ def write_cluster_config(run_id: RunId, task, cluster_config_template: str):
     resources_vars = cloud.make_deploy_resources_variables(task)
     config_dict = {}
 
+    if region is None:
+        assert zones is None, 'Set either both or neither for: region, zones.'
+        region = cloud.get_default_region()
+        zones = region.zones
+    else:
+        assert zones is not None, \
+            'Set either both or neither for: region, zones.'
+    region = region.name
+    if isinstance(cloud, clouds.AWS):
+        # Only AWS supports multiple zones in the 'availability_zone' field.
+        zones = [zone.name for zone in zones]
+    else:
+        zones = [zones[0].name]
+
+    aws_default_ami = None
+    if isinstance(cloud, clouds.AWS):
+        aws_default_ami = cloud.get_default_ami(region)
+
+    setup_sh_path = None
+    if task.setup is not None:
+        codegen = textwrap.dedent(f"""\
+            #!/bin/bash
+            . $(conda info --base)/etc/profile.d/conda.sh
+            {task.setup}
+        """)
+        f = tempfile.NamedTemporaryFile('w', prefix='sky_setup_', delete=False)
+        f.write(codegen)
+        f.flush()
+        setup_sh_path = f.name
+
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
-            resources_vars, **{
+            resources_vars,
+            **{
                 'run_id': run_id,
-                'setup_command': task.setup,
+                'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
                 'container_name': task.container_name,
                 'num_nodes': task.num_nodes,
                 'file_mounts': task.get_local_to_remote_file_mounts() or {},
+                # Region/zones.
+                'region': region,
+                'zones': ','.join(zones),
+                # AWS only.
+                'aws_default_ami': aws_default_ami,
             }))
-    _add_ssh_to_cluster_config(cloud, yaml_path)
     config_dict['ray'] = yaml_path
+    if dryrun:
+        return config_dict
+    _add_ssh_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
         # FIXME: replace hard-coding paths
-        config_dict['gcloud'] = (_fill_template('config/gcp-tpu-create.sh.j2',
-                                                dict(resources_vars)),
-                                 _fill_template('config/gcp-tpu-delete.sh.j2',
-                                                dict(resources_vars)))
+        config_dict['gcloud'] = (_fill_template(
+            'config/gcp-tpu-create.sh.j2',
+            dict(resources_vars, **{
+                'zones': ','.join(zones),
+            })),
+                                 _fill_template(
+                                     'config/gcp-tpu-delete.sh.j2',
+                                     dict(resources_vars, **{
+                                         'zones': ','.join(zones),
+                                     })))
     return config_dict
 
 
@@ -112,10 +164,17 @@ def get_run_id() -> RunId:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
-def wait_until_ray_cluster_ready(cluster_config_file: str, num_nodes: int):
+def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
+                                 num_nodes: int):
     if num_nodes <= 1:
         return
     expected_worker_count = num_nodes - 1
+    if isinstance(cloud, clouds.AWS):
+        worker_str = 'ray.worker.default'
+    elif isinstance(cloud, clouds.GCP):
+        worker_str = 'ray_worker_default'
+    else:
+        assert False, f'No support for distributed clusters for {cloud}.'
     while True:
         proc = subprocess.run(f"ray exec {cluster_config_file} 'ray status'",
                               shell=True,
@@ -124,7 +183,7 @@ def wait_until_ray_cluster_ready(cluster_config_file: str, num_nodes: int):
                               stderr=subprocess.PIPE)
         output = proc.stdout.decode('ascii')
         logger.info(output)
-        if f'{expected_worker_count} ray.worker.default' in output:
+        if f'{expected_worker_count} {worker_str}' in output:
             break
         time.sleep(10)
 

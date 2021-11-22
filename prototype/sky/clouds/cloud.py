@@ -1,11 +1,59 @@
-from typing import Dict, Optional
+"""Interfaces: clouds, regions, and zones."""
+import collections
+from typing import Dict, Iterator, List, Optional, Tuple
+
+
+class Region(collections.namedtuple('Region', ['name'])):
+    """A region."""
+    name: str
+    zones: List['Zone'] = []
+
+    def set_zones(self, zones: List['Zone']):
+        self.zones = zones
+        for zone in self.zones:
+            zone.region = self
+        return self
+
+
+class Zone(collections.namedtuple('Zone', ['name'])):
+    """A zone, typically grouped under a region."""
+    name: str
+    region: Region
 
 
 class Cloud(object):
 
+    UNKNOWN_COST = int(1e9)
+
+    #### Regions/Zones ####
+
+    @classmethod
+    def regions(cls) -> List[Region]:
+        raise NotImplementedError
+
+    @classmethod
+    def region_zones_provision_loop(cls) -> Iterator[Tuple[Region, List[Zone]]]:
+        """Loops over (region, zones) to retry for provisioning.
+
+        Certain clouds' provisioners may handle batched requests, retrying for
+        itself a list of zones under a region.  Others may need a specific zone
+        per provision request (in that case, yields (region, a one-element list
+        for each zone)).
+
+        Typical usage:
+
+            for region, zones in cloud.region_zones_provision_loop():
+                success = try_provision(region, zones, resources)
+                if success:
+                    break
+        """
+        raise NotImplementedError
+
+    #### Normal methods ####
+
     # TODO: incorporate region/zone into the API.
-    def instance_type_to_hourly_cost(self, instance_type):
-        """Returns the hourly on-demand price for an instance type."""
+    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+        """Returns the hourly on-demand/spot price for an instance type."""
         raise NotImplementedError
 
     def accelerators_to_hourly_cost(self, accelerators):
@@ -43,7 +91,12 @@ class Cloud(object):
         """Returns {acc: acc_count} held by 'instance_type', if any."""
         raise NotImplementedError
 
-    def get_default_instance_type(self):
+    @classmethod
+    def get_default_instance_type(cls):
+        raise NotImplementedError
+
+    @classmethod
+    def get_default_region(cls) -> Region:
         raise NotImplementedError
 
     def get_feasible_launchable_resources(self, resources):

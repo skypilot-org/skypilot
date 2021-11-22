@@ -25,7 +25,10 @@ class Azure(clouds.Cloud):
         ('V100', 4): 'Standard_NC24s_v3',
     }
 
-    def instance_type_to_hourly_cost(self, instance_type):
+    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+        # TODO: use_spot support
+        if use_spot:
+            return clouds.Cloud.UNKNOWN_COST
         return Azure._ON_DEMAND_PRICES[instance_type]
 
     def get_egress_cost(self, num_gigabytes):
@@ -76,6 +79,7 @@ class Azure(clouds.Cloud):
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
+        assert not r.use_spot, f"We currently do not support spot instances for Azure"
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:

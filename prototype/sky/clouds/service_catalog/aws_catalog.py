@@ -3,29 +3,75 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
-from typing import Optional
+from typing import Dict, List, Optional
+
+import numpy as np
+import pandas as pd
 
 from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('aws.csv')
 
 
-def get_hourly_cost(instance_type: str, region: str = 'us-west-2') -> float:
-    result = _df[(_df['InstanceType'] == instance_type) &
-                 (_df['Region'] == region)]
-    assert len(result) == 1, (result, instance_type, region)
-    return result['PricePerHour'].iloc[0]
+def _get_instance_type(instance_type: str, region: str) -> pd.DataFrame:
+    return _df[(_df['InstanceType'] == instance_type) &
+               (_df['Region'] == region)]
 
 
-def get_instance_type_for_gpu(gpu_name: str,
-                              count: int,
-                              region: str = 'us-west-2') -> Optional[str]:
-    """Returns the cheapest instance type that offers the required count of GPUs.
+def get_hourly_cost(instance_type: str,
+                    region: str = 'us-west-2',
+                    use_spot: bool = False) -> float:
+    """Returns the cost, or the cheapest cost among all zones for spot."""
+    df = _get_instance_type(instance_type, region)
+    assert len(set(df['Price'])) == 1, (df, instance_type, region)
+    if not use_spot:
+        return df['Price'].iloc[0]
+
+    cheapest_idx = df['SpotPrice'].idxmin()
+    if np.isnan(cheapest_idx):
+        return df['Price'].iloc[0]
+
+    cheapest = df.loc[cheapest_idx]
+    return cheapest['SpotPrice']
+
+
+def get_accelerators_from_instance_type(instance_type: str,
+                                        region: str = 'us-west-2'
+                                       ) -> Optional[Dict[str, int]]:
+    df = _get_instance_type(instance_type, region)
+    row = df.iloc[0]
+    acc_name, acc_count = row['AcceleratorName'], int(row['AcceleratorCount'])
+    if len(acc_name) == 0 and acc_count == 0:
+        return None
+    return {acc_name: acc_count}
+
+
+def get_instance_type_for_accelerator(acc_name: str,
+                                      acc_count: int,
+                                      region: str = 'us-west-2'
+                                     ) -> Optional[str]:
+    """Returns the cheapest instance type that offers the required count of
+    accelerators.
     """
-    # TODO: Reorganize _df to support any accelerator (Inferentia, etc.)
-    result = _df[(_df['GpuName'] == gpu_name) & (_df['GpuCount'] == count) &
+    result = _df[(_df['AcceleratorName'] == acc_name) &
+                 (_df['AcceleratorCount'] == acc_count) &
                  (_df['Region'] == region)]
     if len(result) == 0:
         return None
-    assert len(result) == 1, (result, gpu_name, count, region)
+    assert len(set(result['InstanceType'])) == 1, (result, acc_name, acc_count,
+                                                   region)
     return result.iloc[0]['InstanceType']
+
+
+def list_accelerators(gpus_only: bool) -> Dict[str, List[int]]:
+    """Returns a mapping from the canonical names of accelerators to a list of
+    counts, each representing an instance type offered by this cloud.
+    """
+    df = _df
+    if gpus_only:
+        df = df[~pd.isna(df['GpuInfo'])]
+    df = df[['AcceleratorName', 'AcceleratorCount']].dropna().drop_duplicates()
+    df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
+    groupby = df.groupby('AcceleratorName')
+    return groupby['AcceleratorCount'].apply(lambda xs: sorted(list(xs))
+                                            ).to_dict()
