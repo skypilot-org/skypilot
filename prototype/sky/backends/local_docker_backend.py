@@ -100,7 +100,9 @@ class LocalDockerBackend(backends.Backend):
             handle], f'No image found for {handle}, have you run Backend.provision()?'
         image_tag = self.images[handle]
         logger.info(f'Image {image_tag} found. Running container now.')
-        container = self.client.containers.run(image_tag, detach=True)
+        container = self.client.containers.run(image_tag,
+                                               remove=True,
+                                               detach=True)
         self.containers[handle] = container
         logger.info(
             f'Your container is now running with name {container.name}. You can debug by running docker run -it {image_tag} /bin/bash.'
@@ -118,11 +120,11 @@ class LocalDockerBackend(backends.Backend):
             f'Your container is now running with name {Style.BRIGHT}{container.name}{Style.RESET_ALL}'
         )
         logger.info(
-            f'To get a shell in your container, run {Style.BRIGHT}docker exec -it {container.image} /bin/bash{Style.RESET_ALL}'
+            f'To get a shell in your container, run {Style.BRIGHT}docker exec -it {container.image.tags[0]} /bin/bash{Style.RESET_ALL}'
         )
         logger.info(
             f'To create a new container for debugging without running the task run command,'
-            f' run {Style.BRIGHT}docker run -it {container.image} /bin/bash{Style.RESET_ALL}'
+            f' run {Style.BRIGHT}docker run -it {container.image.tags[0]} /bin/bash{Style.RESET_ALL}'
         )
 
     def teardown(self, handle: ResourceHandle) -> None:
