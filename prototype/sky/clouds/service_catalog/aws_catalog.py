@@ -35,24 +35,26 @@ def get_hourly_cost(instance_type: str,
     return cheapest['SpotPrice']
 
 
-def get_accelerators_from_instance_type(instance_type: str,
-                                        region: str = 'us-west-2'
-                                       ) -> Optional[Dict[str, int]]:
+def get_accelerators_from_instance_type(
+        instance_type: str,
+        region: str = 'us-west-2',
+) -> Optional[Dict[str, int]]:
     df = _get_instance_type(instance_type, region)
     row = df.iloc[0]
-    acc_name, acc_count = row['AcceleratorName'], int(row['AcceleratorCount'])
-    if len(acc_name) == 0 and acc_count == 0:
+    acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
+    if pd.isnull(acc_name):
+        # Happens for e.g., m4.2xlarge.
+        assert pd.isnull(acc_count), (acc_name, acc_count)
         return None
-    return {acc_name: acc_count}
+    return {acc_name: int(acc_count)}
 
 
-def get_instance_type_for_accelerator(acc_name: str,
-                                      acc_count: int,
-                                      region: str = 'us-west-2'
-                                     ) -> Optional[str]:
-    """Returns the cheapest instance type that offers the required count of
-    accelerators.
-    """
+def get_instance_type_for_accelerator(
+        acc_name: str,
+        acc_count: int,
+        region: str = 'us-west-2',
+) -> Optional[str]:
+    """Returns the instance type with the required count of accelerators."""
     result = _df[(_df['AcceleratorName'] == acc_name) &
                  (_df['AcceleratorCount'] == acc_count) &
                  (_df['Region'] == region)]
