@@ -35,7 +35,9 @@ class LocalDockerBackend(backends.Backend):
         """ Since resource demands are ignored, There's no provisioning in
          local docker. Simply return the task name as the handle."""
         handle = task.name
-        logger.info(f'Building docker image for task {task.name}. This might take some time.')
+        logger.info(
+            f'Building docker image for task {task.name}. This might take some time.'
+        )
         image_tag = docker_utils.build_dockerimage_from_task(task)
         self.images[handle] = image_tag
         logger.info(f'Image {image_tag} built.')
@@ -48,25 +50,28 @@ class LocalDockerBackend(backends.Backend):
         logger.info('Since the workdir is synced at build time, '
                     'sync_workdir is a NoOp.')
 
-    def sync_file_mounts(
-            self,
-            handle: ResourceHandle,
-            all_file_mounts: Dict[Path, Path],
-            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]]) -> None:
+    def sync_file_mounts(self, handle: ResourceHandle,
+                         all_file_mounts: Dict[Path, Path],
+                         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]]
+                        ) -> None:
         """ File mounts in Docker are implemented with volume mounts using the -v flag"""
         assert cloud_to_remote_file_mounts is None, 'Only local file mounts are supported' \
                                                     ' with LocalDockerBackend'
         docker_mounts = {}
         if all_file_mounts:
             for container_path, local_path in all_file_mounts.items():
-                docker_mounts[local_path] = {'bind': container_path, 'mode': 'rw'}
+                docker_mounts[local_path] = {
+                    'bind': container_path,
+                    'mode': 'rw'
+                }
         self.volume_mounts[handle] = docker_mounts
 
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
                        task: App) -> None:
         """Post setup is tricky to do in LocalDockerBackend.
         Future investigation: Can we support it with a custom ENTRYPOINT?."""
-        logger.warning('Post setup is currently not supported in LocalDockerBackend')
+        logger.warning(
+            'Post setup is currently not supported in LocalDockerBackend')
 
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
@@ -74,10 +79,13 @@ class LocalDockerBackend(backends.Backend):
 
         # ParTask and Tasks with more than 1 nodes are not currently supported
         if isinstance(task, task_mod.ParTask):
-            raise NotImplementedError('ParTask is currently not supported in LocalDockerBackend.')
+            raise NotImplementedError(
+                'ParTask is currently not supported in LocalDockerBackend.')
 
         if task.num_nodes > 1:
-            raise NotImplementedError('Tasks with num_nodes > 1 is currently not supported in LocalDockerBackend.')
+            raise NotImplementedError(
+                'Tasks with num_nodes > 1 is currently not supported in LocalDockerBackend.'
+            )
 
         # Handle a basic task
         if task.run is None:
@@ -86,15 +94,17 @@ class LocalDockerBackend(backends.Backend):
 
         self._execute_task_one_node(handle, task)
 
-    def _execute_task_one_node(self,
-                               handle: ResourceHandle,
+    def _execute_task_one_node(self, handle: ResourceHandle,
                                task: task_mod.Task) -> None:
-        assert handle in self.images[handle], f'No image found for {handle}, have you run Backend.provision()?'
+        assert handle in self.images[
+            handle], f'No image found for {handle}, have you run Backend.provision()?'
         image_tag = self.images[handle]
         logger.info(f'Image {image_tag} found. Running container now.')
         container = self.client.containers.run(image_tag, detach=True)
         self.containers[handle] = container
-        logger.info(f'Your container is now running with name {container.name}. You can debug by running docker run -it {image_tag} /bin/bash.')
+        logger.info(
+            f'Your container is now running with name {container.name}. You can debug by running docker run -it {image_tag} /bin/bash.'
+        )
         logger.info(f'*** Container output {container.name} ***')
         for line in container.logs(stream=True):
             logger.info(line.strip())
@@ -104,10 +114,16 @@ class LocalDockerBackend(backends.Backend):
         colorama.init()
         Style = colorama.Style
         container = self.containers[handle]
-        logger.info(f'Your container is now running with name {Style.BRIGHT}{container.name}{Style.RESET_ALL}')
-        logger.info(f'To get a shell in your container, run {Style.BRIGHT}docker exec -it {container.image} /bin/bash{Style.RESET_ALL}')
-        logger.info(f'To create a new container for debugging without running the task run command,'
-                    f' run {Style.BRIGHT}docker run -it {container.image} /bin/bash{Style.RESET_ALL}')
+        logger.info(
+            f'Your container is now running with name {Style.BRIGHT}{container.name}{Style.RESET_ALL}'
+        )
+        logger.info(
+            f'To get a shell in your container, run {Style.BRIGHT}docker exec -it {container.image} /bin/bash{Style.RESET_ALL}'
+        )
+        logger.info(
+            f'To create a new container for debugging without running the task run command,'
+            f' run {Style.BRIGHT}docker run -it {container.image} /bin/bash{Style.RESET_ALL}'
+        )
 
     def teardown(self, handle: ResourceHandle) -> None:
         """ Teardown kills the container"""

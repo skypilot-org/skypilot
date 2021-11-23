@@ -16,16 +16,17 @@ FROM {base_image}
 '''.strip()
 
 DOCKERFILE_SETUPCMD = '''RUN {setup_command}'''
-DOCKERFILE_COPYCMD= '''COPY {copy_command}'''
+DOCKERFILE_COPYCMD = '''COPY {copy_command}'''
 DOCKERFILE_RUNCMD = '''CMD {run_command}'''
 
 
-def create_dockerfile(base_image: str,
-                      setup_command: str,
-                      copy_path: str,
-                      output_path: str = None,
-                      run_command: str = None,
-                      ) -> str:
+def create_dockerfile(
+        base_image: str,
+        setup_command: str,
+        copy_path: str,
+        output_path: str = None,
+        run_command: str = None,
+) -> str:
     """
     Writes a valid dockerfile to the specified path.
 
@@ -49,13 +50,16 @@ def create_dockerfile(base_image: str,
     if copy_path:
         dir_name = os.path.basename(os.path.dirname(copy_path))
         copy_docker_cmd = f'{dir_name} /{dir_name}/'  # NOTE: This relies on copy_path being copied to build context.
-        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(copy_command=copy_docker_cmd)
+        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
+            copy_command=copy_docker_cmd)
 
     if setup_command:
-        dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(setup_command=setup_command)
+        dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(
+            setup_command=setup_command)
 
     if run_command:
-        dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=run_command)
+        dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(
+            run_command=run_command)
 
     if output_path:
         with open(output_path, 'w') as f:
@@ -70,10 +74,7 @@ def _execute_build(tag, context_path):
     """
     docker_client = docker.from_env()
     # TODO(romilb): Figure out how to stream logs during build.
-    docker_client.images.build(path=context_path,
-                               tag=tag,
-                               rm=True,
-                               quiet=False)
+    docker_client.images.build(path=context_path, tag=tag, rm=True, quiet=False)
 
 
 def build_dockerimage(dockerfile_contents, copy_path, tag):
