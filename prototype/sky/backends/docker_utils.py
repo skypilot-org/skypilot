@@ -75,17 +75,25 @@ def _execute_build(tag, context_path):
     """
     docker_client = docker.from_env()
     try:
-        _image, _build_logs = docker_client.images.build(path=context_path, tag=tag, rm=True, quiet=False)
+        _image, _build_logs = docker_client.images.build(path=context_path,
+                                                         tag=tag,
+                                                         rm=True,
+                                                         quiet=False)
     except docker.errors.BuildError as e:
         colorama.init()
         Style = colorama.Style
         Fore = colorama.Fore
-        logger.error(f'{Fore.RED}Image build for {tag} failed - please check the logs below{Style.RESET_ALL}')
-        logger.error(f'{Style.BRIGHT}Image context is available at {context_path}{Style.RESET_ALL}')
+        logger.error(
+            f'{Fore.RED}Image build for {tag} failed - please check the logs below{Style.RESET_ALL}'
+        )
+        logger.error(
+            f'{Style.BRIGHT}Image context is available at {context_path}{Style.RESET_ALL}'
+        )
         for line in e.build_log:
             if 'stream' in line:
                 logger.error(line['stream'].strip())
         raise
+
 
 def build_dockerimage(dockerfile_contents, copy_path, tag):
     """
