@@ -6,7 +6,7 @@ DATE_FORMAT = '%m-%d %H:%M:%S'
 
 
 class NewLineFormatter(logging.Formatter):
-
+    """Add logging prefix to the newlines to align multi-line logging messages"""
     def __init__(self, fmt, datefmt=None):
         logging.Formatter.__init__(self, fmt, datefmt)
 
