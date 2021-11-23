@@ -341,8 +341,7 @@ def execute_v2(dag: sky.Dag,
     assert best_resources is not None, \
         'Run sky.Optimize.optimize() before sky.execute().'
 
-    backend = backend if backend is not None else sky.backends.CloudVmRayBackend(
-    )
+    backend = backend if backend is not None else backends.CloudVmRayBackend()
 
     handle = backend.provision(task, best_resources, dryrun=dryrun)
     if dryrun:
