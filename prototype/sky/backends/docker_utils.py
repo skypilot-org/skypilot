@@ -84,7 +84,7 @@ def _execute_build(tag, context_path):
         Style = colorama.Style
         Fore = colorama.Fore
         logger.error(
-            f'{Fore.RED}Image build for {tag} failed - please check the logs below{Style.RESET_ALL}'
+            f'{Fore.RED}Image build for {tag} failed - are your setup commands correct? Logs below{Style.RESET_ALL}'
         )
         logger.error(
             f'{Style.BRIGHT}Image context is available at {context_path}{Style.RESET_ALL}'
