@@ -516,8 +516,8 @@ class CloudVmRayBackend(backends.Backend):
         ips_dict = task.run(ips)
         for ip in ips_dict:
             command_for_ip = ips_dict[ip]
-            # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used to initialize
-            # conda, so that 'conda activate ...' works.
+            # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
+            # to initialize conda, so that 'conda activate ...' works.
             cmd = shlex.quote(
                 f'. $(conda info --base)/etc/profile.d/conda.sh || true && \
                     cd {SKY_REMOTE_WORKDIR} && {command_for_ip}')
@@ -538,7 +538,7 @@ class CloudVmRayBackend(backends.Backend):
         futures.append(ray.remote(lambda: subprocess.run(
             {cmd},
                 shell=True, check=True, executable='/bin/bash')) \\
-                .options(name='task-{ip}'{resources_str}{num_gpus_str}) \\
+                .options(name='{ip}'{resources_str}{num_gpus_str}) \\
                 .remote())
         """))
         # Block.
