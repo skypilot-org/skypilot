@@ -311,16 +311,15 @@ class RetryingVmProvisioner(object):
                         raise e
             cluster_config_file = config_dict['ray']
 
+            tail_cmd = f'tail -n100 -f {log_path}'
+            logger.info(
+                f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
             # Redirect stdout/err to the file and streaming (if stream_logs).
             proc, stdout, stderr = _run_with_log(
                 ['ray', 'up', '-y', cluster_config_file],
                 log_abs_path,
                 stream_logs,
                 start_streaming_at='Shared connection to')
-
-            tail_cmd = f'tail -n100 -f {log_path}'
-            logger.info(
-                f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
 
             if proc.returncode != 0:
                 self._update_blocklist_on_error(to_provision.cloud, region,
