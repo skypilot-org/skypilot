@@ -109,6 +109,9 @@ class Task(object):
     def from_yaml(yaml_path):
         with open(os.path.expanduser(yaml_path), 'r') as f:
             config = yaml.safe_load(f)
+        # TODO: perform more checks on yaml and raise meaningful errors.
+        if 'run' not in config:
+            raise ValueError('The YAML spec should include a \'run\' field.')
 
         task = Task(
             config.get('name'),
