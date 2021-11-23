@@ -665,7 +665,7 @@ class CloudVmRayBackend(backends.Backend):
                 )
 
     def teardown(self, handle: ResourceHandle) -> None:
-        _run(f'ray down -y {handle}', shell=True, check=True)
+        _run(f'ray down -y {handle}')
         if self._managed_tpu is not None:
             _run(f'bash {self._managed_tpu[1]}')
 
