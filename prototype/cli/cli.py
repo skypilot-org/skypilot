@@ -15,7 +15,7 @@ def run(config_path, dryrun):
     """Launch a job from a YAML config."""
 
     with sky.Dag() as dag:
-        task = sky.Task.from_yaml(config_path)
+        sky.Task.from_yaml(config_path)
 
     dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
     sky.execute(dag, dryrun=dryrun)
