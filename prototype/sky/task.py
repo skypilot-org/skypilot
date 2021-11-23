@@ -1,6 +1,6 @@
-from typing import Dict, List, Optional, Set, Union
 import os
-import urllib.parse
+from typing import Callable, Dict, List, Optional, Set, Union
+from urllib import parse
 import yaml
 
 import sky
@@ -8,6 +8,9 @@ from sky import clouds
 from sky import resources
 
 Resources = resources.Resources
+# A lambda generating commands (node addrs -> {addr: cmd_i}).
+CommandGen = Callable[[List[str]], Dict[str, str]]
+CommandOrCommandGen = Union[str, CommandGen]
 
 CLOUD_REGISTRY = {
     'aws': clouds.AWS(),
@@ -17,7 +20,7 @@ CLOUD_REGISTRY = {
 
 
 def _is_cloud_store_url(url):
-    result = urllib.parse.urlsplit(url)
+    result = parse.urlsplit(url)
     # '' means non-cloud URLs.
     return result.netloc
 
@@ -27,16 +30,52 @@ class Task(object):
 
     def __init__(
             self,
-            name=None,
-            workdir=None,
-            setup=None,
-            post_setup_fn=None,
-            docker_image=None,
-            container_name=None,
-            num_nodes=1,
-            private_key='~/.ssh/sky-key',
-            run=None,
+            name: Optional[str] = None,
+            *,
+            setup: Optional[str] = None,
+            run: CommandOrCommandGen = None,
+            workdir: Optional[str] = None,
+            num_nodes: Optional[int] = None,
+            # Advanced:
+            post_setup_fn: Optional[CommandGen] = None,
+            docker_image: Optional[str] = None,
+            container_name: Optional[str] = None,
+            private_key: Optional[str] = '~/.ssh/sky-key',
     ):
+        """Initializes a Task.
+
+        All fields are optional except 'run': either a shell command to run
+        (str) or a command generator for different nodes (lambda; see below).
+
+        Before executing a Task, it is required to call Task.set_resources() to
+        assign resource requirements to this task.
+
+        Args:
+          name: A string name for the Task.
+          setup: A setup command, run under 'workdir' and before actually
+            executing the run command, 'run'.
+          run: Either a shell command (str) or a command generator (callable).
+            If latter, it must take a list of node addresses as input and
+            return a dictionary {addr: command for addr} (valid to exclude some
+            nodes, in which case no commands are run on them).  Commands will
+            be run under 'workdir'.
+          workdir: The local working directory.  This directory and its files
+            will be synced to a location on the remote VM(s), and 'setup' and
+            'run' commands will be run under that location (thus, they can rely
+            on relative paths when invoking binaries).
+          num_nodes: The number of nodes to provision for this Task.  If None,
+            treated as 1 node.  If > 1, each node will execute its own
+            setup/run command; 'run' can either be a str, meaning all nodes get
+            the same command, or a lambda, as documented above.
+          post_setup_fn: If specified, this generates commands to be run on all
+            node(s), which are run after resource provisioning and 'setup' but
+            before 'run'.  A typical use case is to set environment variables
+            on each node based on all node IPs.
+          docker_image: The base docker image that this Task will be built on.
+            In effect when LocalDockerBackend is used.  Example: 'ubuntu'.
+          container_name: Unused?
+          private_key: Unused?
+        """
         self.name = name
         self.best_resources = None
         self.run = run
@@ -45,7 +84,8 @@ class Task(object):
         self.workdir = workdir
         self.docker_image = docker_image
         self.container_name = container_name
-        self.num_nodes = num_nodes
+        self._explicit_num_nodes = num_nodes  # Used as a scheduling constraint.
+        self.num_nodes = 1 if num_nodes is None else num_nodes
         self.private_key = private_key
         self.inputs = None
         self.outputs = None
@@ -57,8 +97,10 @@ class Task(object):
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
 
-        # Check for proper assignment of Task variables
-        # self.validate_config()
+        # Semantics.
+        if num_nodes is not None and num_nodes > 1 and type(self.run) is str:
+            # The same command str for all nodes.
+            self.run = lambda ips: {ip: run for ip in ips}
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
@@ -70,9 +112,10 @@ class Task(object):
 
         task = Task(
             config.get('name'),
+            run=config['run'],  # Required field.
             workdir=config.get('workdir'),
             setup=config.get('setup'),
-            run=config['run'],
+            num_nodes=config.get('num_nodes'),
         )
 
         file_mounts = config.get('file_mounts')
@@ -104,7 +147,6 @@ class Task(object):
         if resources.get('use_spot') is not None:
             resources['use_spot'] = resources['use_spot']
         resources = sky.Resources(**resources)
-
         task.set_resources({resources})
         return task
 
