@@ -30,7 +30,7 @@ SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
 
 logger = logging.init_logger(__name__)
 
-TASK_LAUNCH_CODE_GENERATOR = """
+_TASK_LAUNCH_CODE_GENERATOR = """\
         import io
         import os
         import ray
@@ -75,7 +75,15 @@ TASK_LAUNCH_CODE_GENERATOR = """
                             print(line, end='')
         
         futures = []
-    """
+
+        def start_task(cmd, log_path, stream_logs):
+            proc = subprocess.Popen(cmd,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    shell=True,
+                                    executable='/bin/bash')
+            redirect_process_output(proc, log_path, stream_logs)
+"""
 
 
 def _run(cmd, **kwargs):
@@ -451,7 +459,7 @@ class CloudVmRayBackend(backends.Backend):
                                'tasks')
         codegen = [
             textwrap.dedent(
-                TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
+                _TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
         ]
         for i, t in enumerate(par_task.tasks):
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used to initialize
@@ -478,16 +486,9 @@ class CloudVmRayBackend(backends.Backend):
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
 
             task_i_codegen = textwrap.dedent(f"""\
-        def start_task():
-            proc = subprocess.Popen({cmd},
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    shell=True,
-                                    executable='/bin/bash')
-            redirect_process_output(proc, '{log_path}', {stream_logs})
         futures.append(ray.remote(start_task) \\
               .options(name='{name}'{resources_str}{num_gpus_str}) \\
-              .remote())
+              .remote({cmd}, '{log_path}', {stream_logs}))
         """)
             codegen.append(task_i_codegen)
         # Block.
@@ -502,14 +503,15 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             logger.info(
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
-                f'{Style.RESET_ALL} Hint: task\'s output will be redirect to'
-                f'{Style.BRIGHT} {log_dir} {Style.RESET_ALL}. Please use'
-                '`ray attach` and `tail -f` to monitor.\n')
+                f'{Style.RESET_ALL} Hint: task outputs are redirected to '
+                f'{Style.BRIGHT}{log_dir}{Style.RESET_ALL} on the cluster. To monitor: '
+                f'ray exec {handle} "tail -f {log_dir}/*.log" '
+                f'(To view the task names: ray exec {handle} "ls {log_dir}/")')
 
         self._exec_code_on_head(handle, codegen)
         task_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
         logger.info(
-            f'Syncing down the loggings to {Style.BRIGHT}{task_log_dir}{Style.RESET_ALL}.'
+            f'Syncing down the logs to {Style.BRIGHT}{task_log_dir}{Style.RESET_ALL}.'
         )
         os.makedirs(task_log_dir, exist_ok=True)
         _run(f'ray rsync_down {handle} {log_dir}/* {task_log_dir}')
@@ -536,7 +538,7 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             colorama.init()
             Style = colorama.Style
-            logger.info(f'Redirecting stdout, to monitor: '
+            logger.info(f'Redirecting stdout/stderr, to monitor: '
                         f'{Style.BRIGHT}tail -f {log_path}{Style.RESET_ALL}')
 
         _run_with_log(cmd, log_path, stream_logs, shell=True)
@@ -584,7 +586,7 @@ class CloudVmRayBackend(backends.Backend):
                                'tasks')
         codegen = [
             textwrap.dedent(
-                TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
+                _TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
         ]
         acc, acc_count = _to_accelerator_and_count(task.best_resources)
         # Get private ips here as Ray internally uses 'node:private_ip' as
@@ -617,16 +619,9 @@ class CloudVmRayBackend(backends.Backend):
 
             codegen.append(
                 textwrap.dedent(f"""\
-        def start_task():
-            proc = subprocess.Popen({cmd},
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    shell=True,
-                                    executable='/bin/bash')
-            redirect_process_output(proc, '{log_path}', {stream_logs})
         futures.append(ray.remote(start_task) \\
               .options(name='{name}'{resources_str}{num_gpus_str}) \\
-              .remote())
+              .remote({cmd}, '{log_path}', {stream_logs}))
         """))
         # Block.
         codegen.append('ray.get(futures)\n')
@@ -639,14 +634,15 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             logger.info(
                 f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
-                f'{Style.RESET_ALL} Hint: task\'s output will be redirect to'
-                f'{Style.BRIGHT} {log_dir} {Style.RESET_ALL}. Please use'
-                '`ray attach` and `tail -f` to monitor.\n')
+                f'{Style.RESET_ALL} Hint: task outputs are redirected to'
+                f'{Style.BRIGHT}{log_dir}{Style.RESET_ALL} on the cluster. To monitor: '
+                f'ray exec {handle} "tail -f {log_dir}/*.log"\n'
+                f'(To view the task names: ray exec {handle} "ls {log_dir}/")')
 
         self._exec_code_on_head(handle, codegen)
         task_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
         logger.info(
-            f'Syncing down the loggings to {Style.BRIGHT}{task_log_dir}{Style.RESET_ALL}.'
+            f'Syncing down the logs to {Style.BRIGHT}{task_log_dir}{Style.RESET_ALL}.'
         )
         os.makedirs(task_log_dir, exist_ok=True)
         _run(f'ray rsync_down {handle} {log_dir}/* {task_log_dir}')
