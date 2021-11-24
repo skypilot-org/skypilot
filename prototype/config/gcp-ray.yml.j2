@@ -39,6 +39,8 @@ available_node_types:
         items:
           - key: install-nvidia-driver
             value: "True"
+      scheduling:
+        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
 {%- endif %}
 {% if num_nodes > 1 %}
   ray_worker_default:
@@ -65,6 +67,8 @@ available_node_types:
         items:
           - key: install-nvidia-driver
             value: "True"
+      scheduling:
+        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
 {%- endif %}
 {%- endif %}
 
@@ -75,15 +79,18 @@ file_mounts: {
 {%- if workdir is not none %}
   "/tmp/workdir": "{{workdir}}",
 {%- endif %}
+{%- if setup_sh_path is not none %}
+  "/tmp/setup.sh": "{{setup_sh_path}}",
+{%- endif %}
 {%- for remote_path, local_path in file_mounts.items() %}
   "{{remote_path}}": "{{local_path}}",
 {%- endfor %}
 }
 
 # Patterns for files to exclude when running rsync up or rsync down
-rsync_exclude:
-  - "**/.git"
-  - "**/.git/**"
+# rsync_exclude:
+#   - "**/.git"
+#   - "**/.git/**"
 
 rsync_filter:
   - .gitignore
@@ -92,8 +99,8 @@ rsync_filter:
 setup_commands:
   # This AMI's system Python is version 2+.
   - pip3 install -U ray==1.7.0
-{%- if setup_command is not none %}
-  - mkdir -p /tmp/workdir && cd /tmp/workdir && {{setup_command}}
+{%- if setup_sh_path is not none %}
+  - mkdir -p /tmp/workdir && cd /tmp/workdir && bash /tmp/setup.sh
 {%- else %}
   - mkdir -p /tmp/workdir && cd /tmp/workdir
 {%- endif %}

@@ -23,6 +23,12 @@ class AWS(clouds.Cloud):
                 #     clouds.Zone('us-west-1a'),
                 #     clouds.Zone('us-west-1b'),
                 # ]),
+                clouds.Region('us-west-2').set_zones([
+                    clouds.Zone('us-west-2a'),
+                    clouds.Zone('us-west-2b'),
+                    clouds.Zone('us-west-2c'),
+                    clouds.Zone('us-west-2d'),
+                ]),
                 clouds.Region('us-east-2').set_zones([
                     clouds.Zone('us-east-2a'),
                     clouds.Zone('us-east-2b'),
@@ -35,12 +41,6 @@ class AWS(clouds.Cloud):
                     clouds.Zone('us-east-1d'),
                     clouds.Zone('us-east-1e'),
                     clouds.Zone('us-east-1f'),
-                ]),
-                clouds.Region('us-west-2').set_zones([
-                    clouds.Zone('us-west-2a'),
-                    clouds.Zone('us-west-2b'),
-                    clouds.Zone('us-west-2c'),
-                    clouds.Zone('us-west-2d'),
                 ]),
             ]
         return cls._regions
