@@ -338,8 +338,6 @@ def execute_v2(dag: sky.Dag,
     assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
     task = dag.tasks[0]
     best_resources = task.best_resources
-    import pdb
-    pdb.set_trace()
     assert best_resources is not None, \
         'Run sky.Optimize.optimize() before sky.execute().'
 
