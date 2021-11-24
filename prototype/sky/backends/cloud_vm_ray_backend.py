@@ -96,12 +96,6 @@ def _run_no_outputs(cmd, **kwargs):
     return _run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
 
 
-def _run_with_callback(cmd, callback, **kwargs):
-    output = _run(cmd, **kwargs)
-    callback(output)
-    return output
-
-
 def _run_with_log(cmd,
                   log_path,
                   stream_logs=False,

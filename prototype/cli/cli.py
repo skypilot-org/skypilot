@@ -67,9 +67,8 @@ def _interactive_node(name, resources):
 
     # TODO: cd into workdir immediately on the VM
     # TODO: Delete the temporary cluster config yml (or figure out a way to re-use it)
-    cloud_vm_ray_backend._run_with_callback(
-        f'ray attach {handle} --tmux', lambda _: cloud_vm_ray_backend._run(
-            f'ray down -y {handle}'))
+    cloud_vm_ray_backend._run(f'ray attach {handle} --tmux')
+    cloud_vm_ray_backend._run(f'ray down -y {handle}')
 
 
 @click.group()
