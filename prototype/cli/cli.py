@@ -10,9 +10,8 @@ import sky
 from sky.backends import cloud_vm_ray_backend
 from sky.user_manager import UserManager
 
-
 # TODO: Ensure all paths references from CLI/sky backend
-# refer to a global/absolute path. This may cause files to 
+# refer to a global/absolute path. This may cause files to
 # get dumped places they shouldn't such as a user's workdir.
 
 
@@ -44,7 +43,7 @@ def _interactive_node(name, resources):
         name: Name of the interactivve session.
         resources: Resources to attach to VM.
     """
-    
+
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
         # should be setup = 'conda env export | grep -v "^prefix: " > environment.yml'
@@ -119,7 +118,8 @@ def run(entry_point, dryrun):
             task = sky.Task.from_yaml(entry_point)
 
         else:
-            raise ValueError(f'Unsupported entry point type: {entry_point_type}')
+            raise ValueError(
+                f'Unsupported entry point type: {entry_point_type}')
 
         # TODO: Factor this within Sky kernel
         # Reasoning here would be that if a user wants to write a custom script then
@@ -166,7 +166,8 @@ def status():
 @cli.command()
 def gpunode():
     """Launch an interactive GPU node."""
-    _interactive_node('gpunode', {sky.Resources(sky.AWS(), accelerators='V100')})
+    _interactive_node('gpunode',
+                      {sky.Resources(sky.AWS(), accelerators='V100')})
 
 
 @cli.command()

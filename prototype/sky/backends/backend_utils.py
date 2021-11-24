@@ -115,7 +115,7 @@ def write_cluster_config(run_id: RunId,
         dict(
             resources_vars,
             **{
-                'cluster_id': cluster_id, 
+                'cluster_id': cluster_id,
                 'run_id': run_id,
                 'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
