@@ -19,7 +19,7 @@ import os
 import re
 import subprocess
 import time
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Union, Optional
 
 import colorama
 from colorama import Fore, Style
@@ -318,7 +318,8 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
 def execute_v2(dag: sky.Dag,
                dryrun: bool = False,
                teardown: bool = False,
-               stream_logs: bool = True) -> None:
+               stream_logs: bool = True,
+               backend: Optional[backends.Backend] = None) -> None:
     """Executes a planned DAG.
 
     Args:
@@ -330,6 +331,8 @@ def execute_v2(dag: sky.Dag,
       stream_logs: bool; whether to stream all tasks' outputs to the client.
         Hint: for a ParTask, set this to False to avoid a lot of log outputs;
         each task's output can be redirected to their own files.
+      backend: Backend; backend to use for executing the tasks. Defaults to
+        CloudVmRayBackend()
     """
     # TODO: Azure. Port some of execute_v1()'s nice logging messages.
     assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
@@ -338,8 +341,7 @@ def execute_v2(dag: sky.Dag,
     assert best_resources is not None, \
         'Run sky.Optimize.optimize() before sky.execute().'
 
-    # Future backends: K8S, SLURM, VM, LOCAL, LOCAL_DOCKER, etc.
-    backend = backends.CloudVmRayBackend()
+    backend = backend if backend is not None else backends.CloudVmRayBackend()
 
     handle = backend.provision(task,
                                best_resources,
