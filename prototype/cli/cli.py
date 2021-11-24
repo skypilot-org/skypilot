@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import time
 
 import click
@@ -8,6 +9,11 @@ from prettytable import PrettyTable
 import sky
 from sky.backends import cloud_vm_ray_backend
 from sky.user_manager import UserManager
+
+
+# TODO: Ensure all paths references from CLI/sky backend
+# refer to a global/absolute path. This may cause files to 
+# get dumped places they shouldn't such as a user's workdir.
 
 
 def _combined_pretty_table_str(t1, t2):
@@ -72,19 +78,49 @@ def cli():
 
 
 @cli.command()
-@click.argument('config_path', required=True, type=str)
+@click.argument('entry_point', required=True, type=str)
 @click.option('--dryrun',
               '-n',
               default=False,
               type=bool,
               help='If True, do not actually run the job.')
-def run(config_path, dryrun):
+def run(entry_point, dryrun):
     """Launch a job from a YAML config."""
 
     session = UserManager()
+    stream_logs = False
 
     with sky.Dag() as dag:
-        task = sky.Task.from_yaml(config_path)
+
+        entry_point_type = Path(entry_point).suffix
+        if entry_point_type == '.py':
+            stream_logs = True
+
+            # TODO: Support conda environment cloning (see gpunode comment)
+            setup = f"""
+            pip3 install -r requirements.txt
+            """
+
+            run = f"""
+            python3 {entry_point}
+            """
+
+            task = sky.Task(
+                Path(entry_point).stem,
+                workdir=os.getcwd(),
+                setup=setup,
+                run=run,
+            )
+
+            # TODO: Add good way to automatically infer resources?
+            # Can also just assume we always attach GPU for `run`
+            task.set_resources({sky.Resources(sky.AWS(), accelerators='V100')})
+
+        elif entry_point_type in ['.yaml', '.yml']:
+            task = sky.Task.from_yaml(entry_point)
+
+        else:
+            raise ValueError(f'Unsupported entry point type: {entry_point_type}')
 
         # TODO: Factor this within Sky kernel
         # Reasoning here would be that if a user wants to write a custom script then
@@ -92,7 +128,7 @@ def run(config_path, dryrun):
         session.add_task(task)
 
     dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
-    sky.execute(dag, dryrun=dryrun, stream_logs=False)
+    sky.execute(dag, dryrun=dryrun, stream_logs=stream_logs)
 
 
 @cli.command()
