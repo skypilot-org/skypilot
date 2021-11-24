@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import yaml
 
 import colorama
+from ray.autoscaler import sdk
 
 import sky
 from sky import backends
@@ -509,12 +510,12 @@ class CloudVmRayBackend(backends.Backend):
                 f'(To view the task names: ray exec {handle} "ls {log_dir}/")')
 
         self._exec_code_on_head(handle, codegen)
-        task_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
+        local_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
         logger.info(
-            f'Syncing down the logs to {Style.BRIGHT}{task_log_dir}{Style.RESET_ALL}.'
+            f'Syncing down the logs to {Style.BRIGHT}{local_log_dir}{Style.RESET_ALL}.'
         )
-        os.makedirs(task_log_dir, exist_ok=True)
-        _run(f'ray rsync_down {handle} {log_dir}/* {task_log_dir}')
+        os.makedirs(local_log_dir, exist_ok=True)
+        _run(f'ray rsync_down {handle} {log_dir}/* {local_log_dir}')
 
     def _exec_code_on_head(self,
                            handle: ResourceHandle,
@@ -640,12 +641,25 @@ class CloudVmRayBackend(backends.Backend):
                 f'(To view the task names: ray exec {handle} "ls {log_dir}/")')
 
         self._exec_code_on_head(handle, codegen)
-        task_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
+        local_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
         logger.info(
-            f'Syncing down the logs to {Style.BRIGHT}{task_log_dir}{Style.RESET_ALL}.'
+            f'Syncing down the logs to {Style.BRIGHT}{local_log_dir}{Style.RESET_ALL}.'
         )
-        os.makedirs(task_log_dir, exist_ok=True)
-        _run(f'ray rsync_down {handle} {log_dir}/* {task_log_dir}')
+        os.makedirs(local_log_dir, exist_ok=True)
+        external_ips = self._get_node_ips(handle,
+                                          task.num_nodes,
+                                          return_private_ips=False)
+        # Call the ray sdk to rsync the logs back to local.
+        for ip in external_ips:
+            sdk.rsync(
+                handle,
+                source=f'{log_dir}/*',
+                target=f'{local_log_dir}',
+                down=True,
+                ip_address=ip,
+                use_internal_ip=False,
+                should_bootstrap=False,
+            )
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
