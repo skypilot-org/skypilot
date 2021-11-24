@@ -1,3 +1,4 @@
+import os
 import time
 
 import click
@@ -5,6 +6,7 @@ import pendulum
 from prettytable import PrettyTable
 
 import sky
+from sky.backends import cloud_vm_ray_backend
 from sky.user_manager import UserManager
 
 
@@ -52,12 +54,10 @@ def run(config_path, dryrun):
         # TODO: Factor this within Sky kernel
         # Reasoning here would be that if a user wants to write a custom script then
         # their launched tasks/clusters would still be tracked by the user manager.
-        import pdb
-        pdb.set_trace()
         session.add_task(task)
 
     dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
-    sky.execute(dag, dryrun=dryrun)
+    sky.execute(dag, dryrun=dryrun, stream_logs=False)
 
 
 @cli.command()
@@ -74,10 +74,8 @@ def status():
         launched_at = task_status['launched_at']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         task_table.add_row([
-            task_status['id'], 
-            task_status['name'], 
-            duration.diff_for_humans(),
-            task_status['status']
+            task_status['id'], task_status['name'],
+            duration.diff_for_humans(), task_status['status']
         ])
 
     cluster_table = PrettyTable()
@@ -86,8 +84,8 @@ def status():
         launched_at = cluster_status['launched_at']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         cluster_table.add_row([
-            cluster_status['id'], 
-            cluster_status['cloud'], 
+            cluster_status['id'],
+            cluster_status['cloud'],
             duration.diff_for_humans(),
         ])
 
@@ -98,9 +96,36 @@ def status():
 @cli.command()
 def gpunode():
     """Launch an interactive GPU node."""
-    pass
-    # with sky.Dag() as dag:
-    # sky.Task
+
+    with sky.Dag() as dag:
+        # TODO: Add conda environment replication
+        # should be setup = 'conda env export | grep -v "^prefix: " > environment.yml'
+        # && conda env create -f environment.yml
+
+        task = sky.Task(
+            'gpunode',
+            workdir=os.getcwd(),
+            setup=None,
+            run='',
+        )
+
+        # TODO: specify num_gpus, cloud, spot instance, etc.
+        task.set_resources({
+            sky.Resources(sky.AWS(), accelerators='V100'),
+        })
+
+    # Provision VM for user
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
+    task = dag.tasks[0]
+    handle = backend.provision(task,
+                               task.best_resources,
+                               dryrun=False,
+                               stream_logs=True)
+
+    cloud_vm_ray_backend._run_with_callback(
+        f'ray attach {handle} --tmux', lambda _: cloud_vm_ray_backend._run(
+            f'ray down -y {handle}'))
 
 
 @cli.command()
