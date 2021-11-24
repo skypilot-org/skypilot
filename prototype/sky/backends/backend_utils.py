@@ -29,6 +29,12 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 
 
+def _get_rel_path(path: str) -> str:
+    cwd = os.getcwd()
+    common = os.path.commonpath([path, cwd])
+    return os.path.relpath(path, common)
+
+
 def _fill_template(template_path: str,
                    variables: dict,
                    output_path: Optional[str] = None) -> str:
@@ -42,7 +48,7 @@ def _fill_template(template_path: str,
         output_path, _ = template_path.rsplit('.', 1)
     with open(output_path, 'w') as fout:
         fout.write(content)
-    logger.info(f'Created or updated file {output_path}')
+    logger.info(f'Created or updated file {_get_rel_path(output_path)}')
     return output_path
 
 
