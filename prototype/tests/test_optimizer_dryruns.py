@@ -21,7 +21,6 @@ def test_resources_gcp():
     _test_resources(sky.Resources(clouds.GCP(), 'n1-standard-16'))
 
 
-@pytest.mark.skip(reason='TODO: need to fix service catalog')
 def test_partial_t4():
     _test_resources(sky.Resources(accelerators='T4'))
     _test_resources(sky.Resources(accelerators={'T4': 8}, use_spot=True))
