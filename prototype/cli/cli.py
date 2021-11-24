@@ -31,6 +31,40 @@ def _combined_pretty_table_str(t1, t2):
     return '\n'.join(combined_lines)
 
 
+def _interactive_node(name, resources):
+    """Creates an interactive session.
+    
+    Args:
+        name: Name of the interactivve session.
+        resources: Resources to attach to VM.
+    """
+    
+    with sky.Dag() as dag:
+        # TODO: Add conda environment replication
+        # should be setup = 'conda env export | grep -v "^prefix: " > environment.yml'
+        # && conda env create -f environment.yml
+        task = sky.Task(
+            name,
+            workdir=os.getcwd(),
+            setup=None,
+            run='',
+        )
+        task.set_resources(resources)
+
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
+    task = dag.tasks[0]
+    handle = backend.provision(task,
+                               task.best_resources,
+                               dryrun=False,
+                               stream_logs=True)
+
+    # TODO: cd into workdir immediately on the VM
+    cloud_vm_ray_backend._run_with_callback(
+        f'ray attach {handle} --tmux', lambda _: cloud_vm_ray_backend._run(
+            f'ray down -y {handle}'))
+
+
 @click.group()
 def cli():
     pass
@@ -96,50 +130,19 @@ def status():
 @cli.command()
 def gpunode():
     """Launch an interactive GPU node."""
-
-    with sky.Dag() as dag:
-        # TODO: Add conda environment replication
-        # should be setup = 'conda env export | grep -v "^prefix: " > environment.yml'
-        # && conda env create -f environment.yml
-
-        task = sky.Task(
-            'gpunode',
-            workdir=os.getcwd(),
-            setup=None,
-            run='',
-        )
-
-        # TODO: specify num_gpus, cloud, spot instance, etc.
-        task.set_resources({
-            sky.Resources(sky.AWS(), accelerators='V100'),
-        })
-
-    # Provision VM for user
-    backend = cloud_vm_ray_backend.CloudVmRayBackend()
-    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
-    task = dag.tasks[0]
-    handle = backend.provision(task,
-                               task.best_resources,
-                               dryrun=False,
-                               stream_logs=True)
-
-    cloud_vm_ray_backend._run_with_callback(
-        f'ray attach {handle} --tmux', lambda _: cloud_vm_ray_backend._run(
-            f'ray down -y {handle}'))
+    _interactive_node('gpunode', {sky.Resources(sky.AWS(), accelerators='V100')})
 
 
 @cli.command()
 def cpunode():
     """Launch an interactive CPU node."""
-    pass
-    # with sky.Dag() as dag:
-    # sky.Task
+    _interactive_node('cpunode', {sky.Resources(sky.AWS())})
 
 
 @cli.command()
 def tpunode():
     """Launch an interactive TPU node."""
-    pass
+    raise NotImplementedError()
 
 
 def main():
