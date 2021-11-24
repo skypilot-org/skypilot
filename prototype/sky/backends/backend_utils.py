@@ -1,6 +1,8 @@
 """Util constants/functions for the backends."""
 import datetime
+import io
 import os
+import selectors
 import subprocess
 import tempfile
 import textwrap
@@ -24,6 +26,7 @@ RunId = str
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+SKY_LOGS_DIRECTORY = './sky_logs'
 
 
 def _fill_template(template_path: str,
@@ -224,3 +227,38 @@ def run_command_on_ip_via_ssh(ip: str,
         if errs:
             logger.error(errs)
         raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+
+def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
+    """Redirect the process's filtered stdout/stderr to both stream and file"""
+    dirname = os.path.dirname(log_path)
+    os.makedirs(dirname, exist_ok=True)
+
+    out_io = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
+    err_io = io.TextIOWrapper(proc.stderr, encoding='utf-8', newline='')
+    sel = selectors.DefaultSelector()
+    sel.register(out_io, selectors.EVENT_READ)
+    sel.register(err_io, selectors.EVENT_READ)
+
+    stdout = ''
+    stderr = ''
+
+    start_streaming_flag = False
+    with open(log_path, 'a') as fout:
+        while True:
+            for key, _ in sel.select():
+                line = key.fileobj.readline()
+                if not line:
+                    return stdout, stderr
+                if start_streaming_at in line:
+                    start_streaming_flag = True
+                if key.fileobj is out_io:
+                    stdout += line
+                    fout.write(line)
+                    fout.flush()
+                else:
+                    stderr += line
+                    fout.write(line)
+                    fout.flush()
+                if stream_logs and start_streaming_flag:
+                    print(line, end='')
