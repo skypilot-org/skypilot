@@ -2,12 +2,14 @@
 import datetime
 import io
 import os
+from pathlib import Path
 import selectors
 import subprocess
 import tempfile
 import textwrap
 import time
 from typing import List, Optional, Union
+import uuid
 import yaml
 import zlib
 
@@ -45,7 +47,9 @@ def _fill_template(template_path: str,
     template = jinja2.Template(template)
     content = template.render(**variables)
     if output_path is None:
-        output_path, _ = template_path.rsplit('.', 1)
+        assert 'cluster_id' in variables, 'cluster_id is required.'
+        cluster_id = variables['cluster_id']
+        output_path = Path(template_path).parents[0] / f'{cluster_id}.yml'
     with open(output_path, 'w') as fout:
         fout.write(content)
     logger.info(f'Created or updated file {_get_rel_path(output_path)}')
@@ -87,6 +91,8 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
+    cluster_id = uuid.uuid4().hex[:6]
+
     setup_sh_path = None
     if task.setup is not None:
         codegen = textwrap.dedent(f"""#!/bin/bash
@@ -109,6 +115,7 @@ def write_cluster_config(run_id: RunId,
         dict(
             resources_vars,
             **{
+                'cluster_id': cluster_id, 
                 'run_id': run_id,
                 'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
