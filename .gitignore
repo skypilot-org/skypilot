@@ -10,3 +10,4 @@ prototype/*.egg-info/
 prototype/**/*.tmp
 
 logs
+sky_logs
