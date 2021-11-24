@@ -110,11 +110,6 @@ class Azure(clouds.Cloud):
                     clouds.Zone('2'),
                     clouds.Zone('3'),
                 ]),
-                clouds.Region('westus3').set_zones([
-                    clouds.Zone('1'),
-                    clouds.Zone('2'),
-                    clouds.Zone('3'),
-                ]),
             ]
         return cls._regions
 
