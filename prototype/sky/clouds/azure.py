@@ -1,17 +1,19 @@
 import copy
 import json
-from typing import Dict, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 
 
 class Azure(clouds.Cloud):
     _REPR = 'Azure'
+    _regions: List[clouds.Region] = []
 
     # In general, query this from the cloud.
     # This pricing is for East US region.
     # https://azureprice.net/
     _ON_DEMAND_PRICES = {
+        'Standard_D2_v4': 0.096,
         # V100 GPU series
         'Standard_NC6s_v3': 3.06,
         'Standard_NC12s_v3': 6.12,
@@ -62,6 +64,65 @@ class Azure(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls):
         return 'Standard_D2_v4'
+
+    @classmethod
+    def regions(cls) -> List[clouds.Region]:
+        if not cls._regions:
+            # https://cloud.google.com/compute/docs/regions-zones
+            cls._regions = [
+                clouds.Region('centralus').set_zones([
+                    clouds.Zone('1'),
+                    clouds.Zone('2'),
+                    clouds.Zone('3'),
+                ]),
+                clouds.Region('eastus').set_zones([
+                    clouds.Zone('1'),
+                    clouds.Zone('2'),
+                    clouds.Zone('3'),
+                ]),
+                clouds.Region('eastus2').set_zones([
+                    clouds.Zone('1'),
+                    clouds.Zone('2'),
+                    clouds.Zone('3'),
+                ]),
+                clouds.Region('northcentralus').set_zones([
+                    clouds.Zone('1'),
+                    clouds.Zone('2'),
+                    clouds.Zone('3'),
+                ]),
+                clouds.Region('southcentralus').set_zones([
+                    clouds.Zone('1'),
+                    clouds.Zone('2'),
+                    clouds.Zone('3'),
+                ]),
+                clouds.Region('westcentralus').set_zones([
+                    clouds.Zone('1'),
+                    clouds.Zone('2'),
+                    clouds.Zone('3'),
+                ]),
+                clouds.Region('westus').set_zones([
+                    clouds.Zone('1'),
+                    clouds.Zone('2'),
+                    clouds.Zone('3'),
+                ]),
+                clouds.Region('westus2').set_zones([
+                    clouds.Zone('1'),
+                    clouds.Zone('2'),
+                    clouds.Zone('3'),
+                ]),
+                clouds.Region('westus3').set_zones([
+                    clouds.Zone('1'),
+                    clouds.Zone('2'),
+                    clouds.Zone('3'),
+                ]),
+            ]
+        return cls._regions
+
+    @classmethod
+    def region_zones_provision_loop(
+            cls) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+        for region in cls.regions():
+            yield region, region.zones
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.

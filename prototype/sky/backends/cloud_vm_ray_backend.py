@@ -112,7 +112,7 @@ def _run_with_log(cmd,
 def _get_cluster_config_template(task):
     _CLOUD_TO_TEMPLATE = {
         clouds.AWS: 'config/aws-ray.yml.j2',
-        # clouds.Azure: 'config/azure-ray.yml.j2',
+        clouds.Azure: 'config/azure-ray.yml.j2',
         clouds.GCP: 'config/gcp-ray.yml.j2',
     }
     cloud = task.best_resources.cloud
@@ -221,6 +221,31 @@ class RetryingVmProvisioner(object):
         logger.warn(f'{Style.DIM}\t{messages}{Style.RESET_ALL}')
         self._blocked_regions.add(region.name)
 
+    def _update_blocklist_on_azure_error(self, region, zones, stdout, stderr):
+        # The underlying ray autoscaler will try all zones of a region at once.
+        Style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'An error occurred' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            assert False, \
+                'Errors occurred during setup command; check logs above.'
+
+        logger.warn(f'Got error(s) in all zones of {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warn(f'{Style.DIM}\t{messages}{Style.RESET_ALL}')
+        self._blocked_regions.add(region.name)
+
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
                                    stderr) -> None:
         """Handles cloud-specific errors and updates the block list.
@@ -238,9 +263,9 @@ class RetryingVmProvisioner(object):
                                                        stderr)
 
         if isinstance(cloud, clouds.Azure):
-            assert False, (stdout, stderr)  # TODO
-        else:
-            assert False, f'Unknown cloud: {cloud}.'
+            return self._update_blocklist_on_azure_error(
+                region, zones, stdout, stderr)
+        assert False, f'Unknown cloud: {cloud}.'
 
     def _yield_region_zones(self, task: App, cloud: clouds.Cloud):
         # Try reading previously launched region/zones and try them first,
@@ -256,7 +281,7 @@ class RetryingVmProvisioner(object):
                 zones = config['provider']['availability_zone']
             elif type(cloud) is clouds.Azure:
                 region = config['provider']['location']
-                zones = None
+                zones = config['provider']['zone']
             else:
                 assert False, cloud
         except Exception:
