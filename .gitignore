@@ -1,4 +1,5 @@
 **/.DS_Store
+**/*.log
 **/*.pyc
 
 plotting/*.pdf
@@ -10,3 +11,4 @@ prototype/*.egg-info/
 prototype/**/*.tmp
 
 logs
+sky_logs
