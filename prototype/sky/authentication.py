@@ -1,11 +1,13 @@
 import boto3
 import copy
+import hashlib
 import os
 import time
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
+from Crypto.PublicKey import RSA
 from functools import partial
 from googleapiclient import discovery, errors
 # TODO: Should tolerate if gcloud is not installed. Also,
@@ -74,16 +76,35 @@ def setup_aws_authentication(config):
     else:
         assert os.path.exists(public_key_path)
         public_key = open(public_key_path, 'rb').read().decode('utf-8')
-        private_key = None
+        private_key = open(private_key_path, 'rb').read().decode('utf-8')
 
-    ec2 = boto3.resource('ec2', config['provider']['region'])
+    ec2 = boto3.client('ec2', config['provider']['region'])
+    key_pairs = ec2.describe_key_pairs()['KeyPairs']
     key_found = False
-    for key in ec2.key_pairs.filter(Filters=[{
-            'Name': 'key-name',
-            'Values': [key_name]
-    }]):
-        if key.name == key_name:
-            key_found = True
+
+    def _get_fingerprint(private_key_path):
+        key = RSA.importKey(open(private_key_path).read()).publickey()
+
+        def insert_char_every_n_chars(string, char='\n', every=2):
+            return char.join(
+                string[i:i + every] for i in range(0, len(string), every))
+
+        md5digest = hashlib.md5(key.exportKey('DER', pkcs=8)).hexdigest()
+        fingerprint = insert_char_every_n_chars(md5digest, ':', 2)
+        return fingerprint
+
+    for key in key_pairs:
+        if key['KeyName'] == key_name:
+            # Compute Fingerprint of public key
+            aws_fingerprint = key['KeyFingerprint']
+            local_fingerprint = _get_fingerprint(private_key_path)
+            # If fingerprints dont match, delete bad key
+            if aws_fingerprint == local_fingerprint:
+                key_found = True
+            else:
+                key_found = False
+                ec2.delete_key_pair(KeyName=key_name)
+                break
 
     if not key_found:
         ec2.import_key_pair(KeyName=key_name, PublicKeyMaterial=public_key)

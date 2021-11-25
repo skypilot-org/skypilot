@@ -4,6 +4,7 @@ colorama
 jinja2
 networkx
 pandas
+pycryptodome
 pytest
 ray[default]
 tabulate
