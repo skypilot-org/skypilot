@@ -11,3 +11,4 @@ tabulate
 awscli
 azure-cli
 google-api-python-client
+google-cloud-bigquery
