@@ -139,12 +139,21 @@ class LocalDockerBackend(backends.Backend):
         colorama.init()
         Style = colorama.Style
         container = self.containers[handle]
-        logger.info(
-            f'Your container is now running with name {Style.BRIGHT}{container.name}{Style.RESET_ALL}'
-        )
-        logger.info(
-            f'To get a shell in your container, run {Style.BRIGHT}docker exec -it {container.name} /bin/bash{Style.RESET_ALL}'
-        )
+
+        # Fetch latest status from docker daemon
+        container.reload()
+
+        if container.status == 'running':
+            logger.info(
+                f'Your container is now running with name {Style.BRIGHT}{container.name}{Style.RESET_ALL}'
+            )
+            logger.info(
+                f'To get a shell in your container, run {Style.BRIGHT}docker exec -it {container.name} /bin/bash{Style.RESET_ALL}'
+            )
+        else:
+            logger.info(
+                f'Your container has finished running. Name was {Style.BRIGHT}{container.name}{Style.RESET_ALL}'
+            )
         logger.info(
             f'To create a new container for debugging without running the task run command,'
             f' run {Style.BRIGHT}docker run -it {container.image.tags[0]} /bin/bash{Style.RESET_ALL}'
