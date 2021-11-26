@@ -24,10 +24,12 @@ class LocalDockerBackend(backends.Backend):
     # Resource handle is simply the name of the task
     ResourceHandle = Any
     # Define the Docker-in-Docker mount
-    DINDMount = {'/var/run/docker.sock': {
-                    'bind': '/var/run/docker.sock',
-                    'mode': 'rw'
-                }}
+    DINDMount = {
+        '/var/run/docker.sock': {
+            'bind': '/var/run/docker.sock',
+            'mode': 'rw'
+        }
+    }
 
     def __init__(self):
         self.volume_mounts = {}  # Stores the ResourceHandle->volume mounts map
@@ -35,14 +37,14 @@ class LocalDockerBackend(backends.Backend):
         self.containers = {}
         self.client = docker.from_env()
 
-    def provision(self, task: App,
-                  to_provision: Resources,
-                  dryrun: bool,
+    def provision(self, task: App, to_provision: Resources, dryrun: bool,
                   stream_logs: bool) -> ResourceHandle:
         """ Since resource demands are ignored, There's no provisioning in
          local docker. Simply return the task name as the handle."""
         if stream_logs:
-            logger.info("Streaming logs is not supported in LocalDockerBackend. Logs will be shown on build failure.")
+            logger.info(
+                "Streaming logs is not supported in LocalDockerBackend. Logs will be shown on build failure."
+            )
         handle = task.name
         logger.info(
             f'Building docker image for task {task.name}. This might take some time.'
