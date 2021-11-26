@@ -43,7 +43,7 @@ class LocalDockerBackend(backends.Backend):
          local docker. Simply return the task name as the handle."""
         if stream_logs:
             logger.info(
-                "Streaming logs is not supported in LocalDockerBackend. Logs will be shown on build failure."
+                'Streaming logs is not supported in LocalDockerBackend. Logs will be shown on build failure.'
             )
         handle = task.name
         logger.info(
@@ -66,8 +66,6 @@ class LocalDockerBackend(backends.Backend):
                          cloud_to_remote_file_mounts: Optional[Dict[Path, Path]]
                         ) -> None:
         """ File mounts in Docker are implemented with volume mounts using the -v flag"""
-        print(all_file_mounts)
-        print(cloud_to_remote_file_mounts)
         assert not cloud_to_remote_file_mounts, 'Only local file mounts are supported' \
                                                     ' with LocalDockerBackend'
         docker_mounts = {}
