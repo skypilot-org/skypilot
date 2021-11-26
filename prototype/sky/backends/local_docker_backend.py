@@ -23,6 +23,11 @@ class LocalDockerBackend(backends.Backend):
     """Local docker backend for debugging. Ignores resource demands when allocatinng."""
     # Resource handle is simply the name of the task
     ResourceHandle = Any
+    # Define the Docker-in-Docker mount
+    DINDMount = {'/var/run/docker.sock': {
+                    'bind': '/var/run/docker.sock',
+                    'mode': 'rw'
+                }}
 
     def __init__(self):
         self.volume_mounts = {}  # Stores the ResourceHandle->volume mounts map
@@ -59,9 +64,16 @@ class LocalDockerBackend(backends.Backend):
                          cloud_to_remote_file_mounts: Optional[Dict[Path, Path]]
                         ) -> None:
         """ File mounts in Docker are implemented with volume mounts using the -v flag"""
-        assert cloud_to_remote_file_mounts is None, 'Only local file mounts are supported' \
+        print(all_file_mounts)
+        print(cloud_to_remote_file_mounts)
+        assert not cloud_to_remote_file_mounts, 'Only local file mounts are supported' \
                                                     ' with LocalDockerBackend'
         docker_mounts = {}
+
+        # Add DIND socket mount
+        docker_mounts.update(LocalDockerBackend.DINDMount)
+
+        # Add other mounts
         if all_file_mounts:
             for container_path, local_path in all_file_mounts.items():
                 docker_mounts[local_path] = {
@@ -106,9 +118,12 @@ class LocalDockerBackend(backends.Backend):
             handle], f'No image found for {handle}, have you run Backend.provision()?'
         image_tag = self.images[handle]
         logger.info(f'Image {image_tag} found. Running container now.')
+        volumes = self.volume_mounts[handle]
         container = self.client.containers.run(image_tag,
                                                remove=True,
-                                               detach=True)
+                                               detach=True,
+                                               privileged=True,
+                                               volumes=volumes)
         self.containers[handle] = container
         logger.info(
             f'Your container is now running with name {container.name}.\n'
