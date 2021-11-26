@@ -1,0 +1,15 @@
+# Example: file_mounts destination paths that require root access
+#
+# Sky will use sudo to create destination paths and run 'chown' on them, so that
+# the 'run' command (logged in as non-root) can still access them.
+resources:
+  cloud: aws
+
+# <VM path> : <local path>
+file_mounts:
+  /setup.py: ./setup.py
+  /sky: sky
+
+run: |
+  ls -l /setup.py
+  ls -lH /sky

@@ -321,7 +321,7 @@ class RetryingVmProvisioner(object):
                         raise e
             cluster_config_file = config_dict['ray']
 
-            tail_cmd = f'tail -n100 -f {log_path}'
+            tail_cmd = f'tail -f {log_path}'
             logger.info(
                 f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
             # Redirect stdout/err to the file and streaming (if stream_logs).

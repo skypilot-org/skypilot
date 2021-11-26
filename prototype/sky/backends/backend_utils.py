@@ -28,6 +28,9 @@ SKY_REMOTE_WORKDIR = '/tmp/workdir'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 
+# Do not use /tmp because it gets cleared on VM restart.
+_SKY_REMOTE_FILE_MOUNTS_DIR = '~/sky_file_mounts/'
+
 
 def _get_rel_path(path: str) -> str:
     cwd = os.getcwd()
@@ -52,6 +55,20 @@ def _fill_template(template_path: str,
     return output_path
 
 
+def _wrap_file_mount(remote: str) -> str:
+    """Prepends ~/<opaque dir>/ to a path to work around permission issues.
+
+    Examples:
+      /root/hello.txt -> ~/<opaque dir>/root/hello.txt
+      local.txt -> ~/<opaque dir>/local.txt
+
+    In initialization_commands of the ray autoscaler YAML, we can then create a
+    symlink to this wrapped path.
+    """
+    return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, remote.lstrip('/'))
+
+
+# TODO: too many things happening here - leaky abstraction. Refactor.
 def write_cluster_config(run_id: RunId,
                          task: task.Task,
                          cluster_config_template: str,
@@ -104,6 +121,25 @@ def write_cluster_config(run_id: RunId,
             f.write(codegen)
         setup_sh_path = f.name
 
+    # File mounts handling:
+    #  (1) in 'file_mounts' sections, add <prefix> to all target paths.
+    #  (2) then, create symlinks from '/root/file' to '<prefix>/root/file'.
+    # We need to do these since as of Ray 1.8, this is not supported natively
+    # (Docker works though, of course):
+    #  https://github.com/ray-project/ray/pull/9332
+    #  https://github.com/ray-project/ray/issues/9326
+    mounts = task.get_local_to_remote_file_mounts()
+    wrapped_file_mounts = {}
+    initialization_commands = []
+    if mounts is not None:
+        for remote, local in mounts.items():
+            wrapped_remote = _wrap_file_mount(remote)
+            wrapped_file_mounts[wrapped_remote] = local
+            # NOTE: the use of sudo and the assumption of ubuntu.
+            symlink = (f'sudo ln -sf {wrapped_remote} {remote} && '
+                       f'sudo chown ubuntu {remote}')
+            initialization_commands.append(symlink)
+
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
@@ -115,7 +151,9 @@ def write_cluster_config(run_id: RunId,
                 'docker_image': task.docker_image,
                 'container_name': task.container_name,
                 'num_nodes': task.num_nodes,
-                'file_mounts': task.get_local_to_remote_file_mounts() or {},
+                # File mounts handling.
+                'file_mounts': wrapped_file_mounts,
+                'initialization_commands': initialization_commands or None,
                 # Region/zones.
                 'region': region,
                 'zones': ','.join(zones),
