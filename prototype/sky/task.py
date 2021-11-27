@@ -96,6 +96,9 @@ class Task(object):
         self.file_mounts = None
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
+        
+        # The resources failed to be provisioned.
+        self.blocked_resources = set()
 
         # Semantics.
         if num_nodes is not None and num_nodes > 1 and type(self.run) is str:

@@ -13,6 +13,7 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
+import copy
 import functools
 import json
 import os
@@ -370,4 +371,75 @@ def execute_v2(dag: sky.Dag,
         backend.teardown(handle)
 
 
-execute = execute_v2
+def execute_v3(dag: sky.Dag,
+               dryrun: bool = False,
+               teardown: bool = False,
+               stream_logs: bool = True,
+               backend: Optional[backends.Backend] = None,
+               optimize_fn = None) -> None:
+    """Executes a planned DAG.
+
+    Args:
+      dag: sky.Dag.
+      dryrun: bool; if True, only print the provision info (e.g., cluster
+        yaml).
+      teardown: bool; whether to teardown the launched resources after
+        execution.
+      stream_logs: bool; whether to stream all tasks' outputs to the client.
+        Hint: for a ParTask, set this to False to avoid a lot of log outputs;
+        each task's output can be redirected to their own files.
+      backend: Backend; backend to use for executing the tasks. Defaults to
+        CloudVmRayBackend()
+    """
+    # TODO: Azure. Port some of execute_v1()'s nice logging messages.
+    assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
+
+    backend = backend if backend is not None else backends.CloudVmRayBackend()
+
+    # Future: we can `for task in dag.get_topo_tasks():` and prune the nodes
+    # from the dag that have already been successfully provisioned.
+    provision_failed = True
+    while provision_failed:
+        if optimize_fn is not None:
+            dag = optimize_fn(dag)
+        task = dag.tasks[0]
+        best_resources = task.best_resources
+        assert best_resources is not None, \
+            'Run sky.Optimize.optimize() before sky.execute().'
+        try:
+            handle = backend.provision(task,
+                                    best_resources,
+                                    dryrun=dryrun,
+                                    stream_logs=stream_logs)
+        except Exception as e:
+            logger.info(f'Provision failed: {e}')
+            provision_failed = True
+            # TODO: set all remaining tasks' best_resources to None.
+            task.best_resources = None
+            task.blocked_resources.add(best_resources)
+            
+        
+    
+    if dryrun:
+        logger.info('Dry run finished.')
+        return
+
+    if task.workdir is not None:
+        backend.sync_workdir(handle, task.workdir)
+
+    backend.sync_file_mounts(handle, task.file_mounts,
+                             task.get_cloud_to_remote_file_mounts())
+
+    if task.post_setup_fn is not None:
+        backend.run_post_setup(handle, task.post_setup_fn, task)
+
+    try:
+        backend.execute(handle, task, stream_logs)
+    finally:
+        # Enables post_execute() to be run after KeyboardInterrupt.
+        backend.post_execute(handle, teardown)
+
+    if teardown:
+        backend.teardown(handle)
+
+execute = execute_v3
