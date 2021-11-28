@@ -77,7 +77,7 @@ with sky.Dag() as dag:
     # Optionally, specify a time estimator: Resources -> time in seconds.
     # train.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
-# Would be better to have an api as optimizer_fn = sky.Optimier(minimize=sky.Optimizer.COST)
+# TODO: Would be better to have an api as optimizer_fn = sky.Optimier(minimize=sky.Optimizer.COST)
 optimize_fn = lambda dag: sky.optimize(dag, minimize=sky.Optimizer.COST)
 # sky.execute(dag, dryrun=True)
 sky.execute(dag, optimize_fn=optimize_fn)

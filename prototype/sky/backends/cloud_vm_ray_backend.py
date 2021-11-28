@@ -357,7 +357,7 @@ class RetryingVmProvisioner(object):
                    f' (requested {to_provision}).'
                    ' Try changing resource requirements or use another cloud.')
         logger.error(message)
-        assert False, message
+        return None
 
 
 class CloudVmRayBackend(backends.Backend):
@@ -384,6 +384,9 @@ class CloudVmRayBackend(backends.Backend):
         provisioner = RetryingVmProvisioner(self.log_dir)
         config_dict = provisioner.provision_with_retries(
             task, to_provision, dryrun, stream_logs)
+        if not config_dict:
+            # Failed to provision.
+            return None
         if dryrun:
             return
         cluster_config_file = config_dict['ray']

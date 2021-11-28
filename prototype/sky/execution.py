@@ -340,7 +340,7 @@ def execute_v2(dag: sky.Dag,
     task = dag.tasks[0]
     best_resources = task.best_resources
     assert best_resources is not None, \
-        'Run sky.Optimize.optimize() before sky.execute().'
+        'Run sky.optimize() before sky.execute().'
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
 
@@ -405,20 +405,19 @@ def execute_v3(dag: sky.Dag,
         task = dag.tasks[0]
         best_resources = task.best_resources
         assert best_resources is not None, \
-            'Run sky.Optimize.optimize() before sky.execute().'
-        try:
-            handle = backend.provision(task,
-                                    best_resources,
-                                    dryrun=dryrun,
-                                    stream_logs=stream_logs)
-        except Exception as e:
-            logger.info(f'Provision failed: {e}')
+            'Run sky.optimize() before sky.execute().'
+        handle = backend.provision(task,
+                                best_resources,
+                                dryrun=dryrun,
+                                stream_logs=stream_logs)
+        if not handle:
+            if optimize_fn is None:
+                assert False, 'No resources available.'
+            logger.warning('Provision failed. Retrying...')
             provision_failed = True
             # TODO: set all remaining tasks' best_resources to None.
             task.best_resources = None
             task.blocked_resources.add(best_resources)
-            
-        
     
     if dryrun:
         logger.info('Dry run finished.')
