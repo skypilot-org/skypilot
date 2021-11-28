@@ -14,7 +14,7 @@ import sky
 # since volume mount paths are relative to the host system when running
 # Docker-in-Docker.
 
-setup_cmd = 'mkdir ~/mnist && \
+setup_cmd = 'mkdir -p ~/mnist && \
              sudo chmod 777 ~/mnist && \
              wget --no-check-certificate http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz -P ~/mnist/'
 
