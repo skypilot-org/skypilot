@@ -274,7 +274,7 @@ class RetryingVmProvisioner(object):
             yield (region, zones)
 
     def provision_with_retries(self, task: App, to_provision: Resources,
-                               dryrun: bool, stream_logs: bool):
+                               dryrun: bool, stream_logs: bool, cluster_name: str):
         """The provision retry loop."""
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
@@ -290,14 +290,15 @@ class RetryingVmProvisioner(object):
                 f'({",".join(z.name for z in zones)}).{Style.RESET_ALL}')
             logger.info('If this takes longer than ~30 seconds,'
                         ' provisioning is likely successful.'
-                        ' Setup may take a few minutes.')
+                        ' Setup may take a few minutes.')            
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
                 _get_cluster_config_template(task),
                 region=region,
                 zones=zones,
-                dryrun=dryrun)
+                dryrun=dryrun,
+                cluster_id=cluster_name)
             if dryrun:
                 return
             tpu_name = to_provision.accelerator_args.get('tpu_name')
@@ -392,7 +393,7 @@ class CloudVmRayBackend(backends.Backend):
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner(self.log_dir)
         config_dict = provisioner.provision_with_retries(
-            task, to_provision, dryrun, stream_logs)
+            task, to_provision, dryrun, stream_logs, cluster_name)
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
@@ -404,8 +405,7 @@ class CloudVmRayBackend(backends.Backend):
                                                    task.num_nodes)
 
         if cluster_name is None:
-            cluster_id = cluster_config_file.stem
-            cluster_name = f'sky-{cluster_id}'
+            cluster_name = cluster_config_file.stem
         self.session.add_cluster(cluster_name, str(cluster_config_file))
 
         return cluster_config_file

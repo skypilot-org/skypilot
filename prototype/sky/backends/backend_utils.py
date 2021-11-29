@@ -63,7 +63,8 @@ def write_cluster_config(run_id: RunId,
                          cluster_config_template: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False):
+                         dryrun: bool = False,
+                         cluster_id: str = None):
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -93,7 +94,8 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
-    cluster_id = uuid.uuid4().hex[:6]
+    if cluster_id is None:
+        cluster_id = f'sky-{uuid.uuid4().hex[:6]}'
 
     setup_sh_path = None
     if task.setup is not None:

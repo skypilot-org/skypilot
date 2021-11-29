@@ -1,12 +1,16 @@
 import os
 from pathlib import Path
+import tempfile
 import time
+import yaml
 
 import click
 import pendulum
 from prettytable import PrettyTable
 
 import sky
+from sky import clouds
+from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.session import Session
 
@@ -30,6 +34,24 @@ def _combined_pretty_table_str(t1, t2):
         combined_lines.append(t1_l + '\t' + t2_l)
 
     return '\n'.join(combined_lines)
+
+
+def _get_region_zones_from_handle(handle):
+    """Gets region and zones from a Ray YAML file."""
+    
+    with open(handle, 'r') as f:
+        yaml_dict = yaml.safe_load(f)
+    
+    provider_config = yaml_dict['provider']
+    region = provider_config['region']
+    zones = provider_config['availability_zone']
+
+    region = clouds.Region(name=region)
+    if zones is not None:
+        zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
+        region.set_zones(zones)
+
+    return region, zones
 
 
 def _interactive_node(name, resources, cluster_handle=None):
@@ -79,6 +101,41 @@ def _interactive_node(name, resources, cluster_handle=None):
     session.remove_task(task_id)
 
 
+def _reuse_cluster(task, cluster_name):
+    """Reuses a cluster. Update cluster if required."""
+
+    session = Session()
+    handle = session.get_handle_from_cluster_name(cluster_name)
+
+    # Ensure changes to workdir, setup, etc. are reflected in the cluster        
+    region, zones = _get_region_zones_from_handle(handle)
+    
+    with open(handle, 'r') as f:
+        existing_cluster_handle_content = f.read()
+
+    config_dict = backend_utils.write_cluster_config(
+            None,
+            task,
+            cloud_vm_ray_backend._get_cluster_config_template(task),
+            region=region,
+            zones=zones,
+            dryrun=False,
+            cluster_id=cluster_name)
+    
+    new_handle = str(config_dict['ray'])
+    assert new_handle == handle, 'Cluster handle changed'
+
+    with open(new_handle, 'r') as f:
+        new_cluster_handle_content = f.read()
+        cluster_config_changed = existing_cluster_handle_content != new_cluster_handle_content
+
+    # If cluster configs are identical, then no need to re-run this step.
+    if cluster_config_changed:
+        cloud_vm_ray_backend._run(f'ray up -y {handle} --no-config-cache')
+
+    return new_handle
+
+
 @click.group()
 def cli():
     pass
@@ -121,6 +178,7 @@ def run(entry_point, cluster, dryrun):
 
             # TODO: Add good way to automatically infer resources?
             # Can also just assume we always attach GPU for `run`
+            # TODO: Need a way to infer existing cluster resources if cluster is not None
             task.set_resources({sky.Resources(sky.AWS(), accelerators='V100')})
 
         elif entry_point_type in ['.yaml', '.yml']:
@@ -130,13 +188,35 @@ def run(entry_point, cluster, dryrun):
             raise ValueError(
                 f'Unsupported entry point type: {entry_point_type}')
 
+    # TODO: This is sketchy. What if we're reusing a cluster and the optimized plan is different?
+    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
+
     handle = None
     if cluster is not None:
-        session = Session()
-        handle = session.get_handle_from_cluster_name(cluster)
+        new_task = dag.tasks[0]
+        handle = _reuse_cluster(new_task, cluster)
 
-    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
     sky.execute(dag, dryrun=dryrun, handle=handle, stream_logs=stream_logs)
+
+
+@cli.command()
+def sweep():
+    """Sweep over a set of parameters."""
+
+    # TODO: integrate into run and design with YAML in mind
+    # per_trial_resources = ...
+    # total_resources = ...
+
+    # par_task = sky.ParTask([
+    #     sky.Task(
+    #         run=f'python app.py -s={i}').set_resources(per_trial_resources)
+    #     for i in range(10)
+    # ])
+
+    # # Provision and share a total of this many resources.  Inner Tasks will
+    # # be bin-packed and scheduled according to their demands.
+    # par_task.set_resources(total_resources)
+    pass
 
 
 @cli.command()
@@ -157,7 +237,7 @@ def status():
     clusters_status = session.get_clusters()
 
     task_table = PrettyTable()
-    task_table.field_names = ["ID", "NAME", "DURATION"]
+    task_table.field_names = ["ID", "NAME", "LAUNCHED"]
     for task_status in tasks_status:
         launched_at = task_status['launched_at']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
@@ -168,7 +248,7 @@ def status():
         ])
 
     cluster_table = PrettyTable()
-    cluster_table.field_names = ["NAME", "UPTIME"]
+    cluster_table.field_names = ["NAME", "LAUNCHED"]
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
@@ -223,6 +303,7 @@ def teardown(cluster_name):
 def gpunode(cluster):
     """Launch an interactive GPU node."""
     # TODO: Sync code files between local and interactive node (watch rsync?)
+    # TODO: Add port forwarding to allow access to localhost:PORT for jupyter
 
     handle = None
     if cluster is not None:
