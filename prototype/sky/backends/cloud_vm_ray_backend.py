@@ -274,7 +274,8 @@ class RetryingVmProvisioner(object):
             yield (region, zones)
 
     def provision_with_retries(self, task: App, to_provision: Resources,
-                               dryrun: bool, stream_logs: bool, cluster_name: str):
+                               dryrun: bool, stream_logs: bool,
+                               cluster_name: str):
         """The provision retry loop."""
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
@@ -290,7 +291,7 @@ class RetryingVmProvisioner(object):
                 f'({",".join(z.name for z in zones)}).{Style.RESET_ALL}')
             logger.info('If this takes longer than ~30 seconds,'
                         ' provisioning is likely successful.'
-                        ' Setup may take a few minutes.')            
+                        ' Setup may take a few minutes.')
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,

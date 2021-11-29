@@ -38,10 +38,10 @@ def _combined_pretty_table_str(t1, t2):
 
 def _get_region_zones_from_handle(handle):
     """Gets region and zones from a Ray YAML file."""
-    
+
     with open(handle, 'r') as f:
         yaml_dict = yaml.safe_load(f)
-    
+
     provider_config = yaml_dict['provider']
     region = provider_config['region']
     zones = provider_config['availability_zone']
@@ -107,21 +107,21 @@ def _reuse_cluster(task, cluster_name):
     session = Session()
     handle = session.get_handle_from_cluster_name(cluster_name)
 
-    # Ensure changes to workdir, setup, etc. are reflected in the cluster        
+    # Ensure changes to workdir, setup, etc. are reflected in the cluster
     region, zones = _get_region_zones_from_handle(handle)
-    
+
     with open(handle, 'r') as f:
         existing_cluster_handle_content = f.read()
 
     config_dict = backend_utils.write_cluster_config(
-            None,
-            task,
-            cloud_vm_ray_backend._get_cluster_config_template(task),
-            region=region,
-            zones=zones,
-            dryrun=False,
-            cluster_id=cluster_name)
-    
+        None,
+        task,
+        cloud_vm_ray_backend._get_cluster_config_template(task),
+        region=region,
+        zones=zones,
+        dryrun=False,
+        cluster_id=cluster_name)
+
     new_handle = str(config_dict['ray'])
     assert new_handle == handle, 'Cluster handle changed'
 
