@@ -29,7 +29,7 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 
 # Do not use /tmp because it gets cleared on VM restart.
-_SKY_REMOTE_FILE_MOUNTS_DIR = '~/sky_file_mounts/'
+_SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
 
 def _get_rel_path(path: str) -> str:
