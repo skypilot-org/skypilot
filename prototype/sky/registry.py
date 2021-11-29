@@ -30,6 +30,16 @@ def _remove_task_blocked_resources(task: sky.Task, launchable: dict):
         launchable[orig_resources] = new_launchable_list
     return launchable
 
+def _get_available_clouds(task):
+    available_clouds = []
+    for cloud in _CLOUDS:
+        for blocked_cloud in task.blocked_clouds:
+            if type(cloud) == type(blocked_cloud):
+                break
+        else:
+            available_clouds.append(cloud)
+    return available_clouds
+
 def fill_in_launchable_resources(task: sky.Task):
     launchable = collections.defaultdict(list)
     for resources in task.get_resources():
@@ -41,7 +51,9 @@ def fill_in_launchable_resources(task: sky.Task):
                 resources] = resources.cloud.get_feasible_launchable_resources(
                     resources)
         else:
-            for cloud in _CLOUDS:
+            # Remove blocked clouds.
+            available_clouds = _get_available_clouds(task)
+            for cloud in available_clouds:
                 launchable[resources].extend(
                     cloud.get_feasible_launchable_resources(resources))
 

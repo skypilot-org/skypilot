@@ -99,6 +99,8 @@ class Task(object):
         
         # The resources failed to be provisioned.
         self.blocked_resources = set()
+        # Block some of the clouds.
+        self.blocked_clouds = set()
 
         # Semantics.
         if num_nodes is not None and num_nodes > 1 and type(self.run) is str:
@@ -246,6 +248,11 @@ class Task(object):
             node from which the task is launched.
         """
         self.file_mounts = file_mounts
+        return self
+    
+    def set_blocked_clouds(self, clouds: Set[clouds.Cloud]):
+        """Sets the clouds that this task should not run on."""
+        self.blocked_clouds = clouds
         return self
 
     def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
