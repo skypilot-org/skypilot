@@ -25,10 +25,12 @@ import colorama
 from colorama import Fore, Style
 
 import sky
+from sky import backends
 from sky import cloud_stores
 from sky import logging
-from sky import backends
+from sky import resources
 from sky.backends import backend_utils
+
 
 logger = logging.init_logger(__name__)
 
@@ -399,24 +401,26 @@ def execute_v3(dag: sky.Dag,
     # from the dag that have already been successfully provisioned.
     provision_failed = True
     while provision_failed:
+        provision_failed = False
         if optimize_fn is not None:
             dag = optimize_fn(dag)
         task = dag.tasks[0]
         best_resources = task.best_resources
         assert best_resources is not None, \
             'Run sky.optimize() before sky.execute().'
-        handle = backend.provision(task,
-                                   best_resources,
-                                   dryrun=dryrun,
-                                   stream_logs=stream_logs)
-        if not handle:
+        try:
+            handle = backend.provision(task,
+                                    best_resources,
+                                    dryrun=dryrun,
+                                    stream_logs=stream_logs)
+        except resources.SkyResourcesUnavailable as e:
             if optimize_fn is None:
                 assert False, 'No resources available.'
-            logger.warning('Provision failed. Retrying...')
+            logger.warning('Provision failed. Retrying other clouds...')
             provision_failed = True
             # TODO: set all remaining tasks' best_resources to None.
             task.best_resources = None
-            task.blocked_resources.add(best_resources)
+            task.blocked_resources.add(e.to_provision)
 
     if dryrun:
         logger.info('Dry run finished.')

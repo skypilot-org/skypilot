@@ -69,7 +69,7 @@ with sky.Dag() as dag:
         # sky.Resources(sky.AWS(), accelerators='K80', use_spot=True),
         # sky.Resources(accelerators='tpu-v3-8'),
         # sky.Resources(accelerators='V100', use_spot=True),
-        sky.Resources(accelerators={'V100': 4}),
+        sky.Resources(accelerators={'V100': 8}),
         # sky.Resources(sky.AWS(), accelerators='V100', use_spot=True),
         # sky.Resources(sky.AWS(), accelerators={'V100': 8}),
     })
