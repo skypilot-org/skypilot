@@ -8,7 +8,6 @@ import subprocess
 import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from googleapiclient.discovery import Resource
 import yaml
 
 import colorama

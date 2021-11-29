@@ -13,7 +13,6 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
-import copy
 import functools
 import json
 import os
@@ -376,7 +375,7 @@ def execute_v3(dag: sky.Dag,
                teardown: bool = False,
                stream_logs: bool = True,
                backend: Optional[backends.Backend] = None,
-               optimize_fn = None) -> None:
+               optimize_fn=None) -> None:
     """Executes a planned DAG.
 
     Args:
@@ -407,9 +406,9 @@ def execute_v3(dag: sky.Dag,
         assert best_resources is not None, \
             'Run sky.optimize() before sky.execute().'
         handle = backend.provision(task,
-                                best_resources,
-                                dryrun=dryrun,
-                                stream_logs=stream_logs)
+                                   best_resources,
+                                   dryrun=dryrun,
+                                   stream_logs=stream_logs)
         if not handle:
             if optimize_fn is None:
                 assert False, 'No resources available.'
@@ -418,7 +417,7 @@ def execute_v3(dag: sky.Dag,
             # TODO: set all remaining tasks' best_resources to None.
             task.best_resources = None
             task.blocked_resources.add(best_resources)
-    
+
     if dryrun:
         logger.info('Dry run finished.')
         return
@@ -440,5 +439,6 @@ def execute_v3(dag: sky.Dag,
 
     if teardown:
         backend.teardown(handle)
+
 
 execute = execute_v3

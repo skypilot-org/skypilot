@@ -96,7 +96,7 @@ class Task(object):
         self.file_mounts = None
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
-        
+
         # The resources failed to be provisioned.
         self.blocked_resources = set()
         # Block some of the clouds.
@@ -249,7 +249,7 @@ class Task(object):
         """
         self.file_mounts = file_mounts
         return self
-    
+
     def set_blocked_clouds(self, clouds: Set[clouds.Cloud]):
         """Sets the clouds that this task should not run on."""
         self.blocked_clouds = clouds
