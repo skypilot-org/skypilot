@@ -256,7 +256,7 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
             # alternatives (smart_open, each provider's own sdk), a
             # data-transfer container etc.  We also assumed 'src' is a
             # directory.
-            download_command = storage.make_download_dir_command(
+            download_command = storage.make_sync_dir_command(
                 source=src, destination=dst)
             runner.add_step(
                 'cloud_to_remote_download',

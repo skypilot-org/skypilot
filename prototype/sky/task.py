@@ -243,6 +243,10 @@ class Task(object):
             node from which the task is launched.
         """
         self.file_mounts = file_mounts
+        for remote, unused_source in file_mounts.items():
+            if not os.path.isabs(remote):
+                raise ValueError('File mounts: remote paths should be absolute,'
+                                 f' not relative or "~/...".  Found: {remote}')
         return self
 
     def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
@@ -279,7 +283,10 @@ class Task(object):
     def __repr__(self):
         if self.name:
             return self.name
-        s = 'Task(run=\'{}\')'.format(self.run)
+        if len(self.run) > 20:
+            s = 'Task(run=\'{}...\')'.format(self.run[:20])
+        else:
+            s = 'Task(run=\'{}\')'.format(self.run)
         if self.inputs is not None:
             s += '\n  inputs: {}'.format(self.inputs)
         if self.outputs is not None:

@@ -1,15 +1,52 @@
-# Example: file_mounts destination paths that require root access
+# Example: using file mounts
 #
-# Sky will use sudo to create destination paths and run 'chown' on them, so that
-# the 'run' command (logged in as non-root) can still access them.
+# File mounts allow syncing local files (or cloud URLs) to the VM where a Task
+# will run.  Syncing is done before the Task's execution so that its run command
+# can access these files.  After syncing, the mounted paths can be opened, read,
+# or written as usual.
+#
+# Destination paths must be absolute paths, not relative.
+#
+# Caveat:
+#
+#    Destination paths may be created as *symlinks* under the hood.  Some
+#    commands may require flags to follow symlinks (e.g., ls -H; du -L).
+
 resources:
   cloud: aws
 
-# <VM path> : <local path>
+# Format:
+#   <destination on VM>: <source, local or cloud>
 file_mounts:
+
+  ###############################################
+  #  Sync from local files/directories (rsync)  #
+  ###############################################
   /setup.py: ./setup.py
-  /sky: sky
+  /sky: .
+  /more/levels/should/work: .
+
+  # TODO: test slashes for local.
+
+  #############################################
+  #  Sync from Google Cloud Storage (gsutil)  #
+  #############################################
+
+  # If URLs have no trailing slashes, they are treated as objects ("files").
+  /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
+
+  # If URLs have trailing slashs, they are treated as "directories".  Contents
+  # under a directory, including subdirectories, will be recursively synced.
+  /data/fake_imagenet/: gs://cloud-tpu-test-datasets/fake_imagenet/
 
 run: |
   ls -l /setup.py
-  ls -lH /sky
+
+  cd /sky
+  pip3 install -e .
+
+  du -schL /train-00001-of-01024
+  # FIXME: this shows utf-8 decode error for run_with_log().
+  # head /train-00001-of-01024
+
+  ls -lH /data/fake_imagenet | head -n10
