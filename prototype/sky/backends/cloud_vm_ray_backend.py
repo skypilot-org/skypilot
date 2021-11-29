@@ -382,8 +382,12 @@ class CloudVmRayBackend(backends.Backend):
 
         os.makedirs(self.log_dir, exist_ok=True)
 
-    def provision(self, task: App, to_provision: Resources, dryrun: bool,
-                  stream_logs: bool) -> ResourceHandle:
+    def provision(self,
+                  task: App,
+                  to_provision: Resources,
+                  dryrun: bool,
+                  stream_logs: bool,
+                  cluster_name: str = None) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner(self.log_dir)
@@ -398,6 +402,12 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.wait_until_ray_cluster_ready(to_provision.cloud,
                                                    cluster_config_file,
                                                    task.num_nodes)
+
+        if cluster_name is None:
+            cluster_id = cluster_config_file.stem
+            cluster_name = f'sky-{cluster_id}'
+        self.session.add_cluster(cluster_name, str(cluster_config_file))
+
         return cluster_config_file
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -574,6 +584,8 @@ class CloudVmRayBackend(backends.Backend):
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
         # Execution logic differs for three types of tasks.
+
+        self.session.add_task(task)
 
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):

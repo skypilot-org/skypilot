@@ -19,9 +19,9 @@ def _combined_pretty_table_str(t1, t2):
 
     # Pad each table correctly
     num_total_lines = max(len(t1_lines), len(t2_lines))
-    t1_lines = t1_lines + ['' * len(t1_lines[0])
+    t1_lines = t1_lines + [' ' * len(t1_lines[0])
                           ] * (num_total_lines - len(t1_lines))
-    t2_lines = t2_lines + ['' * len(t2_lines[0])
+    t2_lines = t2_lines + [' ' * len(t2_lines[0])
                           ] * (num_total_lines - len(t2_lines))
 
     # Combine the tables
@@ -32,7 +32,7 @@ def _combined_pretty_table_str(t1, t2):
     return '\n'.join(combined_lines)
 
 
-def _interactive_node(name, resources):
+def _interactive_node(name, resources, cluster_handle=None):
     """Creates an interactive session.
     
     Args:
@@ -56,15 +56,27 @@ def _interactive_node(name, resources):
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
     dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
     task = dag.tasks[0]
-    handle = backend.provision(task,
-                               task.best_resources,
-                               dryrun=False,
-                               stream_logs=True)
+
+    handle = cluster_handle
+    if handle is None:
+        handle = backend.provision(task,
+                                   task.best_resources,
+                                   dryrun=False,
+                                   stream_logs=True)
+
+    session = Session()
+    task_id = session.add_task(task)
 
     # TODO: cd into workdir immediately on the VM
     # TODO: Delete the temporary cluster config yml (or figure out a way to re-use it)
-    cloud_vm_ray_backend._run(f'ray attach {handle} --tmux')
-    cloud_vm_ray_backend._run(f'ray down -y {handle}')
+    cloud_vm_ray_backend._run(f'ray attach {handle}')
+
+    if cluster_handle is None:  # if this is a secondary
+        cloud_vm_ray_backend._run(f'ray down -y {handle}')
+        cluster_name = session.get_cluster_name_from_handle(handle)
+        session.remove_cluster(cluster_name)
+
+    session.remove_task(task_id)
 
 
 @click.group()
@@ -118,10 +130,10 @@ def run(entry_point, cluster, dryrun):
             raise ValueError(
                 f'Unsupported entry point type: {entry_point_type}')
 
-    # Get handle from cluster ID
     handle = None
     if cluster is not None:
-        handle = cluster
+        session = Session()
+        handle = session.get_handle_from_cluster_name(cluster)
 
     dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
     sky.execute(dag, dryrun=dryrun, handle=handle, stream_logs=stream_logs)
@@ -132,8 +144,8 @@ def run(entry_point, cluster, dryrun):
 def cancel(task_id):
     """Cancel a task."""
 
-    backend = cloud_vm_ray_backend.CloudVmRayBackend()
-    backend.cancel(task_id)
+    # TODO: Need a way to interrupt `ray exec` mid-flight (maybe grab PID?)
+    raise NotImplementedError()
 
 
 @cli.command()
@@ -145,23 +157,23 @@ def status():
     clusters_status = session.get_clusters()
 
     task_table = PrettyTable()
-    task_table.field_names = ["ID", "NAME", "DURATION", "STATUS"]
+    task_table.field_names = ["ID", "NAME", "DURATION"]
     for task_status in tasks_status:
         launched_at = task_status['launched_at']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         task_table.add_row([
-            task_status['id'], task_status['name'],
-            duration.diff_for_humans(), task_status['status']
+            task_status['id'],
+            task_status['name'],
+            duration.diff_for_humans(),
         ])
 
     cluster_table = PrettyTable()
-    cluster_table.field_names = ["ID", "CLOUD", "UPTIME"]
+    cluster_table.field_names = ["NAME", "UPTIME"]
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         cluster_table.add_row([
-            cluster_status['id'],
-            cluster_status['cloud'],
+            cluster_status['name'],
             duration.diff_for_humans(),
         ])
 
@@ -170,69 +182,75 @@ def status():
 
 
 @cli.command()
-def provision():
+@click.argument('cluster_name', required=False, type=str)
+def provision(cluster_name=None):
     """Provision a new cluster."""
 
-    raise NotImplementedError()
-
-    session = UserManager()
-    session.add_cluster()
-
     with sky.Dag() as dag:
-        # TODO: Add conda environment replication
-        # should be setup = 'conda env export | grep -v "^prefix: " > environment.yml'
-        # && conda env create -f environment.yml
-        task = sky.Task(
-            name,
-            workdir=os.getcwd(),
-            setup=None,
-            run='',
-        )
+        task = sky.Task(run='')
+        # TODO: Make this configurable via command line.
+        resources = {sky.Resources(sky.AWS(), accelerators='V100')}
         task.set_resources(resources)
 
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
     dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
     task = dag.tasks[0]
-    handle = backend.provision(task,
-                               task.best_resources,
-                               dryrun=False,
-                               stream_logs=True)
-
-    # TODO: cd into workdir immediately on the VM
-    # TODO: Delete the temporary cluster config yml (or figure out a way to re-use it)
-    cloud_vm_ray_backend._run(f'ray attach {handle} --tmux')
-    cloud_vm_ray_backend._run(f'ray down -y {handle}')
+    backend.provision(task,
+                      task.best_resources,
+                      dryrun=False,
+                      stream_logs=True,
+                      cluster_name=cluster_name)
 
 
 @cli.command()
-@click.argument('cluster_id', required=True, type=str)
-def teardown():
+@click.argument('cluster_name', required=True, type=str)
+def teardown(cluster_name):
     """Delete cluster."""
     # TODO: Delete associated tasks as well
 
-    backend = cloud_vm_ray_backend.CloudVmRayBackend()
-    # STEP 1: Get handle from cluster ID
-    # STEP 2: Delete the cluster
-    # STEP 3: Remove cluster from session
+    session = Session()
+    handle = session.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        click.echo(f'Cluster {cluster_name} not found.')
+        return
+
+    cloud_vm_ray_backend._run(f'ray down -y {handle}')
+    session.remove_cluster(cluster_name)
 
 
 @cli.command()
-def gpunode():
+@click.option('--cluster', '-c', default=None, type=str)
+def gpunode(cluster):
     """Launch an interactive GPU node."""
-    # assert False, 'Implement cluster caching and/or Sky provision.'
     # TODO: Sync code files between local and interactive node (watch rsync?)
+
+    handle = None
+    if cluster is not None:
+        session = Session()
+        handle = session.get_handle_from_cluster_name(cluster)
+
     _interactive_node('gpunode',
-                      {sky.Resources(sky.AWS(), accelerators='V100')})
+                      {sky.Resources(sky.AWS(), accelerators='V100')},
+                      cluster_handle=handle)
 
 
 @cli.command()
-def cpunode():
+@click.option('--cluster', '-c', default=None, type=str)
+def cpunode(cluster):
     """Launch an interactive CPU node."""
-    _interactive_node('cpunode', {sky.Resources(sky.AWS())})
+
+    handle = None
+    if cluster is not None:
+        session = Session()
+        handle = session.get_handle_from_cluster_name(cluster)
+
+    _interactive_node('cpunode', {sky.Resources(sky.AWS())},
+                      cluster_handle=handle)
 
 
 @cli.command()
-def tpunode():
+@click.option('--cluster', '-c', default=None, type=str)
+def tpunode(cluster):
     """Launch an interactive TPU node."""
     raise NotImplementedError()
 

@@ -23,8 +23,7 @@ class Session(object):
         except sqlite3.OperationalError:
             # Tables do not exist, create them.
             self.cursor.execute('''CREATE TABLE tasks
-                      (id TEXT PRIMARY KEY, name TEXT, launched_at INTEGER)'''
-                               )
+                      (id TEXT PRIMARY KEY, name TEXT, launched_at INTEGER)''')
             self.cursor.execute('''CREATE TABLE clusters
                       (name TEXT PRIMARY KEY, lauched_at INTEGER, handle TEXT)'''
                                )
@@ -42,36 +41,34 @@ class Session(object):
             f"INSERT INTO tasks VALUES ('{task_id}','{task_name}',{task_launched_at})"
         )
         self.conn.commit()
+        return task_id
 
     def remove_task(self, task_id):
-        self.cursor.execute(
-            f"DELETE FROM tasks WHERE id='{task_id}'"
-        )
+        self.cursor.execute(f"DELETE FROM tasks WHERE id='{task_id}'")
         self.conn.commit()
 
-    def add_cluster(self, cluster):
-        cluster_name = 'cluster-0'
+    def add_cluster(self, cluster_name, cluster_handle):
         cluster_launched_at = int(time.time())
-        cluster_handle = cluster.handle
-
         self.cursor.execute(
             f"INSERT INTO clusters VALUES ('{cluster_name}',{cluster_launched_at},'{cluster_handle}')"
         )
         self.conn.commit()
 
-    def remove_cluster(self, cluster_id):
-        self.cursor.execute(
-            f"DELETE FROM clusters WHERE id='{cluster_id}'"
-        )
+    def remove_cluster(self, cluster_name):
+        self.cursor.execute(f"DELETE FROM clusters WHERE name='{cluster_name}'")
         self.conn.commit()
 
     def get_handle_from_cluster_name(self, cluster_name):
-        # Default behavior: use the first cluster in the DB if there are multiple clusters with the same name
         rows = self.cursor.execute(
-            f"SELECT handle FROM clusters WHERE name='{cluster_name}'"
-        )
-        for handle in rows:
-            return handle[0]
+            f"SELECT handle FROM clusters WHERE name='{cluster_name}'")
+        for (handle,) in rows:
+            return handle
+
+    def get_cluster_name_from_handle(self, cluster_handle):
+        rows = self.cursor.execute(
+            f"SELECT name FROM clusters WHERE handle='{cluster_handle}'")
+        for (name,) in rows:
+            return name
 
     def get_tasks(self):
         rows = self.cursor.execute('select * from tasks')
@@ -84,10 +81,5 @@ class Session(object):
 
     def get_clusters(self):
         rows = self.cursor.execute('select * from clusters')
-        for id, name, launched_at, handle in rows:
-            yield {
-                'id': id,
-                'name': name,
-                'launched_at': launched_at,
-                'handle': handle
-            }
+        for name, launched_at, handle in rows:
+            yield {'name': name, 'launched_at': launched_at, 'handle': handle}
