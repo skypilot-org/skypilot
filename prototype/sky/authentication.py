@@ -76,14 +76,14 @@ def setup_aws_authentication(config):
     else:
         assert os.path.exists(public_key_path)
         public_key = open(public_key_path, 'rb').read().decode('utf-8')
-        private_key = open(private_key_path, 'rb').read().decode('utf-8')
+        private_key = None
 
     ec2 = boto3.client('ec2', config['provider']['region'])
     key_pairs = ec2.describe_key_pairs()['KeyPairs']
     key_found = False
 
-    def _get_fingerprint(private_key_path):
-        key = RSA.importKey(open(private_key_path).read()).publickey()
+    def _get_fingerprint(public_key_path):
+        key = RSA.importKey(open(public_key_path).read())
 
         def insert_char_every_n_chars(string, char='\n', every=2):
             return char.join(
@@ -97,7 +97,7 @@ def setup_aws_authentication(config):
         if key['KeyName'] == key_name:
             # Compute Fingerprint of public key
             aws_fingerprint = key['KeyFingerprint']
-            local_fingerprint = _get_fingerprint(private_key_path)
+            local_fingerprint = _get_fingerprint(public_key_path)
             # If fingerprints dont match, delete bad key
             if aws_fingerprint == local_fingerprint:
                 key_found = True
