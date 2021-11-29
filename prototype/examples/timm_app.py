@@ -47,7 +47,7 @@ with sky.Dag() as dag:
     )
     train.set_file_mounts({
         # Download from GCS.
-        '/tmp/fake_imagenet': 'gs://cloud-tpu-test-datasets/fake_imagenet',
+        '/tmp/fake_imagenet/': 'gs://cloud-tpu-test-datasets/fake_imagenet/',
     })
     train.set_resources({sky.Resources(sky.AWS(), accelerators='V100')})
 

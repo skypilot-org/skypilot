@@ -33,11 +33,11 @@ with sky.Dag() as dag:
     # Format: {VM paths: local paths / cloud URLs}.
     file_mounts = {
         # Download from GCS before training starts.
-        # '/tmp/fake_imagenet': 'gs://cloud-tpu-test-datasets/fake_imagenet',
+        # '/tmp/fake_imagenet/': 'gs://cloud-tpu-test-datasets/fake_imagenet/',
     }
     # Refer to the VM local path.
-    # run = run.replace('gs://cloud-tpu-test-datasets/fake_imagenet',
-    #                   '/tmp/fake_imagenet')
+    # run = run.replace('gs://cloud-tpu-test-datasets/fake_imagenet/',
+    #                   '/tmp/fake_imagenet/')
     ### Optional end ###
 
     train = sky.Task(
@@ -69,7 +69,7 @@ with sky.Dag() as dag:
         # sky.Resources(sky.AWS(), accelerators='K80', use_spot=True),
         # sky.Resources(accelerators='tpu-v3-8'),
         # sky.Resources(accelerators='V100', use_spot=True),
-        sky.Resources(sky.AWS(), accelerators='V100'),
+        sky.Resources(sky.GCP(), accelerators='V100'),
         # sky.Resources(sky.AWS(), accelerators='V100', use_spot=True),
         # sky.Resources(sky.AWS(), accelerators={'V100': 8}),
     })
