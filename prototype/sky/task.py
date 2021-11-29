@@ -97,8 +97,6 @@ class Task(object):
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
 
-        # The resources failed to be provisioned.
-        self.blocked_resources = set()
         # Block some of the clouds.
         self.blocked_clouds = set()
 

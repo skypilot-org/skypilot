@@ -101,7 +101,9 @@ class Resources(object):
                 self.accelerators)
         return hourly_cost * hours
 
+
 class SkyResourcesUnavailable(Exception):
+
     def __init__(self, to_provision: Resources):
         super().__init__(f'Unable to provision {to_provision}')
         self.to_provision = to_provision

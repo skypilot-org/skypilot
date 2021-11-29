@@ -31,7 +31,6 @@ from sky import logging
 from sky import resources
 from sky.backends import backend_utils
 
-
 logger = logging.init_logger(__name__)
 
 IPAddr = str
@@ -44,6 +43,8 @@ STREAM_LOGS_TO_CONSOLE = True
 
 App = backend_utils.App
 RunId = backend_utils.RunId
+
+ResourceHandle = str
 
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 
@@ -372,12 +373,47 @@ def execute_v2(dag: sky.Dag,
         backend.teardown(handle)
 
 
+def _cloud_retry_provision(
+        dag: sky.Dag,
+        dryrun: bool,
+        stream_logs: bool,
+        backend: backends.Backend,
+        optimize_fn: Optional[Callable] = None,
+) -> ResourceHandle:
+    provision_failed = True
+    while provision_failed:
+        provision_failed = False
+        if optimize_fn is not None:
+            dag = optimize_fn(dag)
+        task = dag.tasks[0]
+        best_resources = task.best_resources
+        assert best_resources is not None, \
+            'Run sky.optimize() before sky.execute().'
+        try:
+            handle = backend.provision(task,
+                                       best_resources,
+                                       dryrun=dryrun,
+                                       stream_logs=stream_logs)
+        except resources.SkyResourcesUnavailable as e:
+            if optimize_fn is None:
+                assert False, 'No resources available.'
+            failed_resources = e.to_provision
+            failed_resources.cloud.add_blocked_resources(failed_resources)
+            logger.warning(
+                f'Provision failed for {failed_resources}. Retrying other clouds...'
+            )
+            provision_failed = True
+            # TODO: set all remaining tasks' best_resources to None.
+            task.best_resources = None
+    return handle
+
+
 def execute_v3(dag: sky.Dag,
                dryrun: bool = False,
                teardown: bool = False,
                stream_logs: bool = True,
                backend: Optional[backends.Backend] = None,
-               optimize_fn=None) -> None:
+               optimize_fn: Optional[Callable] = None) -> None:
     """Executes a planned DAG.
 
     Args:
@@ -399,28 +435,9 @@ def execute_v3(dag: sky.Dag,
 
     # Future: we can `for task in dag.get_topo_tasks():` and prune the nodes
     # from the dag that have already been successfully provisioned.
-    provision_failed = True
-    while provision_failed:
-        provision_failed = False
-        if optimize_fn is not None:
-            dag = optimize_fn(dag)
-        task = dag.tasks[0]
-        best_resources = task.best_resources
-        assert best_resources is not None, \
-            'Run sky.optimize() before sky.execute().'
-        try:
-            handle = backend.provision(task,
-                                    best_resources,
-                                    dryrun=dryrun,
-                                    stream_logs=stream_logs)
-        except resources.SkyResourcesUnavailable as e:
-            if optimize_fn is None:
-                assert False, 'No resources available.'
-            logger.warning('Provision failed. Retrying other clouds...')
-            provision_failed = True
-            # TODO: set all remaining tasks' best_resources to None.
-            task.best_resources = None
-            task.blocked_resources.add(e.to_provision)
+    handle = _cloud_retry_provision(dag, dryrun, stream_logs, backend,
+                                    optimize_fn)
+    task = dag.tasks[0]
 
     if dryrun:
         logger.info('Dry run finished.')

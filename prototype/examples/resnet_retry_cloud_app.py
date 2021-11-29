@@ -82,4 +82,4 @@ with sky.Dag() as dag:
 # TODO: Would be better to have an api as optimizer_fn = sky.Optimier(minimize=sky.Optimizer.COST)
 optimize_fn = lambda dag: sky.optimize(dag, minimize=sky.Optimizer.COST)
 # sky.execute(dag, dryrun=True)
-sky.execute(dag, optimize_fn=optimize_fn)
+sky.execute(dag, optimize_fn=optimize_fn, teardown=True)
