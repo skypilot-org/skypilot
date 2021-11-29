@@ -49,7 +49,7 @@ def _fill_template(template_path: str,
     if output_path is None:
         assert 'cluster_id' in variables, 'cluster_id is required.'
         cluster_id = variables['cluster_id']
-        output_path = Path(template_path).parents[0] / f'{cluster_id}.yml'
+        output_path = Path(template_path).parents[0] / 'user' / f'{cluster_id}.yml'
     with open(output_path, 'w') as fout:
         fout.write(content)
     logger.info(f'Created or updated file {_get_rel_path(output_path)}')

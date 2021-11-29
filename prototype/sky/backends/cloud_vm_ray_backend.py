@@ -20,6 +20,7 @@ from sky import clouds
 from sky import cloud_stores
 from sky import logging
 from sky import resources
+from sky import session
 from sky import task as task_mod
 from sky.backends import backend_utils
 
@@ -375,6 +376,10 @@ class CloudVmRayBackend(backends.Backend):
         self._managed_tpu = None
         run_id = backend_utils.get_run_id()
         self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, run_id)
+
+        # User state management.
+        self.session = session.Session()
+
         os.makedirs(self.log_dir, exist_ok=True)
 
     def provision(self, task: App, to_provision: Resources, dryrun: bool,

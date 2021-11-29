@@ -319,6 +319,7 @@ def execute_v2(dag: sky.Dag,
                dryrun: bool = False,
                teardown: bool = False,
                stream_logs: bool = True,
+               handle: str = None,
                backend: Optional[backends.Backend] = None) -> None:
     """Executes a planned DAG.
 
@@ -343,10 +344,12 @@ def execute_v2(dag: sky.Dag,
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
 
-    handle = backend.provision(task,
-                               best_resources,
-                               dryrun=dryrun,
-                               stream_logs=stream_logs)
+    if handle is None:
+        handle = backend.provision(task,
+                                   best_resources,
+                                   dryrun=dryrun,
+                                   stream_logs=stream_logs)
+
     if dryrun:
         logger.info('Dry run finished.')
         return

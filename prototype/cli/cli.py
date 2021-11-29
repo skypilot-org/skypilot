@@ -8,11 +8,7 @@ from prettytable import PrettyTable
 
 import sky
 from sky.backends import cloud_vm_ray_backend
-from sky.user_manager import UserManager
-
-# TODO: Ensure all paths references from CLI/sky backend
-# refer to a global/absolute path. This may cause files to
-# get dumped places they shouldn't such as a user's workdir.
+from sky.session import Session
 
 
 def _combined_pretty_table_str(t1, t2):
@@ -42,6 +38,7 @@ def _interactive_node(name, resources):
     Args:
         name: Name of the interactivve session.
         resources: Resources to attach to VM.
+        cluster_handle: Cluster YAML file.
     """
 
     with sky.Dag() as dag:
@@ -77,15 +74,15 @@ def cli():
 
 @cli.command()
 @click.argument('entry_point', required=True, type=str)
+@click.option('--cluster', '-c', default=None, type=str)
 @click.option('--dryrun',
               '-n',
               default=False,
               type=bool,
               help='If True, do not actually run the job.')
-def run(entry_point, dryrun):
-    """Launch a job from a YAML config."""
+def run(entry_point, cluster, dryrun):
+    """Launch a job from a YAML config or Python script."""
 
-    session = UserManager()
     stream_logs = False
 
     with sky.Dag() as dag:
@@ -121,20 +118,29 @@ def run(entry_point, dryrun):
             raise ValueError(
                 f'Unsupported entry point type: {entry_point_type}')
 
-        # TODO: Factor this within Sky kernel
-        # Reasoning here would be that if a user wants to write a custom script then
-        # their launched tasks/clusters would still be tracked by the user manager.
-        session.add_task(task)
+    # Get handle from cluster ID
+    handle = None
+    if cluster is not None:
+        handle = cluster
 
     dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
-    sky.execute(dag, dryrun=dryrun, stream_logs=stream_logs)
+    sky.execute(dag, dryrun=dryrun, handle=handle, stream_logs=stream_logs)
+
+
+@cli.command()
+@click.argument('task_id', required=True, type=str)
+def cancel(task_id):
+    """Cancel a task."""
+
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    backend.cancel(task_id)
 
 
 @cli.command()
 def status():
     """Show the status of all tasks and clusters."""
 
-    session = UserManager()
+    session = Session()
     tasks_status = session.get_tasks()
     clusters_status = session.get_clusters()
 
@@ -164,8 +170,57 @@ def status():
 
 
 @cli.command()
+def provision():
+    """Provision a new cluster."""
+
+    raise NotImplementedError()
+
+    session = UserManager()
+    session.add_cluster()
+
+    with sky.Dag() as dag:
+        # TODO: Add conda environment replication
+        # should be setup = 'conda env export | grep -v "^prefix: " > environment.yml'
+        # && conda env create -f environment.yml
+        task = sky.Task(
+            name,
+            workdir=os.getcwd(),
+            setup=None,
+            run='',
+        )
+        task.set_resources(resources)
+
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
+    task = dag.tasks[0]
+    handle = backend.provision(task,
+                               task.best_resources,
+                               dryrun=False,
+                               stream_logs=True)
+
+    # TODO: cd into workdir immediately on the VM
+    # TODO: Delete the temporary cluster config yml (or figure out a way to re-use it)
+    cloud_vm_ray_backend._run(f'ray attach {handle} --tmux')
+    cloud_vm_ray_backend._run(f'ray down -y {handle}')
+
+
+@cli.command()
+@click.argument('cluster_id', required=True, type=str)
+def teardown():
+    """Delete cluster."""
+    # TODO: Delete associated tasks as well
+
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    # STEP 1: Get handle from cluster ID
+    # STEP 2: Delete the cluster
+    # STEP 3: Remove cluster from session
+
+
+@cli.command()
 def gpunode():
     """Launch an interactive GPU node."""
+    # assert False, 'Implement cluster caching and/or Sky provision.'
+    # TODO: Sync code files between local and interactive node (watch rsync?)
     _interactive_node('gpunode',
                       {sky.Resources(sky.AWS(), accelerators='V100')})
 
