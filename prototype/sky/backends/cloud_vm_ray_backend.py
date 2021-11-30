@@ -58,11 +58,12 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
 
             start_streaming_flag = False
             with open(log_path, 'a') as fout:
-                while True:
+                while len(sel.get_map()) > 0:
                     for key, _ in sel.select():
                         line = key.fileobj.readline()
                         if not line:
-                            return stdout, stderr
+                            sel.unregister(key.fileobj)
+                            break
                         if start_streaming_at in line:
                             start_streaming_flag = True
                         if key.fileobj is out_io:
@@ -75,6 +76,7 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
                             fout.flush()
                         if stream_logs and start_streaming_flag:
                             print(line, end='')
+            return stdout, stderr
         
         futures = []
 
