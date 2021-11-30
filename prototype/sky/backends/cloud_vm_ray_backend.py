@@ -285,7 +285,7 @@ class RetryingVmProvisioner(object):
                 zones = config['provider']['availability_zone']
             elif type(cloud) is clouds.Azure:
                 region = config['provider']['location']
-                zones = config['provider']['zone']
+                zones = str(config['provider']['zone'])
             else:
                 assert False, cloud
         except Exception:
