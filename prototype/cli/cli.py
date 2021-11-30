@@ -15,30 +15,6 @@ from sky.backends import cloud_vm_ray_backend
 from sky.backends import local_docker_backend
 
 
-def _combined_pretty_table_str(t1, t2):
-    """Generates a combined PrettyTable string given two PrettyTable objects."""
-
-    # TODO: stack vertically
-    # TODO: use wandb style anmes for task ids
-
-    t1_lines = t1.get_string().split('\n')
-    t2_lines = t2.get_string().split('\n')
-
-    # Pad each table correctly
-    num_total_lines = max(len(t1_lines), len(t2_lines))
-    t1_lines = t1_lines + [' ' * len(t1_lines[0])
-                          ] * (num_total_lines - len(t1_lines))
-    t2_lines = t2_lines + [' ' * len(t2_lines[0])
-                          ] * (num_total_lines - len(t2_lines))
-
-    # Combine the tables
-    combined_lines = []
-    for t1_l, t2_l in zip(t1_lines, t2_lines):
-        combined_lines.append(t1_l + '\t' + t2_l)
-
-    return '\n'.join(combined_lines)
-
-
 def _get_region_zones_from_handle(handle):
     """Gets region and zones from a Ray YAML file."""
 
