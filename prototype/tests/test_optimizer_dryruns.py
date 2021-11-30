@@ -17,6 +17,10 @@ def test_resources_aws():
     _test_resources(sky.Resources(clouds.AWS(), 'p3.2xlarge'))
 
 
+def test_resources_azure():
+    _test_resources(sky.Resources(clouds.Azure(), 'Standard_NC24s_v3'))
+
+
 def test_resources_gcp():
     _test_resources(sky.Resources(clouds.GCP(), 'n1-standard-16'))
 

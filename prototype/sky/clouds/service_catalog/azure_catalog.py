@@ -1,24 +1,23 @@
-"""AWS Offerings Catalog.
+"""Azure Offerings Catalog.
 
 This module loads the service catalog file and can be used to query
-instance types and pricing information for AWS.
+instance types and pricing information for Azure.
 """
 from typing import Dict, List, Optional
 
-import pandas as pd
-
 from sky.clouds.service_catalog import common
 
-_df = common.read_catalog('aws.csv')
+_df = common.read_catalog('azure.csv')
 
-_DEFAULT_REGION = 'us-west-2'
+_DEFAULT_REGION = 'westus'
 
 
 def get_hourly_cost(instance_type: str,
                     region: str = _DEFAULT_REGION,
                     use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
+    assert not use_spot, 'not implemented'
+    return common.get_hourly_cost_impl(_df, instance_type, region, False)
 
 
 def get_accelerators_from_instance_type(
@@ -39,8 +38,9 @@ def get_instance_type_for_accelerator(
         _df, acc_name, acc_count, region)
 
 
-def list_accelerators(gpus_only: bool) -> Dict[str, List[int]]:
+def list_accelerators(_gpus_only: bool) -> Dict[str, List[int]]:
     """Returns a mapping from the canonical names of accelerators to a list of
     counts, each representing an instance type offered by this cloud.
     """
-    return common.list_accelerators_impl(_df, gpus_only)
+    # Azure only has GPU offerings, so ignore `gpus_only`.
+    return common.list_accelerators_impl(_df, False)

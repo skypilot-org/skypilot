@@ -3,35 +3,15 @@ import json
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky.clouds.service_catalog import azure_catalog
 
 
 class Azure(clouds.Cloud):
     _REPR = 'Azure'
     _regions: List[clouds.Region] = []
 
-    # In general, query this from the cloud.
-    # This pricing is for East US region.
-    # https://azureprice.net/
-    _ON_DEMAND_PRICES = {
-        'Standard_D2_v4': 0.096,
-        # V100 GPU series
-        'Standard_NC6s_v3': 3.06,
-        'Standard_NC12s_v3': 6.12,
-        'Standard_NC24s_v3': 12.24,
-    }
-
-    # TODO: add other GPUs
-    _ACCELERATORS_DIRECTORY = {
-        ('V100', 1): 'Standard_NC6s_v3',
-        ('V100', 2): 'Standard_NC12s_v3',
-        ('V100', 4): 'Standard_NC24s_v3',
-    }
-
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
-        # TODO: use_spot support
-        if use_spot:
-            return clouds.Cloud.UNKNOWN_COST
-        return Azure._ON_DEMAND_PRICES[instance_type]
+        return azure_catalog.get_hourly_cost(instance_type, use_spot=use_spot)
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -68,7 +48,6 @@ class Azure(clouds.Cloud):
     @classmethod
     def regions(cls) -> List[clouds.Region]:
         if not cls._regions:
-            # https://cloud.google.com/compute/docs/regions-zones
             cls._regions = [
                 clouds.Region('centralus').set_zones([
                     clouds.Zone('1'),
@@ -126,12 +105,7 @@ class Azure(clouds.Cloud):
             self,
             instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        """Returns {acc: acc_count} held by 'instance_type', if any."""
-        inverse = {v: k for k, v in Azure._ACCELERATORS_DIRECTORY.items()}
-        res = inverse.get(instance_type)
-        if res is None:
-            return res
-        return {res[0]: res[1]}
+        return azure_catalog.get_accelerators_from_instance_type(instance_type)
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
@@ -171,7 +145,8 @@ class Azure(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        instance_type = Azure._ACCELERATORS_DIRECTORY.get((acc, acc_count))
+        instance_type = azure_catalog.get_instance_type_for_accelerator(
+            acc, acc_count)
         if instance_type is None:
             return []
         return _make(instance_type)

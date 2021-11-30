@@ -145,7 +145,7 @@ def get_all_regions_instance_types_df():
     df_ret = pd.concat(
         [df_sku, df_sku.apply(get_additional_columns, axis='columns')],
         axis='columns',
-    )
+    ).rename(columns={'name': 'InstanceType'})
     return df_ret
 
 
