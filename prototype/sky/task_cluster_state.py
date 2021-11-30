@@ -1,17 +1,18 @@
 import os
+import pathlib
 import sqlite3
 import time
 import uuid
-from pathlib import Path
 
 SESSION_DB_PATH = '/tmp/sky/session.db'
 
 
-class Session(object):
+class TaskClusterState(object):
     """Manages and persists user session state."""
 
     def __init__(self):
-        os.makedirs(Path(SESSION_DB_PATH).parents[0], exist_ok=True)
+        super().__init__()
+        os.makedirs(pathlib.Path(SESSION_DB_PATH).parents[0], exist_ok=True)
         self.conn = sqlite3.connect(SESSION_DB_PATH)
         self.cursor = self.conn.cursor()
         self.init()
@@ -22,10 +23,10 @@ class Session(object):
             self.cursor.execute('select * from clusters limit 0')
         except sqlite3.OperationalError:
             # Tables do not exist, create them.
-            self.cursor.execute('''CREATE TABLE tasks
-                      (id TEXT PRIMARY KEY, name TEXT, launched_at INTEGER)''')
-            self.cursor.execute('''CREATE TABLE clusters
-                      (name TEXT PRIMARY KEY, lauched_at INTEGER, handle TEXT)'''
+            self.cursor.execute("""CREATE TABLE tasks
+                      (id TEXT PRIMARY KEY, name TEXT, launched_at INTEGER)""")
+            self.cursor.execute("""CREATE TABLE clusters
+                      (name TEXT PRIMARY KEY, lauched_at INTEGER, handle TEXT)"""
                                )
 
         self.conn.commit()

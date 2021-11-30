@@ -2,7 +2,7 @@
 import datetime
 import io
 import os
-from pathlib import Path
+import pathlib
 import selectors
 import subprocess
 import tempfile
@@ -49,7 +49,7 @@ def _fill_template(template_path: str,
     if output_path is None:
         assert 'cluster_id' in variables, 'cluster_id is required.'
         cluster_id = variables['cluster_id']
-        output_path = Path(
+        output_path = pathlib.Path(
             template_path).parents[0] / 'user' / f'{cluster_id}.yml'
         os.makedirs(output_path.parents[0], exist_ok=True)
     with open(output_path, 'w') as fout:

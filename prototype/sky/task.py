@@ -6,7 +6,6 @@ import yaml
 import sky
 from sky import clouds
 from sky import resources
-from sky import session
 
 Resources = resources.Resources
 # A lambda generating commands (node addrs -> {addr: cmd_i}).
