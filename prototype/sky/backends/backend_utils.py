@@ -29,6 +29,12 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 
 
+def _get_rel_path(path: str) -> str:
+    cwd = os.getcwd()
+    common = os.path.commonpath([path, cwd])
+    return os.path.relpath(path, common)
+
+
 def _fill_template(template_path: str,
                    variables: dict,
                    output_path: Optional[str] = None) -> str:
@@ -42,7 +48,7 @@ def _fill_template(template_path: str,
         output_path, _ = template_path.rsplit('.', 1)
     with open(output_path, 'w') as fout:
         fout.write(content)
-    logger.info(f'Created or updated file {output_path}')
+    logger.info(f'Created or updated file {_get_rel_path(output_path)}')
     return output_path
 
 
@@ -245,11 +251,12 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
 
     start_streaming_flag = False
     with open(log_path, 'a') as fout:
-        while True:
+        while len(sel.get_map()) > 0:
             for key, _ in sel.select():
                 line = key.fileobj.readline()
                 if not line:
-                    return stdout, stderr
+                    sel.unregister(key.fileobj)
+                    break
                 if start_streaming_at in line:
                     start_streaming_flag = True
                 if key.fileobj is out_io:
@@ -262,3 +269,4 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
                     fout.flush()
                 if stream_logs and start_streaming_flag:
                     print(line, end='')
+    return stdout, stderr

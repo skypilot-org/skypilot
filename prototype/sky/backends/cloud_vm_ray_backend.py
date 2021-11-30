@@ -8,9 +8,11 @@ import subprocess
 import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from googleapiclient.discovery import Resource
 import yaml
 
 import colorama
+from ray.autoscaler import sdk
 
 import sky
 from sky import backends
@@ -56,11 +58,12 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
 
             start_streaming_flag = False
             with open(log_path, 'a') as fout:
-                while True:
+                while len(sel.get_map()) > 0:
                     for key, _ in sel.select():
                         line = key.fileobj.readline()
                         if not line:
-                            return stdout, stderr
+                            sel.unregister(key.fileobj)
+                            break
                         if start_streaming_at in line:
                             start_streaming_flag = True
                         if key.fileobj is out_io:
@@ -73,6 +76,7 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
                             fout.flush()
                         if stream_logs and start_streaming_flag:
                             print(line, end='')
+            return stdout, stderr
         
         futures = []
 
@@ -117,7 +121,7 @@ def _get_cluster_config_template(task):
     }
     cloud = task.best_resources.cloud
     path = _CLOUD_TO_TEMPLATE[type(cloud)]
-    return os.path.join(sky.__root_dir__, '..', path)
+    return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
 
 def _to_accelerator_and_count(resources: Optional[Resources]
@@ -534,12 +538,33 @@ class CloudVmRayBackend(backends.Backend):
                 f'(To view the task names: ray exec {handle} "ls {log_dir}/")')
 
         self._exec_code_on_head(handle, codegen)
-        task_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
+        # Get external IPs for the nodes
+        external_ips = self._get_node_ips(handle,
+                                          expected_num_nodes=1,
+                                          return_private_ips=False)
+        self._rsync_down_logs(handle, log_dir, external_ips)
+
+    def _rsync_down_logs(self,
+                         handle: ResourceHandle,
+                         log_dir: str,
+                         ips: List[str] = None):
+        local_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
+        Style = colorama.Style
         logger.info(
-            f'Syncing down the logs to {Style.BRIGHT}{task_log_dir}{Style.RESET_ALL}.'
+            f'Syncing down the logs to {Style.BRIGHT}{local_log_dir}{Style.RESET_ALL}'
         )
-        os.makedirs(task_log_dir, exist_ok=True)
-        _run(f'ray rsync_down {handle} {log_dir}/* {task_log_dir}')
+        os.makedirs(local_log_dir, exist_ok=True)
+        # Call the ray sdk to rsync the logs back to local.
+        for ip in ips:
+            sdk.rsync(
+                handle,
+                source=f'{log_dir}/*',
+                target=f'{local_log_dir}',
+                down=True,
+                ip_address=ip,
+                use_internal_ip=False,
+                should_bootstrap=False,
+            )
 
     def _exec_code_on_head(self,
                            handle: ResourceHandle,
@@ -665,12 +690,12 @@ class CloudVmRayBackend(backends.Backend):
                 f'(To view the task names: ray exec {handle} "ls {log_dir}/")')
 
         self._exec_code_on_head(handle, codegen)
-        task_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
-        logger.info(
-            f'Syncing down the logs to {Style.BRIGHT}{task_log_dir}{Style.RESET_ALL}.'
-        )
-        os.makedirs(task_log_dir, exist_ok=True)
-        _run(f'ray rsync_down {handle} {log_dir}/* {task_log_dir}')
+
+        # Get external IPs for the nodes
+        external_ips = self._get_node_ips(handle,
+                                          task.num_nodes,
+                                          return_private_ips=False)
+        self._rsync_down_logs(handle, log_dir, external_ips)
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
