@@ -19,6 +19,13 @@ class Azure(clouds.Cloud):
         'Standard_NC12s_v3': 6.12,
         'Standard_NC24s_v3': 12.24,
     }
+    _SPOT_PRICES = {
+        'Standard_D2_v4': 0.0237,
+        # V100 GPU series
+        'Standard_NC6s_v3': 0.7154,
+        'Standard_NC12s_v3': 1.4309,
+        'Standard_NC24s_v3': 2.8617,
+    }
 
     # TODO: add other GPUs
     _ACCELERATORS_DIRECTORY = {
@@ -30,7 +37,7 @@ class Azure(clouds.Cloud):
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
         # TODO: use_spot support
         if use_spot:
-            return clouds.Cloud.UNKNOWN_COST
+            return Azure._SPOT_PRICES[instance_type]
         return Azure._ON_DEMAND_PRICES[instance_type]
 
     def get_egress_cost(self, num_gigabytes):
@@ -135,7 +142,6 @@ class Azure(clouds.Cloud):
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
-        assert not r.use_spot, f"We currently do not support spot instances for Azure"
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
@@ -145,6 +151,7 @@ class Azure(clouds.Cloud):
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
+            'use_spot': r.use_spot,
         }
 
     def get_feasible_launchable_resources(self, resources):
