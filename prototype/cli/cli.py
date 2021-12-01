@@ -9,7 +9,7 @@ from prettytable import PrettyTable
 
 import sky
 from sky import clouds
-from sky import task_cluster_state
+from sky import global_user_state
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.backends import local_docker_backend
@@ -68,8 +68,7 @@ def _create_interactive_node(name,
                                    dryrun=False,
                                    stream_logs=True)
 
-    sky_state = task_cluster_state.TaskClusterState()
-    task_id = sky_state.add_task(task)
+    task_id = global_user_state.add_task(task)
 
     # TODO: cd into workdir immediately on the VM
     # TODO: Delete the temporary cluster config yml (or figure out a way to re-use it)
@@ -77,17 +76,16 @@ def _create_interactive_node(name,
 
     if cluster_handle is None:  # if this is a secondary
         cloud_vm_ray_backend._run(f'ray down -y {handle}')
-        cluster_name = sky_state.get_cluster_name_from_handle(handle)
-        sky_state.remove_cluster(cluster_name)
+        cluster_name = global_user_state.get_cluster_name_from_handle(handle)
+        global_user_state.remove_cluster(cluster_name)
 
-    sky_state.remove_task(task_id)
+    global_user_state.remove_task(task_id)
 
 
 def _reuse_cluster(task, cluster_name):
     """Reuses a cluster. Update cluster if required."""
 
-    sky_state = task_cluster_state.TaskClusterState()
-    handle = sky_state.get_handle_from_cluster_name(cluster_name)
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
 
     # Ensure changes to workdir, setup, etc. are reflected in the cluster
     region, zones = _get_region_zones_from_handle(handle)
@@ -102,7 +100,7 @@ def _reuse_cluster(task, cluster_name):
         region=region,
         zones=zones,
         dryrun=False,
-        cluster_id=cluster_name)
+        cluster_name=cluster_name)
 
     new_handle = str(config_dict['ray'])
     assert new_handle == handle, 'Cluster handle changed'
@@ -133,8 +131,6 @@ def cli():
               help='If True, do not actually run the job.')
 def run(entry_point, cluster, dryrun):
     """Launch a job from a YAML config or Python script."""
-
-    # TODO: rename to sky up
 
     stream_logs = False
 
@@ -200,25 +196,25 @@ def sweep():
     # # Provision and share a total of this many resources.  Inner Tasks will
     # # be bin-packed and scheduled according to their demands.
     # par_task.set_resources(total_resources)
-    pass
+    raise NotImplementedError()
 
 
 @cli.command()
 @click.argument('task_id', required=True, type=str)
 def cancel(task_id):
     """Cancel a task."""
-
-    # TODO: Need a way to interrupt `ray exec` mid-flight (maybe grab PID?)
-    raise NotImplementedError()
+    # TODO: Current implementation is blocking and will wait for the task to complete.
+    # If this is changed to non-blocking, then we will need a way to kill async tasks with ray exec.
+    
+    global_user_state.remove_task(task_id)
 
 
 @cli.command()
 def status():
     """Show the status of all tasks and clusters."""
 
-    sky_state = task_cluster_state.TaskClusterState()
-    tasks_status = sky_state.get_tasks()
-    clusters_status = sky_state.get_clusters()
+    tasks_status = global_user_state.get_tasks()
+    clusters_status = global_user_state.get_clusters()
 
     task_table = PrettyTable()
     task_table.field_names = ["TASK ID", "TASK NAME", "LAUNCHED"]
@@ -246,78 +242,39 @@ def status():
 
 
 @cli.command()
-@click.argument('cluster_name', required=False, type=str)
-def provision(cluster_name=None):
-    """Provision a new cluster."""
-
-    with sky.Dag() as dag:
-        task = sky.Task(run='')
-        # TODO: Make this configurable via command line.
-        resources = {sky.Resources(sky.AWS(), accelerators='V100')}
-        task.set_resources(resources)
-
-    backend = cloud_vm_ray_backend.CloudVmRayBackend()
-    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
-    task = dag.tasks[0]
-    backend.provision(task,
-                      task.best_resources,
-                      dryrun=False,
-                      stream_logs=True,
-                      cluster_name=cluster_name)
-
-
-@cli.command()
-@click.argument('cluster_name', required=True, type=str)
-def down(cluster_name):
-    """Delete cluster."""
-    # TODO: Delete associated tasks as well
-
-    sky_state = task_cluster_state.TaskClusterState()
-    handle = sky_state.get_handle_from_cluster_name(cluster_name)
-    if handle is None:
-        click.echo(f'Cluster {cluster_name} not found.')
-        return
-
-    cloud_vm_ray_backend._run(f'ray down -y {handle}')
-    sky_state.remove_cluster(cluster_name)
-
-
-@cli.command()
 @click.option('--cluster', '-c', default=None, type=str)
 def gpunode(cluster):
-    """Launch an interactive GPU node."""
+    """Launch an interactive GPU node. Automatically syncs current working directory."""
     # TODO: Sync code files between local and interactive node (watch rsync?)
     # TODO: Add port forwarding to allow access to localhost:PORT for jupyter
 
     handle = None
     if cluster is not None:
-        sky_state = task_cluster_state.TaskClusterState()
-        handle = sky_state.get_handle_from_cluster_name(cluster)
+        handle = global_user_state.get_handle_from_cluster_name(cluster)
 
     _create_interactive_node('gpunode',
-                      {sky.Resources(sky.AWS(), accelerators='V100')},
-                      cluster_handle=handle)
+                             {sky.Resources(sky.AWS(), accelerators='V100')},
+                             cluster_handle=handle)
 
 
 @cli.command()
 @click.option('--cluster', '-c', default=None, type=str)
 @click.option('--docker', '-i', default=False, type=bool)
 def cpunode(cluster):
-    """Launch an interactive CPU node."""
+    """Launch an interactive CPU node. Automatically syncs current working directory."""
 
     handle = None
     if cluster is not None:
-        sky_state = task_cluster_state.TaskClusterState()
-        handle = sky_state.get_handle_from_cluster_name(cluster)
+        handle = global_user_state.get_handle_from_cluster_name(cluster)
 
     _create_interactive_node('cpunode', {sky.Resources(sky.AWS())},
-                      cluster_handle=handle)
+                             cluster_handle=handle)
 
 
 @cli.command()
 @click.option('--cluster', '-c', default=None, type=str)
 def tpunode(cluster):
-    """Launch an interactive TPU node."""
+    """Launch an interactive TPU node. Automatically syncs current working directory."""
     raise NotImplementedError()
 
 

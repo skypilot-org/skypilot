@@ -18,10 +18,10 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
+from sky import global_user_state
 from sky import logging
 from sky import resources
 from sky import task as task_mod
-from sky import task_cluster_state
 from sky.backends import backend_utils
 
 App = backend_utils.App
@@ -299,7 +299,7 @@ class RetryingVmProvisioner(object):
                 region=region,
                 zones=zones,
                 dryrun=dryrun,
-                cluster_id=cluster_name)
+                cluster_name=cluster_name)
             if dryrun:
                 return
             tpu_name = to_provision.accelerator_args.get('tpu_name')
@@ -378,10 +378,6 @@ class CloudVmRayBackend(backends.Backend):
         self._managed_tpu = None
         run_id = backend_utils.get_run_id()
         self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, run_id)
-
-        # User state management.
-        self.sky_state = task_cluster_state.TaskClusterState()
-
         os.makedirs(self.log_dir, exist_ok=True)
 
     def provision(self,
@@ -389,7 +385,7 @@ class CloudVmRayBackend(backends.Backend):
                   to_provision: Resources,
                   dryrun: bool,
                   stream_logs: bool,
-                  cluster_name: str = None) -> ResourceHandle:
+                  cluster_name: Optional[str] = None) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner(self.log_dir)
@@ -406,8 +402,8 @@ class CloudVmRayBackend(backends.Backend):
                                                    task.num_nodes)
 
         if cluster_name is None:
-            cluster_name = cluster_config_file.stem
-        self.sky_state.add_cluster(cluster_name, str(cluster_config_file))
+            cluster_name = pathlib.Path(cluster_config_file).stem
+        global_user_state.add_cluster(cluster_name, str(cluster_config_file))
 
         return cluster_config_file
 
@@ -586,7 +582,7 @@ class CloudVmRayBackend(backends.Backend):
                 stream_logs: bool) -> None:
         # Execution logic differs for three types of tasks.
 
-        self.sky_state.add_task(task)
+        global_user_state.add_task(task)
 
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):

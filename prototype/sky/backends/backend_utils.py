@@ -47,10 +47,11 @@ def _fill_template(template_path: str,
     template = jinja2.Template(template)
     content = template.render(**variables)
     if output_path is None:
-        assert 'cluster_id' in variables, 'cluster_id is required.'
-        cluster_id = variables['cluster_id']
+        assert 'cluster_name' in variables, 'cluster_name is required.'
+        cluster_name = variables['cluster_name']
         output_path = pathlib.Path(
-            template_path).parents[0] / 'user' / f'{cluster_id}.yml'
+            template_path).parents[0] / 'user' / f'{cluster_name}.yml'
+        output_path = str(output_path)
         os.makedirs(output_path.parents[0], exist_ok=True)
     with open(output_path, 'w') as fout:
         fout.write(content)
@@ -64,7 +65,7 @@ def write_cluster_config(run_id: RunId,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
                          dryrun: bool = False,
-                         cluster_id: str = None):
+                         cluster_name: str = None):
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -94,8 +95,9 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
-    if cluster_id is None:
-        cluster_id = f'sky-{uuid.uuid4().hex[:6]}'
+    if cluster_name is None:
+        # TODO: change this ID formatting to something more pleasant.
+        cluster_name = f'sky-{uuid.uuid4().hex[:6]}'
 
     setup_sh_path = None
     if task.setup is not None:
@@ -119,7 +121,7 @@ def write_cluster_config(run_id: RunId,
         dict(
             resources_vars,
             **{
-                'cluster_id': cluster_id,
+                'cluster_name': cluster_name,
                 'run_id': run_id,
                 'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
