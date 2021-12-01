@@ -26,8 +26,7 @@ except sqlite3.OperationalError:
     _CURSOR.execute("""CREATE TABLE tasks
                 (id TEXT PRIMARY KEY, name TEXT, launched_at INTEGER)""")
     _CURSOR.execute("""CREATE TABLE clusters
-                (name TEXT PRIMARY KEY, lauched_at INTEGER, handle TEXT)"""
-                        )
+                (name TEXT PRIMARY KEY, lauched_at INTEGER, handle TEXT)""")
 _CONN.commit()
 
 
