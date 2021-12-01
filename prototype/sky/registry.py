@@ -15,7 +15,7 @@ _CLOUDS = [
 ]
 
 
-def _filter_out_blocked_clouds(task):
+def _filter_out_blocked_clouds(task: sky.Task):
     available_clouds = []
     for cloud in _CLOUDS:
         for blocked_cloud in task.blocked_clouds:
@@ -26,7 +26,8 @@ def _filter_out_blocked_clouds(task):
     return available_clouds
 
 
-def _launchable_resources_eq(r1, r2):
+def _launchable_resources_eq(r1: Resources, r2: Resources):
+    """Whether the resources are the same launchable resources."""
     assert r1.cloud is not None and r2.cloud is not None
     if type(r1.cloud) != type(r2.cloud):
         return False
@@ -35,8 +36,8 @@ def _launchable_resources_eq(r1, r2):
     return r1.accelerators.keys() == r2.accelerators.keys()
 
 
-def _filter_out_blocked_launchable_resources(launchable_resources,
-                                             blocked_launchable_resources):
+def _filter_out_blocked_launchable_resources(launchable_resources: List[Resources],
+                                             blocked_launchable_resources: List[Resources]):
     """Whether the resources are blocked."""
     available_resources = []
     for resources in launchable_resources:
