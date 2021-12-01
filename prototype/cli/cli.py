@@ -15,6 +15,7 @@ from sky.backends import cloud_vm_ray_backend
 
 # TODO: Add support for local Docker backend.
 
+
 def _get_region_zones_from_handle(handle):
     """Gets region and zones from a Ray YAML file."""
 
@@ -82,12 +83,23 @@ def _create_interactive_node(name,
     global_user_state.remove_task(task_id)
 
 
-def _reuse_cluster(task, cluster_name):
-    """Reuses a cluster. Update cluster if required."""
+def _reuse_or_provision_cluster(
+        task, cluster_name, provider=cloud_vm_ray_backend.CloudVmRayBackend):
+    """Reuses or provisions a cluster. Updates existing cluster if required."""
 
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
 
-    # Ensure changes to workdir, setup, etc. are reflected in the cluster
+    # Provision new cluster with cluster_name if it doesn't already exist
+    if handle is None:
+        backend = provider()
+        handle = backend.provision(task,
+                                   task.best_resources,
+                                   dryrun=False,
+                                   stream_logs=True,
+                                   cluster_name=cluster_name)
+        return handle
+
+    # Ensure changes to workdir, setup, etc. are reflected in the existing cluster
     region, zones = _get_region_zones_from_handle(handle)
 
     with open(handle, 'r') as f:
@@ -150,7 +162,7 @@ def run(entry_point, cluster, dryrun):
     handle = None
     if cluster is not None:
         new_task = dag.tasks[0]
-        handle = _reuse_cluster(new_task, cluster)
+        handle = _reuse_or_provision_cluster(new_task, cluster)
 
     sky.execute(dag, dryrun=dryrun, handle=handle, stream_logs=stream_logs)
 

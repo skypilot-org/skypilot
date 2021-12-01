@@ -51,8 +51,8 @@ def _fill_template(template_path: str,
         cluster_name = variables['cluster_name']
         output_path = pathlib.Path(
             template_path).parents[0] / 'user' / f'{cluster_name}.yml'
-        output_path = str(output_path)
         os.makedirs(output_path.parents[0], exist_ok=True)
+        output_path = str(output_path)
     with open(output_path, 'w') as fout:
         fout.write(content)
     logger.info(f'Created or updated file {_get_rel_path(output_path)}')
