@@ -10,7 +10,7 @@ import multiprocessing
 import sky.data_transfer
 import os
 import json
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List
 import sys
 import subprocess
 
@@ -75,10 +75,11 @@ class StorageBackend(object):
 
 class AWSStorageBackend(StorageBackend):
 
-    def __init__(self, name: str, path: str):
+    def __init__(self, name: str, path: str, backends=None):
         region = 'us-east-2'
         self.name = name
         self.path = path
+        self.backends = backends
         if "s3://" in self.path:
             assert name == split_s3_path(
                 path
@@ -101,6 +102,7 @@ class AWSStorageBackend(StorageBackend):
         os.system(sync_command)
 
     def cleanup(self):
+        print(f"Deleting S3 Bucket {self.name}")
         return self.delete_s3_bucket(self.name)
 
     def get_handle(self):
@@ -146,10 +148,11 @@ class AWSStorageBackend(StorageBackend):
 
 class GCSStorageBackend(StorageBackend):
 
-    def __init__(self, name: str, path: str):
+    def __init__(self, name: str, path: str, backends=None):
         region = 'us-central1'
         self.name = name
         self.path = path
+        self.backends = backends
         if "gcs://" in self.path:
             assert name == split_gcs_path(
                 path
@@ -161,19 +164,28 @@ class GCSStorageBackend(StorageBackend):
         self.path = path
         assert not is_new_bucket or self.path
         if "gcs://" not in self.path:
-            if is_new_bucket:
+            if "s3://" in self.path:
+                print("Initating GCS Data Transfer Service from S3->GCS")
+                aws_backend = backends['AWS']
+                self.transfer_to_gcs(aws_backend)
+            elif is_new_bucket and 's3://' not in self.path:
                 print("Uploading Local to GCS")
                 self.upload_from_local(self.path)
             else:
                 print("Syncing Local to GCS")
                 self.sync_from_local()
+
         self.is_initialized = True
 
     def sync_from_local(self):
         sync_command = f"gsutil -m rsync -r {self.path} gs://{self.name}/"
         os.system(sync_command)
 
+    def transfer_to_gcs(self, aws_backend):
+        sky.data_transfer._s3_to_gcs(aws_backend, self)
+
     def cleanup(self):
+        print(f"Deleting GCS Bucket {self.name}")
         return self.delete_gcs_bucket(self.name)
 
     def get_handle(self):
@@ -250,32 +262,26 @@ class Storage(object):
         backend = None
 
         if name == "AWS":
-            backend = AWSStorageBackend(self.name, self.source_path)
+            backend = AWSStorageBackend(self.name, self.source_path,
+                                        self.storage_backends)
         elif name == 'GCP':
-            backend = GCSStorageBackend(self.name, self.source_path)
+            backend = GCSStorageBackend(self.name, self.source_path,
+                                        self.storage_backends)
         else:
             raise ValueError(f"{name} not supported as Storage Backend!")
-        self._add_backend(backend)
 
-    def _add_backend(self, backend: StorageBackend) -> None:
-        """
-        Invoked by the optimizer after it has created a storage backend to
-        add it to Storage.
-        """
         assert backend.is_initialized
-        backend_key = type(backend)
-        assert backend_key not in self.storage_backends, f"Storage type {backend_key} already exists, why do " \
+        assert name not in self.storage_backends, f"Storage type {name} already exists, why do " \
                                                          f"you want to add another of the same type? "
-        self.storage_backends[backend_key] = backend
+        self.storage_backends[name] = backend
 
     def cleanup(self):
         """
         If not persistent, deletes data from all storage backends.
         :return:
         """
-        if not self.persistent:
-            for _, backend in self.storage_backends.items():
-                backend.cleanup()
+        for _, backend in self.storage_backends.items():
+            backend.cleanup()
 
 
 #aws_backend = AWSStorageBackend("imagenet-dataset-1", None)
