@@ -135,38 +135,7 @@ def run(entry_point, cluster, dryrun):
     stream_logs = False
 
     with sky.Dag() as dag:
-
-        entry_point_type = pathlib.Path(entry_point).suffix
-        if entry_point_type == '.py':
-            stream_logs = True
-
-            # TODO: Support conda environment cloning (see gpunode comment)
-            setup = f"""
-            pip3 install -r requirements.txt
-            """
-
-            run = f"""
-            python3 {entry_point}
-            """
-
-            task = sky.Task(
-                pathlib.Path(entry_point).stem,
-                workdir=os.getcwd(),
-                setup=setup,
-                run=run,
-            )
-
-            # TODO: Add good way to automatically infer resources?
-            # Can also just assume we always attach GPU for `run`
-            # TODO: Need a way to infer existing cluster resources if cluster is not None
-            task.set_resources({sky.Resources(sky.AWS(), accelerators='V100')})
-
-        elif entry_point_type in ['.yaml', '.yml']:
-            task = sky.Task.from_yaml(entry_point)
-
-        else:
-            raise ValueError(
-                f'Unsupported entry point type: {entry_point_type}')
+        task = sky.Task.from_yaml(entry_point)
 
     # TODO: This is sketchy. What if we're reusing a cluster and the optimized plan is different?
     dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
