@@ -8,8 +8,6 @@ from sky import clouds
 class Azure(clouds.Cloud):
     _REPR = 'Azure'
 
-    _BLOCKED_RESOURCES = set()
-
     # In general, query this from the cloud.
     # This pricing is for East US region.
     # https://azureprice.net/
@@ -98,7 +96,7 @@ class Azure(clouds.Cloud):
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources.accelerators = None
-            return Azure.remove_blocked_resources([resources])
+            return [resources]
 
         def _make(instance_type):
             r = copy.deepcopy(resources)
@@ -120,5 +118,4 @@ class Azure(clouds.Cloud):
         instance_type = Azure._ACCELERATORS_DIRECTORY.get((acc, acc_count))
         if instance_type is None:
             return []
-        resources = _make(instance_type)
-        return Azure.remove_blocked_resources(resources)
+        return _make(instance_type)

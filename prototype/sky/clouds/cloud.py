@@ -109,21 +109,3 @@ class Cloud(object):
         Launchable resources require a cloud and an instance type be assigned.
         """
         raise NotImplementedError
-
-    @classmethod
-    def add_blocked_resources(cls, resources):
-        """Adds resources to the blocked list."""
-        cls._BLOCKED_RESOURCES.add(resources)
-
-    @classmethod
-    def remove_blocked_resources(cls, orig_resources):
-        """Whether the resources are blocked."""
-        available_resources = []
-        for resources in orig_resources:
-            assert resources.instance_type is not None, resources
-            for blocked_resources in cls._BLOCKED_RESOURCES:
-                if resources.instance_type == blocked_resources.instance_type:
-                    break
-            else:  # available
-                available_resources.append(resources)
-        return available_resources

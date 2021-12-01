@@ -11,8 +11,6 @@ class AWS(clouds.Cloud):
     _REPR = 'AWS'
     _regions: List[clouds.Region] = []
 
-    _BLOCKED_RESOURCES = set()
-
     #### Regions/Zones ####
 
     @classmethod
@@ -135,7 +133,7 @@ class AWS(clouds.Cloud):
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources.accelerators = None
-            return AWS.remove_blocked_resources([resources])
+            return [resources]
 
         def _make(instance_type):
             r = copy.deepcopy(resources)
@@ -158,5 +156,4 @@ class AWS(clouds.Cloud):
             acc, acc_count)
         if instance_type is None:
             return []
-        resources = _make(instance_type)
-        return AWS.remove_blocked_resources(resources)
+        return _make(instance_type)

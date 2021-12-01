@@ -54,12 +54,14 @@ class Optimizer(object):
         return egress_time
 
     @staticmethod
-    def optimize(dag: sky.Dag, minimize=COST):
+    def optimize(dag: sky.Dag, minimize=COST, blocked_launchable_resources=[]):
         dag = copy.deepcopy(dag)
         # Optimization.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
         optimized_dag, best_plan = Optimizer._optimize_cost(
-            dag, minimize_cost=minimize == Optimizer.COST)
+            dag,
+            minimize_cost=minimize == Optimizer.COST,
+            blocked_launchable_resources=blocked_launchable_resources)
         optimized_dag = Optimizer._remove_dummy_source_sink_nodes(optimized_dag)
         return optimized_dag
 
@@ -139,7 +141,9 @@ class Optimizer(object):
         return fn(src_cloud, dst_cloud, nbytes)
 
     @staticmethod
-    def _optimize_cost(dag: sky.Dag, minimize_cost=True):
+    def _optimize_cost(dag: sky.Dag,
+                       minimize_cost=True,
+                       blocked_launchable_resources=[]):
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
         graph = dag.get_graph()
@@ -164,7 +168,7 @@ class Optimizer(object):
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = sky.registry.fill_in_launchable_resources(
-                    node)
+                    node, blocked_launchable_resources)
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()

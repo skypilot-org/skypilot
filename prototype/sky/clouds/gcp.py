@@ -10,8 +10,6 @@ class GCP(clouds.Cloud):
     _REPR = 'GCP'
     _regions: List[clouds.Region] = []
 
-    _BLOCKED_RESOURCES = set()
-
     # Pricing.  All info assumes us-central1.
     # In general, query pricing from the cloud.
     _ON_DEMAND_PRICES = {
@@ -199,14 +197,14 @@ class GCP(clouds.Cloud):
     def get_feasible_launchable_resources(self, resources):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            return GCP.remove_blocked_resources([resources])
+            return [resources]
         # TODO: check if accelerators well-formed/available.
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
         r = copy.deepcopy(resources)
         r.cloud = GCP()
         r.instance_type = GCP.get_default_instance_type()
-        return GCP.remove_blocked_resources([r])
+        return [r]
 
     def get_accelerators_from_instance_type(
             self,

@@ -62,16 +62,8 @@ with sky.Dag() as dag:
         #     'V100',
         # ),
         ##### Partially specified
-        # sky.Resources(accelerators='T4'),
-        # sky.Resources(accelerators={'T4': 8}, use_spot=True),
-        # sky.Resources(sky.AWS(), accelerators={'T4': 8}, use_spot=True),
-        # sky.Resources(sky.AWS(), accelerators='K80'),
-        # sky.Resources(sky.AWS(), accelerators='K80', use_spot=True),
+        sky.Resources(accelerators={'V100': 4}),
         # sky.Resources(accelerators='tpu-v3-8'),
-        # sky.Resources(accelerators='V100', use_spot=True),
-        sky.Resources(accelerators={'V100': 8}),
-        # sky.Resources(sky.AWS(), accelerators='V100', use_spot=True),
-        # sky.Resources(sky.AWS(), accelerators={'V100': 8}),
     })
 
     train.set_blocked_clouds({sky.Azure()})
@@ -79,7 +71,7 @@ with sky.Dag() as dag:
     # Optionally, specify a time estimator: Resources -> time in seconds.
     # train.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
-# TODO: Would be better to have an api as optimizer_fn = sky.Optimier(minimize=sky.Optimizer.COST)
-optimize_fn = lambda dag: sky.optimize(dag, minimize=sky.Optimizer.COST)
-# sky.execute(dag, dryrun=True)
-sky.execute(dag, optimize_fn=optimize_fn, teardown=True)
+sky.execute(dag,
+            teardown=True,
+            minimize=sky.Optimizer.COST,
+            provision_retry=True)

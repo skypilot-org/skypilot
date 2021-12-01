@@ -17,6 +17,7 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
+from sky import exceptions
 from sky import logging
 from sky import resources
 from sky import task as task_mod
@@ -358,7 +359,7 @@ class RetryingVmProvisioner(object):
                    f' (requested {to_provision}).'
                    ' Try changing resource requirements or use another cloud.')
         logger.error(message)
-        raise resources.SkyResourcesUnavailable(to_provision)
+        raise exceptions.ResourcesUnavailableError(to_provision)
 
 
 class CloudVmRayBackend(backends.Backend):
@@ -377,6 +378,37 @@ class CloudVmRayBackend(backends.Backend):
         run_id = backend_utils.get_run_id()
         self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, run_id)
         os.makedirs(self.log_dir, exist_ok=True)
+
+        self.blocked_launchable_resources = set()
+
+    def retrying_cloud_vm_provision(self, dag, dryrun: bool, stream_logs: bool,
+                                    minimize) -> ResourceHandle:
+        """Provision with retries for all launchable resources."""
+        provision_failed = True
+        while provision_failed:
+            provision_failed = False
+            task = dag.tasks[0]
+            best_resources = task.best_resources
+            assert best_resources is not None, task
+            try:
+                handle = self.provision(task,
+                                        best_resources,
+                                        dryrun=dryrun,
+                                        stream_logs=stream_logs)
+            except exceptions.ResourcesUnavailableError as e:
+                failed_resources = e.to_provision
+                self.blocked_launchable_resources.add(failed_resources)
+                logger.warning(
+                    f'Provision failed for {failed_resources}. Retrying other launchable resources...'
+                )
+                provision_failed = True
+                # TODO: set all remaining tasks' best_resources to None.
+                task.best_resources = None
+                dag = sky.optimize(dag,
+                                   minimize=minimize,
+                                   blocked_launchable_resources=self.
+                                   blocked_launchable_resources)
+        return handle
 
     def provision(self, task: App, to_provision: Resources, dryrun: bool,
                   stream_logs: bool) -> ResourceHandle:
