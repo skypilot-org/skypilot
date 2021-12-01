@@ -12,8 +12,8 @@ from sky import clouds
 from sky import global_user_state
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
-from sky.backends import local_docker_backend
 
+# TODO: Add support for local Docker backend.
 
 def _get_region_zones_from_handle(handle):
     """Gets region and zones from a Ray YAML file."""
