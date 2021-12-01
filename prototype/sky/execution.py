@@ -29,6 +29,7 @@ from sky import cloud_stores
 from sky import logging
 from sky import backends
 from sky.backends import backend_utils
+from sky.storage import Storage
 
 logger = logging.init_logger(__name__)
 
@@ -213,6 +214,12 @@ def execute_v1(dag: sky.Dag, dryrun: bool = False, teardown: bool = False):
 
     assert len(dag) == 1, 'Job launcher assumes 1 task for now'
     task = dag.tasks[0]
+    storage = task.get_storage()
+    if storage is not None:
+        # Optimizer should eventually choose where to store bucket
+        # Hardcoded right now, @zongheng Ideas on how to approach this?
+        optimizer_storage_backend = 'AWS'
+        storage.add_backend(optimizer_storage_backend)
 
     run_id = backend_utils.get_run_id()
     config_dict = backend_utils.write_cluster_config(
@@ -334,6 +341,14 @@ def execute_v2(dag: sky.Dag,
     # TODO: Azure. Port some of execute_v1()'s nice logging messages.
     assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
     task = dag.tasks[0]
+
+    storage = task.get_storage()
+    if storage is not None:
+        # Optimizer should eventually choose where to store bucket
+        # Hardcoded right now, @zongheng Ideas on how to approach this?
+        optimizer_storage_backend = 'AWS'
+        storage.add_backend(optimizer_storage_backend)
+
     best_resources = task.best_resources
     assert best_resources is not None, \
         'Run sky.Optimize.optimize() before sky.execute().'

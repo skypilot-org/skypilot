@@ -4,6 +4,7 @@ from sky.execution import execute
 from sky.resources import Resources
 from sky.task import ParTask, Task
 from sky.registry import fill_in_launchable_resources
+from sky.storage import Storage
 from sky.optimizer import Optimizer
 
 import os
@@ -21,4 +22,5 @@ __all__ = [
     'execute',
     'fill_in_launchable_resources',
     '__root_dir__',
+    'Storage',
 ]

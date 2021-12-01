@@ -18,20 +18,22 @@ class Task(object):
     """Task: a coarse-grained stage in an application."""
 
     def __init__(
-            self,
-            name=None,
-            workdir=None,
-            setup=None,
-            post_setup_fn=None,
-            docker_image=None,
-            container_name=None,
-            num_nodes=1,
-            private_key='~/.ssh/sky-key',
-            run=None,
+        self,
+        name=None,
+        workdir=None,
+        storage=None,
+        setup=None,
+        post_setup_fn=None,
+        docker_image=None,
+        container_name=None,
+        num_nodes=1,
+        private_key='~/.ssh/sky-key',
+        run=None,
     ):
         self.name = name
         self.best_resources = None
         self.run = run
+        self.storage = storage
         self.setup = setup
         self.post_setup_fn = post_setup_fn
         self.workdir = workdir
@@ -112,6 +114,12 @@ class Task(object):
 
     def get_resources(self):
         return self.resources
+
+    def get_storage(self):
+        return self.storage
+
+    def add_storage_backend(self, name):
+        self.storage.add_backend(name)
 
     def set_time_estimator(self, func):
         """Sets a func mapping resources to estimated time (secs)."""

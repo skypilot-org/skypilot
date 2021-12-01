@@ -7,15 +7,29 @@ import googleapiclient.discovery
 from googleapiclient import discovery
 from oauth2client.client import GoogleCredentials
 import multiprocessing
-import data_transfer
+import sky.data_transfer
 import os
 import json
 from typing import Any, Callable, Dict
 import sys
+import subprocess
 
-InitializeFn = Callable[[str], Any]
 Path = str
 StorageHandle = str
+
+
+def split_s3_path(s3_path):
+    path_parts = s3_path.replace("s3://", "").split("/")
+    bucket = path_parts.pop(0)
+    key = "/".join(path_parts)
+    return bucket, key
+
+
+def split_gcs_path(gcs_path):
+    path_parts = gcs_path.replace("gcs://", "").split("/")
+    bucket = path_parts.pop(0)
+    key = "/".join(path_parts)
+    return bucket, key
 
 
 class StorageBackend(object):
@@ -27,9 +41,9 @@ class StorageBackend(object):
 
     StorageHandle = str
 
-    def __init__(self, name: str, initialize_fn: InitializeFn):
+    def __init__(self, name: str, path: str):
         self.name = name
-        self.initialize_fn = initialize_fn
+        self.path = path
         self.is_initialized = False
         self.storage_handle = None
 
@@ -61,12 +75,30 @@ class StorageBackend(object):
 
 class AWSStorageBackend(StorageBackend):
 
-    def __init__(self, name: str, initialize_fn: InitializeFn):
+    def __init__(self, name: str, path: str):
         region = 'us-east-2'
-        self.client = self.create_client(region)
         self.name = name
+        self.path = path
+        if "s3://" in self.path:
+            assert name == split_s3_path(
+                path
+            )[0], "S3 Bucket is specified as path, the name should be the same as S3 bucket!"
+        self.client = self.create_client(region)
         self.region = region
-        self.bucket = self.get_bucket()
+        self.bucket, is_new_bucket = self.get_bucket()
+        assert not is_new_bucket or self.path
+        if "s3://" not in self.path:
+            if is_new_bucket:
+                print("Uploading Local to S3")
+                self.upload_from_local(self.path)
+            else:
+                print("Syncing Local to S3")
+                self.sync_from_local()
+        self.is_initialized = True
+
+    def sync_from_local(self):
+        sync_command = f"aws s3 sync {self.path} s3://{self.name}/"
+        os.system(sync_command)
 
     def cleanup(self):
         return self.delete_s3_bucket(self.name)
@@ -81,14 +113,14 @@ class AWSStorageBackend(StorageBackend):
         s3 = boto3.resource('s3')
         bucket = s3.Bucket(self.name)
         if bucket in s3.buckets.all():
-            return bucket
-        return self.create_s3_bucket(self.name)
+            return bucket, False
+        return self.create_s3_bucket(self.name), True
 
     def upload_from_local(self, local_path):
-        data_transfer._local_to_s3(local_path, self)
+        sky.data_transfer._local_to_s3(local_path, self)
 
     def download_to_local(self, local_path):
-        data_transfer._s3_to_local(self, local_path)
+        sky.data_transfer._s3_to_local(self, local_path)
 
     def create_s3_bucket(self, bucket_name, region='us-east-2'):
         # Create bucket
@@ -114,12 +146,32 @@ class AWSStorageBackend(StorageBackend):
 
 class GCSStorageBackend(StorageBackend):
 
-    def __init__(self, name: str, initialize_fn: InitializeFn):
+    def __init__(self, name: str, path: str):
         region = 'us-central1'
+        self.name = name
+        self.path = path
+        if "gcs://" in self.path:
+            assert name == split_gcs_path(
+                path
+            )[0], "GCS Bucket is specified as path, the name should be the same as GCS bucket!"
         self.client = self.create_client(region)
         self.name = name
         self.region = region
-        self.bucket = self.get_bucket()
+        self.bucket, is_new_bucket = self.get_bucket()
+        self.path = path
+        assert not is_new_bucket or self.path
+        if "gcs://" not in self.path:
+            if is_new_bucket:
+                print("Uploading Local to GCS")
+                self.upload_from_local(self.path)
+            else:
+                print("Syncing Local to GCS")
+                self.sync_from_local()
+        self.is_initialized = True
+
+    def sync_from_local(self):
+        sync_command = f"gsutil -m rsync -r {self.path} gs://{self.name}/"
+        os.system(sync_command)
 
     def cleanup(self):
         return self.delete_gcs_bucket(self.name)
@@ -133,15 +185,15 @@ class GCSStorageBackend(StorageBackend):
     def get_bucket(self):
         try:
             bucket = self.client.get_bucket(self.name)
-            return bucket
+            return bucket, False
         except:
-            return self.create_gcs_bucket(self.name)
+            return self.create_gcs_bucket(self.name), True
 
     def upload_from_local(self, local_path):
-        data_transfer._local_to_gcs(local_path, self)
+        sky.data_transfer._local_to_gcs(local_path, self)
 
     def download_to_local(self, local_path):
-        data_transfer._gcs_to_local(self, local_path)
+        sky.data_transfer._gcs_to_local(self, local_path)
 
     def create_gcs_bucket(self, bucket_name, region='us-central1'):
         bucket = self.client.bucket(bucket_name)
@@ -166,10 +218,10 @@ class Storage(object):
 
     def __init__(self,
                  name: str,
-                 initialize_fn: InitializeFn,
+                 source_path: str,
                  default_mount_path: Path,
                  storage_backends: Dict[str, StorageBackend] = None,
-                 persistent: bool = False):
+                 persistent: bool = True):
         """
         :param name: Name of the storage object. Used as the unique id for
         persistence.
@@ -181,7 +233,7 @@ class Storage(object):
         :param persistent: Whether to persist across sky runs.
         """
         self.name = name
-        self.initialize_fn = initialize_fn
+        self.source_path = source_path
         self.default_mount_path = default_mount_path
         self.persistent = persistent
 
@@ -194,7 +246,18 @@ class Storage(object):
 
         super(Storage, self).__init__()
 
-    def add_backend(self, backend: StorageBackend) -> None:
+    def add_backend(self, name: str) -> None:
+        backend = None
+
+        if name == "AWS":
+            backend = AWSStorageBackend(self.name, self.source_path)
+        elif name == 'GCP':
+            backend = GCSStorageBackend(self.name, self.source_path)
+        else:
+            raise ValueError(f"{name} not supported as Storage Backend!")
+        self._add_backend(backend)
+
+    def _add_backend(self, backend: StorageBackend) -> None:
         """
         Invoked by the optimizer after it has created a storage backend to
         add it to Storage.
