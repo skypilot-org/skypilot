@@ -392,6 +392,9 @@ def execute_v3(dag: sky.Dag,
         each task's output can be redirected to their own files.
       backend: Backend; backend to use for executing the tasks. Defaults to
         CloudVmRayBackend()
+      minimize: bool; the dag optimization metric, e.g. sky.Optimizer.COST.
+      provision_retry: bool; whether to retry provisioning when a launchable 
+        resource fails to provision.
     """
     # TODO: Azure. Port some of execute_v1()'s nice logging messages.
     assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
