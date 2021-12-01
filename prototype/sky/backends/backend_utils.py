@@ -16,12 +16,12 @@ import jinja2
 from sky import authentication as auth
 from sky import clouds
 from sky import logging
-from sky import task
+from sky import task as task_lib
 
 logger = logging.init_logger(__name__)
 
 # An application.  These are the task types to support.
-App = Union[task.Task, task.ParTask]
+App = Union[task_lib.Task, task_lib.ParTask]
 RunId = str
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
@@ -53,7 +53,7 @@ def _fill_template(template_path: str,
 
 
 def write_cluster_config(run_id: RunId,
-                         task: task.Task,
+                         task: task_lib.Task,
                          cluster_config_template: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
@@ -193,7 +193,7 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
     else:
         assert False, f'No support for distributed clusters for {cloud}.'
     while True:
-        proc = subprocess.run(f"ray exec {cluster_config_file} 'ray status'",
+        proc = subprocess.run(f'ray exec {cluster_config_file} "ray status"',
                               shell=True,
                               check=True,
                               stdout=subprocess.PIPE,

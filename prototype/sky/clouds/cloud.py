@@ -22,6 +22,7 @@ class Zone(collections.namedtuple('Zone', ['name'])):
 
 
 class Cloud(object):
+    """A cloud provider."""
 
     UNKNOWN_COST = int(1e9)
 

@@ -1,3 +1,4 @@
+"""Clouds in Sky."""
 from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import Region
 from sky.clouds.cloud import Zone
