@@ -13,6 +13,7 @@ import zlib
 
 import jinja2
 
+import sky
 from sky import authentication as auth
 from sky import clouds
 from sky import logging
@@ -29,7 +30,7 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 
 
-def _get_rel_path(path: str) -> str:
+def get_rel_path(path: str) -> str:
     cwd = os.getcwd()
     common = os.path.commonpath([path, cwd])
     return os.path.relpath(path, common)
@@ -40,6 +41,10 @@ def _fill_template(template_path: str,
                    output_path: Optional[str] = None) -> str:
     """Create a file from a Jinja template and return the filename."""
     assert template_path.endswith('.j2'), template_path
+    if not os.path.isabs(template_path):
+        # Need abs path here, otherwise get_rel_path() below fails.
+        template_path = os.path.join(os.path.dirname(sky.__root_dir__),
+                                     template_path)
     with open(template_path) as fin:
         template = fin.read()
     template = jinja2.Template(template)
@@ -48,7 +53,7 @@ def _fill_template(template_path: str,
         output_path, _ = template_path.rsplit('.', 1)
     with open(output_path, 'w') as fout:
         fout.write(content)
-    logger.info(f'Created or updated file {_get_rel_path(output_path)}')
+    logger.info(f'Created or updated file {get_rel_path(output_path)}')
     return output_path
 
 
@@ -128,16 +133,12 @@ def write_cluster_config(run_id: RunId,
     _add_ssh_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
         # FIXME: replace hard-coding paths
-        config_dict['gcloud'] = (_fill_template(
-            'config/gcp-tpu-create.sh.j2',
-            dict(resources_vars, **{
-                'zones': ','.join(zones),
-            })),
-                                 _fill_template(
-                                     'config/gcp-tpu-delete.sh.j2',
-                                     dict(resources_vars, **{
-                                         'zones': ','.join(zones),
-                                     })))
+        config_dict['gcloud'] = tuple(
+            _fill_template(path,
+                           dict(resources_vars, **{
+                               'zones': ','.join(zones),
+                           })) for path in
+            ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
     return config_dict
 
 
@@ -222,17 +223,17 @@ def run_command_on_ip_via_ssh(ip: str,
         '{}@{}'.format(user, ip),
         command  # TODO: shlex.quote() doesn't work.  Is it needed in a list?
     ]
-    proc = subprocess.Popen(cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            universal_newlines=True)
-    outs, errs = proc.communicate()
-    if outs:
-        logger.info(outs)
-    if proc.returncode:
-        if errs:
-            logger.error(errs)
-        raise subprocess.CalledProcessError(proc.returncode, cmd)
+    with subprocess.Popen(cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          universal_newlines=True) as proc:
+        outs, errs = proc.communicate()
+        if outs:
+            logger.info(outs)
+        if proc.returncode:
+            if errs:
+                logger.error(errs)
+            raise subprocess.CalledProcessError(proc.returncode, cmd)
 
 
 def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):

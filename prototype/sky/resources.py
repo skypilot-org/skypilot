@@ -46,8 +46,8 @@ class Resources(object):
         # Convert to Dict[str, int].
         if accelerators is not None and isinstance(accelerators, str):
             if 'tpu' in accelerators:
-                assert accelerator_args is not None, \
-                    'accelerator_args must be specified together with TPU'
+                if accelerator_args is None:
+                    accelerator_args = {}
                 if 'tf_version' not in accelerator_args:
                     logger.info('Missing tf_version in accelerator_args, using'
                                 ' default (2.5.0)')

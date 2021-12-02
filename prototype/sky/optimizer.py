@@ -100,10 +100,10 @@ class Optimizer(object):
         with dag:
             source = make_dummy('__source__')
             for real_source_node in zero_indegree_nodes:
-                source >> real_source_node
+                source >> real_source_node  # pylint: disable=pointless-statement
             sink = make_dummy('__sink__')
             for real_sink_node in zero_outdegree_nodes:
-                real_sink_node >> sink
+                real_sink_node >> sink  # pylint: disable=pointless-statement
         return dag
 
     @staticmethod

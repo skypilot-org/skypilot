@@ -80,6 +80,8 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
         futures = []
 
         def start_task(cmd, log_path, stream_logs):
+            # Set the executable to /bin/bash, so that the 'source ~/.bashrc'
+            # and 'source activate conda_env' can be used.
             proc = subprocess.Popen(cmd,
                                     stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE,
@@ -102,14 +104,14 @@ def _run_with_log(cmd,
                   stream_logs=False,
                   start_streaming_at='',
                   **kwargs):
-    proc = subprocess.Popen(cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            **kwargs)
-    stdout, stderr = backend_utils.redirect_process_output(
-        proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
-    proc.wait()
-    return proc, stdout, stderr
+    with subprocess.Popen(cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          **kwargs) as proc:
+        stdout, stderr = backend_utils.redirect_process_output(
+            proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
+        proc.wait()
+        return proc, stdout, stderr
 
 
 def _get_cluster_config_template(task):
@@ -251,20 +253,17 @@ class RetryingVmProvisioner(object):
         # because we may have an existing cluster there.
         region = None
         zones = None
-        try:
-            path = _get_cluster_config_template(task)[:-len('.j2')]
-            with open(path, 'r') as f:
-                config = yaml.safe_load(f)
-            if type(cloud) in (clouds.AWS, clouds.GCP):
-                region = config['provider']['region']
-                zones = config['provider']['availability_zone']
-            elif isinstance(cloud, clouds.Azure):
-                region = config['provider']['location']
-                zones = None
-            else:
-                assert False, cloud
-        except Exception:
-            pass
+        path = _get_cluster_config_template(task)[:-len('.j2')]
+        with open(path, 'r') as f:
+            config = yaml.safe_load(f)
+        if type(cloud) in (clouds.AWS, clouds.GCP):
+            region = config['provider']['region']
+            zones = config['provider']['availability_zone']
+        elif isinstance(cloud, clouds.Azure):
+            region = config['provider']['location']
+            zones = None
+        else:
+            assert False, cloud
         if region is not None:
             region = clouds.Region(name=region)
             if zones is not None:
@@ -303,6 +302,7 @@ class RetryingVmProvisioner(object):
             if dryrun:
                 return
             acc_args = to_provision.accelerator_args
+            tpu_name = None
             if acc_args is not None and acc_args.get('tpu_name') is not None:
                 tpu_name = acc_args['tpu_name']
                 assert 'gcloud' in config_dict, \
@@ -346,16 +346,15 @@ class RetryingVmProvisioner(object):
                          stderr=subprocess.PIPE)
             else:
                 if tpu_name is not None:
-                    # TODO: check this quoting
                     _run(f'ray exec {cluster_config_file} '
                          f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
-
+                relpath = backend_utils.get_rel_path(cluster_config_file)
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing VM(s). Setup completed.{style.RESET_ALL}')
                 logger.info(
                     f'\nTo log into the head VM:\t{style.BRIGHT}ray attach'
-                    f' {cluster_config_file}{style.RESET_ALL}\n')
+                    f' {relpath}{style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -527,7 +526,7 @@ class CloudVmRayBackend(backends.Backend):
                          ips: List[str] = None):
         local_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
         style = colorama.Style
-        logger.info('Syncing down the logs to '
+        logger.info('Syncing down logs to '
                     f'{style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
         os.makedirs(local_log_dir, exist_ok=True)
         # Call the ray sdk to rsync the logs back to local.
@@ -638,11 +637,8 @@ class CloudVmRayBackend(backends.Backend):
                 # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
                 # would be force-set to empty by Ray.
                 num_gpus_str = f', num_gpus={acc_count}'
-            # Set the executable to /bin/bash, so that the 'source ~/.bashrc'
-            # and 'source activate conda_env' can be used.
-            name = f'task-{ip}'
+            name = f'{ip}'
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
-
             codegen.append(
                 textwrap.dedent(f"""\
         futures.append(ray.remote(start_task) \\
@@ -677,16 +673,16 @@ class CloudVmRayBackend(backends.Backend):
         colorama.init()
         style = colorama.Style
         if not teardown:
-            # TODO: check quoting
+            relpath = backend_utils.get_rel_path(handle)
             logger.info(
                 '\nTo log into the head VM:\t'
-                f'{style.BRIGHT}ray attach {handle} {style.RESET_ALL}\n'
+                f'{style.BRIGHT}ray attach {relpath} {style.RESET_ALL}\n'
                 '\nTo tear down the cluster:'
-                f'\t{style.BRIGHT}ray down {handle} -y {style.RESET_ALL}\n')
+                f'\t{style.BRIGHT}ray down {relpath} -y {style.RESET_ALL}\n')
             if self._managed_tpu is not None:
-                # TODO: check quoting
+                tpu_script = backend_utils.get_rel_path(self._managed_tpu[1])
                 logger.info('To tear down the TPU(s):\t'
-                            f'{style.BRIGHT}bash {self._managed_tpu[1]}'
+                            f'{style.BRIGHT}bash {tpu_script}'
                             f'{style.RESET_ALL}\n')
 
     def teardown(self, handle: ResourceHandle) -> None:
