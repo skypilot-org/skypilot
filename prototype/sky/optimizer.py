@@ -71,7 +71,7 @@ class Optimizer(object):
         # Optimization.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
         optimized_dag, unused_best_plan = Optimizer._optimize_cost(
-            dag, minimize_cost=minimize == Optimizer.COST,
+            dag, minimize_cost=minimize == OptimizeTarget.COST,
             blocked_launchable_resources=blocked_launchable_resources)
         optimized_dag = Optimizer._remove_dummy_source_sink_nodes(optimized_dag)
         return optimized_dag
@@ -179,7 +179,7 @@ class Optimizer(object):
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = \
-                    sky.registry.fill_in_launchable_resources(node)
+                    sky.registry.fill_in_launchable_resources(node, blocked_launchable_resources)
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
