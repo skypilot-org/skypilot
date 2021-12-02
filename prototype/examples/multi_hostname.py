@@ -8,5 +8,4 @@ with sky.Dag() as dag:
     sky.Task(run='echo My hostname: $(hostname)',
              num_nodes=2).set_resources(sky.Resources(sky.AWS()))
 
-dag = sky.optimize(dag)
 sky.execute(dag)

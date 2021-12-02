@@ -8,7 +8,6 @@ def _test_resources(resources):
     with sky.Dag() as dag:
         train = sky.Task('train')
         train.set_resources({resources})
-    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
     sky.execute(dag, dryrun=True)
     assert True
 

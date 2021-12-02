@@ -17,14 +17,19 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
+from sky import dag
 from sky import exceptions
 from sky import logging
+from sky import optimizer
 from sky import resources
 from sky import task as task_mod
 from sky.backends import backend_utils
 
 App = backend_utils.App
 Resources = resources.Resources
+Dag = dag.Dag
+OptimizeTarget = optimizer.OptimizeTarget
+
 Path = str
 PostSetupFn = Callable[[str], Any]
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
@@ -139,10 +144,15 @@ def _to_accelerator_and_count(resources: Optional[Resources]
 class RetryingVmProvisioner(object):
     """A provisioner that retries different regions/zones within a cloud."""
 
-    def __init__(self, log_dir):
+    def __init__(self, log_dir: str, dag: Dag, optimize_target: OptimizeTarget):
         self._blocked_regions = set()
         self._blocked_zones = set()
+        self._blocked_launchable_resources = set()
+
         self.log_dir = log_dir
+        self.dag = dag
+        self.optimize_target = optimize_target
+
         colorama.init()
 
     def _in_blocklist(self, cloud, region, zones):
@@ -274,8 +284,8 @@ class RetryingVmProvisioner(object):
         for region, zones in cloud.region_zones_provision_loop():
             yield (region, zones)
 
-    def provision_with_retries(self, task: App, to_provision: Resources,
-                               dryrun: bool, stream_logs: bool):
+    def _retry_region_zones(self, task: App, to_provision: Resources,
+                            dryrun: bool, stream_logs: bool):
         """The provision retry loop."""
         Style = colorama.Style
 
@@ -358,7 +368,43 @@ class RetryingVmProvisioner(object):
                    f' (requested {to_provision}).'
                    ' Try changing resource requirements or use another cloud.')
         logger.error(message)
-        raise exceptions.ResourcesUnavailableError(to_provision)
+        raise exceptions.ResourcesUnavailableError()
+
+    def provision_with_retries(self, task: App, to_provision: Resources,
+                               dryrun: bool, stream_logs: bool):
+        """Provision with retries for all launchable resources."""
+        assert self.dag is not None, 'Must register dag first.'
+        assert self.optimize_target is not None, 'Must register optimizer_target first.'
+
+        Style = colorama.Style
+        task_index = self.dag.tasks.index(task)
+
+        # Retrying launchable resources.
+        provision_failed = True
+        while provision_failed:
+            provision_failed = False
+            try:
+                handle = self._retry_region_zones(task,
+                                                  to_provision,
+                                                  dryrun=dryrun,
+                                                  stream_logs=stream_logs)
+            except exceptions.ResourcesUnavailableError:
+                provision_failed = True
+                logger.warning(
+                    f'\n{Style.BRIGHT}Provision failed for {to_provision}. Retrying other launchable resources...{Style.RESET_ALL}'
+                )
+                # Add failed resources to the blocklist.
+                self._blocked_launchable_resources.add(to_provision)
+                # TODO: set all remaining tasks' best_resources to None.
+                task.best_resources = None
+                self.dag = sky.optimize(self.dag,
+                                        minimize=self.optimize_target,
+                                        blocked_launchable_resources=self.
+                                        _blocked_launchable_resources)
+                task = self.dag.tasks[task_index]
+                to_provision = task.best_resources
+                assert to_provision is not None, task
+        return handle
 
 
 class CloudVmRayBackend(backends.Backend):
@@ -378,43 +424,19 @@ class CloudVmRayBackend(backends.Backend):
         self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, run_id)
         os.makedirs(self.log_dir, exist_ok=True)
 
-        self.blocked_launchable_resources = set()
+        self.dag = None
+        self.optimize_target = None
 
-    def retrying_cloud_vm_provision(self, dag, dryrun: bool, stream_logs: bool,
-                                    minimize) -> ResourceHandle:
-        """Provision with retries for all launchable resources."""
-        Style = colorama.Style
-        provision_failed = True
-        while provision_failed:
-            provision_failed = False
-            task = dag.tasks[0]
-            best_resources = task.best_resources
-            assert best_resources is not None, task
-            try:
-                handle = self.provision(task,
-                                        best_resources,
-                                        dryrun=dryrun,
-                                        stream_logs=stream_logs)
-            except exceptions.ResourcesUnavailableError as e:
-                failed_resources = e.to_provision
-                self.blocked_launchable_resources.add(failed_resources)
-                logger.warning(
-                    f'\n{Style.BRIGHT}Provision failed for {failed_resources}. Retrying other launchable resources...{Style.RESET_ALL}'
-                )
-                provision_failed = True
-                # TODO: set all remaining tasks' best_resources to None.
-                task.best_resources = None
-                dag = sky.optimize(dag,
-                                   minimize=minimize,
-                                   blocked_launchable_resources=self.
-                                   blocked_launchable_resources)
-        return handle
+    def register_info(self, **kwargs) -> None:
+        self.dag = kwargs['dag']
+        self.optimize_target = kwargs['optimize_target']
 
     def provision(self, task: App, to_provision: Resources, dryrun: bool,
                   stream_logs: bool) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # ray up: the VMs.
-        provisioner = RetryingVmProvisioner(self.log_dir)
+        provisioner = RetryingVmProvisioner(self.log_dir, self.dag,
+                                            self.optimize_target)
         config_dict = provisioner.provision_with_retries(
             task, to_provision, dryrun, stream_logs)
         if dryrun:

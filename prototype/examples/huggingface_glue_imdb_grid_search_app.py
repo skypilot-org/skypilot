@@ -41,8 +41,6 @@ with sky.Dag() as dag:
     # Groups all tasks under a sky.ParTask.
     sky.ParTask(tasks).set_resources(resources_to_launch)
 
-dag = sky.optimize(dag)
-
 # Set 'stream_logs=False' to not mix all tasks' outputs together.
 # Each task's output is redirected to run-{lr}.log and can be tail-ed.
 sky.execute(dag, stream_logs=False)

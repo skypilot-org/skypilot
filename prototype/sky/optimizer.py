@@ -1,5 +1,6 @@
 import collections
 import copy
+import enum
 import pprint
 
 import networkx as nx
@@ -8,16 +9,25 @@ import tabulate
 
 import sky
 from sky import clouds
+from sky import dag
 from sky import logging
+from sky import task
+from sky import resources
 
 logger = logging.init_logger(__name__)
 
+Dag = dag.Dag
+Resources = resources.Resources
 
-class Optimizer(object):
-
-    # Constants: minimize what target?
+# Constants: minimize what target?
+class OptimizeTarget(enum.Enum):
     COST = 0
     TIME = 1
+    # BANDWIDTH = 3
+    # LATENCY = 4
+class Optimizer(object):
+
+    
 
     @staticmethod
     def _egress_cost(src_cloud, dst_cloud, gigabytes):
@@ -54,19 +64,19 @@ class Optimizer(object):
         return egress_time
 
     @staticmethod
-    def optimize(dag: sky.Dag, minimize=COST, blocked_launchable_resources=[]):
+    def optimize(dag: Dag, minimize=OptimizeTarget.COST, blocked_launchable_resources=[]):
         dag = copy.deepcopy(dag)
         # Optimization.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
         optimized_dag, best_plan = Optimizer._optimize_cost(
             dag,
-            minimize_cost=minimize == Optimizer.COST,
+            minimize_cost=minimize == OptimizeTarget.COST,
             blocked_launchable_resources=blocked_launchable_resources)
         optimized_dag = Optimizer._remove_dummy_source_sink_nodes(optimized_dag)
         return optimized_dag
 
     @staticmethod
-    def _add_dummy_source_sink_nodes(dag: sky.Dag):
+    def _add_dummy_source_sink_nodes(dag: Dag):
         """Adds special Source and Sink nodes.
 
         The two special nodes are for conveniently handling cases such as
@@ -92,7 +102,7 @@ class Optimizer(object):
                 zero_outdegree_nodes.append(node)
 
         def make_dummy(name):
-            dummy = sky.Task(name)
+            dummy = task.Task(name)
             dummy.set_resources({DummyResources(DummyCloud(), None)})
             dummy.set_time_estimator(lambda _: 0)
             return dummy
@@ -107,7 +117,7 @@ class Optimizer(object):
         return dag
 
     @staticmethod
-    def _remove_dummy_source_sink_nodes(dag: sky.Dag):
+    def _remove_dummy_source_sink_nodes(dag: Dag):
         """Removes special Source and Sink nodes."""
         source = [t for t in dag.tasks if t.name == '__source__']
         sink = [t for t in dag.tasks if t.name == '__sink__']
@@ -117,9 +127,9 @@ class Optimizer(object):
         return dag
 
     @staticmethod
-    def _egress_cost_or_time(minimize_cost: bool, parent: sky.Task,
-                             parent_resources: sky.Resources, node: sky.Task,
-                             resources: sky.Resources):
+    def _egress_cost_or_time(minimize_cost: bool, parent: task.Task,
+                             parent_resources: Resources, node: task.Task,
+                             resources: Resources):
         """Computes the egress cost or time depending on 'minimize_cost'."""
         if isinstance(parent_resources.cloud, DummyCloud):
             # Special case.  The current 'node' is a real
@@ -141,7 +151,7 @@ class Optimizer(object):
         return fn(src_cloud, dst_cloud, nbytes)
 
     @staticmethod
-    def _optimize_cost(dag: sky.Dag,
+    def _optimize_cost(dag: Dag,
                        minimize_cost=True,
                        blocked_launchable_resources=[]):
         # TODO: The output of this function is useful. Should generate a
@@ -293,7 +303,7 @@ class Optimizer(object):
         return best_plan
 
 
-class DummyResources(sky.Resources):
+class DummyResources(Resources):
     """A dummy Resources that has zero egress cost from/to."""
 
     _REPR = 'DummyCloud'

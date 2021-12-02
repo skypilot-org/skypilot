@@ -46,3 +46,7 @@ class Backend(object):
 
     def teardown(self, handle: ResourceHandle) -> None:
         raise NotImplementedError
+
+    def register_info(self, **kwargs) -> None:
+        """Register backend-specific information."""
+        pass

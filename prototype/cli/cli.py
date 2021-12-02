@@ -17,7 +17,6 @@ def run(config_path, dryrun):
     with sky.Dag() as dag:
         sky.Task.from_yaml(config_path)
 
-    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
     sky.execute(dag, dryrun=dryrun)
 
 
