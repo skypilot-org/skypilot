@@ -319,6 +319,7 @@ def execute_v2(dag: sky.Dag,
                dryrun: bool = False,
                teardown: bool = False,
                stream_logs: bool = True,
+               handle: Any = None,
                backend: Optional[backends.Backend] = None) -> None:
     """Executes a planned DAG.
 
@@ -331,6 +332,8 @@ def execute_v2(dag: sky.Dag,
       stream_logs: bool; whether to stream all tasks' outputs to the client.
         Hint: for a ParTask, set this to False to avoid a lot of log outputs;
         each task's output can be redirected to their own files.
+      handle: Any; if provided, execution will use an existing backend cluster handle
+        instead of provisioning a new one.
       backend: Backend; backend to use for executing the tasks. Defaults to
         CloudVmRayBackend()
     """
@@ -343,10 +346,12 @@ def execute_v2(dag: sky.Dag,
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
 
-    handle = backend.provision(task,
-                               best_resources,
-                               dryrun=dryrun,
-                               stream_logs=stream_logs)
+    if handle is None:
+        handle = backend.provision(task,
+                                   best_resources,
+                                   dryrun=dryrun,
+                                   stream_logs=stream_logs)
+
     if dryrun:
         logger.info('Dry run finished.')
         return
