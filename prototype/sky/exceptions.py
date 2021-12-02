@@ -1,4 +1,5 @@
-class ResourcesUnavailableError(Exception):
+"""Exceptions."""
 
-    def __init__(self):
-        super().__init__()
+
+class ResourcesUnavailableError(Exception):
+    pass

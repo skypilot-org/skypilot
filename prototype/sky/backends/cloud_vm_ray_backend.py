@@ -18,7 +18,7 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
-from sky import dag
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
 from sky import logging
@@ -30,7 +30,7 @@ from sky.backends import backend_utils
 App = backend_utils.App
 
 Resources = resources_lib.Resources
-Dag = dag.Dag
+Dag = dag_lib.Dag
 OptimizeTarget = optimizer.OptimizeTarget
 
 Path = str
@@ -300,9 +300,8 @@ class RetryingVmProvisioner(object):
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
         tail_cmd = f'tail -n100 -f {log_path}'
-        logger.info(
-            f'To view detailed progress: {style.BRIGHT}{tail_cmd}{style.RESET_ALL}'
-        )
+        logger.info('To view detailed progress: '
+                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(task, to_provision.cloud):
@@ -385,9 +384,10 @@ class RetryingVmProvisioner(object):
                                cluster_name: str):
         """Provision with retries for all launchable resources."""
         assert self.dag is not None, 'Must register dag first.'
-        assert self.optimize_target is not None, 'Must register optimizer_target first.'
+        assert self.optimize_target is not None, \
+            'Must register optimizer_target first.'
 
-        Style = colorama.Style
+        style = colorama.Style
         task_index = self.dag.tasks.index(task)
 
         # Retrying launchable resources.
@@ -403,8 +403,8 @@ class RetryingVmProvisioner(object):
             except exceptions.ResourcesUnavailableError:
                 provision_failed = True
                 logger.warning(
-                    f'\n{Style.BRIGHT}Provision failed for {to_provision}. Retrying other launchable resources...{Style.RESET_ALL}'
-                )
+                    f'\n{style.BRIGHT}Provision failed for {to_provision}. '
+                    f'Retrying other launchable resources...{style.RESET_ALL}')
                 # Add failed resources to the blocklist.
                 self._blocked_launchable_resources.add(to_provision)
                 # TODO: set all remaining tasks' best_resources to None.
@@ -429,7 +429,6 @@ class CloudVmRayBackend(backends.Backend):
 
     class ResourceHandle(str):
         """A string path pointing to a cluster.yaml file."""
-        pass
 
     def __init__(self):
         # TODO: should include this as part of the handle.

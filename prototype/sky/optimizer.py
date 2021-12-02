@@ -3,6 +3,7 @@ import collections
 import copy
 import enum
 import pprint
+from typing import List, Optional
 
 import networkx as nx
 import numpy as np
@@ -10,21 +11,22 @@ import tabulate
 
 import sky
 from sky import clouds
-from sky import dag
+from sky import dag as dag_lib
 from sky import logging
+from sky import resources as resources_lib
 from sky import task
-from sky import resources
 
 logger = logging.init_logger(__name__)
 
-Dag = dag.Dag
-Resources = resources.Resources
+Dag = dag_lib.Dag
+Resources = resources_lib.Resources
 
 
 # Constants: minimize what target?
 class OptimizeTarget(enum.Enum):
     COST = 0
     TIME = 1
+
 
 class Optimizer(object):
     """The Sky optimizer: assigns best resources to user tasks."""
@@ -64,14 +66,16 @@ class Optimizer(object):
         return egress_time
 
     @staticmethod
-    def optimize(dag: Dag,
-                 minimize=OptimizeTarget.COST,
-                 blocked_launchable_resources=[]):
+    def optimize(
+            dag: Dag,
+            minimize=OptimizeTarget.COST,
+            blocked_launchable_resources: Optional[List[Resources]] = None):
         dag = copy.deepcopy(dag)
         # Optimization.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
         optimized_dag, unused_best_plan = Optimizer._optimize_cost(
-            dag, minimize_cost=minimize == OptimizeTarget.COST,
+            dag,
+            minimize_cost=minimize == OptimizeTarget.COST,
             blocked_launchable_resources=blocked_launchable_resources)
         optimized_dag = Optimizer._remove_dummy_source_sink_nodes(optimized_dag)
         return optimized_dag
@@ -153,8 +157,9 @@ class Optimizer(object):
 
     @staticmethod
     def _optimize_cost(dag: Dag,
-                       minimize_cost=True,
-                       blocked_launchable_resources=[]):
+                       minimize_cost: bool=True,
+                       blocked_launchable_resources: \
+                           Optional[List[Resources]]=None):
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
         graph = dag.get_graph()
@@ -179,7 +184,10 @@ class Optimizer(object):
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = \
-                    sky.registry.fill_in_launchable_resources(node, blocked_launchable_resources)
+                    sky.registry.fill_in_launchable_resources(\
+                        node,
+                        blocked_launchable_resources
+                    )
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
@@ -317,4 +325,3 @@ class DummyResources(Resources):
 
 class DummyCloud(clouds.Cloud):
     """A dummy Cloud that has zero egress cost from/to."""
-    pass

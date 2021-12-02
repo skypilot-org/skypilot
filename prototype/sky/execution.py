@@ -62,7 +62,8 @@ def execute_v2(dag: sky.Dag,
         handle instead of provisioning a new one.
       backend: Backend; backend to use for executing the tasks. Defaults to
         CloudVmRayBackend()
-      optimize_target: OptimizeTarget; the dag optimization metric, e.g. OptimizeTarget.COST.
+      optimize_target: OptimizeTarget; the dag optimization metric, e.g.
+        OptimizeTarget.COST.
     """
     # TODO: Azure. Port some of execute_v1()'s nice logging messages.
     assert len(dag) == 1, 'Job launcher assumes 1 task for now.'

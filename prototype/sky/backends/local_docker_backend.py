@@ -27,7 +27,6 @@ class LocalDockerBackend(backends.Backend):
 
     class ResourceHandle(str):
         """The name of the task."""
-        pass
 
     # Define the Docker-in-Docker mount
     _dind_mount = {

@@ -249,9 +249,9 @@ class Task(object):
         self.file_mounts = file_mounts
         return self
 
-    def set_blocked_clouds(self, clouds: Set[clouds.Cloud]):
+    def set_blocked_clouds(self, blocked_clouds: Set[clouds.Cloud]):
         """Sets the clouds that this task should not run on."""
-        self.blocked_clouds = clouds
+        self.blocked_clouds = blocked_clouds
         return self
 
     def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
