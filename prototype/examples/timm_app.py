@@ -51,5 +51,4 @@ with sky.Dag() as dag:
     })
     train.set_resources({sky.Resources(sky.AWS(), accelerators='V100')})
 
-dag = sky.optimize(dag)
 sky.execute(dag)

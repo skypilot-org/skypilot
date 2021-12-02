@@ -1,7 +1,9 @@
 """The Sky optimizer: assigns best resources to user tasks."""
 import collections
 import copy
+import enum
 import pprint
+from typing import List, Optional
 
 import networkx as nx
 import numpy as np
@@ -9,17 +11,26 @@ import tabulate
 
 import sky
 from sky import clouds
+from sky import dag as dag_lib
+from sky import exceptions
 from sky import logging
+from sky import resources as resources_lib
+from sky import task
 
 logger = logging.init_logger(__name__)
+
+Dag = dag_lib.Dag
+Resources = resources_lib.Resources
+
+
+# Constants: minimize what target?
+class OptimizeTarget(enum.Enum):
+    COST = 0
+    TIME = 1
 
 
 class Optimizer(object):
     """The Sky optimizer: assigns best resources to user tasks."""
-
-    # Constants: minimize what target?
-    COST = 0
-    TIME = 1
 
     @staticmethod
     def _egress_cost(src_cloud, dst_cloud, gigabytes):
@@ -56,17 +67,22 @@ class Optimizer(object):
         return egress_time
 
     @staticmethod
-    def optimize(dag: sky.Dag, minimize=COST):
+    def optimize(
+            dag: Dag,
+            minimize=OptimizeTarget.COST,
+            blocked_launchable_resources: Optional[List[Resources]] = None):
         dag = copy.deepcopy(dag)
         # Optimization.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
         optimized_dag, unused_best_plan = Optimizer._optimize_cost(
-            dag, minimize_cost=minimize == Optimizer.COST)
+            dag,
+            minimize_cost=minimize == OptimizeTarget.COST,
+            blocked_launchable_resources=blocked_launchable_resources)
         optimized_dag = Optimizer._remove_dummy_source_sink_nodes(optimized_dag)
         return optimized_dag
 
     @staticmethod
-    def _add_dummy_source_sink_nodes(dag: sky.Dag):
+    def _add_dummy_source_sink_nodes(dag: Dag):
         """Adds special Source and Sink nodes.
 
         The two special nodes are for conveniently handling cases such as
@@ -92,7 +108,7 @@ class Optimizer(object):
                 zero_outdegree_nodes.append(node)
 
         def make_dummy(name):
-            dummy = sky.Task(name)
+            dummy = task.Task(name)
             dummy.set_resources({DummyResources(DummyCloud(), None)})
             dummy.set_time_estimator(lambda _: 0)
             return dummy
@@ -107,7 +123,7 @@ class Optimizer(object):
         return dag
 
     @staticmethod
-    def _remove_dummy_source_sink_nodes(dag: sky.Dag):
+    def _remove_dummy_source_sink_nodes(dag: Dag):
         """Removes special Source and Sink nodes."""
         source = [t for t in dag.tasks if t.name == '__source__']
         sink = [t for t in dag.tasks if t.name == '__sink__']
@@ -117,9 +133,9 @@ class Optimizer(object):
         return dag
 
     @staticmethod
-    def _egress_cost_or_time(minimize_cost: bool, parent: sky.Task,
-                             parent_resources: sky.Resources, node: sky.Task,
-                             resources: sky.Resources):
+    def _egress_cost_or_time(minimize_cost: bool, parent: task.Task,
+                             parent_resources: Resources, node: task.Task,
+                             resources: Resources):
         """Computes the egress cost or time depending on 'minimize_cost'."""
         if isinstance(parent_resources.cloud, DummyCloud):
             # Special case.  The current 'node' is a real
@@ -141,7 +157,11 @@ class Optimizer(object):
         return fn(src_cloud, dst_cloud, nbytes)
 
     @staticmethod
-    def _optimize_cost(dag: sky.Dag, minimize_cost=True):
+    def _optimize_cost(
+            dag: Dag,
+            minimize_cost: bool = True,
+            blocked_launchable_resources: Optional[List[Resources]] = None,
+    ):
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
         graph = dag.get_graph()
@@ -166,7 +186,10 @@ class Optimizer(object):
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = \
-                    sky.registry.fill_in_launchable_resources(node)
+                    sky.registry.fill_in_launchable_resources(
+                        node,
+                        blocked_launchable_resources
+                    )
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
@@ -177,7 +200,7 @@ class Optimizer(object):
             parents = list(graph.predecessors(node))
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
-                    raise ValueError(
+                    raise exceptions.ResourcesUnavailableError(
                         f'No launchable resource found for task {node}; '
                         f'To fix: relax its Resources() requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:
@@ -290,7 +313,7 @@ class Optimizer(object):
         return best_plan
 
 
-class DummyResources(sky.Resources):
+class DummyResources(Resources):
     """A dummy Resources that has zero egress cost from/to."""
 
     _REPR = 'DummyCloud'
