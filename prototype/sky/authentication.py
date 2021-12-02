@@ -102,7 +102,7 @@ def setup_aws_authentication(config):
         if aws_fingerprint == local_fingerprint:
             key_found = True
         # Check if name exists
-        if key['KeyName'] == key_name:
+        if key_name in key['KeyName']:
             name_counter += 1
     if not key_found:
         if name_counter == 0:
