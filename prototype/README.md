@@ -1,8 +1,11 @@
 # Sky Prototype
 
+![pytest](https://github.com/concretevitamin/sky-experiments/actions/workflows/pytest.yml/badge.svg)
+
 ## Setup
 
 ```bash
+pip install -r requirements.txt
 pip install -e .
 
 python examples/resnet_app.py

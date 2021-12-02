@@ -3,9 +3,14 @@ boto3
 colorama
 jinja2
 networkx
+pandas
+pendulum
+PrettyTable
+pytest
 ray[default]
 tabulate
+docker
 
-awscli
+awscli==1.22.17
 azure-cli
 google-api-python-client
