@@ -251,30 +251,25 @@ class RetryingVmProvisioner(object):
             assert False, f'Unknown cloud: {cloud}.'
 
     def _yield_region_zones(self, task: App, cloud: clouds.Cloud):
-        # Try reading previously launched region/zones and try them first,
-        # because we may have an existing cluster there.
         region = None
         zones = None
-        path = _get_cluster_config_template(task)[:-len('.j2')]
-
-        print('path', path)
-        parent = os.path.dirname(path)
-        print('parent', parent)
-        print('ls -l parent:')
-        _run(f'ls -l {parent}')
-        print('ls -l parent parent:')
-        _run(f'ls -l {os.path.dirname(parent)}')
-
-        with open(path, 'r') as f:
-            config = yaml.safe_load(f)
-        if type(cloud) in (clouds.AWS, clouds.GCP):
-            region = config['provider']['region']
-            zones = config['provider']['availability_zone']
-        elif isinstance(cloud, clouds.Azure):
-            region = config['provider']['location']
-            zones = None
-        else:
-            assert False, cloud
+        try:
+            # Try reading previously launched region/zones and try them first,
+            # because we may have an existing cluster there.
+            path = _get_cluster_config_template(task)[:-len('.j2')]
+            with open(path, 'r') as f:
+                config = yaml.safe_load(f)
+            if type(cloud) in (clouds.AWS, clouds.GCP):
+                region = config['provider']['region']
+                zones = config['provider']['availability_zone']
+            elif isinstance(cloud, clouds.Azure):
+                region = config['provider']['location']
+                zones = None
+            else:
+                assert False, cloud
+        except FileNotFoundError:
+            # Happens if no previous cluster.yaml exists.
+            pass
         if region is not None:
             region = clouds.Region(name=region)
             if zones is not None:
