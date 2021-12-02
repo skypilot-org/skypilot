@@ -2,6 +2,7 @@
 import ast
 import json
 import os
+import pathlib
 import re
 import shlex
 import subprocess
@@ -19,6 +20,7 @@ from sky import clouds
 from sky import cloud_stores
 from sky import dag
 from sky import exceptions
+from sky import global_user_state
 from sky import logging
 from sky import optimizer
 from sky import resources
@@ -285,7 +287,7 @@ class RetryingVmProvisioner(object):
             yield (region, zones)
 
     def _retry_region_zones(self, task: App, to_provision: Resources,
-                            dryrun: bool, stream_logs: bool):
+                            dryrun: bool, stream_logs: bool, cluster_name: str):
         """The provision retry loop."""
         Style = colorama.Style
 
@@ -310,7 +312,8 @@ class RetryingVmProvisioner(object):
                 _get_cluster_config_template(task),
                 region=region,
                 zones=zones,
-                dryrun=dryrun)
+                dryrun=dryrun,
+                cluster_name=cluster_name)
             if dryrun:
                 return
             tpu_name = to_provision.accelerator_args.get('tpu_name')
@@ -371,7 +374,8 @@ class RetryingVmProvisioner(object):
         raise exceptions.ResourcesUnavailableError()
 
     def provision_with_retries(self, task: App, to_provision: Resources,
-                               dryrun: bool, stream_logs: bool):
+                               dryrun: bool, stream_logs: bool,
+                               cluster_name: str):
         """Provision with retries for all launchable resources."""
         assert self.dag is not None, 'Must register dag first.'
         assert self.optimize_target is not None, 'Must register optimizer_target first.'
@@ -387,7 +391,8 @@ class RetryingVmProvisioner(object):
                 handle = self._retry_region_zones(task,
                                                   to_provision,
                                                   dryrun=dryrun,
-                                                  stream_logs=stream_logs)
+                                                  stream_logs=stream_logs,
+                                                  cluster_name=cluster_name)
             except exceptions.ResourcesUnavailableError:
                 provision_failed = True
                 logger.warning(
@@ -431,14 +436,18 @@ class CloudVmRayBackend(backends.Backend):
         self.dag = kwargs['dag']
         self.optimize_target = kwargs['optimize_target']
 
-    def provision(self, task: App, to_provision: Resources, dryrun: bool,
-                  stream_logs: bool) -> ResourceHandle:
+    def provision(self,
+                  task: App,
+                  to_provision: Resources,
+                  dryrun: bool,
+                  stream_logs: bool,
+                  cluster_name: Optional[str] = None) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner(self.log_dir, self.dag,
                                             self.optimize_target)
         config_dict = provisioner.provision_with_retries(
-            task, to_provision, dryrun, stream_logs)
+            task, to_provision, dryrun, stream_logs, cluster_name)
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
@@ -448,6 +457,11 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.wait_until_ray_cluster_ready(to_provision.cloud,
                                                    cluster_config_file,
                                                    task.num_nodes)
+
+        if cluster_name is None:
+            cluster_name = pathlib.Path(cluster_config_file).stem
+        global_user_state.add_cluster(cluster_name, str(cluster_config_file))
+
         return cluster_config_file
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -624,6 +638,8 @@ class CloudVmRayBackend(backends.Backend):
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
         # Execution logic differs for three types of tasks.
+
+        global_user_state.add_task(task)
 
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):

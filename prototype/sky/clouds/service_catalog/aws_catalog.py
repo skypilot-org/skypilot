@@ -43,8 +43,6 @@ def get_accelerators_from_instance_type(
     row = df.iloc[0]
     acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
     if pd.isnull(acc_name):
-        # Happens for e.g., m4.2xlarge.
-        assert pd.isnull(acc_count), (acc_name, acc_count)
         return None
     return {acc_name: int(acc_count)}
 
@@ -60,8 +58,14 @@ def get_instance_type_for_accelerator(
                  (_df['Region'] == region)]
     if len(result) == 0:
         return None
-    assert len(set(result['InstanceType'])) == 1, (result, acc_name, acc_count,
-                                                   region)
+    instance_types = set(result['InstanceType'])
+    if len(instance_types) > 1:
+        for t in instance_types:
+            # For now, the only case is that g4dn.{1,2,4,8,16x} all have
+            # 1x T4, which we pick the cheapest. For other cases, throw
+            # exceptions to manually investigate.
+            assert t.startswith('g4dn'), result
+    result.sort_values('Price', ascending=True, inplace=True)
     return result.iloc[0]['InstanceType']
 
 
