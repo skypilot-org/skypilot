@@ -81,6 +81,7 @@ def setup_aws_authentication(config):
     ec2 = boto3.client('ec2', config['provider']['region'])
     key_pairs = ec2.describe_key_pairs()['KeyPairs']
     key_found = False
+    name_counter = 0
 
     def _get_fingerprint(public_key_path):
         key = RSA.importKey(open(public_key_path).read())
@@ -94,20 +95,21 @@ def setup_aws_authentication(config):
         return fingerprint
 
     for key in key_pairs:
+        # Compute Fingerprint of public key
+        aws_fingerprint = key['KeyFingerprint']
+        local_fingerprint = _get_fingerprint(public_key_path)
+        # If fingerprints dont match, delete bad key
+        if aws_fingerprint == local_fingerprint:
+            key_found = True
+        # Check if name exists
         if key['KeyName'] == key_name:
-            # Compute Fingerprint of public key
-            aws_fingerprint = key['KeyFingerprint']
-            local_fingerprint = _get_fingerprint(public_key_path)
-            # If fingerprints dont match, delete bad key
-            if aws_fingerprint == local_fingerprint:
-                key_found = True
-            else:
-                key_found = False
-                ec2.delete_key_pair(KeyName=key_name)
-                break
-
+            name_counter += 1
     if not key_found:
-        ec2.import_key_pair(KeyName=key_name, PublicKeyMaterial=public_key)
+        if name_counter == 0:
+            ec2.import_key_pair(KeyName=key_name, PublicKeyMaterial=public_key)
+        else:
+            ec2.import_key_pair(KeyName=key_name + f'_{name_counter}',
+                                PublicKeyMaterial=public_key)
 
     node_types = config['available_node_types']
 
