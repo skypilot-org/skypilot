@@ -11,6 +11,6 @@ ray[default]
 tabulate
 docker
 
-awscli
+awscli==1.22.17
 azure-cli
 google-api-python-client

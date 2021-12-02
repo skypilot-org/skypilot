@@ -1,3 +1,4 @@
+"""The Sky optimizer: assigns best resources to user tasks."""
 import collections
 import copy
 import pprint
@@ -14,6 +15,7 @@ logger = logging.init_logger(__name__)
 
 
 class Optimizer(object):
+    """The Sky optimizer: assigns best resources to user tasks."""
 
     # Constants: minimize what target?
     COST = 0
@@ -58,7 +60,7 @@ class Optimizer(object):
         dag = copy.deepcopy(dag)
         # Optimization.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
-        optimized_dag, best_plan = Optimizer._optimize_cost(
+        optimized_dag, unused_best_plan = Optimizer._optimize_cost(
             dag, minimize_cost=minimize == Optimizer.COST)
         optimized_dag = Optimizer._remove_dummy_source_sink_nodes(optimized_dag)
         return optimized_dag
@@ -98,10 +100,10 @@ class Optimizer(object):
         with dag:
             source = make_dummy('__source__')
             for real_source_node in zero_indegree_nodes:
-                source >> real_source_node
+                source >> real_source_node  # pylint: disable=pointless-statement
             sink = make_dummy('__sink__')
             for real_sink_node in zero_outdegree_nodes:
-                real_sink_node >> sink
+                real_sink_node >> sink  # pylint: disable=pointless-statement
         return dag
 
     @staticmethod
@@ -163,8 +165,8 @@ class Optimizer(object):
                 logger.info('#### {} ####'.format(node))
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
-                launchable_resources = sky.registry.fill_in_launchable_resources(
-                    node)
+                launchable_resources = \
+                    sky.registry.fill_in_launchable_resources(node)
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
@@ -229,7 +231,6 @@ class Optimizer(object):
                                 min_pred_cost_plus_egress = \
                                     parent_cost + egress_cost
                                 best_parent_hardware = parent_resources
-                                best_egress_cost = egress_cost
                         sum_parent_cost_and_egress += min_pred_cost_plus_egress
                         dp_point_backs[node][resources][parent] = (
                             best_parent_hardware, min_pred_cost_plus_egress)

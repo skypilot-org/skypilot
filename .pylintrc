@@ -85,6 +85,8 @@ disable=abstract-method,
         intern-builtin,
         invalid-str-codec,
         locally-disabled,
+        logging-format-interpolation,  # FIXME(sky): make pass.
+        logging-fstring-interpolation,  # FIXME(sky): make pass.
         long-builtin,
         long-suffix,
         map-builtin-not-iterating,

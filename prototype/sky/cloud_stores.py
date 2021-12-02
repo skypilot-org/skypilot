@@ -9,7 +9,6 @@ TODO:
   The full-blown impl should handle authentication so each user's private
   datasets can be accessed.
 """
-import os
 import urllib.parse
 
 
@@ -41,8 +40,9 @@ class GcsCloudStorage(CloudStorage):
             'tar xzf gsutil.tar.gz)',
             'popd &>/dev/null',
         ]
-        download_via_gsutil = f'mkdir -p {destination} && /tmp/gsutil/gsutil -m rsync -r {source} {destination}'
-
+        download_via_gsutil = (
+            f'mkdir -p {destination} && '
+            f'/tmp/gsutil/gsutil -m rsync -r {source} {destination}')
         all_commands = get_gsutil
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
@@ -52,9 +52,9 @@ def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
     if result.scheme not in _REGISTRY:
-        assert False, 'Scheme {} not found in'
-        ' supported storage ({}); path {}'.format(result.scheme,
-                                                  _REGISTRY.keys(), url)
+        assert False, ('Scheme {} not found in'
+                       ' supported storage ({}); path {}'.format(
+                           result.scheme, _REGISTRY.keys(), url))
     return _REGISTRY[result.scheme]
 
 
