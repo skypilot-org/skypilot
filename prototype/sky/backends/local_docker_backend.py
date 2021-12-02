@@ -24,8 +24,10 @@ class LocalDockerBackend(backends.Backend):
 
     Ignores resource demands when allocating.
     """
-    # Resource handle is simply the name of the task
-    ResourceHandle = Any
+
+    class ResourceHandle(str):
+        """The name of the task."""
+        pass
 
     # Define the Docker-in-Docker mount
     _dind_mount = {
