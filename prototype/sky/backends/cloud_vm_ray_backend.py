@@ -42,7 +42,7 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
         print('cluster_resources:', ray.cluster_resources())
         print('available_resources:', ray.available_resources())
         print('live nodes:', ray.state.node_ids())
-        
+
         def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
             dirname = os.path.dirname(log_path)
             os.makedirs(dirname, exist_ok=True)
@@ -77,7 +77,7 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
                         if stream_logs and start_streaming_flag:
                             print(line, end='')
             return stdout, stderr
-        
+
         futures = []
 
         def start_task(cmd, log_path, stream_logs):
@@ -124,8 +124,8 @@ def _get_cluster_config_template(task):
     return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
 
-def _to_accelerator_and_count(resources: Optional[Resources]
-                             ) -> Tuple[Optional[str], int]:
+def _to_accelerator_and_count(
+        resources: Optional[Resources]) -> Tuple[Optional[str], int]:
     acc = None
     acc_count = 0
     if resources is not None:
@@ -403,11 +403,19 @@ class CloudVmRayBackend(backends.Backend):
         # deprecated.
         _run(f'ray rsync_up {handle} {workdir}/ {SKY_REMOTE_WORKDIR}')
 
+    def add_storage_backend(self, task: App, cloud_type: str) -> None:
+        storage = task.storage
+        storage.add_backend(cloud_type)
+        if cloud_type == 'AWS':
+            task.append_file_mount("~/.aws", "~/.aws")
+            task.append_file_mount(storage.default_mount_path,
+                                   "s3://" + storage.name + "/")
+
     def sync_file_mounts(
-            self,
-            handle: ResourceHandle,
-            all_file_mounts: Dict[Path, Path],
-            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        self,
+        handle: ResourceHandle,
+        all_file_mounts: Dict[Path, Path],
+        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         # TODO: this only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()

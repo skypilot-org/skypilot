@@ -345,18 +345,17 @@ def execute_v2(dag: sky.Dag,
     assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
     task = dag.tasks[0]
 
-    storage = task.get_storage()
-    if storage is not None:
-        # Optimizer should eventually choose where to store bucket
-        # Hardcoded right now, @zongheng Ideas on how to approach this?
-        optimizer_storage_backend = 'AWS'
-        storage.add_backend(optimizer_storage_backend)
-
     best_resources = task.best_resources
     assert best_resources is not None, \
         'Run sky.Optimize.optimize() before sky.execute().'
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
+
+    if task.storage is not None:
+        # Optimizer should eventually choose where to store bucket
+        # Hardcoded right now, @zongheng Ideas on how to approach this?
+        optimizer_storage_backend = 'AWS'
+        backend.add_storage_backend(task, optimizer_storage_backend)
 
     handle = backend.provision(task,
                                best_resources,

@@ -8,12 +8,17 @@ import time_estimators
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
+    data_mount_path = '/tmp/imagenet'
     subprocess.run(f'cd {workdir} && git checkout 222cc86',
                    shell=True,
                    check=True)
 
     # The setup command.  Will be run under the working directory.
-    setup = 'pip install --upgrade pip && \
+    setup = 'echo \"alias python=python3\" >> ~/.bashrc && \
+        echo \"alias pip3=pip\" >> ~/.bashrc && \
+        source ~/.bashrc && \
+        pip install --upgrade pip && \
+        pip install awscli botocore boto3 && \
         conda init bash && \
         conda activate resnet || \
           (conda create -n resnet python=3.7 -y && \
@@ -22,19 +27,17 @@ with sky.Dag() as dag:
            cd models && pip install -e .)'
 
     # The command to run.  Will be run under the working directory.
-    run = 'conda activate resnet && \
+    run = f'conda activate resnet && \
         python -u models/official/resnet/resnet_main.py --use_tpu=False \
         --mode=train --train_batch_size=256 --train_steps=250 \
         --iterations_per_loop=125 \
-        --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
+        --data_dir={data_mount_path} \
         --model_dir=resnet-model-dir \
         --amp --xla --loss_scale=128'
 
-    file_mounts = {}
-
-    storage = Storage(name="fake-imagenet",
-                      source_path="~/Downloads/temp",
-                      default_mount_path="/tmp/fake_imagenet")
+    storage = Storage(name="imagenet-bucket",
+                      source_path="s3://imagenet-bucket",
+                      default_mount_path=data_mount_path)
     train = sky.Task(
         'train',
         workdir=workdir,
@@ -42,7 +45,8 @@ with sky.Dag() as dag:
         setup=setup,
         run=run,
     )
-    train.set_file_mounts(file_mounts)
+    # File mount != Data mount, File mount is slow and is for direc
+    train.set_file_mounts({})
     # TODO: allow option to say (or detect) no download/egress cost.
     train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
                      estimated_size_gigabytes=70)

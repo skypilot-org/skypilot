@@ -253,6 +253,15 @@ class Task(object):
         self.file_mounts = file_mounts
         return self
 
+    def append_file_mount(self, src: str, destination: str):
+        """Appends a file mount for this Task
+
+        This should be run before provisioning
+        """
+        if self.file_mounts is None:
+            self.file_mounts = {}
+        self.file_mounts[src] = destination
+
     def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=local path).
 

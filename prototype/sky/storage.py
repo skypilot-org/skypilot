@@ -282,12 +282,3 @@ class Storage(object):
         """
         for _, backend in self.storage_backends.items():
             backend.cleanup()
-
-
-#aws_backend = AWSStorageBackend("imagenet-dataset-1", None)
-#gcp_backend = GCSStorageBackend("christmasbalsa", None)
-#aws_backend.download_to_local("~/Downloads/temp/")
-#_s3_to_gcs(aws_backend, gcp_backend)
-#aws_backend.upload_from_local("~/Downloads/tpu/")
-#_s3_to_gcs(aws_backend, gcp_backend)
-#aws_backend.cleanup()

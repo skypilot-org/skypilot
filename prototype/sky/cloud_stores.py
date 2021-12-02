@@ -21,6 +21,22 @@ class CloudStorage(object):
         raise NotImplementedError
 
 
+class S3CloudStorage(CloudStorage):
+    """AWS Cloud Storage."""
+
+    def make_download_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using AWS CLI.
+        """
+        get_awscli = [
+            'pip install awscli',
+        ]
+        download_via_awscli = f'mkdir -p {destination} && aws s3 sync {source} {destination}'
+
+        all_commands = []
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+
 class GcsCloudStorage(CloudStorage):
     """Google Cloud Storage."""
 
@@ -51,6 +67,7 @@ class GcsCloudStorage(CloudStorage):
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
+
     if result.scheme not in _REGISTRY:
         assert False, 'Scheme {} not found in'
         ' supported storage ({}); path {}'.format(result.scheme,
@@ -60,4 +77,5 @@ def get_storage_from_path(url: str) -> CloudStorage:
 
 _REGISTRY = {
     'gs': GcsCloudStorage(),
+    's3': S3CloudStorage(),
 }
