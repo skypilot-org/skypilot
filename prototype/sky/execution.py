@@ -345,7 +345,8 @@ def execute_v2(dag: sky.Dag,
     """
     # TODO: Azure. Port some of execute_v1()'s nice logging messages.
     assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
-    logger.info(f'Optimizer target is set to {OptimizeTarget(optimize_target).name}')
+    logger.info(
+        f'Optimizer target is set to {OptimizeTarget(optimize_target).name}')
 
     dag = sky.optimize(dag, minimize=optimize_target)
     task = dag.tasks[0]
@@ -381,5 +382,6 @@ def execute_v2(dag: sky.Dag,
 
     if teardown:
         backend.teardown(handle)
+
 
 execute = execute_v2

@@ -19,15 +19,16 @@ logger = logging.init_logger(__name__)
 Dag = dag.Dag
 Resources = resources.Resources
 
+
 # Constants: minimize what target?
 class OptimizeTarget(enum.Enum):
     COST = 0
     TIME = 1
+
+
     # BANDWIDTH = 3
     # LATENCY = 4
 class Optimizer(object):
-
-    
 
     @staticmethod
     def _egress_cost(src_cloud, dst_cloud, gigabytes):
@@ -64,7 +65,9 @@ class Optimizer(object):
         return egress_time
 
     @staticmethod
-    def optimize(dag: Dag, minimize=OptimizeTarget.COST, blocked_launchable_resources=[]):
+    def optimize(dag: Dag,
+                 minimize=OptimizeTarget.COST,
+                 blocked_launchable_resources=[]):
         dag = copy.deepcopy(dag)
         # Optimization.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)

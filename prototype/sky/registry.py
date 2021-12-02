@@ -36,8 +36,9 @@ def _launchable_resources_eq(r1: Resources, r2: Resources):
     return r1.accelerators.keys() == r2.accelerators.keys()
 
 
-def _filter_out_blocked_launchable_resources(launchable_resources: List[Resources],
-                                             blocked_launchable_resources: List[Resources]):
+def _filter_out_blocked_launchable_resources(
+        launchable_resources: List[Resources],
+        blocked_launchable_resources: List[Resources]):
     """Whether the resources are blocked."""
     available_resources = []
     for resources in launchable_resources:
