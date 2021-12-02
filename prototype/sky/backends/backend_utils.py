@@ -277,6 +277,8 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
                 if not line:
                     sel.unregister(key.fileobj)
                     break
+                # Remove special characters from the line, to avoid cursor hidding
+                line = line.replace('\x1b[?25l', '')
                 if start_streaming_at in line:
                     start_streaming_flag = True
                 if key.fileobj is out_io:
