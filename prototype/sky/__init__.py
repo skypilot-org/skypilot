@@ -1,3 +1,4 @@
+"""The Sky package."""
 import os
 
 from sky import backends

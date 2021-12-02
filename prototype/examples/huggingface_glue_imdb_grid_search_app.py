@@ -25,7 +25,7 @@ with sky.Dag() as dag:
             --fp16 2>&1 | tee run-{lr}.log'
 
     per_trial_resources = sky.Resources(accelerators={'V100': 1})
-    resources_to_launch = sky.Resources(sky.GCP(), accelerators={'V100': 4})
+    resources_to_launch = sky.Resources(sky.AWS(), accelerators={'V100': 4})
 
     tasks = []
     for lr in [1e-5, 2e-5, 3e-5, 4e-5]:

@@ -1,3 +1,4 @@
+"""Sky logging utilities."""
 import logging
 import sys
 
@@ -6,7 +7,7 @@ DATE_FORMAT = '%m-%d %H:%M:%S'
 
 
 class NewLineFormatter(logging.Formatter):
-    """Add logging prefix to the newlines to align multi-line logging messages"""
+    """Adds logging prefix to newlines to align multi-line messages."""
 
     def __init__(self, fmt, datefmt=None):
         logging.Formatter.__init__(self, fmt, datefmt)
