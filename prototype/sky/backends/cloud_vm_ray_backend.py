@@ -256,6 +256,15 @@ class RetryingVmProvisioner(object):
         region = None
         zones = None
         path = _get_cluster_config_template(task)[:-len('.j2')]
+
+        print('path', path)
+        parent = os.path.dirname(path)
+        print('parent', parent)
+        print('ls -l parent:')
+        _run(f'ls -l {parent}')
+        print('ls -l parent parent:')
+        _run(f'ls -l {os.path.dirname(parent)}')
+
         with open(path, 'r') as f:
             config = yaml.safe_load(f)
         if type(cloud) in (clouds.AWS, clouds.GCP):
