@@ -18,8 +18,12 @@ class Backend(object):
     class ResourceHandle(object):
         pass
 
-    def provision(self, task: App, to_provision: Resources, dryrun: bool,
-                  stream_logs: bool) -> ResourceHandle:
+    def provision(self,
+                  task: App,
+                  to_provision: Resources,
+                  dryrun: bool,
+                  stream_logs: bool,
+                  cluster_name: Optional[str] = None) -> ResourceHandle:
         raise NotImplementedError
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
