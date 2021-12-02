@@ -65,7 +65,7 @@ def write_cluster_config(run_id: RunId,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
                          dryrun: bool = False,
-                         cluster_name: str = None):
+                         cluster_name: Optional[str] = None):
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
