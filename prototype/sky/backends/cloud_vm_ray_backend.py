@@ -277,21 +277,23 @@ class RetryingVmProvisioner(object):
     def provision_with_retries(self, task: App, to_provision: Resources,
                                dryrun: bool, stream_logs: bool):
         """The provision retry loop."""
+        Style = colorama.Style
+
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
+        tail_cmd = f'tail -n100 -f {log_path}'
+        logger.info(
+            f'To view detailed progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}'
+        )
 
         self._clear_blocklist()
-        Style = colorama.Style
         for region, zones in self._yield_region_zones(task, to_provision.cloud):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
             logger.info(
                 f'\n{Style.BRIGHT}Launching on {to_provision.cloud} {region.name} '
                 f'({",".join(z.name for z in zones)}).{Style.RESET_ALL}')
-            logger.info('If this takes longer than ~30 seconds,'
-                        ' provisioning is likely successful.'
-                        ' Setup may take a few minutes.')
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
@@ -323,9 +325,6 @@ class RetryingVmProvisioner(object):
                         raise e
             cluster_config_file = config_dict['ray']
 
-            tail_cmd = f'tail -n100 -f {log_path}'
-            logger.info(
-                f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
             # Redirect stdout/err to the file and streaming (if stream_logs).
             proc, stdout, stderr = _run_with_log(
                 ['ray', 'up', '-y', cluster_config_file],
@@ -384,6 +383,7 @@ class CloudVmRayBackend(backends.Backend):
     def retrying_cloud_vm_provision(self, dag, dryrun: bool, stream_logs: bool,
                                     minimize) -> ResourceHandle:
         """Provision with retries for all launchable resources."""
+        Style = colorama.Style
         provision_failed = True
         while provision_failed:
             provision_failed = False
@@ -399,7 +399,7 @@ class CloudVmRayBackend(backends.Backend):
                 failed_resources = e.to_provision
                 self.blocked_launchable_resources.add(failed_resources)
                 logger.warning(
-                    f'Provision failed for {failed_resources}. Retrying other launchable resources...'
+                    f'\n{Style.BRIGHT}Provision failed for {failed_resources}. Retrying other launchable resources...{Style.RESET_ALL}'
                 )
                 provision_failed = True
                 # TODO: set all remaining tasks' best_resources to None.
