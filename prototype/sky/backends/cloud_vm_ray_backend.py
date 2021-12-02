@@ -100,29 +100,6 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
 """
 
 
-def _run(cmd, **kwargs):
-    return subprocess.run(cmd, shell=True, check=True, **kwargs)
-
-
-def _run_no_outputs(cmd, **kwargs):
-    return _run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
-
-
-def _run_with_log(cmd,
-                  log_path,
-                  stream_logs=False,
-                  start_streaming_at='',
-                  **kwargs):
-    with subprocess.Popen(cmd,
-                          stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE,
-                          **kwargs) as proc:
-        stdout, stderr = backend_utils.redirect_process_output(
-            proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
-        proc.wait()
-        return proc, stdout, stderr
-
-
 def _get_cluster_config_template(task):
     cloud_to_template = {
         clouds.AWS: 'config/aws-ray.yml.j2',
@@ -328,9 +305,9 @@ class RetryingVmProvisioner(object):
                 assert 'gcloud' in config_dict, \
                     'Expect TPU provisioning with gcloud'
                 try:
-                    _run(f'bash {config_dict["gcloud"][0]}',
-                         stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE)
+                    backend_utils.run(f'bash {config_dict["gcloud"][0]}',
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE)
                 except subprocess.CalledProcessError as e:
                     stderr = e.stderr.decode('ascii')
                     if 'ALREADY_EXISTS' in stderr:
@@ -346,7 +323,7 @@ class RetryingVmProvisioner(object):
             cluster_config_file = config_dict['ray']
 
             # Redirect stdout/err to the file and streaming (if stream_logs).
-            proc, stdout, stderr = _run_with_log(
+            proc, stdout, stderr = backend_utils.run_with_log(
                 ['ray', 'up', '-y', cluster_config_file],
                 log_abs_path,
                 stream_logs,
@@ -358,13 +335,14 @@ class RetryingVmProvisioner(object):
                 if tpu_name is not None:
                     logger.info(
                         'Failed to provision VM. Tearing down TPU resource...')
-                    _run(f'bash {config_dict["gcloud"][1]}',
-                         stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE)
+                    backend_utils.run(f'bash {config_dict["gcloud"][1]}',
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE)
             else:
                 if tpu_name is not None:
-                    _run(f'ray exec {cluster_config_file} '
-                         f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
+                    backend_utils.run(
+                        f'ray exec {cluster_config_file} '
+                        f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
                 relpath = backend_utils.get_rel_path(cluster_config_file)
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
@@ -483,7 +461,8 @@ class CloudVmRayBackend(backends.Backend):
         # TODO: do we really need this if provision() takes care of it?
         # TODO: this only syncs to head.  -A flag from ray rsync_up is being
         # deprecated.
-        _run(f'ray rsync_up {handle} {workdir}/ {SKY_REMOTE_WORKDIR}')
+        backend_utils.run(
+            f'ray rsync_up {handle} {workdir}/ {SKY_REMOTE_WORKDIR}')
 
     def sync_file_mounts(
             self,
@@ -505,7 +484,7 @@ class CloudVmRayBackend(backends.Backend):
                 # directory.
                 download_command = storage.make_download_dir_command(
                     source=src, destination=dst)
-                _run(f'ray exec {handle} \'{download_command}\'')
+                backend_utils.run(f'ray exec {handle} \'{download_command}\'')
 
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
                        task: App) -> None:
@@ -635,7 +614,8 @@ class CloudVmRayBackend(backends.Backend):
             # Rather than 'rsync_up' & 'exec', the alternative of 'ray submit'
             # may not work as the remote VM may use system python (python2) to
             # execute the script.  Happens for AWS.
-            _run_no_outputs(f'ray rsync_up {handle} {fp.name} /tmp/{basename}')
+            backend_utils.run_no_outputs(
+                f'ray rsync_up {handle} {fp.name} /tmp/{basename}')
         if executable is None:
             executable = 'python3'
         cd = f'cd {SKY_REMOTE_WORKDIR}'
@@ -647,7 +627,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'Redirecting stdout/stderr, to monitor: '
                         f'{style.BRIGHT}tail -f {log_path}{style.RESET_ALL}')
 
-        _run_with_log(cmd, log_path, stream_logs, shell=True)
+        backend_utils.run_with_log(cmd, log_path, stream_logs, shell=True)
 
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
@@ -769,9 +749,9 @@ class CloudVmRayBackend(backends.Backend):
                             f'{style.RESET_ALL}\n')
 
     def teardown(self, handle: ResourceHandle) -> None:
-        _run(f'ray down -y {handle}')
+        backend_utils.run(f'ray down -y {handle}')
         if self._managed_tpu is not None:
-            _run(f'bash {self._managed_tpu[1]}')
+            backend_utils.run(f'bash {self._managed_tpu[1]}')
 
     def _get_node_ips(self,
                       handle: ResourceHandle,
@@ -787,13 +767,13 @@ class CloudVmRayBackend(backends.Backend):
             yaml_handle = handle + '.tmp'
             backend_utils.yaml_dump(yaml_handle, config)
 
-        out = _run(f'ray get-head-ip {yaml_handle}',
-                   stdout=subprocess.PIPE).stdout.decode().strip()
+        out = backend_utils.run(f'ray get-head-ip {yaml_handle}',
+                                stdout=subprocess.PIPE).stdout.decode().strip()
         head_ip = re.findall(backend_utils.IP_ADDR_REGEX, out)
         assert 1 == len(head_ip), out
 
-        out = _run(f'ray get-worker-ips {yaml_handle}',
-                   stdout=subprocess.PIPE).stdout.decode()
+        out = backend_utils.run(f'ray get-worker-ips {yaml_handle}',
+                                stdout=subprocess.PIPE).stdout.decode()
         worker_ips = re.findall(backend_utils.IP_ADDR_REGEX, out)
         assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes -
                                                            1, out)
