@@ -26,13 +26,15 @@ def _filter_out_blocked_clouds(task: sky.Task):
     return available_clouds
 
 
-def _launchable_resources_eq(r1: Resources, r2: Resources):
-    """Whether the resources are the same launchable resources."""
+def _launchable_resources_fuzzy_eq(r1: Resources, r2: Resources):
+    """Whether the resources are the fuzzily same launchable resources."""
     assert r1.cloud is not None and r2.cloud is not None
     if not r1.cloud.is_same_cloud(r2.cloud):
         return False
     if r1.instance_type is not None or r2.instance_type is not None:
         return r1.instance_type == r2.instance_type
+    # For GCP, when a accelerator type fails to launch, it should be blocked
+    # regardless of the count, since the larger number will fail either.
     return r1.accelerators.keys() == r2.accelerators.keys()
 
 
@@ -43,7 +45,7 @@ def _filter_out_blocked_launchable_resources(
     available_resources = []
     for resources in launchable_resources:
         for blocked_resources in blocked_launchable_resources:
-            if _launchable_resources_eq(resources, blocked_resources):
+            if _launchable_resources_fuzzy_eq(resources, blocked_resources):
                 break
         else:  # non-blokced launchable resources. (no break)
             available_resources.append(resources)
