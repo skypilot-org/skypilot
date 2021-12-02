@@ -9,7 +9,6 @@ import os
 import subprocess
 
 import sky
-from sky import clouds
 
 PROJECT_DIR = '~/Downloads/pytorch-image-models'
 
@@ -50,7 +49,7 @@ with sky.Dag() as dag:
         # Download from GCS.
         '/tmp/fake_imagenet': 'gs://cloud-tpu-test-datasets/fake_imagenet',
     })
-    train.set_resources({sky.Resources(clouds.AWS(), accelerators='V100')})
+    train.set_resources({sky.Resources(sky.AWS(), accelerators='V100')})
 
-dag = sky.Optimizer.optimize(dag)
+dag = sky.optimize(dag)
 sky.execute(dag)

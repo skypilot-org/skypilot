@@ -1,9 +1,15 @@
 """Util constants/functions for the backends."""
 import datetime
+import io
+import os
+import selectors
 import subprocess
+import tempfile
+import textwrap
 import time
 from typing import List, Optional, Union
 import yaml
+import zlib
 
 import jinja2
 
@@ -20,6 +26,13 @@ RunId = str
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+SKY_LOGS_DIRECTORY = './sky_logs'
+
+
+def _get_rel_path(path: str) -> str:
+    cwd = os.getcwd()
+    common = os.path.commonpath([path, cwd])
+    return os.path.relpath(path, common)
 
 
 def _fill_template(template_path: str,
@@ -35,7 +48,7 @@ def _fill_template(template_path: str,
         output_path, _ = template_path.rsplit('.', 1)
     with open(output_path, 'w') as fout:
         fout.write(content)
-    logger.info(f'Created or updated file {output_path}')
+    logger.info(f'Created or updated file {_get_rel_path(output_path)}')
     return output_path
 
 
@@ -45,11 +58,12 @@ def write_cluster_config(run_id: RunId,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
                          dryrun: bool = False):
-    """Returns {provisioner: path to yaml, the provisioning spec}.
+    """Fills in cluster configuration templates and writes them out.
 
-    'provisioner' can be
-      - 'ray'
-      - 'gcloud' (if TPU is requested)
+    Returns: {provisioner: path to yaml, the provisioning spec}.
+      'provisioner' can be
+        - 'ray'
+        - 'gcloud' (if TPU is requested)
     """
     cloud = task.best_resources.cloud
     resources_vars = cloud.make_deploy_resources_variables(task)
@@ -73,13 +87,30 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
+    setup_sh_path = None
+    if task.setup is not None:
+        codegen = textwrap.dedent(f"""#!/bin/bash
+            . $(conda info --base)/etc/profile.d/conda.sh
+            {task.setup}
+        """)
+        # Use a stable path, /<tempdir>/sky_setup_<checksum>.sh, because
+        # rerunning the same task without any changes to the content of the
+        # setup command should skip the setup step.  Using NamedTemporaryFile()
+        # would generate a random path every time, hence re-triggering setup.
+        checksum = zlib.crc32(codegen.encode())
+        tempdir = tempfile.gettempdir()
+        # TODO: file lock on this path, in case tasks have the same setup cmd.
+        with open(os.path.join(tempdir, f'sky_setup_{checksum}.sh'), 'w') as f:
+            f.write(codegen)
+        setup_sh_path = f.name
+
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
             resources_vars,
             **{
                 'run_id': run_id,
-                'setup_command': task.setup,
+                'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
                 'container_name': task.container_name,
@@ -150,10 +181,17 @@ def get_run_id() -> RunId:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
-def wait_until_ray_cluster_ready(cluster_config_file: str, num_nodes: int):
+def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
+                                 num_nodes: int):
     if num_nodes <= 1:
         return
     expected_worker_count = num_nodes - 1
+    if isinstance(cloud, clouds.AWS):
+        worker_str = 'ray.worker.default'
+    elif isinstance(cloud, clouds.GCP):
+        worker_str = 'ray_worker_default'
+    else:
+        assert False, f'No support for distributed clusters for {cloud}.'
     while True:
         proc = subprocess.run(f"ray exec {cluster_config_file} 'ray status'",
                               shell=True,
@@ -162,7 +200,7 @@ def wait_until_ray_cluster_ready(cluster_config_file: str, num_nodes: int):
                               stderr=subprocess.PIPE)
         output = proc.stdout.decode('ascii')
         logger.info(output)
-        if f'{expected_worker_count} ray.worker.default' in output:
+        if f'{expected_worker_count} {worker_str}' in output:
             break
         time.sleep(10)
 
@@ -195,3 +233,40 @@ def run_command_on_ip_via_ssh(ip: str,
         if errs:
             logger.error(errs)
         raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+
+def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
+    """Redirect the process's filtered stdout/stderr to both stream and file"""
+    dirname = os.path.dirname(log_path)
+    os.makedirs(dirname, exist_ok=True)
+
+    out_io = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
+    err_io = io.TextIOWrapper(proc.stderr, encoding='utf-8', newline='')
+    sel = selectors.DefaultSelector()
+    sel.register(out_io, selectors.EVENT_READ)
+    sel.register(err_io, selectors.EVENT_READ)
+
+    stdout = ''
+    stderr = ''
+
+    start_streaming_flag = False
+    with open(log_path, 'a') as fout:
+        while len(sel.get_map()) > 0:
+            for key, _ in sel.select():
+                line = key.fileobj.readline()
+                if not line:
+                    sel.unregister(key.fileobj)
+                    break
+                if start_streaming_at in line:
+                    start_streaming_flag = True
+                if key.fileobj is out_io:
+                    stdout += line
+                    fout.write(line)
+                    fout.flush()
+                else:
+                    stderr += line
+                    fout.write(line)
+                    fout.flush()
+                if stream_logs and start_streaming_flag:
+                    print(line, end='')
+    return stdout, stderr

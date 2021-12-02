@@ -7,8 +7,8 @@ pandas
 pytest
 ray[default]
 tabulate
+docker
 
 awscli
 azure-cli
 google-api-python-client
-google-cloud-bigquery

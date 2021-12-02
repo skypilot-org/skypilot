@@ -166,7 +166,8 @@ class GCP(clouds.Cloud):
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
-        assert not r.use_spot, f"We currently do not support spot instances for GCP"
+        assert not r.use_spot, \
+            'We currently do not support spot instances for GCP'
         # Find GPU spec, if any.
         resources_vars = {
             'instance_type': r.instance_type,
@@ -204,3 +205,9 @@ class GCP(clouds.Cloud):
         r.cloud = GCP()
         r.instance_type = GCP.get_default_instance_type()
         return [r]
+
+    def get_accelerators_from_instance_type(
+            self,
+            instance_type: str,
+    ) -> Optional[Dict[str, int]]:
+        return None

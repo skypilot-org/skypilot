@@ -17,8 +17,8 @@ class Backend(object):
     # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
     ResourceHandle = Any
 
-    def provision(self, task: App, to_provision: Resources,
-                  dryrun: bool) -> ResourceHandle:
+    def provision(self, task: App, to_provision: Resources, dryrun: bool,
+                  stream_logs: bool) -> ResourceHandle:
         raise NotImplementedError
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:

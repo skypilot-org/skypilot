@@ -1,7 +1,6 @@
 import subprocess
 
 import sky
-from sky import clouds
 
 import time_estimators
 
@@ -54,10 +53,10 @@ with sky.Dag() as dag:
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
         ##### Fully specified
-        # sky.Resources(clouds.AWS(), 'p3.2xlarge'),
-        # sky.Resources(clouds.GCP(), 'n1-standard-16'),
+        # sky.Resources(sky.AWS(), 'p3.2xlarge'),
+        # sky.Resources(sky.GCP(), 'n1-standard-16'),
         # sky.Resources(
-        #     clouds.GCP(),
+        #     sky.GCP(),
         #     'n1-standard-8',
         #     # Options: 'V100', {'V100': <num>}.
         #     'V100',
@@ -65,19 +64,19 @@ with sky.Dag() as dag:
         ##### Partially specified
         # sky.Resources(accelerators='T4'),
         # sky.Resources(accelerators={'T4': 8}, use_spot=True),
-        # sky.Resources(clouds.AWS(), accelerators={'T4': 8}, use_spot=True),
-        # sky.Resources(clouds.AWS(), accelerators='K80'),
-        # sky.Resources(clouds.AWS(), accelerators='K80', use_spot=True),
+        # sky.Resources(sky.AWS(), accelerators={'T4': 8}, use_spot=True),
+        # sky.Resources(sky.AWS(), accelerators='K80'),
+        # sky.Resources(sky.AWS(), accelerators='K80', use_spot=True),
         # sky.Resources(accelerators='tpu-v3-8'),
-        sky.Resources(accelerators='V100', use_spot=True),
-        # sky.Resources(clouds.AWS(), accelerators='V100'),
-        # sky.Resources(clouds.AWS(), accelerators='V100', use_spot=True),
-        # sky.Resources(clouds.AWS(), accelerators={'V100': 8}),
+        # sky.Resources(accelerators='V100', use_spot=True),
+        sky.Resources(sky.AWS(), accelerators='V100'),
+        # sky.Resources(sky.AWS(), accelerators='V100', use_spot=True),
+        # sky.Resources(sky.AWS(), accelerators={'V100': 8}),
     })
 
     # Optionally, specify a time estimator: Resources -> time in seconds.
     # train.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
-dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
+dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
 # sky.execute(dag, dryrun=True)
 sky.execute(dag)

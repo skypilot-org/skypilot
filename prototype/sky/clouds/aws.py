@@ -11,37 +11,6 @@ class AWS(clouds.Cloud):
     _REPR = 'AWS'
     _regions: List[clouds.Region] = []
 
-    # TODO: make aws_catalog support this.
-    # Used in reverse matching to fill out --resources when launching clusters.
-    # https://aws.amazon.com/ec2/instance-types/
-    _ACCELERATORS_DIRECTORY = {
-        # A100
-        ('A100', 8): 'p4d.24xlarge',
-        # V100
-        ('V100', 1): 'p3.2xlarge',
-        ('V100', 4): 'p3.8xlarge',
-        ('V100', 8): 'p3.16xlarge',
-        # V100-32GB
-        ('V100-32GB', 8): 'p3dn.24xlarge',
-        # K80
-        ('K80', 1): 'p2.xlarge',
-        ('K80', 8): 'p2.8xlarge',
-        ('K80', 16): 'p2.16xlarge',
-        # T4
-        ('T4', 1): (
-            'g4dn.xlarge',
-            'g4dn.2xlarge',
-            'g4dn.4xlarge',
-            'g4dn.8xlarge',
-            'g4dn.16xlarge',
-        ),  # FIXME: what's the story here?
-        ('T4', 8): 'g4dn.metal',
-        # M60
-        ('M60', 1): ('g3s.xlarge', 'g3.4xlarge'),  # FIXME
-        ('M60', 2): 'g3.8xlarge',
-        ('M60', 4): 'g3.16xlarge',
-    }
-
     #### Regions/Zones ####
 
     @classmethod
@@ -54,6 +23,12 @@ class AWS(clouds.Cloud):
                 #     clouds.Zone('us-west-1a'),
                 #     clouds.Zone('us-west-1b'),
                 # ]),
+                clouds.Region('us-west-2').set_zones([
+                    clouds.Zone('us-west-2a'),
+                    clouds.Zone('us-west-2b'),
+                    clouds.Zone('us-west-2c'),
+                    clouds.Zone('us-west-2d'),
+                ]),
                 clouds.Region('us-east-2').set_zones([
                     clouds.Zone('us-east-2a'),
                     clouds.Zone('us-east-2b'),
@@ -67,12 +42,6 @@ class AWS(clouds.Cloud):
                     clouds.Zone('us-east-1e'),
                     clouds.Zone('us-east-1f'),
                 ]),
-                clouds.Region('us-west-2').set_zones([
-                    clouds.Zone('us-west-2a'),
-                    clouds.Zone('us-west-2b'),
-                    clouds.Zone('us-west-2c'),
-                    clouds.Zone('us-west-2d'),
-                ]),
             ]
         return cls._regions
 
@@ -82,7 +51,7 @@ class AWS(clouds.Cloud):
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         for region in cls.regions():
-            yield (region, region.zones)
+            yield region, region.zones
 
     @classmethod
     def get_default_ami(cls, region_name: str) -> str:
@@ -142,12 +111,7 @@ class AWS(clouds.Cloud):
             self,
             instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        """Returns {acc: acc_count} held by 'instance_type', if any."""
-        inverse = {v: k for k, v in AWS._ACCELERATORS_DIRECTORY.items()}
-        res = inverse.get(instance_type)
-        if res is None:
-            return res
-        return {res[0]: res[1]}
+        return aws_catalog.get_accelerators_from_instance_type(instance_type)
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
@@ -188,7 +152,8 @@ class AWS(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        instance_type = aws_catalog.get_instance_type_for_gpu(acc, acc_count)
+        instance_type = aws_catalog.get_instance_type_for_accelerator(
+            acc, acc_count)
         if instance_type is None:
             return []
         return _make(instance_type)
