@@ -15,7 +15,8 @@ class Backend(object):
 
     # Backend-specific handle to the launched resources (e.g., a cluster).
     # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
-    ResourceHandle = Any
+    class ResourceHandle(object):
+        pass
 
     def provision(self, task: App, to_provision: Resources, dryrun: bool,
                   stream_logs: bool) -> ResourceHandle:
