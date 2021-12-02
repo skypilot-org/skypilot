@@ -23,12 +23,12 @@ def _s3_to_gcs(aws_backend, gcs_backend):
     project_id = 'intercloud-320520'
     storage_account = storagetransfer.googleServiceAccounts().get(
         projectId=project_id).execute()
-    add_bucket_iam_member(gcs_backend.name, "roles/storage.admin",
-                          "serviceAccount:" + storage_account["accountEmail"])
+    _add_bucket_iam_member(gcs_backend.name, "roles/storage.admin",
+                           "serviceAccount:" + storage_account["accountEmail"])
 
     starttime = datetime.utcnow()
     transfer_job = {
-        'description': "Transferring data from S3 to GCS",
+        'description': f"Transferring data from S3 Bucket {aws_backend.name} to GCS Bucket {gcs_backend.name}",
         'status': 'ENABLED',
         'projectId': project_id,
         "schedule": {
@@ -122,7 +122,7 @@ def _gcs_to_local(gcs_backend, local_path):
 
 
 # From Google Tutorial
-def add_bucket_iam_member(bucket_name, role, member):
+def _add_bucket_iam_member(bucket_name, role, member):
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
 
