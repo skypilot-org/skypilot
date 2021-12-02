@@ -1,6 +1,5 @@
 """Grid search version of huggingface_glue_imdb_app.py."""
 import sky
-from sky import clouds
 
 with sky.Dag() as dag:
 
@@ -26,7 +25,7 @@ with sky.Dag() as dag:
             --fp16 2>&1 | tee run-{lr}.log'
 
     per_trial_resources = sky.Resources(accelerators={'V100': 1})
-    resources_to_launch = sky.Resources(clouds.AWS(), accelerators={'V100': 4})
+    resources_to_launch = sky.Resources(sky.AWS(), accelerators={'V100': 4})
 
     tasks = []
     for lr in [1e-5, 2e-5, 3e-5, 4e-5]:
@@ -41,8 +40,6 @@ with sky.Dag() as dag:
 
     # Groups all tasks under a sky.ParTask.
     sky.ParTask(tasks).set_resources(resources_to_launch)
-
-dag = sky.Optimizer.optimize(dag)
 
 # Set 'stream_logs=False' to not mix all tasks' outputs together.
 # Each task's output is redirected to run-{lr}.log and can be tail-ed.

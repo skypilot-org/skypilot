@@ -1,3 +1,4 @@
+"""Module to enable a single Sky key for all Sky VMs in each cloud."""
 import boto3
 import copy
 import hashlib
@@ -9,10 +10,11 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from Crypto.PublicKey import RSA
 from functools import partial
-from googleapiclient import discovery, errors
+from googleapiclient import discovery
 # TODO: Should tolerate if gcloud is not installed. Also,
 # https://pypi.org/project/google-api-python-client/ recommends
-# using Cloud Client Libraries for Python, where possible, for new code development.
+# using Cloud Client Libraries for Python, where possible, for new code
+# development.
 
 
 def generate_rsa_key_pair():
@@ -54,7 +56,8 @@ def get_public_key_path(private_key_path):
     return private_key_path + '.pub'
 
 
-# Snippets of code inspired from https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
+# Snippets of code inspired from
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
 def setup_aws_authentication(config):
     config = copy.deepcopy(config)
@@ -118,7 +121,8 @@ def setup_aws_authentication(config):
     return config
 
 
-# Snippets of code inspired from https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
+# Snippets of code inspired from
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
 def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
@@ -182,7 +186,7 @@ def setup_gcp_authentication(config):
             ssh_key_index = ssh_key_index[0]
             ssh_dict = metadata[ssh_key_index]
             ssh_dict['value'] += '\n' + new_ssh_key
-            operation = compute.projects().setCommonInstanceMetadata(
+            compute.projects().setCommonInstanceMetadata(
                 project=project['name'],
                 body=project['commonInstanceMetadata']).execute()
             time.sleep(5)

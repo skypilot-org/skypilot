@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 import ray
 
+from sky.clouds.service_catalog import common
+
 REGIONS = ['us-west-1', 'us-west-2', 'us-east-1', 'us-east-2']
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
 # only available in this region, but it serves pricing information for all regions.
@@ -91,28 +93,33 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
             return spot_pricing_df.loc[(instance, zone)]['SpotPrice']
         except KeyError:
             print(
-                f'{region} WARNING: cannot find spot pricing for {instance} {(zone)}'
+                f'{region} WARNING: cannot find spot pricing for {instance} {zone}'
             )
             return np.nan
 
-    def get_gpu_info(row) -> Tuple[str, float]:
-        info = row['GpuInfo']
-        if not isinstance(info, dict):
+    def get_acc_info(row) -> Tuple[str, float]:
+        accelerator = None
+        for col, info_key in [('GpuInfo', 'Gpus'),
+                              ('InferenceAcceleratorInfo', 'Accelerators'),
+                              ('FpgaInfo', 'Fpgas')]:
+            info = row.get(col)
+            if isinstance(info, dict):
+                accelerator = info[info_key][0]
+        if accelerator is None:
             return None, np.nan
-        gpu = info['Gpus'][0]
-        return gpu['Name'], gpu['Count']
+        return accelerator['Name'], accelerator['Count']
 
     def get_additional_columns(row):
-        gpu_name, gpu_count = get_gpu_info(row)
+        acc_name, acc_count = get_acc_info(row)
         # AWS p3dn.24xlarge offers a different V100 GPU.
         # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/
         if row['InstanceType'] == 'p3dn.24xlarge':
-            gpu_name = 'V100-32GB'
+            acc_name = 'V100-32GB'
         return pd.Series({
             'Price': get_price(row),
             'SpotPrice': get_spot_price(row),
-            'GpuName': gpu_name,
-            'GpuCount': gpu_count,
+            'AcceleratorName': acc_name,
+            'AcceleratorCount': acc_count,
         })
 
     df['Region'] = region
@@ -134,7 +141,7 @@ def main(argv):
     ray.init()
     logging.set_verbosity(logging.DEBUG)
     df = get_all_regions_instance_types_df()
-    df.to_csv('aws.csv', index=False)
+    df.to_csv(common.get_data_path('aws.csv'), index=False)
     print('AWS Service Catalog saved to aws.csv')
 
 
