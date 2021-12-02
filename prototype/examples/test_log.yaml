@@ -1,9 +1,0 @@
-resources:
-  cloud: aws
-
-# <VM path> : <local path>
-file_mounts: {
-  /hello: ./hello
-}
-
-run: cat /hello
