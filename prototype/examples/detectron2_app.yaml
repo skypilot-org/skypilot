@@ -1,11 +1,9 @@
 name: detectron2-app
 
 resources:
-  cloud: aws
-  instance_type: p3.2xlarge
+  accelerators: V100
 
 setup: |
-  . $(conda info --base)/etc/profile.d/conda.sh
   pip install --upgrade pip
 
   conda activate d2
@@ -44,7 +42,6 @@ setup: |
   rm stuff_annotations_trainval2017.zip
 
 run: |
-  . $(conda info --base)/etc/profile.d/conda.sh
   conda activate d2
   
   cd detectron2/tools
