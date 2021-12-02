@@ -430,6 +430,7 @@ class CloudVmRayBackend(backends.Backend):
 
     class ResourceHandle(str):
         """A string path pointing to a cluster.yaml file."""
+        pass
 
     def __init__(self):
         # TODO: should include this as part of the handle.

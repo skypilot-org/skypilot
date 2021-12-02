@@ -327,3 +327,4 @@ class DummyResources(Resources):
 
 class DummyCloud(clouds.Cloud):
     """A dummy Cloud that has zero egress cost from/to."""
+    pass

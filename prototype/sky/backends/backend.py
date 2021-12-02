@@ -50,3 +50,4 @@ class Backend(object):
 
     def register_info(self, **kwargs) -> None:
         """Register backend-specific information."""
+        pass
