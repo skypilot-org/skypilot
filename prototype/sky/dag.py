@@ -1,8 +1,13 @@
+"""DAGs: user applications to be run on Sky."""
 import networkx as nx
 import pprint
 
 
 class DagContext(object):
+    """A global stack of Dags.
+
+    Currently, we only use one sky.Dag.
+    """
     _current_dag = None
     _previous_dags = []
 
@@ -27,7 +32,7 @@ class DagContext(object):
 
 
 class Dag(object):
-    """FIXME: assume a chain DAG for now."""
+    """Dag: a user application, represented as a DAG of Tasks."""
 
     _PREVIOUS_DAGS = []
     _CURRENT_DAG = None
@@ -62,7 +67,6 @@ class Dag(object):
     def __repr__(self):
         pformat = pprint.pformat(self.tasks)
         return 'DAG:\n{}'.format(pformat)
-        # return '<DAG=[{}]>'.format(','.join(map(str, self.tasks)))
 
     def get_graph(self):
         return self.graph
