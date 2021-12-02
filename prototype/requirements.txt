@@ -4,6 +4,8 @@ colorama
 jinja2
 networkx
 pandas
+pendulum
+PrettyTable
 pytest
 ray[default]
 tabulate

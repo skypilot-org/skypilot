@@ -2,12 +2,14 @@
 import datetime
 import io
 import os
+import pathlib
 import selectors
 import subprocess
 import tempfile
 import textwrap
 import time
 from typing import List, Optional, Union
+import uuid
 import yaml
 import zlib
 
@@ -50,7 +52,12 @@ def _fill_template(template_path: str,
     template = jinja2.Template(template)
     content = template.render(**variables)
     if output_path is None:
-        output_path, _ = template_path.rsplit('.', 1)
+        assert 'cluster_name' in variables, 'cluster_name is required.'
+        cluster_name = variables['cluster_name']
+        output_path = pathlib.Path(
+            template_path).parents[0] / 'user' / f'{cluster_name}.yml'
+        os.makedirs(output_path.parents[0], exist_ok=True)
+        output_path = str(output_path)
     with open(output_path, 'w') as fout:
         fout.write(content)
     logger.info(f'Created or updated file {get_rel_path(output_path)}')
@@ -62,7 +69,8 @@ def write_cluster_config(run_id: RunId,
                          cluster_config_template: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False):
+                         dryrun: bool = False,
+                         cluster_name: Optional[str] = None):
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -92,6 +100,10 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
+    if cluster_name is None:
+        # TODO: change this ID formatting to something more pleasant.
+        cluster_name = f'sky-{uuid.uuid4().hex[:6]}'
+
     setup_sh_path = None
     if task.setup is not None:
         codegen = textwrap.dedent(f"""#!/bin/bash
@@ -114,6 +126,7 @@ def write_cluster_config(run_id: RunId,
         dict(
             resources_vars,
             **{
+                'cluster_name': cluster_name,
                 'run_id': run_id,
                 'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,

@@ -2,6 +2,7 @@
 import ast
 import json
 import os
+import pathlib
 import re
 import shlex
 import subprocess
@@ -17,6 +18,7 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
+from sky import global_user_state
 from sky import logging
 from sky import resources as resources_lib
 from sky import task as task_mod
@@ -274,7 +276,8 @@ class RetryingVmProvisioner(object):
             yield (region, zones)
 
     def provision_with_retries(self, task: App, to_provision: Resources,
-                               dryrun: bool, stream_logs: bool):
+                               dryrun: bool, stream_logs: bool,
+                               cluster_name: str):
         """The provision retry loop."""
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
@@ -298,7 +301,8 @@ class RetryingVmProvisioner(object):
                 _get_cluster_config_template(task),
                 region=region,
                 zones=zones,
-                dryrun=dryrun)
+                dryrun=dryrun,
+                cluster_name=cluster_name)
             if dryrun:
                 return
             acc_args = to_provision.accelerator_args
@@ -382,13 +386,17 @@ class CloudVmRayBackend(backends.Backend):
         self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, run_id)
         os.makedirs(self.log_dir, exist_ok=True)
 
-    def provision(self, task: App, to_provision: Resources, dryrun: bool,
-                  stream_logs: bool) -> ResourceHandle:
+    def provision(self,
+                  task: App,
+                  to_provision: Resources,
+                  dryrun: bool,
+                  stream_logs: bool,
+                  cluster_name: Optional[str] = None) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner(self.log_dir)
         config_dict = provisioner.provision_with_retries(
-            task, to_provision, dryrun, stream_logs)
+            task, to_provision, dryrun, stream_logs, cluster_name)
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
@@ -398,6 +406,11 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.wait_until_ray_cluster_ready(to_provision.cloud,
                                                    cluster_config_file,
                                                    task.num_nodes)
+
+        if cluster_name is None:
+            cluster_name = pathlib.Path(cluster_config_file).stem
+        global_user_state.add_cluster(cluster_name, str(cluster_config_file))
+
         return cluster_config_file
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -573,6 +586,8 @@ class CloudVmRayBackend(backends.Backend):
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
         # Execution logic differs for three types of tasks.
+
+        global_user_state.add_task(task)
 
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):
