@@ -70,7 +70,9 @@ def execute_v2(dag: sky.Dag,
     logger.info(
         f'Optimizer target is set to {OptimizeTarget(optimize_target).name}')
 
-    dag = sky.optimize(dag, minimize=optimize_target)
+    task = dag.tasks[0]
+    if task.best_resources is None:
+        dag = sky.optimize(dag, minimize=optimize_target)
     task = dag.tasks[0]
     best_resources = task.best_resources
 

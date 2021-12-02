@@ -173,7 +173,7 @@ def run(entry_point, cluster, dryrun):
                 dryrun=dryrun,
                 handle=handle,
                 stream_logs=stream_logs,
-                optimize_target=sky.OptimizerTarget.COST)
+                optimize_target=sky.OptimizeTarget.COST)
 
 
 @cli.command()

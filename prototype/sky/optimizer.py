@@ -12,6 +12,7 @@ import tabulate
 import sky
 from sky import clouds
 from sky import dag as dag_lib
+from sky import exceptions
 from sky import logging
 from sky import resources as resources_lib
 from sky import task
@@ -156,10 +157,11 @@ class Optimizer(object):
         return fn(src_cloud, dst_cloud, nbytes)
 
     @staticmethod
-    def _optimize_cost(dag: Dag,
-                       minimize_cost: bool=True,
-                       blocked_launchable_resources: \
-                           Optional[List[Resources]]=None):
+    def _optimize_cost(
+            dag: Dag,
+            minimize_cost: bool = True,
+            blocked_launchable_resources: Optional[List[Resources]] = None,
+    ):
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
         graph = dag.get_graph()
@@ -184,7 +186,7 @@ class Optimizer(object):
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = \
-                    sky.registry.fill_in_launchable_resources(\
+                    sky.registry.fill_in_launchable_resources(
                         node,
                         blocked_launchable_resources
                     )
@@ -198,7 +200,7 @@ class Optimizer(object):
             parents = list(graph.predecessors(node))
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
-                    raise ValueError(
+                    raise exceptions.ResourcesUnavailableError(
                         f'No launchable resource found for task {node}; '
                         f'To fix: relax its Resources() requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:

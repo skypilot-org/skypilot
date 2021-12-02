@@ -155,8 +155,8 @@ class RetryingVmProvisioner(object):
         self._blocked_launchable_resources = set()
 
         self.log_dir = log_dir
-        self.dag = dag
-        self.optimize_target = optimize_target
+        self._dag = dag
+        self._optimize_target = optimize_target
 
         colorama.init()
 
@@ -383,12 +383,13 @@ class RetryingVmProvisioner(object):
                                dryrun: bool, stream_logs: bool,
                                cluster_name: str):
         """Provision with retries for all launchable resources."""
-        assert self.dag is not None, 'Must register dag first.'
-        assert self.optimize_target is not None, \
+        assert self._dag is not None, 'Must register dag first.'
+        assert self._optimize_target is not None, \
             'Must register optimizer_target first.'
 
         style = colorama.Style
-        task_index = self.dag.tasks.index(task)
+
+        task_index = self._dag.tasks.index(task)
 
         # Retrying launchable resources.
         provision_failed = True
@@ -409,11 +410,11 @@ class RetryingVmProvisioner(object):
                 self._blocked_launchable_resources.add(to_provision)
                 # TODO: set all remaining tasks' best_resources to None.
                 task.best_resources = None
-                self.dag = sky.optimize(self.dag,
-                                        minimize=self.optimize_target,
-                                        blocked_launchable_resources=self.
-                                        _blocked_launchable_resources)
-                task = self.dag.tasks[task_index]
+                self._dag = sky.optimize(self._dag,
+                                         minimize=self._optimize_target,
+                                         blocked_launchable_resources=self.
+                                         _blocked_launchable_resources)
+                task = self._dag.tasks[task_index]
                 to_provision = task.best_resources
                 assert to_provision is not None, task
         return handle
@@ -437,12 +438,12 @@ class CloudVmRayBackend(backends.Backend):
         self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, run_id)
         os.makedirs(self.log_dir, exist_ok=True)
 
-        self.dag = None
-        self.optimize_target = None
+        self._dag = None
+        self._optimize_target = None
 
     def register_info(self, **kwargs) -> None:
-        self.dag = kwargs['dag']
-        self.optimize_target = kwargs['optimize_target']
+        self._dag = kwargs['dag']
+        self._optimize_target = kwargs['optimize_target']
 
     def provision(self,
                   task: App,
@@ -452,10 +453,14 @@ class CloudVmRayBackend(backends.Backend):
                   cluster_name: Optional[str] = None) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # ray up: the VMs.
-        provisioner = RetryingVmProvisioner(self.log_dir, self.dag,
-                                            self.optimize_target)
-        config_dict = provisioner.provision_with_retries(
-            task, to_provision, dryrun, stream_logs, cluster_name)
+        provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
+                                            self._optimize_target)
+        try:
+            config_dict = provisioner.provision_with_retries(
+                task, to_provision, dryrun, stream_logs, cluster_name)
+        except exceptions.ResourcesUnavailableError as e:
+            logger.error(e)
+            assert False, 'Failed to provision all possible launchable resources.'
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
