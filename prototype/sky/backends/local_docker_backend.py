@@ -43,13 +43,18 @@ class LocalDockerBackend(backends.Backend):
         self.containers = {}
         self.client = docker.from_env()
 
-    def provision(self, task: App, to_provision: Resources, dryrun: bool,
-                  stream_logs: bool) -> ResourceHandle:
+    def provision(self,
+                  task: App,
+                  to_provision: Resources,
+                  dryrun: bool,
+                  stream_logs: bool,
+                  cluster_name: Optional[str] = None) -> ResourceHandle:
         """Simply returns the task name as the handle.
 
         Since resource demands are ignored, There's no provisioning in local
         docker.
         """
+        del cluster_name  # Unused.
         if stream_logs:
             logger.info(
                 'Streaming logs is not supported in LocalDockerBackend. '

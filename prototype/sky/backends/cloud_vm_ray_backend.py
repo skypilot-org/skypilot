@@ -677,7 +677,7 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             logger.info(
                 f'{fore.CYAN}Logs will not be streamed (stream_logs=False).'
-                f'{style.RESET_ALL} Hint: task outputs are redirected to'
+                f'{style.RESET_ALL} Hint: task outputs are redirected to '
                 f'{style.BRIGHT}{log_dir}{style.RESET_ALL} on the cluster. '
                 f'To monitor: ray exec {handle} "tail -f {log_dir}/*.log"\n'
                 f'(To view the task names: ray exec {handle} "ls {log_dir}/")')
