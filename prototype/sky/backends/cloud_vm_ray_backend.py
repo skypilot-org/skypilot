@@ -460,7 +460,8 @@ class CloudVmRayBackend(backends.Backend):
                 task, to_provision, dryrun, stream_logs, cluster_name)
         except exceptions.ResourcesUnavailableError as e:
             logger.error(e)
-            assert False, 'Failed to provision all possible launchable resources.'
+            assert False, \
+                'Failed to provision all possible launchable resources.'
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
