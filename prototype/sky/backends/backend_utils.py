@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import textwrap
 import time
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 import uuid
 import yaml
 import zlib
@@ -39,14 +39,10 @@ def get_rel_path(path: str) -> str:
 
 
 def _fill_template(template_path: str,
-                   variables: dict,
+                   variables: Dict,
                    output_path: Optional[str] = None) -> str:
     """Create a file from a Jinja template and return the filename."""
     assert template_path.endswith('.j2'), template_path
-    if not os.path.isabs(template_path):
-        # Need abs path here, otherwise get_rel_path() below fails.
-        template_path = os.path.join(os.path.dirname(sky.__root_dir__),
-                                     template_path)
     with open(template_path) as fin:
         template = fin.read()
     template = jinja2.Template(template)
@@ -60,6 +56,10 @@ def _fill_template(template_path: str,
         output_path = str(output_path)
     with open(output_path, 'w') as fout:
         fout.write(content)
+    if not os.path.isabs(output_path):
+        # Need abs path here, otherwise get_rel_path() below fails.
+        output_path = os.path.join(os.path.dirname(sky.__root_dir__),
+                                   output_path)
     logger.info(f'Created or updated file {get_rel_path(output_path)}')
     return output_path
 
@@ -145,12 +145,18 @@ def write_cluster_config(run_id: RunId,
         return config_dict
     _add_ssh_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
-        # FIXME: replace hard-coding paths
         config_dict['gcloud'] = tuple(
-            _fill_template(path,
-                           dict(resources_vars, **{
-                               'zones': ','.join(zones),
-                           })) for path in
+            _fill_template(
+                path,
+                dict(resources_vars, **{
+                    'zones': ','.join(zones),
+                }),
+                # Use new names for TPU scripts so that different runs can use
+                # different TPUs.  Put in config/user/ to be consistent with
+                # cluster yamls.
+                output_path=path.replace('.sh.j2', f'.{cluster_name}.sh').
+                replace('config/', 'config/user/'),
+            ) for path in
             ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
     return config_dict
 
