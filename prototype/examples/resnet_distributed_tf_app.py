@@ -8,10 +8,8 @@ IPAddr = str
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
-    code_url = 'https://github.com/concretevitamin/tpu'
     workdir = '~/Downloads/tpu'
-    subprocess.run(f'git clone -b gpu_train {code_url} {workdir} || \
-            true && cd {workdir} && git checkout 222cc86',
+    subprocess.run(f'cd {workdir} && git checkout 222cc86',
                    shell=True,
                    check=True)
 
