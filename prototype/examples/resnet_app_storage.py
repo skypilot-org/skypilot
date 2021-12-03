@@ -45,11 +45,7 @@ with sky.Dag() as dag:
         setup=setup,
         run=run,
     )
-    # File mount != Data mount, File mount is slow and is for direc
-    train.set_file_mounts({})
-    # TODO: allow option to say (or detect) no download/egress cost.
-    train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
-                     estimated_size_gigabytes=70)
+    train.set_inputs('s3://imagenet-bucket', estimated_size_gigabytes=150)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
         ##### Fully specified
