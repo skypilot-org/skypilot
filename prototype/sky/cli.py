@@ -261,8 +261,7 @@ def down(cluster, all):  # pylint: disable=redefined-builtin
         handle = record['handle']
         backend.teardown(handle)
         global_user_state.remove_cluster(name)
-        # TODO: colorama green this?
-        print(f'Tearing down cluster {name}...done.')
+        click.secho(f'Tearing down cluster {name}...done.', fg='green')
 
 
 @cli.command()
