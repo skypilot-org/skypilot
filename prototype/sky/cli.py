@@ -88,7 +88,9 @@ def _create_interactive_node(name,
         task.set_resources(resources)
 
     backend = backend()
-    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
+    backend.register_info(dag=dag, optimize_target=sky.OptimizeTarget.COST)
+
+    dag = sky.optimize(dag, minimize=sky.OptimizeTarget.COST)
     task = dag.tasks[0]
 
     handle = cluster_handle
@@ -113,16 +115,20 @@ def _create_interactive_node(name,
     global_user_state.remove_task(task_id)
 
 
-def _reuse_or_provision_cluster(task,
+def _reuse_or_provision_cluster(dag,
                                 cluster_name,
                                 backend=cloud_vm_ray_backend.CloudVmRayBackend):
     """Reuses or provisions a cluster. Updates existing cluster if required."""
 
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
 
+    task = dag.tasks[0]
+
     # Provision new cluster with cluster_name if it doesn't already exist
     if handle is None:
         backend = backend()
+        backend.register_info(dag=dag, optimize_target=sky.OptimizeTarget.COST)
+
         handle = backend.provision(task,
                                    task.best_resources,
                                    dryrun=False,
@@ -183,17 +189,14 @@ def cli():
               help='If True, do not actually run the job.')
 def run(entry_point, cluster, dryrun):
     """Launch a job from a YAML config or Python script."""
-
     with sky.Dag() as dag:
         sky.Task.from_yaml(entry_point)
 
+    dag = sky.optimize(dag, minimize=sky.OptimizeTarget.COST)
+
     handle = None
     if cluster is not None:
-        new_task = dag.tasks[0]
-        # FIXME: this is incorrect. E.g., new_task doesn't get optimized yet
-        # but inside the next call, a "-c non_exist" will access
-        # task.best_resources.
-        handle = _reuse_or_provision_cluster(new_task, cluster)
+        handle = _reuse_or_provision_cluster(dag, cluster)
 
     # TODO: This is sketchy. What if we're reusing a cluster and the optimized
     # plan is different?

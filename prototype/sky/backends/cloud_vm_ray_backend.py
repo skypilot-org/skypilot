@@ -361,13 +361,10 @@ class RetryingVmProvisioner(object):
                                dryrun: bool, stream_logs: bool,
                                cluster_name: str):
         """Provision with retries for all launchable resources."""
-        assert self._dag is not None, 'Must register dag first.'
-        assert self._optimize_target is not None, \
-            'Must register optimizer_target first.'
+        launchable_retries_disabled = self._dag is None or \
+                                    self._optimize_target is None
 
         style = colorama.Style
-
-        task_index = self._dag.tasks.index(task)
 
         # Retrying launchable resources.
         provision_failed = True
@@ -379,7 +376,14 @@ class RetryingVmProvisioner(object):
                                                   dryrun=dryrun,
                                                   stream_logs=stream_logs,
                                                   cluster_name=cluster_name)
-            except exceptions.ResourcesUnavailableError:
+            except exceptions.ResourcesUnavailableError as e:
+                if launchable_retries_disabled:
+                    logger.warning(
+                        'DAG and optimize_target needs to be registered first '
+                        'to enable cross-cloud retry. '
+                        'To fix, call backend.register_info(dag=dag, '
+                        'optimize_target=sky.OptimizeTarget.COST)')
+                    raise e
                 provision_failed = True
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {to_provision}. '
@@ -387,6 +391,7 @@ class RetryingVmProvisioner(object):
                 # Add failed resources to the blocklist.
                 self._blocked_launchable_resources.add(to_provision)
                 # TODO: set all remaining tasks' best_resources to None.
+                task_index = self._dag.tasks.index(task)
                 task.best_resources = None
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
@@ -491,10 +496,12 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = self._get_node_ips(handle, task.num_nodes)
         ip_to_command = post_setup_fn(ip_list)
         for ip, cmd in ip_to_command.items():
-            cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
-                   f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
-            backend_utils.run_command_on_ip_via_ssh(ip, cmd, task.private_key,
-                                                    task.container_name)
+            if cmd is not None:
+                cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
+                       f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
+                backend_utils.run_command_on_ip_via_ssh(ip, cmd,
+                                                        task.private_key,
+                                                        task.container_name)
 
     def _execute_par_task(self, handle: ResourceHandle,
                           par_task: task_mod.ParTask,
