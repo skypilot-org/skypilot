@@ -55,7 +55,7 @@ class GcsCloudStorage(CloudStorage):
                                                                     destination)
         download_via_gsutil = (
             f'/tmp/gsutil/gsutil -m rsync -r {source[:-1]} {destination[:-1]}')
-        all_commands = self._GET_GSUTIL
+        all_commands = list(self._GET_GSUTIL)
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
 
@@ -69,7 +69,7 @@ class GcsCloudStorage(CloudStorage):
             source, destination)
         download_via_gsutil = (
             f'/tmp/gsutil/gsutil -m cp {source} {destination}')
-        all_commands = self._GET_GSUTIL
+        all_commands = list(self._GET_GSUTIL)
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
 

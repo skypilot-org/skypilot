@@ -20,5 +20,4 @@ with sky.Dag() as dag:
                     setup=setup_commands,
                     name='ping').set_resources(resources)
 
-dag = sky.optimize(dag)
 sky.execute(dag, backend=backend)

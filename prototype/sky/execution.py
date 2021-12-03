@@ -2,7 +2,6 @@
 
 Usage:
 
-   >> planned_dag = sky.optimize(dag)
    >> sky.execute(planned_dag)
 
 Current resource privisioners:
@@ -13,11 +12,12 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
-from typing import Callable, Dict, List, Union, Optional
+from typing import Any, Callable, Dict, List, Union, Optional
 
 import sky
-from sky import logging
 from sky import backends
+from sky import logging
+from sky import optimizer
 from sky.backends import backend_utils
 
 logger = logging.init_logger(__name__)
@@ -29,18 +29,21 @@ ShellCommandOrGenerator = Union[ShellCommand, ShellCommandGenerator]
 
 SKY_LOGS_DIRECTORY = './logs'
 STREAM_LOGS_TO_CONSOLE = True
+SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 
 App = backend_utils.App
 RunId = backend_utils.RunId
-
-SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
+ResourceHandle = str
+OptimizeTarget = optimizer.OptimizeTarget
 
 
 def execute_v2(dag: sky.Dag,
                dryrun: bool = False,
                teardown: bool = False,
                stream_logs: bool = True,
-               backend: Optional[backends.Backend] = None) -> None:
+               handle: Any = None,
+               backend: Optional[backends.Backend] = None,
+               optimize_target: OptimizeTarget = OptimizeTarget.COST) -> None:
     """Executes a planned DAG.
 
     Args:
@@ -52,22 +55,33 @@ def execute_v2(dag: sky.Dag,
       stream_logs: bool; whether to stream all tasks' outputs to the client.
         Hint: for a ParTask, set this to False to avoid a lot of log outputs;
         each task's output can be redirected to their own files.
+      handle: Any; if provided, execution will use an existing backend cluster
+        handle instead of provisioning a new one.
       backend: Backend; backend to use for executing the tasks. Defaults to
         CloudVmRayBackend()
+      optimize_target: OptimizeTarget; the dag optimization metric, e.g.
+        OptimizeTarget.COST.
     """
     # TODO: Azure. Port some of execute_v1()'s nice logging messages.
     assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
+    logger.info(
+        f'Optimizer target is set to {OptimizeTarget(optimize_target).name}')
+
+    task = dag.tasks[0]
+    if task.best_resources is None:
+        dag = sky.optimize(dag, minimize=optimize_target)
     task = dag.tasks[0]
     best_resources = task.best_resources
-    assert best_resources is not None, \
-        'Run sky.Optimize.optimize() before sky.execute().'
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
+    backend.register_info(dag=dag, optimize_target=optimize_target)
 
-    handle = backend.provision(task,
-                               best_resources,
-                               dryrun=dryrun,
-                               stream_logs=stream_logs)
+    if handle is None:
+        handle = backend.provision(task,
+                                   best_resources,
+                                   dryrun=dryrun,
+                                   stream_logs=stream_logs)
+
     if dryrun:
         logger.info('Dry run finished.')
         return

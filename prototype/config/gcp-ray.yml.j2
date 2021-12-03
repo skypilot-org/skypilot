@@ -1,7 +1,7 @@
 # Ref: https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/gcp/example-gpu-docker.yaml
 # FIXME: use variables for project_id, zone.
 
-cluster_name: sky-gcp
+cluster_name: {{cluster_name}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
