@@ -9,7 +9,7 @@ from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('azure.csv')
 
-_DEFAULT_REGION = 'westus'
+_DEFAULT_REGION = 'southcentralus'
 
 
 def get_hourly_cost(instance_type: str,
