@@ -20,22 +20,16 @@ def get_hourly_cost(instance_type: str,
     return common.get_hourly_cost_impl(_df, instance_type, region, False)
 
 
-def get_accelerators_from_instance_type(
-        instance_type: str,
-        region: str = _DEFAULT_REGION,
-) -> Optional[Dict[str, int]]:
-    return common.get_accelerators_from_instance_type_impl(
-        _df, instance_type, region)
+def get_accelerators_from_instance_type(instance_type: str
+                                       ) -> Optional[Dict[str, int]]:
+    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
-def get_instance_type_for_accelerator(
-        acc_name: str,
-        acc_count: int,
-        region: str = _DEFAULT_REGION,
-) -> Optional[str]:
+def get_instance_type_for_accelerator(acc_name: str,
+                                      acc_count: int) -> Optional[str]:
     """Returns the instance type with the required count of accelerators."""
     return common.get_instance_type_for_accelerator_impl(
-        _df, acc_name, acc_count, region)
+        _df, acc_name, acc_count)
 
 
 def list_accelerators(gpus_only: bool) -> Dict[str, List[int]]:

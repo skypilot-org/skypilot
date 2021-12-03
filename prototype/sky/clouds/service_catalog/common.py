@@ -16,9 +16,12 @@ def read_catalog(filename: str) -> pd.DataFrame:
 def _get_instance_type(
         df: pd.DataFrame,
         instance_type: str,
-        region: str,
+        region: Optional[str],
 ) -> pd.DataFrame:
-    return df[(df['InstanceType'] == instance_type) & (df['Region'] == region)]
+    idx = df['InstanceType'] == instance_type
+    if region is not None:
+        idx &= df['Region'] == region
+    return df[idx]
 
 
 def get_hourly_cost_impl(
@@ -44,9 +47,8 @@ def get_hourly_cost_impl(
 def get_accelerators_from_instance_type_impl(
         df: pd.DataFrame,
         instance_type: str,
-        region: str,
 ) -> Optional[Dict[str, int]]:
-    df = _get_instance_type(df, instance_type, region)
+    df = _get_instance_type(df, instance_type, None)
     row = df.iloc[0]
     acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
     if pd.isnull(acc_name):
@@ -58,12 +60,10 @@ def get_instance_type_for_accelerator_impl(
         df: pd.DataFrame,
         acc_name: str,
         acc_count: int,
-        region: str,
 ) -> Optional[str]:
     """Returns the instance type with the required count of accelerators."""
     result = df[(df['AcceleratorName'] == acc_name) &
-                (df['AcceleratorCount'] == acc_count) &
-                (df['Region'] == region)]
+                (df['AcceleratorCount'] == acc_count)]
     if len(result) == 0:
         return None
     instance_types = set(result['InstanceType'])
