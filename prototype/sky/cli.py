@@ -253,9 +253,9 @@ def down(cluster, all):  # pylint: disable=redefined-builtin
 
     # FIXME: Assumes a specific backend.
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
-    for status in to_down:
-        name = status['name']
-        handle = status['handle']
+    for record in to_down:
+        name = record['name']
+        handle = record['handle']
         backend.teardown(handle)
         global_user_state.remove_cluster(name)
         # TODO: colorama green this?
