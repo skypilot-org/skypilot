@@ -1,5 +1,4 @@
 import sky
-from sky import clouds
 
 
 def make_application():
@@ -31,5 +30,4 @@ def make_application():
 
 
 dag = make_application()
-dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
 sky.execute(dag)
