@@ -383,7 +383,8 @@ class RetryingVmProvisioner(object):
                                dryrun: bool, stream_logs: bool,
                                cluster_name: str):
         """Provision with retries for all launchable resources."""
-        launchable_retries_disabled = self._dag is None or self._optimize_target is None
+        launchable_retries_disabled = self._dag is None or \
+                                    self._optimize_target is None
 
         style = colorama.Style
 
