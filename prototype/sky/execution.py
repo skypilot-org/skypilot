@@ -12,32 +12,16 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
-from typing import Any, Callable, Dict, List, Union, Optional
+from typing import Any, Optional
 
 import sky
 from sky import backends
 from sky import logging
 from sky import optimizer
-from sky.backends import backend_utils
 
 logger = logging.init_logger(__name__)
 
-IPAddr = str
-ShellCommand = str
-ShellCommandGenerator = Callable[[List[IPAddr]], Dict[IPAddr, ShellCommand]]
-ShellCommandOrGenerator = Union[ShellCommand, ShellCommandGenerator]
-
-SKY_LOGS_DIRECTORY = './logs'
-STREAM_LOGS_TO_CONSOLE = True
-
-App = backend_utils.App
-RunId = backend_utils.RunId
-
-ResourceHandle = str
-
 OptimizeTarget = optimizer.OptimizeTarget
-
-SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 
 
 def execute_v2(dag: sky.Dag,
