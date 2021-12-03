@@ -1,9 +1,6 @@
 import subprocess
 
 import sky
-from sky import clouds
-
-import time_estimators
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
@@ -55,9 +52,8 @@ with sky.Dag() as dag:
 
     # Run the training and tensorboard in parallel.
     task = sky.ParTask([train, tensorboard])
-    total = sky.Resources(clouds.AWS(), accelerators={'V100': 1})
+    total = sky.Resources(sky.AWS(), accelerators={'V100': 1})
     task.set_resources(total)
 
-dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
 # sky.execute(dag, dryrun=True)
 sky.execute(dag)
