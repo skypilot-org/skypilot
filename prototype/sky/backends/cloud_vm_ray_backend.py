@@ -402,7 +402,9 @@ class RetryingVmProvisioner(object):
                 if launchable_retries_disabled:
                     logger.warning(
                         'DAG and optimize_target needs to be registered first '
-                        'to enable cross-cloud retry.')
+                        'to enable cross-cloud retry. '
+                        'To fix, call backend.register_info(dag=dag, '
+                        'optimize_target=sky.OptimizeTarget.COST)')
                     raise e
                 provision_failed = True
                 logger.warning(
