@@ -2,8 +2,6 @@ import subprocess
 
 import sky
 
-import time_estimators
-
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
