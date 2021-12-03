@@ -70,10 +70,13 @@ def get_instance_type_for_accelerator_impl(
     if len(instance_types) > 1:
         for t in instance_types:
             # Assert that only one instance type exists for a given accelerator
-            # and count. For now, the only exception is that T4 is offered by
-            # multiple instance types in both AWS and Azure. For all other
-            # cases, throw so we can manually investigate.
-            assert t.startswith('g4dn') or t.endswith('_T4_v3'), result
+            # and count. Throw so we can manually investigate. The current
+            # whitelist consists of:
+            # - T4, offered by AWS g4dn.{1,2,4,8,16x}
+            # - T4, offered by Azure Standard_NC{4,8,16}as_T4_v3
+            # - K80, offered by Azure Standard_NC{6,12,24}[_Promo]
+            assert t.startswith('g4dn') or t.startswith(
+                'Standard_NC6') or t.endswith('_T4_v3'), result['InstanceType']
     result.sort_values('Price', ascending=True, inplace=True)
     return result.iloc[0]['InstanceType']
 

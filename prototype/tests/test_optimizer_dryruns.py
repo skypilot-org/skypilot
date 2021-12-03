@@ -34,6 +34,10 @@ def test_partial_tpu():
     _test_resources(sky.Resources(accelerators='tpu-v3-8'))
 
 
+def test_partial_k80():
+    _test_resources(sky.Resources(clouds.Azure(), accelerators='K80'))
+
+
 def test_partial_v100():
     _test_resources(sky.Resources(clouds.AWS(), accelerators='V100'))
     _test_resources(
