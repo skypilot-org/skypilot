@@ -1,3 +1,4 @@
+"""Google Cloud Platform."""
 import copy
 import json
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -6,6 +7,7 @@ from sky import clouds
 
 
 class GCP(clouds.Cloud):
+    """Google Cloud Platform."""
 
     _REPR = 'GCP'
     _regions: List[clouds.Region] = []
@@ -166,7 +168,8 @@ class GCP(clouds.Cloud):
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
-        assert not r.use_spot, f"We currently do not support spot instances for GCP"
+        assert not r.use_spot, \
+            'We currently do not support spot instances for GCP'
         # Find GPU spec, if any.
         resources_vars = {
             'instance_type': r.instance_type,
@@ -184,10 +187,12 @@ class GCP(clouds.Cloud):
                                                                         ':'))
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
+                assert r.accelerator_args is not None, r
                 resources_vars['tf_version'] = r.accelerator_args['tf_version']
                 resources_vars['tpu_name'] = r.accelerator_args['tpu_name']
             else:
-                # Convert to GCP names: https://cloud.google.com/compute/docs/gpus
+                # Convert to GCP names:
+                # https://cloud.google.com/compute/docs/gpus
                 resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
                 resources_vars['gpu_count'] = acc_count
 
@@ -204,3 +209,9 @@ class GCP(clouds.Cloud):
         r.cloud = GCP()
         r.instance_type = GCP.get_default_instance_type()
         return [r]
+
+    def get_accelerators_from_instance_type(
+            self,
+            instance_type: str,
+    ) -> Optional[Dict[str, int]]:
+        return None
