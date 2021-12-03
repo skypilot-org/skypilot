@@ -3,6 +3,7 @@ boto3
 colorama
 jinja2
 networkx
+oauth2client
 pandas
 pendulum
 PrettyTable
@@ -11,6 +12,7 @@ ray[default]
 tabulate
 docker
 
-awscli
+awscli==1.22.17
 azure-cli
 google-api-python-client
+google-cloud-storage

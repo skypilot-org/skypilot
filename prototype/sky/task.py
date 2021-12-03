@@ -1,3 +1,4 @@
+"""Task: a coarse-grained stage in an application."""
 import os
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 from urllib import parse
@@ -5,9 +6,9 @@ import yaml
 
 import sky
 from sky import clouds
-from sky import resources
+from sky import resources as resources_lib
 
-Resources = resources.Resources
+Resources = resources_lib.Resources
 # A lambda generating commands (node addrs -> {addr: cmd_i}).
 CommandGen = Callable[[List[str]], Dict[str, str]]
 CommandOrCommandGen = Union[str, CommandGen]
@@ -29,19 +30,19 @@ class Task(object):
     """Task: a coarse-grained stage in an application."""
 
     def __init__(
-        self,
-        name: Optional[str] = None,
-        *,
-        setup: Optional[str] = None,
-        run: CommandOrCommandGen = None,
-        workdir: Optional[str] = None,
-        num_nodes: Optional[int] = None,
-        # Advanced:
-        storage: Optional[Any] = None,
-        post_setup_fn: Optional[CommandGen] = None,
-        docker_image: Optional[str] = None,
-        container_name: Optional[str] = None,
-        private_key: Optional[str] = '~/.ssh/sky-key',
+            self,
+            name: Optional[str] = None,
+            *,
+            setup: Optional[str] = None,
+            run: CommandOrCommandGen = None,
+            workdir: Optional[str] = None,
+            num_nodes: Optional[int] = None,
+            # Advanced:
+            storage: Optional[Any] = None,
+            post_setup_fn: Optional[CommandGen] = None,
+            docker_image: Optional[str] = None,
+            container_name: Optional[str] = None,
+            private_key: Optional[str] = '~/.ssh/sky-key',
     ):
         """Initializes a Task.
 
@@ -99,8 +100,12 @@ class Task(object):
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
 
+        # Block some of the clouds.
+        self.blocked_clouds = set()
+
         # Semantics.
-        if num_nodes is not None and num_nodes > 1 and type(self.run) is str:
+        if num_nodes is not None and num_nodes > 1 and isinstance(
+                self.run, str):
             # The same command str for all nodes.
             self.run = lambda ips: {ip: run for ip in ips}
 
@@ -161,7 +166,6 @@ class Task(object):
                              ' None or valid strings.')
         if self.num_nodes <= 0:
             raise ValueError('Must set Task.num_nodes to >0.')
-        return
 
     # E.g., 's3://bucket', 'gs://bucket', or None.
     def set_inputs(self, inputs, estimated_size_gigabytes):
@@ -177,7 +181,7 @@ class Task(object):
 
     def get_inputs_cloud(self):
         """Returns the cloud my inputs live in."""
-        assert type(self.inputs) is str, self.inputs
+        assert isinstance(self.inputs, str), self.inputs
         if self.inputs.startswith('s3:'):
             return clouds.AWS()
         elif self.inputs.startswith('gs:'):
@@ -262,6 +266,11 @@ class Task(object):
             self.file_mounts = {}
         self.file_mounts[src] = destination
 
+    def set_blocked_clouds(self, blocked_clouds: Set[clouds.Cloud]):
+        """Sets the clouds that this task should not run on."""
+        self.blocked_clouds = blocked_clouds
+        return self
+
     def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=local path).
 
@@ -290,8 +299,8 @@ class Task(object):
                 d[k] = v
         return d
 
-    def __rshift__(a, b):
-        sky.DagContext.get_current_dag().add_edge(a, b)
+    def __rshift__(self, b):
+        sky.DagContext.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
         if self.name:
@@ -359,25 +368,25 @@ class ParTask(Task):
     def __init__(self, tasks: List[Task]):
         super().__init__()
         # Validation.
-        assert all([isinstance(task, Task) and \
-                    not isinstance(task, ParTask) for task in tasks]), \
-                    'ParTask can only wrap base Tasks.'
-        assert all([task.num_nodes == 1 for task in tasks]), \
+        assert all(isinstance(task, Task) and
+                   not isinstance(task, ParTask) for task in tasks), \
+                   'ParTask can only wrap base Tasks.'
+        assert all(task.num_nodes == 1 for task in tasks), \
             'ParTask currently only wraps Tasks with num_nodes == 1.'
 
-        setup = set([task.setup for task in tasks])
+        setup = set(task.setup for task in tasks)
         assert len(setup) == 1, 'Inner Tasks must have the same \'setup\'.'
         self.setup = list(setup)[0]
 
-        workdir = set([task.workdir for task in tasks])
+        workdir = set(task.workdir for task in tasks)
         assert len(workdir) == 1, 'Inner Tasks must have the same \'workdir\'.'
         self.workdir = list(workdir)[0]
 
         # TODO: No support for these yet.
-        assert all([task.file_mounts is None for task in tasks])
-        assert all([task.inputs is None for task in tasks])
-        assert all([task.outputs is None for task in tasks])
-        assert all([task.time_estimator_func is None for task in tasks])
+        assert all(task.file_mounts is None for task in tasks)
+        assert all(task.inputs is None for task in tasks)
+        assert all(task.outputs is None for task in tasks)
+        assert all(task.time_estimator_func is None for task in tasks)
 
         dag = sky.DagContext.get_current_dag()
         for task in tasks:

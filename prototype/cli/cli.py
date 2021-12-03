@@ -163,15 +163,17 @@ def run(entry_point, cluster, dryrun):
     with sky.Dag() as dag:
         task = sky.Task.from_yaml(entry_point)
 
-    # TODO: This is sketchy. What if we're reusing a cluster and the optimized plan is different?
-    dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
-
     handle = None
     if cluster is not None:
         new_task = dag.tasks[0]
         handle = _reuse_or_provision_cluster(new_task, cluster)
 
-    sky.execute(dag, dryrun=dryrun, handle=handle, stream_logs=stream_logs)
+    # TODO: This is sketchy. What if we're reusing a cluster and the optimized plan is different?
+    sky.execute(dag,
+                dryrun=dryrun,
+                handle=handle,
+                stream_logs=stream_logs,
+                optimize_target=sky.OptimizeTarget.COST)
 
 
 @cli.command()

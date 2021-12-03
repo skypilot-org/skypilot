@@ -1,45 +1,25 @@
+"""Storage and StorageBackend Classes for Sky Data
+"""
+# pylint: disable=maybe-no-member
+import os
+from typing import Dict, Tuple
+
 import boto3
 from botocore.exceptions import ClientError
-from datetime import datetime
-import glob
-from google.cloud import storage
-import googleapiclient.discovery
-from googleapiclient import discovery
-from oauth2client.client import GoogleCredentials
-import multiprocessing
-import sky.data_transfer
-import os
-import json
-from typing import Any, Callable, Dict, List
-import sys
-import subprocess
+from google.api_core.exceptions import NotFound
+
+from sky.backends import data_utils, data_transfer
 
 Path = str
 StorageHandle = str
 
 
-def split_s3_path(s3_path):
-    path_parts = s3_path.replace("s3://", "").split("/")
-    bucket = path_parts.pop(0)
-    key = "/".join(path_parts)
-    return bucket, key
-
-
-def split_gcs_path(gcs_path):
-    path_parts = gcs_path.replace("gcs://", "").split("/")
-    bucket = path_parts.pop(0)
-    key = "/".join(path_parts)
-    return bucket, key
-
-
-class StorageBackend(object):
+class StorageBackend:
     """
-   StorageBackends abstract away the different storage types exposed by
-   different clouds. They return a StorageHandle that must be handled by the
-   ExecutionBackend to mount onto VMs or containers.
-   """
-
-    StorageHandle = str
+    StorageBackends abstract away the different storage types exposed by
+    different clouds. They return a StorageHandle that must be handled by the
+    ExecutionBackend to mount onto VMs or containers.
+    """
 
     def __init__(self, name: str, path: str):
         self.name = name
@@ -47,21 +27,9 @@ class StorageBackend(object):
         self.is_initialized = False
         self.storage_handle = None
 
-    def initialize(self, mount_path: Path) -> StorageHandle:
-        """
-        Creates the storage backend on the cloud and executes the setup
-        function. This might require a VM setup (e.g. for EBS) or directly
-        from user's laptop (e.g. s3 cp)
-        :param mount_path: Path used for mounting for initialization.
-        This path must be used in initialize_fn.
-        :return: None
-        """
-        raise NotImplementedError("Implement in a child class.")
-
-    def cleanup(self):
+    def cleanup(self) -> None:
         """
         Removes the storage object from the cloud
-        :return: None
         """
         raise NotImplementedError
 
@@ -74,72 +42,98 @@ class StorageBackend(object):
 
 
 class AWSStorageBackend(StorageBackend):
+    """
+    AWSStorageBackend inherits from StorageBackend and represents the backend
+    for S3 buckets.
+    """
 
-    def __init__(self, name: str, path: str, backends=None):
-        region = 'us-east-2'
-        self.name = name
-        self.path = path
+    def __init__(self, name: str, path: str, region='us-east-2', backends=None):
+        super().__init__(name, path)
         self.backends = backends
-        if "s3://" in self.path:
-            assert name == split_s3_path(
-                path
-            )[0], "S3 Bucket is specified as path, the name should be the same as S3 bucket!"
-        self.client = self.create_client(region)
+        if 's3://' in self.path:
+            assert name == data_utils.split_s3_path(path)[
+                0], 'S3 Bucket is specified as path, the name should be the \
+             same as S3 bucket!'
+
+        self.client = data_utils.create_s3_client(region)
         self.region = region
         self.bucket, is_new_bucket = self.get_bucket()
         assert not is_new_bucket or self.path
-        if "s3://" not in self.path:
+        if 's3://' not in self.path:
             if is_new_bucket:
-                print("Uploading Local to S3")
+                print('Uploading Local to S3')
                 self.upload_from_local(self.path)
             else:
-                print("Syncing Local to S3")
+                print('Syncing Local to S3')
                 self.sync_from_local()
         self.is_initialized = True
 
-    def sync_from_local(self):
-        sync_command = f"aws s3 sync {self.path} s3://{self.name}/"
-        os.system(sync_command)
-
-    def cleanup(self):
-        print(f"Deleting S3 Bucket {self.name}")
+    def cleanup(self) -> None:
+        print(f'Deleting S3 Bucket {self.name}')
         return self.delete_s3_bucket(self.name)
 
-    def get_handle(self):
+    def get_handle(self) -> StorageHandle:
         return boto3.resource('s3').Bucket(self.name)
 
-    def create_client(self, region='us-east-2'):
-        return boto3.client('s3', region_name=region)
+    def sync_from_local(self) -> None:
+        """Syncs Local folder with S3 Bucket. This method is called after
+        the folder is already uploaded onto the S3 bucket.
+        """
+        sync_command = f'aws s3 sync {self.path} s3://{self.name}/'
+        os.system(sync_command)
 
-    def get_bucket(self):
+    def get_bucket(self) -> Tuple[StorageHandle, bool]:
+        """Obtains the S3 bucket. If the S3 bucket does not exist, this
+        method will create the S3 bucket
+        """
         s3 = boto3.resource('s3')
         bucket = s3.Bucket(self.name)
         if bucket in s3.buckets.all():
             return bucket, False
         return self.create_s3_bucket(self.name), True
 
-    def upload_from_local(self, local_path):
-        sky.data_transfer._local_to_s3(local_path, self)
+    def upload_from_local(self, local_path) -> None:
+        """Uploads folder from local_path to S3 bucket
 
-    def download_to_local(self, local_path):
-        sky.data_transfer._s3_to_local(self, local_path)
+        Args:
+          local_path: str; Local path on user's device
+        """
+        data_transfer.local_to_s3(local_path, self)
+
+    def download_to_local(self, local_path) -> None:
+        """Uploads folder from local_path to S3 bucket
+
+        Args:
+          local_path: str; Local path on user's device
+        """
+        data_transfer.s3_to_local(self, local_path)
 
     def create_s3_bucket(self, bucket_name, region='us-east-2'):
-        # Create bucket
+        """Creates S3 bucket with specific name in specific region
+
+        Args:
+          bucket_name: str; Name of bucket
+          region: str; Region name, e.g. us-west-1, us-east-2
+        """
         s3_client = self.client
         try:
             if region is None:
-                response = s3_client.create_bucket(Bucket=bucket_name)
+                s3_client.create_bucket(Bucket=bucket_name)
             else:
                 location = {'LocationConstraint': region}
-                response = s3_client.create_bucket(
-                    Bucket=bucket_name, CreateBucketConfiguration=location)
+                s3_client.create_bucket(Bucket=bucket_name,
+                                        CreateBucketConfiguration=location)
         except ClientError as e:
             print(e)
             return None
         return boto3.resource('s3').Bucket(bucket_name)
 
     def delete_s3_bucket(self, bucket_name):
+        """Deletes S3 bucket, including all objects in bucket
+
+        Args:
+          bucket_name: str; Name of bucket
+        """
         s3 = boto3.resource('s3')
         bucket = s3.Bucket(bucket_name)
         bucket.objects.all().delete()
@@ -147,75 +141,112 @@ class AWSStorageBackend(StorageBackend):
 
 
 class GCSStorageBackend(StorageBackend):
+    """
+    GCSStorageBackend inherits from StorageBackend and represents the backend
+    for GCS buckets.
+    """
 
-    def __init__(self, name: str, path: str, backends=None):
-        region = 'us-central1'
-        self.name = name
-        self.path = path
+    def __init__(self,
+                 name: str,
+                 path: str,
+                 region='us-central1',
+                 backends=None):
+        super().__init__(name, path)
         self.backends = backends
-        if "gcs://" in self.path:
-            assert name == split_gcs_path(
-                path
-            )[0], "GCS Bucket is specified as path, the name should be the same as GCS bucket!"
-        self.client = self.create_client(region)
+        if 'gcs://' in self.path:
+            assert name == data_utils.split_gcs_path(path)[
+                0], 'GCS Bucket is specified as path, the name should be the \
+             same as GCS bucket!'
+
+        self.client = data_utils.create_gcs_client()
         self.name = name
         self.region = region
         self.bucket, is_new_bucket = self.get_bucket()
         self.path = path
         assert not is_new_bucket or self.path
-        if "gcs://" not in self.path:
-            if "s3://" in self.path:
-                print("Initating GCS Data Transfer Service from S3->GCS")
+        if 'gcs://' not in self.path:
+            if 's3://' in self.path:
+                print('Initating GCS Data Transfer Service from S3->GCS')
                 aws_backend = backends['AWS']
                 self.transfer_to_gcs(aws_backend)
             elif is_new_bucket and 's3://' not in self.path:
-                print("Uploading Local to GCS")
+                print('Uploading Local to GCS')
                 self.upload_from_local(self.path)
             else:
-                print("Syncing Local to GCS")
+                print('Syncing Local to GCS')
                 self.sync_from_local()
 
         self.is_initialized = True
 
-    def sync_from_local(self):
-        sync_command = f"gsutil -m rsync -r {self.path} gs://{self.name}/"
-        os.system(sync_command)
-
-    def transfer_to_gcs(self, aws_backend):
-        sky.data_transfer._s3_to_gcs(aws_backend, self)
-
     def cleanup(self):
-        print(f"Deleting GCS Bucket {self.name}")
+        print(f'Deleting GCS Bucket {self.name}')
         return self.delete_gcs_bucket(self.name)
 
     def get_handle(self):
         return self.client.get_bucket(self.name)
 
-    def create_client(self, region='us-central1'):
-        return storage.Client()
+    def sync_from_local(self):
+        """Syncs Local folder with GCS Bucket. This method is called after
+        the folder is already uploaded onto the GCS bucket.
+        """
+        sync_command = f'gsutil -m rsync -r {self.path} gs://{self.name}/'
+        os.system(sync_command)
+
+    def transfer_to_gcs(self, aws_backend: StorageBackend):
+        """Transfer data from S3 to GCS bucket using Google's Data Transfer
+        service
+
+        Args:
+          aws_backend: StorageBackend; S3 Backend, see AWSStorageBackend
+        """
+        data_transfer.s3_to_gcs(aws_backend, self)
 
     def get_bucket(self):
+        """Obtains the GCS bucket. If the GCS bucket does not exist, this
+        method will create the GCS bucket
+        """
         try:
             bucket = self.client.get_bucket(self.name)
             return bucket, False
-        except:
+        except NotFound:
             return self.create_gcs_bucket(self.name), True
 
     def upload_from_local(self, local_path):
-        sky.data_transfer._local_to_gcs(local_path, self)
+        """Uploads folder from local_path to GCS bucket
+
+        Args:
+          local_path: str; Local path on user's device
+        """
+        data_transfer.local_to_gcs(local_path, self)
 
     def download_to_local(self, local_path):
-        sky.data_transfer._gcs_to_local(self, local_path)
+        """Uploads folder from local_path to GCS bucket
+
+        Args:
+          local_path: str; Local path on user's device
+        """
+        data_transfer.gcs_to_local(self, local_path)
 
     def create_gcs_bucket(self, bucket_name, region='us-central1'):
+        """Creates GCS bucket with specific name in specific region
+
+        Args:
+          bucket_name: str; Name of bucket
+          region: str; Region name, e.g. us-central1, us-west1
+        """
         bucket = self.client.bucket(bucket_name)
-        bucket.storage_class = "STANDARD"
+        bucket.storage_class = 'STANDARD'
         new_bucket = self.client.create_bucket(bucket, location=region)
-        print("Created bucket {} in {} with storage class {}".format(
+        print('Created bucket {} in {} with storage class {}'.format(
             new_bucket.name, new_bucket.location, new_bucket.storage_class))
         return new_bucket
 
     def delete_gcs_bucket(self, bucket_name):
+        """Deletes GCS bucket, including all objects in bucket
+
+        Args:
+          bucket_name: str; Name of bucket
+        """
         bucket = self.client.get_bucket(bucket_name)
         bucket.delete(force=True)
 
@@ -256,24 +287,35 @@ class Storage(object):
         else:
             self.storage_backends = storage_backends
 
-        super(Storage, self).__init__()
+    def add_backend(self, cloud_type: str) -> None:
+        """Invoked by the optimizer after it has created a storage backend to
+        add it to Storage.
 
-    def add_backend(self, name: str) -> None:
+        Args:
+          cloud_type: str; Type of the storage [AWS, GCP, Azure]
+        """
         backend = None
 
-        if name == "AWS":
-            backend = AWSStorageBackend(self.name, self.source_path,
-                                        self.storage_backends)
-        elif name == 'GCP':
-            backend = GCSStorageBackend(self.name, self.source_path,
-                                        self.storage_backends)
+        if cloud_type == 'AWS':
+            backend = AWSStorageBackend(self.name,
+                                        self.source_path,
+                                        backends=self.storage_backends)
+        elif cloud_type == 'GCP':
+            backend = GCSStorageBackend(self.name,
+                                        self.source_path,
+                                        backends=self.storage_backends)
         else:
-            raise ValueError(f"{name} not supported as Storage Backend!")
+            raise ValueError(f'{cloud_type} not supported as Storage Backend!')
 
         assert backend.is_initialized
-        assert name not in self.storage_backends, f"Storage type {name} already exists, why do " \
-                                                         f"you want to add another of the same type? "
-        self.storage_backends[name] = backend
+        assert cloud_type not in self.storage_backends, f'Storage type \
+                                                    {cloud_type} \
+                                                    already exists, \
+                                                    why do you want to \
+                                                    add another of \
+                                                    the same type? '
+
+        self.storage_backends[cloud_type] = backend
 
     def cleanup(self):
         """

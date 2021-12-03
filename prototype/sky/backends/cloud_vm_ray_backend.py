@@ -9,7 +9,6 @@ import subprocess
 import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from googleapiclient.discovery import Resource
 import yaml
 
 import colorama
@@ -19,14 +18,21 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
+from sky import dag as dag_lib
+from sky import exceptions
 from sky import global_user_state
 from sky import logging
-from sky import resources
+from sky import optimizer
+from sky import resources as resources_lib
 from sky import task as task_mod
 from sky.backends import backend_utils
 
 App = backend_utils.App
-Resources = resources.Resources
+
+Resources = resources_lib.Resources
+Dag = dag_lib.Dag
+OptimizeTarget = optimizer.OptimizeTarget
+
 Path = str
 PostSetupFn = Callable[[str], Any]
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
@@ -83,6 +89,8 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
         futures = []
 
         def start_task(cmd, log_path, stream_logs):
+            # Set the executable to /bin/bash, so that the 'source ~/.bashrc'
+            # and 'source activate conda_env' can be used.
             proc = subprocess.Popen(cmd,
                                     stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE,
@@ -105,29 +113,29 @@ def _run_with_log(cmd,
                   stream_logs=False,
                   start_streaming_at='',
                   **kwargs):
-    proc = subprocess.Popen(cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            **kwargs)
-    stdout, stderr = backend_utils.redirect_process_output(
-        proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
-    proc.wait()
-    return proc, stdout, stderr
+    with subprocess.Popen(cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          **kwargs) as proc:
+        stdout, stderr = backend_utils.redirect_process_output(
+            proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
+        proc.wait()
+        return proc, stdout, stderr
 
 
 def _get_cluster_config_template(task):
-    _CLOUD_TO_TEMPLATE = {
+    cloud_to_template = {
         clouds.AWS: 'config/aws-ray.yml.j2',
         # clouds.Azure: 'config/azure-ray.yml.j2',
         clouds.GCP: 'config/gcp-ray.yml.j2',
     }
     cloud = task.best_resources.cloud
-    path = _CLOUD_TO_TEMPLATE[type(cloud)]
+    path = cloud_to_template[type(cloud)]
     return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
 
-def _to_accelerator_and_count(
-        resources: Optional[Resources]) -> Tuple[Optional[str], int]:
+def _to_accelerator_and_count(resources: Optional[Resources]
+                             ) -> Tuple[Optional[str], int]:
     acc = None
     acc_count = 0
     if resources is not None:
@@ -141,10 +149,15 @@ def _to_accelerator_and_count(
 class RetryingVmProvisioner(object):
     """A provisioner that retries different regions/zones within a cloud."""
 
-    def __init__(self, log_dir):
+    def __init__(self, log_dir: str, dag: Dag, optimize_target: OptimizeTarget):
         self._blocked_regions = set()
         self._blocked_zones = set()
+        self._blocked_launchable_resources = set()
+
         self.log_dir = log_dir
+        self._dag = dag
+        self._optimize_target = optimize_target
+
         colorama.init()
 
     def _in_blocklist(self, cloud, region, zones):
@@ -161,7 +174,7 @@ class RetryingVmProvisioner(object):
         self._blocked_zones.clear()
 
     def _update_blocklist_on_gcp_error(self, region, zones, stdout, stderr):
-        Style = colorama.Style
+        style = colorama.Style
         assert len(zones) == 1, zones
         zone = zones[0]
         splits = stderr.split('\n')
@@ -173,9 +186,9 @@ class RetryingVmProvisioner(object):
             for error in exception_dict['errors']:
                 code = error['code']
                 message = error['message']
-                logger.warn(f'Got {code} in {zone.name} '
-                            f'{Style.DIM}(message: {message})'
-                            f'{Style.RESET_ALL}')
+                logger.warning(f'Got {code} in {zone.name} '
+                               f'{style.DIM}(message: {message})'
+                               f'{style.RESET_ALL}')
                 if code == 'QUOTA_EXCEEDED':  # Per region.
                     self._blocked_regions.add(region.name)
                 elif code == 'ZONE_RESOURCE_POOL_EXHAUSTED':  # Per zone.
@@ -189,7 +202,7 @@ class RetryingVmProvisioner(object):
                 # Example: The resource
                 # 'projects/<id>/zones/zone/acceleratorTypes/nvidia-tesla-v100'
                 # was not found.
-                logger.warn(f'Got \'resource not found\' in {zone.name}.')
+                logger.warning(f'Got \'resource not found\' in {zone.name}.')
                 self._blocked_zones.add(zone.name)
             else:
                 logger.info('====== stdout ======')
@@ -202,9 +215,10 @@ class RetryingVmProvisioner(object):
                     'Errors occurred during setup command; check logs above.'
 
     def _update_blocklist_on_aws_error(self, region, zones, stdout, stderr):
+        del zones  # Unused.
         # The underlying ray autoscaler / boto3 will try all zones of a region
         # at once.
-        Style = colorama.Style
+        style = colorama.Style
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
         errors = [
@@ -222,9 +236,9 @@ class RetryingVmProvisioner(object):
             assert False, \
                 'Errors occurred during setup command; check logs above.'
 
-        logger.warn(f'Got error(s) in all zones of {region.name}:')
+        logger.warning(f'Got error(s) in all zones of {region.name}:')
         messages = '\n\t'.join(errors)
-        logger.warn(f'{Style.DIM}\t{messages}{Style.RESET_ALL}')
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_regions.add(region.name)
 
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
@@ -249,23 +263,24 @@ class RetryingVmProvisioner(object):
             assert False, f'Unknown cloud: {cloud}.'
 
     def _yield_region_zones(self, task: App, cloud: clouds.Cloud):
-        # Try reading previously launched region/zones and try them first,
-        # because we may have an existing cluster there.
         region = None
         zones = None
         try:
+            # Try reading previously launched region/zones and try them first,
+            # because we may have an existing cluster there.
             path = _get_cluster_config_template(task)[:-len('.j2')]
             with open(path, 'r') as f:
                 config = yaml.safe_load(f)
             if type(cloud) in (clouds.AWS, clouds.GCP):
                 region = config['provider']['region']
                 zones = config['provider']['availability_zone']
-            elif type(cloud) is clouds.Azure:
+            elif isinstance(cloud, clouds.Azure):
                 region = config['provider']['location']
                 zones = None
             else:
                 assert False, cloud
-        except Exception:
+        except FileNotFoundError:
+            # Happens if no previous cluster.yaml exists.
             pass
         if region is not None:
             region = clouds.Region(name=region)
@@ -276,25 +291,26 @@ class RetryingVmProvisioner(object):
         for region, zones in cloud.region_zones_provision_loop():
             yield (region, zones)
 
-    def provision_with_retries(self, task: App, to_provision: Resources,
-                               dryrun: bool, stream_logs: bool,
-                               cluster_name: str):
+    def _retry_region_zones(self, task: App, to_provision: Resources,
+                            dryrun: bool, stream_logs: bool, cluster_name: str):
         """The provision retry loop."""
+        style = colorama.Style
+
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
+        tail_cmd = f'tail -n100 -f {log_path}'
+        logger.info('To view detailed progress: '
+                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         self._clear_blocklist()
-        Style = colorama.Style
         for region, zones in self._yield_region_zones(task, to_provision.cloud):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
             logger.info(
-                f'\n{Style.BRIGHT}Launching on {to_provision.cloud} {region.name} '
-                f'({",".join(z.name for z in zones)}).{Style.RESET_ALL}')
-            logger.info('If this takes longer than ~30 seconds,'
-                        ' provisioning is likely successful.'
-                        ' Setup may take a few minutes.')
+                f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
+                f'{region.name} '
+                f'({",".join(z.name for z in zones)}).{style.RESET_ALL}')
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
@@ -305,8 +321,10 @@ class RetryingVmProvisioner(object):
                 cluster_name=cluster_name)
             if dryrun:
                 return
-            tpu_name = to_provision.accelerator_args.get('tpu_name')
-            if tpu_name is not None:
+            acc_args = to_provision.accelerator_args
+            tpu_name = None
+            if acc_args is not None and acc_args.get('tpu_name') is not None:
+                tpu_name = acc_args['tpu_name']
                 assert 'gcloud' in config_dict, \
                     'Expect TPU provisioning with gcloud'
                 try:
@@ -320,16 +338,13 @@ class RetryingVmProvisioner(object):
                             f'TPU {tpu_name} already exists; skipped creation.')
                     elif 'PERMISSION_DENIED' in stderr:
                         logger.info(
-                            f'TPU resource is not available in this zone.')
+                            'TPU resource is not available in this zone.')
                         continue
                     else:
                         logger.error(stderr)
                         raise e
             cluster_config_file = config_dict['ray']
 
-            tail_cmd = f'tail -n100 -f {log_path}'
-            logger.info(
-                f'To view progress: {Style.BRIGHT}{tail_cmd}{Style.RESET_ALL}')
             # Redirect stdout/err to the file and streaming (if stream_logs).
             proc, stdout, stderr = _run_with_log(
                 ['ray', 'up', '-y', cluster_config_file],
@@ -348,22 +363,61 @@ class RetryingVmProvisioner(object):
                          stderr=subprocess.PIPE)
             else:
                 if tpu_name is not None:
-                    _run(
-                        f"ray exec {cluster_config_file} \'echo \"export TPU_NAME={tpu_name}\" >> ~/.bashrc\'"
-                    )
-
+                    _run(f'ray exec {cluster_config_file} '
+                         f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
+                relpath = backend_utils.get_rel_path(cluster_config_file)
                 logger.info(
-                    f'{Style.BRIGHT}Successfully provisioned or found'
-                    f' existing VM(s). Setup completed.{Style.RESET_ALL}')
+                    f'{style.BRIGHT}Successfully provisioned or found'
+                    f' existing VM(s). Setup completed.{style.RESET_ALL}')
                 logger.info(
-                    f'\nTo log into the head VM:\t{Style.BRIGHT}ray attach'
-                    f' {cluster_config_file}{Style.RESET_ALL}\n')
+                    f'\nTo log into the head VM:\t{style.BRIGHT}ray attach'
+                    f' {relpath}{style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
                    ' Try changing resource requirements or use another cloud.')
         logger.error(message)
-        assert False, message
+        raise exceptions.ResourcesUnavailableError()
+
+    def provision_with_retries(self, task: App, to_provision: Resources,
+                               dryrun: bool, stream_logs: bool,
+                               cluster_name: str):
+        """Provision with retries for all launchable resources."""
+        assert self._dag is not None, 'Must register dag first.'
+        assert self._optimize_target is not None, \
+            'Must register optimizer_target first.'
+
+        style = colorama.Style
+
+        task_index = self._dag.tasks.index(task)
+
+        # Retrying launchable resources.
+        provision_failed = True
+        while provision_failed:
+            provision_failed = False
+            try:
+                handle = self._retry_region_zones(task,
+                                                  to_provision,
+                                                  dryrun=dryrun,
+                                                  stream_logs=stream_logs,
+                                                  cluster_name=cluster_name)
+            except exceptions.ResourcesUnavailableError:
+                provision_failed = True
+                logger.warning(
+                    f'\n{style.BRIGHT}Provision failed for {to_provision}. '
+                    f'Retrying other launchable resources...{style.RESET_ALL}')
+                # Add failed resources to the blocklist.
+                self._blocked_launchable_resources.add(to_provision)
+                # TODO: set all remaining tasks' best_resources to None.
+                task.best_resources = None
+                self._dag = sky.optimize(self._dag,
+                                         minimize=self._optimize_target,
+                                         blocked_launchable_resources=self.
+                                         _blocked_launchable_resources)
+                task = self._dag.tasks[task_index]
+                to_provision = task.best_resources
+                assert to_provision is not None, task
+        return handle
 
 
 class CloudVmRayBackend(backends.Backend):
@@ -374,7 +428,9 @@ class CloudVmRayBackend(backends.Backend):
       * Cloud providers' implementations under clouds/
     """
 
-    ResourceHandle = str  # yaml file
+    class ResourceHandle(str):
+        """A string path pointing to a cluster.yaml file."""
+        pass
 
     def __init__(self):
         # TODO: should include this as part of the handle.
@@ -382,6 +438,13 @@ class CloudVmRayBackend(backends.Backend):
         run_id = backend_utils.get_run_id()
         self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, run_id)
         os.makedirs(self.log_dir, exist_ok=True)
+
+        self._dag = None
+        self._optimize_target = None
+
+    def register_info(self, **kwargs) -> None:
+        self._dag = kwargs['dag']
+        self._optimize_target = kwargs['optimize_target']
 
     def provision(self,
                   task: App,
@@ -391,9 +454,15 @@ class CloudVmRayBackend(backends.Backend):
                   cluster_name: Optional[str] = None) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # ray up: the VMs.
-        provisioner = RetryingVmProvisioner(self.log_dir)
-        config_dict = provisioner.provision_with_retries(
-            task, to_provision, dryrun, stream_logs, cluster_name)
+        provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
+                                            self._optimize_target)
+        try:
+            config_dict = provisioner.provision_with_retries(
+                task, to_provision, dryrun, stream_logs, cluster_name)
+        except exceptions.ResourcesUnavailableError as e:
+            logger.error(e)
+            assert False, \
+                'Failed to provision all possible launchable resources.'
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
@@ -420,15 +489,15 @@ class CloudVmRayBackend(backends.Backend):
         storage = task.storage
         storage.add_backend(cloud_type)
         if cloud_type == 'AWS':
-            task.append_file_mount("~/.aws", "~/.aws")
+            task.append_file_mount('~/.aws', '~/.aws')
             task.append_file_mount(storage.default_mount_path,
-                                   "s3://" + storage.name + "/")
+                                   's3://' + storage.name + '/')
 
     def sync_file_mounts(
-        self,
-        handle: ResourceHandle,
-        all_file_mounts: Dict[Path, Path],
-        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+            self,
+            handle: ResourceHandle,
+            all_file_mounts: Dict[Path, Path],
+            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         # TODO: this only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
@@ -451,10 +520,12 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = self._get_node_ips(handle, task.num_nodes)
         ip_to_command = post_setup_fn(ip_list)
         for ip, cmd in ip_to_command.items():
-            cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
-                   f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
-            backend_utils.run_command_on_ip_via_ssh(ip, cmd, task.private_key,
-                                                    task.container_name)
+            if cmd is not None:
+                cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
+                       f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
+                backend_utils.run_command_on_ip_via_ssh(ip, cmd,
+                                                        task.private_key,
+                                                        task.container_name)
 
     def _execute_par_task(self, handle: ResourceHandle,
                           par_task: task_mod.ParTask,
@@ -487,8 +558,8 @@ class CloudVmRayBackend(backends.Backend):
                 _TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
         ]
         for i, t in enumerate(par_task.tasks):
-            # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used to initialize
-            # conda, so that 'conda activate ...' works.
+            # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
+            # to initialize conda, so that 'conda activate ...' works.
             cmd = shlex.quote(
                 f'. $(conda info --base)/etc/profile.d/conda.sh || true && \
                     cd {SKY_REMOTE_WORKDIR} && source ~/.bashrc && {t.run}')
@@ -522,15 +593,15 @@ class CloudVmRayBackend(backends.Backend):
 
         # Logger.
         colorama.init()
-        Fore = colorama.Fore
-        Style = colorama.Style
-        logger.info(f'{Fore.CYAN}Starting ParTask execution.{Style.RESET_ALL}')
+        fore = colorama.Fore
+        style = colorama.Style
+        logger.info(f'{fore.CYAN}Starting ParTask execution.{style.RESET_ALL}')
         if not stream_logs:
             logger.info(
-                f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
-                f'{Style.RESET_ALL} Hint: task outputs are redirected to '
-                f'{Style.BRIGHT}{log_dir}{Style.RESET_ALL} on the cluster. To monitor: '
-                f'ray exec {handle} "tail -f {log_dir}/*.log" '
+                f'{fore.CYAN}Logs will not be streamed (stream_logs=False).'
+                f'{style.RESET_ALL} Hint: task outputs are redirected to '
+                f'{style.BRIGHT}{log_dir}{style.RESET_ALL} on the cluster. '
+                f'To monitor: ray exec {handle} "tail -f {log_dir}/*.log" '
                 f'(To view the task names: ray exec {handle} "ls {log_dir}/")')
 
         self._exec_code_on_head(handle, codegen)
@@ -545,10 +616,9 @@ class CloudVmRayBackend(backends.Backend):
                          log_dir: str,
                          ips: List[str] = None):
         local_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
-        Style = colorama.Style
-        logger.info(
-            f'Syncing down the logs to {Style.BRIGHT}{local_log_dir}{Style.RESET_ALL}'
-        )
+        style = colorama.Style
+        logger.info('Syncing down logs to '
+                    f'{style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
         os.makedirs(local_log_dir, exist_ok=True)
         # Call the ray sdk to rsync the logs back to local.
         for ip in ips:
@@ -580,12 +650,12 @@ class CloudVmRayBackend(backends.Backend):
             executable = 'python3'
         cd = f'cd {SKY_REMOTE_WORKDIR}'
         cmd = f'ray exec {handle} \'{cd} && {executable} /tmp/{basename}\''
-        log_path = os.path.join(self.log_dir, f'run.log')
+        log_path = os.path.join(self.log_dir, 'run.log')
         if not stream_logs:
             colorama.init()
-            Style = colorama.Style
+            style = colorama.Style
             logger.info(f'Redirecting stdout/stderr, to monitor: '
-                        f'{Style.BRIGHT}tail -f {log_path}{Style.RESET_ALL}')
+                        f'{style.BRIGHT}tail -f {log_path}{style.RESET_ALL}')
 
         _run_with_log(cmd, log_path, stream_logs, shell=True)
 
@@ -615,7 +685,7 @@ class CloudVmRayBackend(backends.Backend):
     def _execute_task_one_node(self, handle: ResourceHandle, task: App,
                                stream_logs: bool) -> None:
         # Launch the command as a Ray task.
-        assert type(task.run) is str, \
+        assert isinstance(task.run, str), \
             f'Task(run=...) should be a string (found {type(task.run)}).'
         codegen = textwrap.dedent(f"""\
             #!/bin/bash
@@ -636,7 +706,7 @@ class CloudVmRayBackend(backends.Backend):
             textwrap.dedent(
                 _TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
         ]
-        acc, acc_count = _to_accelerator_and_count(task.best_resources)
+        unused_acc, acc_count = _to_accelerator_and_count(task.best_resources)
         # Get private ips here as Ray internally uses 'node:private_ip' as
         # per-node custom resources.
         ips = self._get_node_ips(handle,
@@ -660,11 +730,8 @@ class CloudVmRayBackend(backends.Backend):
                 # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
                 # would be force-set to empty by Ray.
                 num_gpus_str = f', num_gpus={acc_count}'
-            # Set the executable to /bin/bash, so that the 'source ~/.bashrc'
-            # and 'source activate conda_env' can be used.
-            name = f'task-{ip}'
+            name = f'{ip}'
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
-
             codegen.append(
                 textwrap.dedent(f"""\
         futures.append(ray.remote(start_task) \\
@@ -676,15 +743,15 @@ class CloudVmRayBackend(backends.Backend):
         codegen = '\n'.join(codegen)
         # Logger.
         colorama.init()
-        Fore = colorama.Fore
-        Style = colorama.Style
-        logger.info(f'\n{Fore.CYAN}Starting Task execution.{Style.RESET_ALL}')
+        fore = colorama.Fore
+        style = colorama.Style
+        logger.info(f'\n{fore.CYAN}Starting Task execution.{style.RESET_ALL}')
         if not stream_logs:
             logger.info(
-                f'{Fore.CYAN}Logs will not be streamed (stream_logs=False).'
-                f'{Style.RESET_ALL} Hint: task outputs are redirected to'
-                f'{Style.BRIGHT}{log_dir}{Style.RESET_ALL} on the cluster. To monitor: '
-                f'ray exec {handle} "tail -f {log_dir}/*.log"\n'
+                f'{fore.CYAN}Logs will not be streamed (stream_logs=False).'
+                f'{style.RESET_ALL} Hint: task outputs are redirected to '
+                f'{style.BRIGHT}{log_dir}{style.RESET_ALL} on the cluster. '
+                f'To monitor: ray exec {handle} "tail -f {log_dir}/*.log"\n'
                 f'(To view the task names: ray exec {handle} "ls {log_dir}/")')
 
         self._exec_code_on_head(handle, codegen)
@@ -697,16 +764,19 @@ class CloudVmRayBackend(backends.Backend):
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
-        Style = colorama.Style
+        style = colorama.Style
         if not teardown:
+            relpath = backend_utils.get_rel_path(handle)
             logger.info(
-                f'\nTo log into the head VM:\t{Style.BRIGHT}ray attach {handle} {Style.RESET_ALL}\n'
-                f'\nTo tear down the cluster:\t{Style.BRIGHT}ray down {handle} -y {Style.RESET_ALL}\n'
-            )
+                '\nTo log into the head VM:\t'
+                f'{style.BRIGHT}ray attach {relpath} {style.RESET_ALL}\n'
+                '\nTo tear down the cluster:'
+                f'\t{style.BRIGHT}ray down {relpath} -y {style.RESET_ALL}\n')
             if self._managed_tpu is not None:
-                logger.info(
-                    f'To tear down the TPU(s):\t{Style.BRIGHT}bash {self._managed_tpu[1]} {Style.RESET_ALL}\n'
-                )
+                tpu_script = backend_utils.get_rel_path(self._managed_tpu[1])
+                logger.info('To tear down the TPU(s):\t'
+                            f'{style.BRIGHT}bash {tpu_script}'
+                            f'{style.RESET_ALL}\n')
 
     def teardown(self, handle: ResourceHandle) -> None:
         _run(f'ray down -y {handle}')
