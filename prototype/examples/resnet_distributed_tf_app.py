@@ -9,7 +9,7 @@ IPAddr = str
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
-    subprocess.run(f'cd {workdir} && git checkout 9459fee',
+    subprocess.run(f'cd {workdir} && git checkout 222cc86',
                    shell=True,
                    check=True)
 

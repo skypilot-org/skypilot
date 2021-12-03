@@ -51,7 +51,8 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
         print('available_resources:', ray.available_resources())
         print('live nodes:', ray.state.node_ids())
 
-        def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
+        def redirect_process_output(
+          proc, log_path, stream_logs, start_streaming_at=''):
             dirname = os.path.dirname(log_path)
             os.makedirs(dirname, exist_ok=True)
 
@@ -475,21 +476,56 @@ class CloudVmRayBackend(backends.Backend):
             all_file_mounts: Dict[Path, Path],
             cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
-        # TODO: this only syncs to head.
+        # TODO: this function currently only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
         # using the yaml file.  Here we handle cloud -> remote file transfers.
         mounts = cloud_to_remote_file_mounts
-        if mounts is not None:
-            for dst, src in mounts.items():
-                storage = cloud_stores.get_storage_from_path(src)
-                # TODO: room for improvement.  Here there are many moving parts
-                # (download gsutil on remote, run gsutil on remote).  Consider
-                # alternatives (smart_open, each provider's own sdk), a
-                # data-transfer container etc.  We also assumed 'src' is a
-                # directory.
-                download_command = storage.make_download_dir_command(
-                    source=src, destination=dst)
-                backend_utils.run(f'ray exec {handle} \'{download_command}\'')
+        if mounts is None:
+            return
+        for dst, src in mounts.items():
+            # TODO: room for improvement.  Here there are many moving parts
+            # (download gsutil on remote, run gsutil on remote).  Consider
+            # alternatives (smart_open, each provider's own sdk), a
+            # data-transfer container etc.
+            storage = cloud_stores.get_storage_from_path(src)
+            # Sync to a safe-to-write "wrapped" path.
+            wrapped_dst = backend_utils.wrap_file_mount(dst)
+            if storage.is_directory(src):
+                sync = storage.make_sync_dir_command(source=src,
+                                                     destination=wrapped_dst)
+            else:
+                sync = storage.make_sync_file_command(source=src,
+                                                      destination=wrapped_dst)
+            # Symlink to the wrapped path.
+            symlink_to_make = dst.rstrip('/')
+            dir_of_symlink = os.path.dirname(symlink_to_make)
+            # Below, use sudo in case the symlink needs sudo access to create.
+            command = ' && '.join([
+                # Prepare to create the symlink:
+                #  1. make sure its dir exists.
+                f'sudo mkdir -p {dir_of_symlink}',
+                #  2. remove any existing symlink (otherwise, gsutil errors).
+                f'(sudo rm {symlink_to_make} &>/dev/null || true)',
+                # Make the wrapped dir.
+                f'mkdir -p {wrapped_dst}',
+                # Both the wrapped and the symlink dir exist; sync.
+                sync,
+                # Link.
+                f'sudo ln -s {wrapped_dst.rstrip("/")} {symlink_to_make}',
+                # chown.
+                f'sudo chown $USER {dst}',
+            ])
+            log_path = os.path.join(self.log_dir,
+                                    'file_mounts_cloud_to_remote.log')
+            proc, unused_stdout, unused_stderr = backend_utils.run_with_log(
+                f'ray exec {handle} \'{command}\'',
+                os.path.abspath(log_path),
+                stream_logs=True,
+                shell=True)
+            if proc.returncode:
+                raise ValueError(
+                    f'File mounts\n\t{src} -> {dst}\nfailed to sync. '
+                    f'See errors above and log: {log_path}')
 
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
                        task: App) -> None:

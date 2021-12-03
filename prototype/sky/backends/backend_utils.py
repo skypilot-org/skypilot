@@ -31,6 +31,9 @@ SKY_REMOTE_WORKDIR = '/tmp/workdir'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 
+# Do not use /tmp because it gets cleared on VM restart.
+_SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
+
 
 def get_rel_path(path: str) -> str:
     cwd = os.getcwd()
@@ -64,6 +67,21 @@ def _fill_template(template_path: str,
     return output_path
 
 
+def wrap_file_mount(path: str) -> str:
+    """Prepends ~/<opaque dir>/ to a path to work around permission issues.
+
+    Examples:
+      /root/hello.txt -> ~/<opaque dir>/root/hello.txt
+      local.txt -> ~/<opaque dir>/local.txt
+
+    After the path is synced, we can later create a symlink to this wrapped
+    path from the original path, e.g., in the initialization_commands of the
+    ray autoscaler YAML.
+    """
+    return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, path.lstrip('/'))
+
+
+# TODO: too many things happening here - leaky abstraction. Refactor.
 def write_cluster_config(run_id: RunId,
                          task: task_lib.Task,
                          cluster_config_template: str,
@@ -121,6 +139,44 @@ def write_cluster_config(run_id: RunId,
             f.write(codegen)
         setup_sh_path = f.name
 
+    # File mounts handling:
+    #  (1) in 'file_mounts' sections, add <prefix> to all target paths.
+    #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
+    # We need to do these since as of Ray 1.8, this is not supported natively
+    # (Docker works though, of course):
+    #  https://github.com/ray-project/ray/pull/9332
+    #  https://github.com/ray-project/ray/issues/9326
+    mounts = task.get_local_to_remote_file_mounts()
+    wrapped_file_mounts = {}
+    initialization_commands = []
+    if mounts is not None:
+        for remote, local in mounts.items():
+            wrapped_remote = wrap_file_mount(remote)
+            wrapped_file_mounts[wrapped_remote] = local
+            # Point 'remote' (may or may not exist) to 'wrapped_remote'
+            # (guaranteed to exist by ray autoscaler's use of rsync).
+            #
+            # 'remote' can have multiple levels:
+            #   - relative paths, a/b/c
+            #   - absolute paths, /a/b/c
+            symlink_to_make = remote.rstrip('/')
+            dir_of_symlink = os.path.dirname(remote)
+            # Below, use sudo in case the symlink needs sudo access to create.
+            command = ' && '.join([
+                # Prepare to create the symlink:
+                #  1. make sure its dir exists.
+                f'sudo mkdir -p {dir_of_symlink}',
+                #  2. remove any existing symlink (ln -f may throw 'cannot
+                #     overwrite directory', if the link exists and points to a
+                #     directory).
+                f'(sudo rm {symlink_to_make} &>/dev/null || true)',
+                # Link.
+                f'sudo ln -s {wrapped_remote} {symlink_to_make}',
+                # chown.
+                f'sudo chown $USER {symlink_to_make}',
+            ])
+            initialization_commands.append(command)
+
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
@@ -133,7 +189,9 @@ def write_cluster_config(run_id: RunId,
                 'docker_image': task.docker_image,
                 'container_name': task.container_name,
                 'num_nodes': task.num_nodes,
-                'file_mounts': task.get_local_to_remote_file_mounts() or {},
+                # File mounts handling.
+                'file_mounts': wrapped_file_mounts,
+                'initialization_commands': initialization_commands or None,
                 # Region/zones.
                 'region': region,
                 'zones': ','.join(zones),
