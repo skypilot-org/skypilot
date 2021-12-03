@@ -14,7 +14,7 @@ outputs: {
 }
 
 # file_mounts: {
-#   /tmp/fake_imagenet/: gs://cloud-tpu-test-datasets/fake_imagenet/,
+#   /tmp/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet,
 # }
 
 setup: |
