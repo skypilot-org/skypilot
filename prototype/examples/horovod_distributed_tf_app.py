@@ -57,5 +57,5 @@ with sky.Dag() as dag:
         sky.Resources(clouds.AWS(), 'p3.2xlarge'),
     })
 
-dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
+dag = sky.Optimizer.optimize(dag)
 sky.execute(dag)
