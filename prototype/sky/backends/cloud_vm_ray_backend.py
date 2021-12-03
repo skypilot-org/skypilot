@@ -503,17 +503,6 @@ class CloudVmRayBackend(backends.Backend):
         mounts = cloud_to_remote_file_mounts
         if mounts is None:
             return
-        # Validation.
-        for dst, src in mounts.items():
-            if dst.endswith('/') != src.endswith('/'):
-                raise ValueError(
-                    'In file mounts involving cloud URLs, add a slash to '
-                    'both source and destination to signify directories. '
-                    f'Found src={src} dst={dst}.')
-            if dst.endswith('/'):
-                logger.info(f'[Planned dir sync] {src} -> {dst}')
-            else:
-                logger.info(f'[Planned file sync] {src} -> {dst}')
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
             # (download gsutil on remote, run gsutil on remote).  Consider
@@ -522,24 +511,24 @@ class CloudVmRayBackend(backends.Backend):
             storage = cloud_stores.get_storage_from_path(src)
             # Sync to a safe-to-write "wrapped" path.
             wrapped_dst = backend_utils.wrap_file_mount(dst)
-            if dst.endswith('/'):
-                mkdir_wrapped_dst = f'mkdir -p {wrapped_dst} && '
+            if storage.is_directory(src):
                 sync = storage.make_sync_dir_command(source=src,
                                                      destination=wrapped_dst)
             else:
-                mkdir_wrapped_dst = ''
                 sync = storage.make_sync_file_command(source=src,
                                                       destination=wrapped_dst)
             # Symlink to the wrapped path.
             symlink_to_make = dst.rstrip('/')
             dir_of_symlink = os.path.dirname(symlink_to_make)
             # Below, use sudo in case the symlink needs sudo access to create.
-            command = mkdir_wrapped_dst + ' && '.join([
+            command = ' && '.join([
                 # Prepare to create the symlink:
                 #  1. make sure its dir exists.
                 f'sudo mkdir -p {dir_of_symlink}',
                 #  2. remove any existing symlink (otherwise, gsutil errors).
                 f'(sudo rm {symlink_to_make} &>/dev/null || true)',
+                # Make the wrapped dir.
+                f'mkdir -p {wrapped_dst}',
                 # Both the wrapped and the symlink dir exist; sync.
                 sync,
                 # Link.
@@ -549,20 +538,15 @@ class CloudVmRayBackend(backends.Backend):
             ])
             log_path = os.path.join(self.log_dir,
                                     'file_mounts_cloud_to_remote.log')
-            proc, stdout, stderr = _run_with_log(
+            proc, unused_stdout, unused_stderr = _run_with_log(
                 f'ray exec {handle} \'{command}\'',
                 os.path.abspath(log_path),
                 stream_logs=True,
                 shell=True)
             if proc.returncode:
-                if 'Did you mean to do cp -r?' in stdout:  # gsutil error
-                    raise ValueError(
-                        f'File mounts\n\t{src} -> {dst}\nappear to be '
-                        'directories; add a trailing slash to both paths.')
-                else:
-                    raise ValueError(
-                        f'File mounts\n\t{src} -> {dst}\nfailed to sync. '
-                        f'See errors above and log: {log_path}')
+                raise ValueError(
+                    f'File mounts\n\t{src} -> {dst}\nfailed to sync. '
+                    f'See errors above and log: {log_path}')
 
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
                        task: App) -> None:

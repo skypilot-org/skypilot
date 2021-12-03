@@ -13,7 +13,7 @@
 #    commands may require flags to follow symlinks (e.g., ls -H; du -L).
 
 resources:
-  cloud: aws
+  cloud: gcp
 
 # Format:
 #   <destination on VM>: <source, local or cloud>
@@ -26,18 +26,16 @@ file_mounts:
   /sky: .
   /more/levels/should/work: .
 
-  # TODO: test slashes for local.
-
   #############################################
   #  Sync from Google Cloud Storage (gsutil)  #
   #############################################
 
-  # If URLs have no trailing slashes, they are treated as objects ("files").
+  # Syncing a regular object.
   /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
 
-  # If URLs have trailing slashs, they are treated as "directories".  Contents
-  # under a directory, including subdirectories, will be recursively synced.
-  /data/fake_imagenet/: gs://cloud-tpu-test-datasets/fake_imagenet/
+  # If a source path points to a "directory", its contents will be recursively
+  # synced (subdirectories included).
+  /data/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet
 
 run: |
   ls -l /setup.py

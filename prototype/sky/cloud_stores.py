@@ -9,24 +9,35 @@ TODO:
   The full-blown impl should handle authentication so each user's private
   datasets can be accessed.
 """
+import subprocess
 import urllib.parse
+
+
+def _run(cmd, **kwargs):
+    return subprocess.run(cmd, shell=True, check=True, **kwargs)
+
+
+def _run_captured_outputs(cmd, **kwargs):
+    return _run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
 
 
 class CloudStorage(object):
     """Interface for a cloud object store."""
 
-    def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Makes a runnable bash command to sync a 'directory'.
+    def is_directory(self, url: str) -> bool:
+        """Returns whether 'url' is a directory.
 
-        Both 'source' and 'destination' must end with a trailing slash (/).
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
         """
         raise NotImplementedError
 
-    def make_sync_file_command(self, source: str, destination: str) -> str:
-        """Makes a runnable bash command to sync a file.
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Makes a runnable bash command to sync a 'directory'."""
+        raise NotImplementedError
 
-        Both 'source' and 'destination' must not end with a trailing slash (/).
-        """
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Makes a runnable bash command to sync a file."""
         raise NotImplementedError
 
 
@@ -45,16 +56,37 @@ class GcsCloudStorage(CloudStorage):
         'popd &>/dev/null',
     ]
 
+    _GSUTIL = '/tmp/gsutil/gsutil'
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether 'url' is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        commands = list(self._GET_GSUTIL)
+        commands.append(f'{self._GSUTIL} ls -d {url}')
+        command = ' && '.join(commands)
+        p = _run_captured_outputs(command)
+        out = p.stdout.decode().strip()
+        # gsutil ls -d url
+        #   --> url.rstrip('/')          if url is not a directory
+        #   --> url with an ending '/'   if url is a directory
+        if not out.endswith('/'):
+            assert out == url.rstrip('/'), (out, url)
+            return False
+        url = url if url.endswith('/') else (url + '/')
+        assert out == url, (out, url)
+        return True
+
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil.
 
         Limitation: no authentication support; 'source' is assumed to in a
         publicly accessible bucket.
         """
-        assert source.endswith('/') and destination.endswith('/'), (source,
-                                                                    destination)
         download_via_gsutil = (
-            f'/tmp/gsutil/gsutil -m rsync -r {source[:-1]} {destination[:-1]}')
+            f'{self._GSUTIL} -m rsync -r {source} {destination}')
         all_commands = list(self._GET_GSUTIL)
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
@@ -65,10 +97,7 @@ class GcsCloudStorage(CloudStorage):
         Limitation: no authentication support; 'source' is assumed to in a
         publicly accessible bucket.
         """
-        assert not source.endswith('/') and not destination.endswith('/'), (
-            source, destination)
-        download_via_gsutil = (
-            f'/tmp/gsutil/gsutil -m cp {source} {destination}')
+        download_via_gsutil = f'{self._GSUTIL} -m cp {source} {destination}'
         all_commands = list(self._GET_GSUTIL)
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
