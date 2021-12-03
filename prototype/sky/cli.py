@@ -218,18 +218,28 @@ def cancel(task_id):
 
 
 @cli.command()
-@click.option('--cluster',
-              '-c',
-              default=None,
-              type=str,
-              help=_CLUSTER_FLAG_HELP)
+@click.argument('cluster', required=False)
 @click.option('--all',
               '-a',
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
 def down(cluster, all):  # pylint: disable=redefined-builtin
-    """Tears down a cluster."""
+    """Tears down the cluster CLUSTER.
+
+    CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
+    are supplied, the latter takes precedence.
+
+    Examples:
+
+      \b
+      # Tear down a specific cluster.
+      sky down cluster_name
+
+      \b
+      # Tear down all existing clusters.
+      sky down -a
+    """
     # FIXME: make TPU part of handles; so that this kills TPUs too.
     name = cluster
     downall = all
