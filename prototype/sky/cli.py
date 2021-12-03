@@ -5,9 +5,19 @@ Example usage:
   # See available commands.
   >> sky
 
-  >> sky run <app.yaml>
+  # Run a task, described in a yaml file.
+  # Provisioning, setup, file syncing are handled.
+  >> sky run task.yaml
+  >> sky run [-c cluster_name] task.yaml
 
+  # Show the list of tasks and running clusters.
   >> sky status
+
+  # Tear down a specific cluster.
+  >> sky down -c cluster_name
+
+  # Tear down all existing clusters.
+  >> sky down -a
 
 TODO:
 - Add support for local Docker backend.  Currently this module is very coupled
@@ -202,6 +212,54 @@ def cancel(task_id):
     # complete.  If this is changed to non-blocking, then we will need a way to
     # kill async tasks with ray exec.
     global_user_state.remove_task(task_id)
+
+
+@cli.command()
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              help=_CLUSTER_FLAG_HELP)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Tear down all existing clusters.')
+def down(cluster, all):  # pylint: disable=redefined-builtin
+    """Tears down a cluster."""
+    # FIXME: make TPU part of handles; so that this kills TPUs too.
+    name = cluster
+    downall = all
+    if name is None and downall is None:
+        raise click.UsageError(
+            'sky down requires either a cluster name (see `sky status`) '
+            'or --all.')
+
+    to_down = []
+    if name is not None:
+        handle = global_user_state.get_handle_from_cluster_name(name)
+        if handle is not None:
+            to_down = [{'name': name, 'handle': handle}]
+    if downall:
+        to_down = global_user_state.get_clusters()
+        if name is not None:
+            print('Both --all and --cluster specified for sky down. '
+                  'Letting --all take effect.')
+    if not to_down:
+        if name is not None:
+            print(f'Cluster {name} is not found (see `sky status`).')
+        else:
+            print('No existing clusters found (see `sky status`).')
+
+    # FIXME: Assumes a specific backend.
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    for status in to_down:
+        name = status['name']
+        handle = status['handle']
+        backend.teardown(handle)
+        global_user_state.remove_cluster(name)
+        # TODO: colorama green this?
+        print(f'Tearing down cluster {name}...done.')
 
 
 @cli.command()

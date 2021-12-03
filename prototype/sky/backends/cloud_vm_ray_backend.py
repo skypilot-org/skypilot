@@ -737,11 +737,12 @@ class CloudVmRayBackend(backends.Backend):
         style = colorama.Style
         if not teardown:
             relpath = backend_utils.get_rel_path(handle)
+            name = global_user_state.get_cluster_name_from_handle(handle)
             logger.info(
                 '\nTo log into the head VM:\t'
                 f'{style.BRIGHT}ray attach {relpath} {style.RESET_ALL}\n'
                 '\nTo tear down the cluster:'
-                f'\t{style.BRIGHT}ray down {relpath} -y {style.RESET_ALL}\n')
+                f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n')
             if self._managed_tpu is not None:
                 tpu_script = backend_utils.get_rel_path(self._managed_tpu[1])
                 logger.info('To tear down the TPU(s):\t'
