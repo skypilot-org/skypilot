@@ -512,10 +512,12 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = self._get_node_ips(handle, task.num_nodes)
         ip_to_command = post_setup_fn(ip_list)
         for ip, cmd in ip_to_command.items():
-            cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
-                   f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
-            backend_utils.run_command_on_ip_via_ssh(ip, cmd, task.private_key,
-                                                    task.container_name)
+            if cmd is not None:
+                cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
+                       f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
+                backend_utils.run_command_on_ip_via_ssh(ip, cmd,
+                                                        task.private_key,
+                                                        task.container_name)
 
     def _execute_par_task(self, handle: ResourceHandle,
                           par_task: task_mod.ParTask,
