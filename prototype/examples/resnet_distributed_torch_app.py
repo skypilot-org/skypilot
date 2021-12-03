@@ -1,9 +1,6 @@
-import json
 from typing import Dict, List
 
 import sky
-import time_estimators
-from sky import clouds
 
 IPAddr = str
 
@@ -43,10 +40,10 @@ with sky.Dag() as dag:
 
     train.set_resources({
         ##### Fully specified
-        sky.Resources(clouds.AWS(), 'p3.2xlarge'),
-        # sky.Resources(clouds.GCP(), 'n1-standard-16'),
+        sky.Resources(sky.AWS(), 'p3.2xlarge'),
+        # sky.Resources(sky.GCP(), 'n1-standard-16'),
         #sky.Resources(
-        #     clouds.GCP(),
+        #     sky.GCP(),
         #     'n1-standard-8',
         # Options: 'V100', {'V100': <num>}.
         #     'V100',
@@ -54,9 +51,8 @@ with sky.Dag() as dag:
         ##### Partially specified
         #sky.Resources(accelerators='V100'),
         # sky.Resources(accelerators='tpu-v3-8'),
-        # sky.Resources(clouds.AWS(), accelerators={'V100': 4}),
-        # sky.Resources(clouds.AWS(), accelerators='V100'),
+        # sky.Resources(sky.AWS(), accelerators={'V100': 4}),
+        # sky.Resources(sky.AWS(), accelerators='V100'),
     })
 
-dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
 sky.execute(dag)

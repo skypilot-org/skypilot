@@ -1,3 +1,4 @@
+"""Service catalog."""
 import collections
 from typing import Dict, List
 
@@ -5,10 +6,10 @@ from sky import clouds
 from sky.clouds.service_catalog import aws_catalog
 
 
-def list_accelerators(
-        gpus_only: bool = True) -> Dict[str, Dict[clouds.Cloud, List[int]]]:
+def list_accelerators(gpus_only: bool = True
+                     ) -> Dict[str, Dict[clouds.Cloud, List[int]]]:
     """List the canonical names of all accelerators offered by the Sky.
-    
+
     Returns: a mapping from the canonical names of accelerators, to a mapping
     from cloud names to a list of counts, each representing that an instance
     type is offered by this cloud with this many accelerators.

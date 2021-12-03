@@ -1,3 +1,4 @@
+"""Common utilities for service_catalog."""
 import os
 
 import pandas as pd

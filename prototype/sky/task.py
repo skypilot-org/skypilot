@@ -1,15 +1,27 @@
-from typing import Dict, List, Optional, Set, Union
-import urllib.parse
+"""Task: a coarse-grained stage in an application."""
+import os
+from typing import Callable, Dict, List, Optional, Set, Union
+from urllib import parse
+import yaml
 
 import sky
 from sky import clouds
-from sky import resources
+from sky import resources as resources_lib
 
-Resources = resources.Resources
+Resources = resources_lib.Resources
+# A lambda generating commands (node addrs -> {addr: cmd_i}).
+CommandGen = Callable[[List[str]], Dict[str, str]]
+CommandOrCommandGen = Union[str, CommandGen]
+
+CLOUD_REGISTRY = {
+    'aws': clouds.AWS(),
+    'gcp': clouds.GCP(),
+    'azure': clouds.Azure(),
+}
 
 
 def _is_cloud_store_url(url):
-    result = urllib.parse.urlsplit(url)
+    result = parse.urlsplit(url)
     # '' means non-cloud URLs.
     return result.netloc
 
@@ -19,25 +31,62 @@ class Task(object):
 
     def __init__(
             self,
-            name=None,
-            workdir=None,
-            setup=None,
-            post_setup_fn=None,
-            docker_image=None,
-            container_name=None,
-            num_nodes=1,
-            private_key='~/.ssh/sky-key',
-            run=None,
+            name: Optional[str] = None,
+            *,
+            setup: Optional[str] = None,
+            run: CommandOrCommandGen = None,
+            workdir: Optional[str] = None,
+            num_nodes: Optional[int] = None,
+            # Advanced:
+            post_setup_fn: Optional[CommandGen] = None,
+            docker_image: Optional[str] = None,
+            container_name: Optional[str] = None,
+            private_key: Optional[str] = '~/.ssh/sky-key',
     ):
+        """Initializes a Task.
+
+        All fields are optional except 'run': either a shell command to run
+        (str) or a command generator for different nodes (lambda; see below).
+
+        Before executing a Task, it is required to call Task.set_resources() to
+        assign resource requirements to this task.
+
+        Args:
+          name: A string name for the Task.
+          setup: A setup command, run under 'workdir' and before actually
+            executing the run command, 'run'.
+          run: Either a shell command (str) or a command generator (callable).
+            If latter, it must take a list of node addresses as input and
+            return a dictionary {addr: command for addr} (valid to exclude some
+            nodes, in which case no commands are run on them).  Commands will
+            be run under 'workdir'.
+          workdir: The local working directory.  This directory and its files
+            will be synced to a location on the remote VM(s), and 'setup' and
+            'run' commands will be run under that location (thus, they can rely
+            on relative paths when invoking binaries).
+          num_nodes: The number of nodes to provision for this Task.  If None,
+            treated as 1 node.  If > 1, each node will execute its own
+            setup/run command; 'run' can either be a str, meaning all nodes get
+            the same command, or a lambda, as documented above.
+          post_setup_fn: If specified, this generates commands to be run on all
+            node(s), which are run after resource provisioning and 'setup' but
+            before 'run'.  A typical use case is to set environment variables
+            on each node based on all node IPs.
+          docker_image: The base docker image that this Task will be built on.
+            In effect when LocalDockerBackend is used.  Defaults to 'ubuntu'.
+          container_name: Unused?
+          private_key: Unused?
+        """
         self.name = name
         self.best_resources = None
         self.run = run
         self.setup = setup
         self.post_setup_fn = post_setup_fn
         self.workdir = workdir
-        self.docker_image = docker_image
+        self.docker_image = docker_image if docker_image else 'ubuntu'
         self.container_name = container_name
-        self.num_nodes = num_nodes
+        self._explicit_num_nodes = num_nodes  # Used as a scheduling constraint.
+        self.num_nodes = 1 if num_nodes is None else num_nodes
         self.private_key = private_key
         self.inputs = None
         self.outputs = None
@@ -49,20 +98,72 @@ class Task(object):
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
 
-        # Check for proper assignment of Task variables
-        # self.validate_config()
+        # Block some of the clouds.
+        self.blocked_clouds = set()
+
+        # Semantics.
+        if num_nodes is not None and num_nodes > 1 and isinstance(
+                self.run, str):
+            # The same command str for all nodes.
+            self.run = lambda ips: {ip: run for ip in ips}
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
 
+    @staticmethod
+    def from_yaml(yaml_path):
+        with open(os.path.expanduser(yaml_path), 'r') as f:
+            config = yaml.safe_load(f)
+        # TODO: perform more checks on yaml and raise meaningful errors.
+        if 'run' not in config:
+            raise ValueError('The YAML spec should include a \'run\' field.')
+
+        task = Task(
+            config.get('name'),
+            run=config['run'],  # Required field.
+            workdir=config.get('workdir'),
+            setup=config.get('setup'),
+            num_nodes=config.get('num_nodes'),
+        )
+
+        file_mounts = config.get('file_mounts')
+        if file_mounts is not None:
+            task.set_file_mounts(file_mounts)
+
+        if config.get('inputs') is not None:
+            inputs_dict = config['inputs']
+            inputs = list(inputs_dict.keys())[0]
+            estimated_size_gigabytes = list(inputs_dict.values())[0]
+            # TODO: allow option to say (or detect) no download/egress cost.
+            task.set_inputs(inputs=inputs,
+                            estimated_size_gigabytes=estimated_size_gigabytes)
+
+        if config.get('outputs') is not None:
+            outputs_dict = config['outputs']
+            outputs = list(outputs_dict.keys())[0]
+            estimated_size_gigabytes = list(outputs_dict.values())[0]
+            task.set_outputs(outputs=outputs,
+                             estimated_size_gigabytes=estimated_size_gigabytes)
+
+        resources = config.get('resources')
+        if resources.get('cloud') is not None:
+            resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
+        if resources.get('accelerators') is not None:
+            resources['accelerators'] = resources['accelerators']
+        if resources.get('accelerator_args') is not None:
+            resources['accelerator_args'] = dict(resources['accelerator_args'])
+        if resources.get('use_spot') is not None:
+            resources['use_spot'] = resources['use_spot']
+        resources = sky.Resources(**resources)
+        task.set_resources({resources})
+        return task
+
     def validate_config(self):
         if bool(self.docker_image) != bool(self.container_name):
-            raise ValueError(
-                "Either docker image and container are both None or valid strings"
-            )
+            raise ValueError('Either docker_image and container_name are both'
+                             ' None or valid strings.')
         if self.num_nodes <= 0:
-            raise ValueError("Must be >0 total nodes")
-        return
+            raise ValueError('Must set Task.num_nodes to >0.')
 
     # E.g., 's3://bucket', 'gs://bucket', or None.
     def set_inputs(self, inputs, estimated_size_gigabytes):
@@ -78,7 +179,7 @@ class Task(object):
 
     def get_inputs_cloud(self):
         """Returns the cloud my inputs live in."""
-        assert type(self.inputs) is str, self.inputs
+        assert isinstance(self.inputs, str), self.inputs
         if self.inputs.startswith('s3:'):
             return clouds.AWS()
         elif self.inputs.startswith('gs:'):
@@ -148,6 +249,11 @@ class Task(object):
         self.file_mounts = file_mounts
         return self
 
+    def set_blocked_clouds(self, blocked_clouds: Set[clouds.Cloud]):
+        """Sets the clouds that this task should not run on."""
+        self.blocked_clouds = blocked_clouds
+        return self
+
     def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=local path).
 
@@ -176,8 +282,8 @@ class Task(object):
                 d[k] = v
         return d
 
-    def __rshift__(a, b):
-        sky.DagContext.get_current_dag().add_edge(a, b)
+    def __rshift__(self, b):
+        sky.DagContext.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
         if self.name:
@@ -245,25 +351,25 @@ class ParTask(Task):
     def __init__(self, tasks: List[Task]):
         super().__init__()
         # Validation.
-        assert all([isinstance(task, Task) and \
-                    not isinstance(task, ParTask) for task in tasks]), \
-                    'ParTask can only wrap base Tasks.'
-        assert all([task.num_nodes == 1 for task in tasks]), \
+        assert all(isinstance(task, Task) and
+                   not isinstance(task, ParTask) for task in tasks), \
+                   'ParTask can only wrap base Tasks.'
+        assert all(task.num_nodes == 1 for task in tasks), \
             'ParTask currently only wraps Tasks with num_nodes == 1.'
 
-        setup = set([task.setup for task in tasks])
+        setup = set(task.setup for task in tasks)
         assert len(setup) == 1, 'Inner Tasks must have the same \'setup\'.'
         self.setup = list(setup)[0]
 
-        workdir = set([task.workdir for task in tasks])
+        workdir = set(task.workdir for task in tasks)
         assert len(workdir) == 1, 'Inner Tasks must have the same \'workdir\'.'
         self.workdir = list(workdir)[0]
 
         # TODO: No support for these yet.
-        assert all([task.file_mounts is None for task in tasks])
-        assert all([task.inputs is None for task in tasks])
-        assert all([task.outputs is None for task in tasks])
-        assert all([task.time_estimator_func is None for task in tasks])
+        assert all(task.file_mounts is None for task in tasks)
+        assert all(task.inputs is None for task in tasks)
+        assert all(task.outputs is None for task in tasks)
+        assert all(task.time_estimator_func is None for task in tasks)
 
         dag = sky.DagContext.get_current_dag()
         for task in tasks:

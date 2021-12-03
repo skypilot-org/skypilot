@@ -1,3 +1,4 @@
+"""Amazon Web Services."""
 import copy
 import json
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -7,6 +8,7 @@ from sky.clouds.service_catalog import aws_catalog
 
 
 class AWS(clouds.Cloud):
+    """Amazon Web Services."""
 
     _REPR = 'AWS'
     _regions: List[clouds.Region] = []
@@ -23,6 +25,12 @@ class AWS(clouds.Cloud):
                 #     clouds.Zone('us-west-1a'),
                 #     clouds.Zone('us-west-1b'),
                 # ]),
+                clouds.Region('us-west-2').set_zones([
+                    clouds.Zone('us-west-2a'),
+                    clouds.Zone('us-west-2b'),
+                    clouds.Zone('us-west-2c'),
+                    clouds.Zone('us-west-2d'),
+                ]),
                 clouds.Region('us-east-2').set_zones([
                     clouds.Zone('us-east-2a'),
                     clouds.Zone('us-east-2b'),
@@ -35,12 +43,6 @@ class AWS(clouds.Cloud):
                     clouds.Zone('us-east-1d'),
                     clouds.Zone('us-east-1e'),
                     clouds.Zone('us-east-1f'),
-                ]),
-                clouds.Region('us-west-2').set_zones([
-                    clouds.Zone('us-west-2a'),
-                    clouds.Zone('us-west-2b'),
-                    clouds.Zone('us-west-2c'),
-                    clouds.Zone('us-west-2d'),
                 ]),
             ]
         return cls._regions
@@ -108,8 +110,8 @@ class AWS(clouds.Cloud):
     # between Azure and AWS.
 
     def get_accelerators_from_instance_type(
-        self,
-        instance_type: str,
+            self,
+            instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return aws_catalog.get_accelerators_from_instance_type(instance_type)
 
