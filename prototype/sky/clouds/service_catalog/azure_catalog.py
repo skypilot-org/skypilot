@@ -38,9 +38,10 @@ def get_instance_type_for_accelerator(
         _df, acc_name, acc_count, region)
 
 
-def list_accelerators(_gpus_only: bool) -> Dict[str, List[int]]:
+def list_accelerators(gpus_only: bool) -> Dict[str, List[int]]:
     """Returns a mapping from the canonical names of accelerators to a list of
     counts, each representing an instance type offered by this cloud.
     """
     # Azure only has GPU offerings, so ignore `gpus_only`.
+    del gpus_only
     return common.list_accelerators_impl(_df, False)

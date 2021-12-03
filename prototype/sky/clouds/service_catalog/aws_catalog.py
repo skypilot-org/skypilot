@@ -5,8 +5,6 @@ instance types and pricing information for AWS.
 """
 from typing import Dict, List, Optional
 
-import pandas as pd
-
 from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('aws.csv')

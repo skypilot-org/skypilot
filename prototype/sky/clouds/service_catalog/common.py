@@ -71,8 +71,8 @@ def get_instance_type_for_accelerator_impl(
         for t in instance_types:
             # Assert that only one instance type exists for a given accelerator
             # and count. For now, the only exception is that T4 is offered by
-            # multiple instance types in both AWS and Azure. For all other cases,
-            # throw so we can manually investigate.
+            # multiple instance types in both AWS and Azure. For all other
+            # cases, throw so we can manually investigate.
             assert t.startswith('g4dn') or t.endswith('_T4_v3'), result
     result.sort_values('Price', ascending=True, inplace=True)
     return result.iloc[0]['InstanceType']
