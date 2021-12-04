@@ -459,8 +459,8 @@ class CloudVmRayBackend(backends.Backend):
 
         if cluster_name is None:
             cluster_name = pathlib.Path(cluster_config_file).stem
-        global_user_state.add_cluster(cluster_name, str(cluster_config_file))
-
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                str(cluster_config_file))
         return cluster_config_file
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:

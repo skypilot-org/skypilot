@@ -49,15 +49,12 @@ def execute_v2(dag: sky.Dag,
       optimize_target: OptimizeTarget; the dag optimization metric, e.g.
         OptimizeTarget.COST.
     """
-    # TODO: Azure. Port some of execute_v1()'s nice logging messages.
-    assert len(dag) == 1, 'Job launcher assumes 1 task for now.'
-    logger.info(
-        f'Optimizer target is set to {OptimizeTarget(optimize_target).name}')
-
+    # TODO: Azure.
+    assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]
     if task.best_resources is None:
+        logger.info(f'Optimizer target is set to {optimize_target.name}.')
         dag = sky.optimize(dag, minimize=optimize_target)
-    task = dag.tasks[0]
     best_resources = task.best_resources
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
