@@ -348,3 +348,26 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
                 if stream_logs and start_streaming_flag:
                     print(line, end='')
     return stdout, stderr
+
+
+def run(cmd, **kwargs):
+    return subprocess.run(cmd, shell=True, check=True, **kwargs)
+
+
+def run_no_outputs(cmd, **kwargs):
+    return run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+
+
+def run_with_log(cmd,
+                 log_path,
+                 stream_logs=False,
+                 start_streaming_at='',
+                 **kwargs):
+    with subprocess.Popen(cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          **kwargs) as proc:
+        stdout, stderr = redirect_process_output(
+            proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
+        proc.wait()
+        return proc, stdout, stderr
