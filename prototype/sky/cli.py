@@ -208,13 +208,41 @@ def run(entry_point, cluster, dryrun):
 
 
 @cli.command()
-@click.argument('task_id', required=True, type=str)
-def cancel(task_id):
-    """Cancel a task."""
+@click.argument('task_id', required=False, type=str)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Cancel all tasks.')
+def cancel(task_id, all):  # pylint: disable=redefined-builtin
+    """Cancel a task.
+
+    TASK_ID is the id of the task to cancel.  If both TASK_ID and --all are
+    supplied, the latter takes precedence.
+
+    Examples:
+
+      \b
+      sky cancel task_id
+      sky cancel -a
+    """
+    downall = all
+    if task_id is None and downall is None:
+        raise click.UsageError(
+            'sky cancel requires either a task id (see `sky status`) '
+            'or --all.')
+    to_down = []
+    if task_id is not None:
+        to_down = [task_id]
+    if downall:
+        records = global_user_state.get_tasks()
+        to_down = [r['id'] for r in records]
     # TODO: Current implementation is blocking and will wait for the task to
     # complete.  If this is changed to non-blocking, then we will need a way to
     # kill async tasks with ray exec.
-    global_user_state.remove_task(task_id)
+    for task_id in to_down:
+        global_user_state.remove_task(task_id)
+        click.secho(f'Cancelled task {task_id}.', fg='green')
 
 
 @cli.command()
@@ -302,8 +330,9 @@ def status():
             duration.diff_for_humans(),
         ])
 
-    click.echo(task_table)
-    click.echo(cluster_table)
+    click.echo(f'Tasks\n{task_table}')
+    click.echo()
+    click.echo(f'Clusters\n{cluster_table}')
 
 
 @cli.command()
