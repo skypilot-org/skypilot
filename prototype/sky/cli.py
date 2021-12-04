@@ -237,12 +237,22 @@ def cancel(task_id, all):  # pylint: disable=redefined-builtin
     if downall:
         records = global_user_state.get_tasks()
         to_down = [r['id'] for r in records]
+        if task_id is not None:
+            print('Both --all and TASK_ID specified for sky cancel. '
+                  'Letting --all take effect.')
+            task_id = None
+    if not to_down:
+        if task_id is not None:
+            print(f'Task {task_id} is not found (see `sky status`).')
+        else:
+            print('No existing tasks found (see `sky status`).')
+        return
     # TODO: Current implementation is blocking and will wait for the task to
     # complete.  If this is changed to non-blocking, then we will need a way to
     # kill async tasks with ray exec.
-    for task_id in to_down:
-        global_user_state.remove_task(task_id)
-        click.secho(f'Cancelled task {task_id}.', fg='green')
+    for tid in to_down:
+        global_user_state.remove_task(tid)
+    click.secho('Done.', fg='green')
 
 
 @cli.command()
@@ -286,6 +296,7 @@ def down(cluster, all):  # pylint: disable=redefined-builtin
         if name is not None:
             print('Both --all and --cluster specified for sky down. '
                   'Letting --all take effect.')
+            name = None
     if not to_down:
         if name is not None:
             print(f'Cluster {name} is not found (see `sky status`).')
