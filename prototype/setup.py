@@ -9,7 +9,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'sky = cli.cli:cli',
+            'sky = sky.cli:cli',
         ],
     },
     include_package_data=True,
