@@ -22,6 +22,10 @@ Example usage:
 TODO:
 - Add support for local Docker backend.  Currently this module is very coupled
   with CloudVmRayBackend, as seen by the many use of ray commands.
+
+NOTE: the order of command definitions in this file corresponds to how they are
+listed in "sky --help".  Take care to put logically connected commands close to
+each other.
 """
 import os
 import time
@@ -115,7 +119,17 @@ def _create_interactive_node(name,
     global_user_state.remove_task(task_id)
 
 
-@click.group()
+class _NaturalOrderGroup(click.Group):
+    """Lists commands in the order they are defined in this script.
+
+    Reference: https://github.com/pallets/click/issues/513
+    """
+
+    def list_commands(self, ctx):
+        return self.commands.keys()
+
+
+@click.group(cls=_NaturalOrderGroup)
 def cli():
     pass
 
@@ -133,7 +147,7 @@ def cli():
               type=bool,
               help='If True, do not actually run the job.')
 def run(yaml_path, cluster, dryrun):
-    """Launch a task from a YAML config."""
+    """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
     # FIXME: --cluster flag semantics has the following bug.  'sky run -c name
@@ -163,7 +177,7 @@ def run(yaml_path, cluster, dryrun):
               type=str,
               help='Name of the existing cluster to execute a task on.')
 def exec(yaml_path, cluster):  # pylint: disable=redefined-builtin
-    """Execute a task from a YAML config on an existing cluster.
+    """Execute a task from a YAML spec on a cluster (skip setup).
 
     \b
     Actions performed by this command only include:
@@ -210,51 +224,36 @@ def exec(yaml_path, cluster):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
-@click.argument('task_id', required=False, type=str)
-@click.option('--all',
-              '-a',
-              default=None,
-              is_flag=True,
-              help='Cancel all tasks.')
-def cancel(task_id, all):  # pylint: disable=redefined-builtin
-    """Cancel task(s).
+def status():
+    """Show launched clusters and tasks."""
 
-    TASK_ID is the id of the task to cancel.  If both TASK_ID and --all are
-    supplied, the latter takes precedence.
+    tasks_status = global_user_state.get_tasks()
+    clusters_status = global_user_state.get_clusters()
 
-    Examples:
+    task_table = prettytable.PrettyTable()
+    task_table.field_names = ['TASK ID', 'TASK NAME', 'LAUNCHED']
+    for task_status in tasks_status:
+        launched_at = task_status['launched_at']
+        duration = pendulum.now().subtract(seconds=time.time() - launched_at)
+        task_table.add_row([
+            task_status['id'],
+            task_status['name'],
+            duration.diff_for_humans(),
+        ])
 
-      \b
-      sky cancel task_id
-      sky cancel -a
-    """
-    downall = all
-    if task_id is None and downall is None:
-        raise click.UsageError(
-            'sky cancel requires either a task id (see `sky status`) '
-            'or --all.')
-    to_down = []
-    if task_id is not None:
-        to_down = [task_id]
-    if downall:
-        records = global_user_state.get_tasks()
-        to_down = [r['id'] for r in records]
-        if task_id is not None:
-            print('Both --all and TASK_ID specified for sky cancel. '
-                  'Letting --all take effect.')
-            task_id = None
-    if not to_down:
-        if task_id is not None:
-            print(f'Task {task_id} is not found (see `sky status`).')
-        else:
-            print('No existing tasks found (see `sky status`).')
-        return
-    # TODO: Current implementation is blocking and will wait for the task to
-    # complete.  If this is changed to non-blocking, then we will need a way to
-    # kill async tasks with ray exec.
-    for tid in to_down:
-        global_user_state.remove_task(tid)
-    click.secho('Done.', fg='green')
+    cluster_table = prettytable.PrettyTable()
+    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED']
+    for cluster_status in clusters_status:
+        launched_at = cluster_status['launched_at']
+        duration = pendulum.now().subtract(seconds=time.time() - launched_at)
+        cluster_table.add_row([
+            cluster_status['name'],
+            duration.diff_for_humans(),
+        ])
+
+    click.echo(f'Tasks\n{task_table}')
+    click.echo()
+    click.echo(f'Clusters\n{cluster_table}')
 
 
 @cli.command()
@@ -316,36 +315,51 @@ def down(cluster, all):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
-def status():
-    """Show tasks and clusters."""
+@click.argument('task_id', required=False, type=str)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Cancel all tasks.')
+def cancel(task_id, all):  # pylint: disable=redefined-builtin
+    """Cancel task(s).
 
-    tasks_status = global_user_state.get_tasks()
-    clusters_status = global_user_state.get_clusters()
+    TASK_ID is the id of the task to cancel.  If both TASK_ID and --all are
+    supplied, the latter takes precedence.
 
-    task_table = prettytable.PrettyTable()
-    task_table.field_names = ['TASK ID', 'TASK NAME', 'LAUNCHED']
-    for task_status in tasks_status:
-        launched_at = task_status['launched_at']
-        duration = pendulum.now().subtract(seconds=time.time() - launched_at)
-        task_table.add_row([
-            task_status['id'],
-            task_status['name'],
-            duration.diff_for_humans(),
-        ])
+    Examples:
 
-    cluster_table = prettytable.PrettyTable()
-    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED']
-    for cluster_status in clusters_status:
-        launched_at = cluster_status['launched_at']
-        duration = pendulum.now().subtract(seconds=time.time() - launched_at)
-        cluster_table.add_row([
-            cluster_status['name'],
-            duration.diff_for_humans(),
-        ])
-
-    click.echo(f'Tasks\n{task_table}')
-    click.echo()
-    click.echo(f'Clusters\n{cluster_table}')
+      \b
+      sky cancel task_id
+      sky cancel -a
+    """
+    downall = all
+    if task_id is None and downall is None:
+        raise click.UsageError(
+            'sky cancel requires either a task id (see `sky status`) '
+            'or --all.')
+    to_down = []
+    if task_id is not None:
+        to_down = [task_id]
+    if downall:
+        records = global_user_state.get_tasks()
+        to_down = [r['id'] for r in records]
+        if task_id is not None:
+            print('Both --all and TASK_ID specified for sky cancel. '
+                  'Letting --all take effect.')
+            task_id = None
+    if not to_down:
+        if task_id is not None:
+            print(f'Task {task_id} is not found (see `sky status`).')
+        else:
+            print('No existing tasks found (see `sky status`).')
+        return
+    # TODO: Current implementation is blocking and will wait for the task to
+    # complete.  If this is changed to non-blocking, then we will need a way to
+    # kill async tasks with ray exec.
+    for tid in to_down:
+        global_user_state.remove_task(tid)
+    click.secho('Done.', fg='green')
 
 
 @cli.command()
