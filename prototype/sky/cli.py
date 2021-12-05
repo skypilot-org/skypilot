@@ -133,7 +133,7 @@ def cli():
               type=bool,
               help='If True, do not actually run the job.')
 def run(entry_point, cluster, dryrun):
-    """Launch a job from a YAML config or Python script."""
+    """Launch a task from a YAML config."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(entry_point)
     # FIXME: --cluster flag semantics has the following bug.  'sky run -c name
@@ -156,6 +156,57 @@ def run(entry_point, cluster, dryrun):
 
 
 @cli.command()
+@click.argument('entry_point', required=True, type=str)
+@click.option('--cluster',
+              '-c',
+              required=True,
+              type=str,
+              help='Name of the existing cluster to execute a task on.')
+def exec(entry_point, cluster):
+    """Execute a task from a YAML config on an existing cluster.
+
+    Actions performed by this command only include:
+    - workdir syncing
+    - executing the task's run command
+
+    All setup steps (provisioning, setup commands, file mounts syncing) are
+    skipped.  If any of those specifications changed, this command will not
+    reflect those changes.  To ensure a cluster's setup is up to date, use `sky
+    run` instead.
+
+    Typical workflow:
+
+      # First command: set up the cluster once.
+
+      >> sky run -c name app.yaml
+
+      # Starting iterative development...
+      # For example, modify local workdir code.
+      # Future commands: simply execute the task on the launched cluster.
+
+      >> sky exec -c name app.yaml
+
+      # Simply do "sky run" again if you anything other than Task.run is
+      # modified:
+
+      >> sky run -c name app.yaml
+
+    """
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
+                                 'Use `sky run` to provision first.')
+    with sky.Dag() as dag:
+        sky.Task.from_yaml(entry_point)
+    sky.execute(dag,
+                handle=handle,
+                stages=[
+                    sky.execution.Stage.SYNC_WORKDIR,
+                    sky.execution.Stage.EXEC,
+                ])
+
+
+@cli.command()
 @click.argument('task_id', required=False, type=str)
 @click.option('--all',
               '-a',
@@ -163,7 +214,7 @@ def run(entry_point, cluster, dryrun):
               is_flag=True,
               help='Cancel all tasks.')
 def cancel(task_id, all):  # pylint: disable=redefined-builtin
-    """Cancel a task.
+    """Cancel task(s).
 
     TASK_ID is the id of the task to cancel.  If both TASK_ID and --all are
     supplied, the latter takes precedence.
@@ -211,7 +262,7 @@ def cancel(task_id, all):  # pylint: disable=redefined-builtin
               is_flag=True,
               help='Tear down all existing clusters.')
 def down(cluster, all):  # pylint: disable=redefined-builtin
-    """Tears down the cluster CLUSTER.
+    """Tear down cluster(s).
 
     CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
     are supplied, the latter takes precedence.
@@ -263,7 +314,7 @@ def down(cluster, all):  # pylint: disable=redefined-builtin
 
 @cli.command()
 def status():
-    """Show the status of all tasks and clusters."""
+    """Show tasks and clusters."""
 
     tasks_status = global_user_state.get_tasks()
     clusters_status = global_user_state.get_clusters()
@@ -301,7 +352,7 @@ def status():
               type=str,
               help=_CLUSTER_FLAG_HELP)
 def gpunode(cluster):
-    """Launches an interactive GPU node.
+    """Launch an interactive GPU node.
 
     Automatically syncs current working directory.
     """
@@ -323,7 +374,7 @@ def gpunode(cluster):
               type=str,
               help=_CLUSTER_FLAG_HELP)
 def cpunode(cluster):
-    """Launches an interactive CPU node.
+    """Launch an interactive CPU node.
 
     Automatically syncs current working directory.
     """
