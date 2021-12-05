@@ -162,7 +162,7 @@ def run(entry_point, cluster, dryrun):
               required=True,
               type=str,
               help='Name of the existing cluster to execute a task on.')
-def exec(entry_point, cluster):
+def exec(entry_point, cluster):  # pylint: disable=redefined-builtin
     """Execute a task from a YAML config on an existing cluster.
 
     \b
