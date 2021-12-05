@@ -371,8 +371,8 @@ def run_with_log(cmd,
                  start_streaming_at='',
                  **kwargs):
     """Runs a command and logs its output to a file.
-    
-    Retruns the process, stdout and stderr of the command. 
+
+    Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
     with subprocess.Popen(cmd,
