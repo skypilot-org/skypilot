@@ -351,7 +351,9 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
 
 
 def run(cmd, **kwargs):
-    return subprocess.run(cmd, shell=True, check=True, **kwargs)
+    check = kwargs.pop('check', True)
+    shell = kwargs.pop('shell', True)
+    return subprocess.run(cmd, shell=shell, check=check, **kwargs)
 
 
 def run_no_outputs(cmd, **kwargs):

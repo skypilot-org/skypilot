@@ -112,7 +112,8 @@ def _create_interactive_node(name,
     if port_forward is not None:
         extra_cmd = ' '.join(
             [f'--port-forward {port}' for port in port_forward])
-    backend_utils.run(f'ray attach {extra_cmd} {handle}')
+    # Disable check, since the returncode could be non-zero if the user Ctrl-D
+    backend_utils.run(f'ray attach {extra_cmd} {handle}', check=False)
 
     if cluster_handle is None:  # if this is a secondary
         backend_utils.run(f'ray down -y {handle}')
