@@ -25,6 +25,7 @@ TODO:
 """
 import os
 import time
+from typing import List, Optional
 import yaml
 
 import click
@@ -65,7 +66,9 @@ def _get_region_zones_from_handle(handle):
 def _create_interactive_node(name,
                              resources,
                              cluster_handle=None,
-                             backend=cloud_vm_ray_backend.CloudVmRayBackend):
+                             backend=cloud_vm_ray_backend.CloudVmRayBackend,
+                             port_forward: Optional[List[int]] = None,
+                             cluster_name: Optional[str] = None):
     """Creates an interactive session.
 
     Args:
@@ -90,22 +93,26 @@ def _create_interactive_node(name,
     backend = backend()
     backend.register_info(dag=dag, optimize_target=sky.OptimizeTarget.COST)
 
-    dag = sky.optimize(dag, minimize=sky.OptimizeTarget.COST)
-    task = dag.tasks[0]
-
     handle = cluster_handle
     if handle is None:
+        dag = sky.optimize(dag, minimize=sky.OptimizeTarget.COST)
+        task = dag.tasks[0]
         handle = backend.provision(task,
                                    task.best_resources,
                                    dryrun=False,
-                                   stream_logs=True)
+                                   stream_logs=True,
+                                   cluster_name=cluster_name)
 
     task_id = global_user_state.add_task(task)
 
     # TODO: cd into workdir immediately on the VM
     # TODO: Delete the temporary cluster config yml (or figure out a way to
     # re-use it)
-    backend_utils.run(f'ray attach {handle}')
+    extra_cmd = ''
+    if port_forward is not None:
+        extra_cmd = ' '.join(
+            [f'--port-forward {port}' for port in port_forward])
+    backend_utils.run(f'ray attach {extra_cmd} {handle}')
 
     if cluster_handle is None:  # if this is a secondary
         backend_utils.run(f'ray down -y {handle}')
@@ -314,6 +321,49 @@ def down(cluster, all):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
+@click.argument('cluster', required=False)
+@click.option('--port-forward',
+              '-p',
+              multiple=True,
+              default=[],
+              type=int,
+              required=False,
+              help='Port to be forwarded. To forward multiple ports, '
+              'use this option multiple times.')
+def attach(cluster, port_forward):  # pylint: disable=redefined-builtin
+    """Attach to the cluster CLUSTER.
+
+    CLUSTER is the name of the cluster to attach.  If CLUSTER is not supplied,
+    the last cluster will be attached.
+
+    Examples:
+
+      \b
+      # Attach to a specific cluster.
+      sky attach cluster_name
+
+      \b
+      # Port forward.
+      sky attach -p 8080 -p 4650 cluster_name
+    """
+    # FIXME: make TPU part of handles; so that this kills TPUs too.
+    name = cluster
+
+    to_attach = name
+    if to_attach is None:
+        to_attach = sorted(global_user_state.get_clusters(),
+                           key=lambda x: x['launched_at'])[-1]
+    handle = global_user_state.get_handle_from_cluster_name(to_attach)
+    assert handle is not None, f'Cluster {name} is not found.'
+
+    # FIXME: Assumes a specific backend.
+    _create_interactive_node(name,
+                             sky.Resources(),
+                             handle,
+                             port_forward=port_forward)
+
+
+@cli.command()
 def status():
     """Show the status of all tasks and clusters."""
 
@@ -352,20 +402,29 @@ def status():
               default=None,
               type=str,
               help=_CLUSTER_FLAG_HELP)
-def gpunode(cluster):
+@click.option('--port-forward',
+              '-p',
+              multiple=True,
+              default=[],
+              type=int,
+              required=False,
+              help='Port to be forwarded. To forward multiple ports, '
+              'use this option multiple times.')
+def gpunode(cluster, port_forward):
     """Launches an interactive GPU node.
 
     Automatically syncs current working directory.
     """
     # TODO: Sync code files between local and interactive node (watch rsync?)
-    # TODO: Add port forwarding to allow access to localhost:PORT for jupyter
     handle = None
     if cluster is not None:
         handle = global_user_state.get_handle_from_cluster_name(cluster)
 
     _create_interactive_node('gpunode',
                              {sky.Resources(sky.AWS(), accelerators='V100')},
-                             cluster_handle=handle)
+                             cluster_handle=handle,
+                             port_forward=port_forward,
+                             cluster_name=cluster)
 
 
 @cli.command()
@@ -374,7 +433,15 @@ def gpunode(cluster):
               default=None,
               type=str,
               help=_CLUSTER_FLAG_HELP)
-def cpunode(cluster):
+@click.option('--port-forward',
+              '-p',
+              multiple=True,
+              default=[],
+              type=int,
+              required=False,
+              help='Port to be forwarded. To forward multiple ports, '
+              'use this option multiple times.')
+def cpunode(cluster, port_forward):
     """Launches an interactive CPU node.
 
     Automatically syncs current working directory.
@@ -384,7 +451,9 @@ def cpunode(cluster):
         handle = global_user_state.get_handle_from_cluster_name(cluster)
 
     _create_interactive_node('cpunode', {sky.Resources(sky.AWS())},
-                             cluster_handle=handle)
+                             cluster_handle=handle,
+                             port_forward=port_forward,
+                             cluster_name=cluster)
 
 
 def main():
