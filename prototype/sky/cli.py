@@ -121,7 +121,7 @@ def cli():
 
 
 @cli.command()
-@click.argument('entry_point', required=True, type=str)
+@click.argument('yaml_path', required=True, type=str)
 @click.option('--cluster',
               '-c',
               default=None,
@@ -132,10 +132,10 @@ def cli():
               default=False,
               type=bool,
               help='If True, do not actually run the job.')
-def run(entry_point, cluster, dryrun):
+def run(yaml_path, cluster, dryrun):
     """Launch a task from a YAML config."""
     with sky.Dag() as dag:
-        sky.Task.from_yaml(entry_point)
+        sky.Task.from_yaml(yaml_path)
     # FIXME: --cluster flag semantics has the following bug.  'sky run -c name
     # x.yml' requiring GCP.  Then change x.yml to requiring AWS.  'sky run -c
     # name x.yml' again.  The GCP cluster is not down'd but should be.  The
@@ -156,13 +156,13 @@ def run(entry_point, cluster, dryrun):
 
 
 @cli.command()
-@click.argument('entry_point', required=True, type=str)
+@click.argument('yaml_path', required=True, type=str)
 @click.option('--cluster',
               '-c',
               required=True,
               type=str,
               help='Name of the existing cluster to execute a task on.')
-def exec(entry_point, cluster):  # pylint: disable=redefined-builtin
+def exec(yaml_path, cluster):  # pylint: disable=redefined-builtin
     """Execute a task from a YAML config on an existing cluster.
 
     \b
@@ -200,7 +200,7 @@ def exec(entry_point, cluster):  # pylint: disable=redefined-builtin
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
                                  'Use `sky run` to provision first.')
     with sky.Dag() as dag:
-        sky.Task.from_yaml(entry_point)
+        sky.Task.from_yaml(yaml_path)
     sky.execute(dag,
                 handle=handle,
                 stages=[
