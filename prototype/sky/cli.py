@@ -165,9 +165,12 @@ def run(entry_point, cluster, dryrun):
 def exec(entry_point, cluster):
     """Execute a task from a YAML config on an existing cluster.
 
+    \b
     Actions performed by this command only include:
-    - workdir syncing
-    - executing the task's run command
+      - workdir syncing
+      - executing the task's run command
+    `sky exec` is thus typically faster than `sky run`, provided a cluster
+    already exists.
 
     All setup steps (provisioning, setup commands, file mounts syncing) are
     skipped.  If any of those specifications changed, this command will not
@@ -180,14 +183,14 @@ def exec(entry_point, cluster):
 
       >> sky run -c name app.yaml
 
+    \b
       # Starting iterative development...
       # For example, modify local workdir code.
       # Future commands: simply execute the task on the launched cluster.
 
       >> sky exec -c name app.yaml
 
-      # Simply do "sky run" again if you anything other than Task.run is
-      # modified:
+      # Simply do "sky run" again if anything other than Task.run is modified:
 
       >> sky run -c name app.yaml
 
