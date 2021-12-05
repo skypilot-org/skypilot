@@ -14,7 +14,7 @@ import urllib.parse
 
 
 def _run(cmd, **kwargs):
-    return subprocess.run(cmd, shell=True, check=True, **kwargs)
+    return subprocess.run(cmd, shell=True, check=True, executable='/bin/bash', **kwargs)
 
 
 def _run_captured_outputs(cmd, **kwargs):
