@@ -115,55 +115,6 @@ def _create_interactive_node(name,
     global_user_state.remove_task(task_id)
 
 
-def _reuse_or_provision_cluster(dag,
-                                cluster_name,
-                                backend=cloud_vm_ray_backend.CloudVmRayBackend):
-    """Reuses or provisions a cluster. Updates existing cluster if required."""
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    assert len(dag) == 1, 'Sky assumes 1 task for now.'
-    task = dag.tasks[0]
-    if handle is not None:
-        # Ensure changes to workdir, setup, etc. are reflected in the existing
-        # cluster.
-        region, zones = _get_region_zones_from_handle(handle)
-        with open(handle, 'r') as f:
-            existing_cluster_handle_content = f.read()
-        # Generate a config based on optimized 'task.best_resources'.
-        config_dict = backend_utils.write_cluster_config(
-            None,
-            task,
-            # FIXME: we don't want to expose that func, and this module
-            # shouldn't need that func either.
-            # pylint: disable=protected-access
-            cloud_vm_ray_backend._get_cluster_config_template(task),
-            region=region,
-            zones=zones,
-            dryrun=False,
-            cluster_name=cluster_name)
-        new_handle = str(config_dict['ray'])
-        assert new_handle == handle, 'Cluster handle paths changed.'
-        with open(new_handle, 'r') as f:
-            new_cluster_handle_content = f.read()
-        cluster_config_changed = \
-            existing_cluster_handle_content != new_cluster_handle_content
-        if not cluster_config_changed:
-            # If cluster configs are identical, then no need to re-run
-            # provision().
-            return handle
-    # Run provision() with cluster_name if
-    #  (1) it doesn't already exist, or
-    #  (2) it exists, but the handle contents changed (e.g., resource spec).
-    #      provision() will tear down the existing cluster, and launch a new
-    #      one with the updated spec.
-    backend = backend()
-    backend.register_info(dag=dag, optimize_target=sky.OptimizeTarget.COST)
-    return backend.provision(task,
-                             task.best_resources,
-                             dryrun=False,
-                             stream_logs=True,
-                             cluster_name=cluster_name)
-
-
 @click.group()
 def cli():
     pass
@@ -185,21 +136,11 @@ def run(entry_point, cluster, dryrun):
     """Launch a job from a YAML config or Python script."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(entry_point)
-    # FIXME: seems to me the below should really be in the backend. The CLI
-    # really should be a thin layer.
-
-    # Call sky.optimize() manually because _reuse_or_provision_cluster()
-    # depends on it.
-    dag = sky.optimize(dag, minimize=sky.OptimizeTarget.COST)
-    handle = None
-    if cluster is not None:
-        handle = _reuse_or_provision_cluster(dag, cluster)
-
-    # FIXME: --cluster flag semantics has the following bug.  'sky run x.yml'
-    # requiring GCP.  Then change x.yml to requiring AWS.  'sky run x.yml'
-    # again.  The GCP cluster is not down'd but should be.  The root cause is
-    # due to 'ray up' not dealing with this cross-cloud case (but does
-    # correctly deal with in-cloud config changes).
+    # FIXME: --cluster flag semantics has the following bug.  'sky run -c name
+    # x.yml' requiring GCP.  Then change x.yml to requiring AWS.  'sky run -c
+    # name x.yml' again.  The GCP cluster is not down'd but should be.  The
+    # root cause is due to 'ray up' not dealing with this cross-cloud case (but
+    # does correctly deal with in-cloud config changes).
     #
     # This bug also means that the old GCP cluster with the same name is
     # orphaned.  `sky down` would not have an entry pointing to that handle, so
@@ -207,12 +148,11 @@ def run(entry_point, cluster, dryrun):
     #
     # To fix all of the above, fix/circumvent the bug that 'ray up' not downing
     # old cloud's cluster with the same name.
-
     sky.execute(dag,
                 dryrun=dryrun,
-                handle=handle,
                 stream_logs=True,
-                optimize_target=sky.OptimizeTarget.COST)
+                optimize_target=sky.OptimizeTarget.COST,
+                cluster_name=cluster)
 
 
 @cli.command()

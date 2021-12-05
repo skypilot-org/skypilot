@@ -30,7 +30,8 @@ def execute_v2(dag: sky.Dag,
                stream_logs: bool = True,
                handle: Any = None,
                backend: Optional[backends.Backend] = None,
-               optimize_target: OptimizeTarget = OptimizeTarget.COST) -> None:
+               optimize_target: OptimizeTarget = OptimizeTarget.COST,
+               cluster_name: Optional[str] = None) -> None:
     """Executes a planned DAG.
 
     Args:
@@ -48,6 +49,8 @@ def execute_v2(dag: sky.Dag,
         CloudVmRayBackend()
       optimize_target: OptimizeTarget; the dag optimization metric, e.g.
         OptimizeTarget.COST.
+      cluster_name: Name of the cluster to create/reuse.  If None,
+        auto-generate a name.
     """
     # TODO: Azure.
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
@@ -55,16 +58,27 @@ def execute_v2(dag: sky.Dag,
     if task.best_resources is None:
         logger.info(f'Optimizer target is set to {optimize_target.name}.')
         dag = sky.optimize(dag, minimize=optimize_target)
+    task = dag.tasks[0]  # Keep: dag may have been deep-copied.
     best_resources = task.best_resources
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
     if handle is None:
+        # **Dangerous**.  If passing a handle, changes to (1) setup commands
+        # (2) file_mounts list/content (3) other state about the cluster are
+        # IGNORED.  Careful.
+        #
+        # Mitigations: introduce backend.run_setup_commands() as a standalone
+        # stage; fix CloudVmRayBackend.sync_file_mounts() to sync all files.
+        # They are mitigations because if one manually changes the cluster AND
+        # passing in a handle, the cluster still would not be updated
+        # correctly.
         handle = backend.provision(task,
                                    best_resources,
                                    dryrun=dryrun,
-                                   stream_logs=stream_logs)
+                                   stream_logs=stream_logs,
+                                   cluster_name=cluster_name)
 
     if dryrun:
         logger.info('Dry run finished.')
