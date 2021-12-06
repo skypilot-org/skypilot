@@ -12,13 +12,7 @@ TODO:
 import subprocess
 import urllib.parse
 
-
-def _run(cmd, **kwargs):
-    return subprocess.run(cmd, shell=True, check=True, **kwargs)
-
-
-def _run_captured_outputs(cmd, **kwargs):
-    return _run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+from sky.backends import backend_utils
 
 
 class CloudStorage(object):
@@ -67,7 +61,7 @@ class GcsCloudStorage(CloudStorage):
         commands = list(self._GET_GSUTIL)
         commands.append(f'{self._GSUTIL} ls -d {url}')
         command = ' && '.join(commands)
-        p = _run_captured_outputs(command)
+        p = backend_utils.run(command, stdout=subprocess.PIPE)
         out = p.stdout.decode().strip()
         # gsutil ls -d url
         #   --> url.rstrip('/')          if url is not a directory
