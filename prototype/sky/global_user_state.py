@@ -9,6 +9,7 @@ Examples/concepts:
 """
 import os
 import pathlib
+import pickle
 import sqlite3
 import time
 from typing import Optional
@@ -28,7 +29,7 @@ except sqlite3.OperationalError:
     _CURSOR.execute("""CREATE TABLE tasks
                 (id TEXT PRIMARY KEY, name TEXT, launched_at INTEGER)""")
     _CURSOR.execute("""CREATE TABLE clusters
-                (name TEXT PRIMARY KEY, lauched_at INTEGER, handle TEXT)""")
+                (name TEXT PRIMARY KEY, lauched_at INTEGER, handle BLOB)""")
 _CONN.commit()
 
 
@@ -37,42 +38,43 @@ def add_task(task):
     task_name = task.name
     task_launched_at = int(time.time())
 
-    _CURSOR.execute('INSERT INTO tasks VALUES '
-                    f'(\'{task_id}\',\'{task_name}\',{task_launched_at})')
+    _CURSOR.execute('INSERT INTO tasks VALUES (?,?,?)',
+                    (task_id, task_name, task_launched_at))
     _CONN.commit()
     return task_id
 
 
 def remove_task(task_id):
-    _CURSOR.execute(f'DELETE FROM tasks WHERE id=\'{task_id}\'')
+    _CURSOR.execute('DELETE FROM tasks WHERE id=(?)', (task_id,))
     _CONN.commit()
 
 
 def add_or_update_cluster(cluster_name, cluster_handle):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     cluster_launched_at = int(time.time())
-    _CURSOR.execute(
-        'INSERT OR REPLACE INTO clusters VALUES '
-        f'(\'{cluster_name}\',{cluster_launched_at},\'{cluster_handle}\')')
+    handle = pickle.dumps(cluster_handle)
+    _CURSOR.execute('INSERT OR REPLACE INTO clusters VALUES (?, ?, ?)',
+                    (cluster_name, cluster_launched_at, handle))
     _CONN.commit()
 
 
 def remove_cluster(cluster_name):
     """Removes cluster_name mapping."""
-    _CURSOR.execute(f'DELETE FROM clusters WHERE name=\'{cluster_name}\'')
+    _CURSOR.execute('DELETE FROM clusters WHERE name=(?)', (cluster_name,))
     _CONN.commit()
 
 
 def get_handle_from_cluster_name(cluster_name) -> Optional[str]:
-    rows = _CURSOR.execute(
-        f'SELECT handle FROM clusters WHERE name=\'{cluster_name}\'')
+    rows = _CURSOR.execute('SELECT handle FROM clusters WHERE name=(?)',
+                           (cluster_name,))
     for (handle,) in rows:
-        return handle
+        return pickle.loads(handle)
 
 
 def get_cluster_name_from_handle(cluster_handle):
-    rows = _CURSOR.execute(
-        f'SELECT name FROM clusters WHERE handle=\'{cluster_handle}\'')
+    handle = pickle.dumps(cluster_handle)
+    rows = _CURSOR.execute('SELECT name FROM clusters WHERE handle=(?)',
+                           (handle,))
     for (name,) in rows:
         return name
 
@@ -96,6 +98,6 @@ def get_clusters():
         records.append({
             'name': name,
             'launched_at': launched_at,
-            'handle': handle
+            'handle': pickle.loads(handle),
         })
     return records
