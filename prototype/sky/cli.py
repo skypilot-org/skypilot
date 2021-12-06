@@ -269,6 +269,8 @@ def down(cluster, all):  # pylint: disable=redefined-builtin
     CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
     are supplied, the latter takes precedence.
 
+    Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
+
     Examples:
 
       \b
@@ -279,7 +281,6 @@ def down(cluster, all):  # pylint: disable=redefined-builtin
       # Tear down all existing clusters.
       sky down -a
     """
-    # FIXME: make TPU part of handles; so that this kills TPUs too.
     name = cluster
     downall = all
     if name is None and downall is None:
@@ -306,7 +307,7 @@ def down(cluster, all):  # pylint: disable=redefined-builtin
 
     # FIXME: Assumes a specific backend.
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
-    for record in to_down:
+    for record in to_down:  # TODO: parallelize.
         name = record['name']
         handle = record['handle']
         backend.teardown(handle)
