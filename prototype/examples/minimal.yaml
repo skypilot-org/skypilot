@@ -1,0 +1,9 @@
+# A minimal example.
+resources:
+  cloud: aws
+
+setup: |
+  echo "running setup"
+
+run: |
+  conda env list
