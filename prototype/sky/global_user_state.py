@@ -48,11 +48,11 @@ def remove_task(task_id):
     _CONN.commit()
 
 
-def add_cluster(cluster_name, cluster_handle):
-    """Adds cluster_name -> cluster_handle mapping."""
+def add_or_update_cluster(cluster_name, cluster_handle):
+    """Adds or updates cluster_name -> cluster_handle mapping."""
     cluster_launched_at = int(time.time())
     _CURSOR.execute(
-        'INSERT INTO clusters VALUES '
+        'INSERT OR REPLACE INTO clusters VALUES '
         f'(\'{cluster_name}\',{cluster_launched_at},\'{cluster_handle}\')')
     _CONN.commit()
 
