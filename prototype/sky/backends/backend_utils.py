@@ -351,11 +351,18 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
 
 
 def run(cmd, **kwargs):
-    return subprocess.run(cmd, shell=True, check=True, **kwargs)
+    return subprocess.run(cmd,
+                          shell=True,
+                          check=True,
+                          executable='/bin/bash',
+                          **kwargs)
 
 
 def run_no_outputs(cmd, **kwargs):
-    return run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+    return run(cmd,
+               stdout=subprocess.DEVNULL,
+               stderr=subprocess.DEVNULL,
+               **kwargs)
 
 
 def run_with_log(cmd,
@@ -363,6 +370,11 @@ def run_with_log(cmd,
                  stream_logs=False,
                  start_streaming_at='',
                  **kwargs):
+    """Runs a command and logs its output to a file.
+
+    Retruns the process, stdout and stderr of the command.
+      Note that the stdout and stderr is already decoded.
+    """
     with subprocess.Popen(cmd,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE,
