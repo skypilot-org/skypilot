@@ -360,8 +360,7 @@ def ssh(cluster, port_forward):
         if len(launched_clusters) == 0:
             raise click.UsageError(
                 'No launched clusters found (see `sky status`).')
-        to_ssh = sorted(launched_clusters,
-                           key=lambda x: x['launched_at'])[-1]
+        to_ssh = sorted(launched_clusters, key=lambda x: x['launched_at'])[-1]
     handle = global_user_state.get_handle_from_cluster_name(to_ssh)
 
     if handle is None:
@@ -373,6 +372,7 @@ def ssh(cluster, port_forward):
                              sky.Resources(),
                              handle,
                              port_forward=port_forward)
+
 
 @click.argument('task_id', required=False, type=str)
 @click.option('--all',
