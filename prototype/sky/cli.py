@@ -75,6 +75,9 @@ def _create_interactive_node(name,
         name: Name of the interactivve session.
         resources: Resources to attach to VM.
         cluster_handle: Cluster YAML file.
+        backend: Backend to use.
+        port_forward: List of ports to forward.
+        cluster_name: Name of the cluster.
     """
 
     with sky.Dag() as dag:
@@ -108,12 +111,12 @@ def _create_interactive_node(name,
     # TODO: cd into workdir immediately on the VM
     # TODO: Delete the temporary cluster config yml (or figure out a way to
     # re-use it)
-    extra_cmd = ''
+    attach_options = ''
     if port_forward is not None:
-        extra_cmd = ' '.join(
+        attach_options = ' '.join(
             [f'--port-forward {port}' for port in port_forward])
     # Disable check, since the returncode could be non-zero if the user Ctrl-D
-    backend_utils.run(f'ray attach {extra_cmd} {handle}', check=False)
+    backend_utils.run(f'ray attach {attach_options} {handle}', check=False)
 
     if cluster_handle is None:  # if this is a secondary
         backend_utils.run(f'ray down -y {handle}')
@@ -222,7 +225,7 @@ def run(entry_point, cluster, dryrun):
               default=None,
               is_flag=True,
               help='Cancel all tasks.')
-def cancel(task_id, all):  # pylint: disable=redefined-builtin
+def cancel(task_id, all): 
     """Cancel a task.
 
     TASK_ID is the id of the task to cancel.  If both TASK_ID and --all are
@@ -331,8 +334,8 @@ def down(cluster, all):  # pylint: disable=redefined-builtin
               required=False,
               help='Port to be forwarded. To forward multiple ports, '
               'use this option multiple times.')
-def attach(cluster, port_forward):  # pylint: disable=redefined-builtin
-    """Attach to the cluster CLUSTER.
+def ssh(cluster, port_forward):
+    """ssh to the cluster CLUSTER.
 
     CLUSTER is the name of the cluster to attach.  If CLUSTER is not supplied,
     the last cluster will be attached.
@@ -340,22 +343,29 @@ def attach(cluster, port_forward):  # pylint: disable=redefined-builtin
     Examples:
 
       \b
-      # Attach to a specific cluster.
-      sky attach cluster_name
+      # ssh to a specific cluster.
+      sky ssh cluster_name
 
       \b
       # Port forward.
-      sky attach -p 8080 -p 4650 cluster_name
+      sky ssh -p 8080 -p 4650 cluster_name
     """
     # FIXME: make TPU part of handles; so that this kills TPUs too.
     name = cluster
 
-    to_attach = name
-    if to_attach is None:
-        to_attach = sorted(global_user_state.get_clusters(),
+    to_ssh = name
+    if to_ssh is None:
+        launched_clusters = global_user_state.get_clusters()
+        if len(launched_clusters) == 0:
+            raise click.UsageError(
+                'No launched clusters found (see `sky status`).')
+        to_ssh = sorted(launched_clusters,
                            key=lambda x: x['launched_at'])[-1]
-    handle = global_user_state.get_handle_from_cluster_name(to_attach)
-    assert handle is not None, f'Cluster {name} is not found.'
+    handle = global_user_state.get_handle_from_cluster_name(to_ssh)
+
+    if handle is None:
+        raise click.UsageError(
+            f'Cluster {to_ssh} is not found (see `sky status`).')
 
     # FIXME: Assumes a specific backend.
     _create_interactive_node(name,

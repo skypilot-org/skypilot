@@ -344,13 +344,12 @@ class RetryingVmProvisioner(object):
                     backend_utils.run(
                         f'ray exec {cluster_config_file} '
                         f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
-                relpath = backend_utils.get_rel_path(cluster_config_file)
+                cluster_name = config_dict['cluster_name']
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing VM(s). Setup completed.{style.RESET_ALL}')
-                logger.info(
-                    f'\nTo log into the head VM:\t{style.BRIGHT}ray attach'
-                    f' {relpath}{style.RESET_ALL}\n')
+                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}sky ssh'
+                            f' {cluster_name}{style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -779,13 +778,11 @@ class CloudVmRayBackend(backends.Backend):
         colorama.init()
         style = colorama.Style
         if not teardown:
-            relpath = backend_utils.get_rel_path(handle)
             name = global_user_state.get_cluster_name_from_handle(handle)
-            logger.info(
-                '\nTo log into the head VM:\t'
-                f'{style.BRIGHT}ray attach {relpath} {style.RESET_ALL}\n'
-                '\nTo tear down the cluster:'
-                f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n')
+            logger.info('\nTo log into the head VM:\t'
+                        f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
+                        '\nTo tear down the cluster:'
+                        f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n')
             if self._managed_tpu is not None:
                 tpu_script = backend_utils.get_rel_path(self._managed_tpu[1])
                 logger.info('To tear down the TPU(s):\t'

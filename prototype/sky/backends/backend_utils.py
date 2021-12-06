@@ -198,6 +198,7 @@ def write_cluster_config(run_id: RunId,
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
             }))
+    config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
