@@ -574,15 +574,20 @@ class CloudVmRayBackend(backends.Backend):
             # alternatives (smart_open, each provider's own sdk), a
             # data-transfer container etc.
             storage = cloud_stores.get_storage_from_path(src)
-            # Sync to a safe-to-write "wrapped" path.
+            # Sync 'src' to 'wrapped_dst', a safe-to-write "wrapped" path.
             wrapped_dst = backend_utils.wrap_file_mount(dst)
             if storage.is_directory(src):
                 sync = storage.make_sync_dir_command(source=src,
                                                      destination=wrapped_dst)
+                # It is a directory so make sure it exists.
+                mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
             else:
                 sync = storage.make_sync_file_command(source=src,
                                                       destination=wrapped_dst)
-            # Symlink to the wrapped path.
+                # It is a file so make sure *its parent dir* exists.
+                mkdir_for_wrapped_dst = \
+                    f'mkdir -p {os.path.dirname(wrapped_dst)}'
+            # Goal: point dst --> wrapped_dst.
             symlink_to_make = dst.rstrip('/')
             dir_of_symlink = os.path.dirname(symlink_to_make)
             # Below, use sudo in case the symlink needs sudo access to create.
@@ -592,8 +597,8 @@ class CloudVmRayBackend(backends.Backend):
                 f'sudo mkdir -p {dir_of_symlink}',
                 #  2. remove any existing symlink (otherwise, gsutil errors).
                 f'(sudo rm {symlink_to_make} &>/dev/null || true)',
-                # Make the wrapped dir.
-                f'mkdir -p {wrapped_dst}',
+                # Ensure sync can write to wrapped_dst.
+                mkdir_for_wrapped_dst,
                 # Both the wrapped and the symlink dir exist; sync.
                 sync,
                 # Link.

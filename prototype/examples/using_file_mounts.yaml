@@ -32,6 +32,7 @@ file_mounts:
 
   # Syncing a regular object.
   /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
+  /data/: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
 
   # If a source path points to a "directory", its contents will be recursively
   # synced (subdirectories included).
@@ -44,6 +45,7 @@ run: |
   cd /sky
   pip3 install -e .
 
+  ls -l /data/train-00001-of-01024
   du -schL /train-00001-of-01024
   head /train-00001-of-01024
 
