@@ -459,12 +459,14 @@ class CloudVmRayBackend(backends.Backend):
 
         if cluster_name is None:
             cluster_name = pathlib.Path(cluster_config_file).stem
-        global_user_state.add_cluster(cluster_name, str(cluster_config_file))
-
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                str(cluster_config_file))
         return cluster_config_file
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
-        # TODO: do we really need this if provision() takes care of it?
+        # Even though provision() takes care of it, there may be cases where
+        # this function is called in isolation, without calling provision(),
+        # e.g., in CLI.  So we should rerun rsync_up.
         # TODO: this only syncs to head.  -A flag from ray rsync_up is being
         # deprecated.
         backend_utils.run(
@@ -479,6 +481,8 @@ class CloudVmRayBackend(backends.Backend):
         # TODO: this function currently only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
         # using the yaml file.  Here we handle cloud -> remote file transfers.
+        # FIXME: if called out-of-band without provision() first, we actually
+        # need to handle all_file_mounts again.
         mounts = cloud_to_remote_file_mounts
         if mounts is None:
             return
