@@ -35,7 +35,8 @@ file_mounts:
 
   # If a source path points to a "directory", its contents will be recursively
   # synced (subdirectories included).
-  /data/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet
+  # Commenting out as this takes a while.
+  # /data/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet
 
 run: |
   ls -l /setup.py
@@ -44,6 +45,7 @@ run: |
   pip3 install -e .
 
   du -schL /train-00001-of-01024
+  # FIXME:
   # head /train-00001-of-01024
 
   ls -lH /data/fake_imagenet | head -n10
