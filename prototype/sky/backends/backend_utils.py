@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import datetime
+import getpass
 import io
 import os
 import pathlib
@@ -120,7 +121,8 @@ def write_cluster_config(run_id: RunId,
 
     if cluster_name is None:
         # TODO: change this ID formatting to something more pleasant.
-        cluster_name = f'sky-{uuid.uuid4().hex[:6]}'
+        # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
+        cluster_name = f'sky-{getpass.getuser()}-{uuid.uuid4().hex[:4]}'
 
     setup_sh_path = None
     if task.setup is not None:
