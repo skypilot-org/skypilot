@@ -95,7 +95,8 @@ def write_cluster_config(run_id: RunId,
     Returns: {provisioner: path to yaml, the provisioning spec}.
       'provisioner' can be
         - 'ray'
-        - 'gcloud' (if TPU is requested)
+        - 'tpu-create-script' (if TPU is requested)
+        - 'tpu-delete-script' (if TPU is requested)
     """
     cloud = task.best_resources.cloud
     resources_vars = cloud.make_deploy_resources_variables(task)
@@ -205,7 +206,7 @@ def write_cluster_config(run_id: RunId,
         return config_dict
     _add_ssh_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
-        config_dict['gcloud'] = tuple(
+        scripts = tuple(
             _fill_template(
                 path,
                 dict(resources_vars, **{
@@ -218,6 +219,8 @@ def write_cluster_config(run_id: RunId,
                 replace('config/', 'config/user/'),
             ) for path in
             ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
+        config_dict['tpu-create-script'] = scripts[0]
+        config_dict['tpu-delete-script'] = scripts[1]
     return config_dict
 
 

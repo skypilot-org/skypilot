@@ -168,8 +168,9 @@ def _ssh_options_list(ssh_private_key: Optional[str],
         'ControlMaster': 'auto',
         'ControlPath': '{}/%C'.format(ssh_control_path),
         'ControlPersist': '30s',
+        # ConnectTimeout.
+        'ConnectTimeout': '{}s'.format(timeout),
     }
-    arg_dict['ConnectTimeout'] = '{}s'.format(timeout)
     ssh_key_option = [
         '-i',
         ssh_private_key,
@@ -364,12 +365,13 @@ class RetryingVmProvisioner(object):
             tpu_name = None
             if acc_args is not None and acc_args.get('tpu_name') is not None:
                 tpu_name = acc_args['tpu_name']
-                assert 'gcloud' in config_dict, \
-                    'Expect TPU provisioning with gcloud'
+                assert 'tpu-create-script' in config_dict, \
+                    'Expect TPU provisioning with gcloud.'
                 try:
-                    backend_utils.run(f'bash {config_dict["gcloud"][0]}',
-                                      stdout=subprocess.PIPE,
-                                      stderr=subprocess.PIPE)
+                    backend_utils.run(
+                        f'bash {config_dict["tpu-create-script"]}',
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE)
                 except subprocess.CalledProcessError as e:
                     stderr = e.stderr.decode('ascii')
                     if 'ALREADY_EXISTS' in stderr:
@@ -397,9 +399,10 @@ class RetryingVmProvisioner(object):
                 if tpu_name is not None:
                     logger.info(
                         'Failed to provision VM. Tearing down TPU resource...')
-                    backend_utils.run(f'bash {config_dict["gcloud"][1]}',
-                                      stdout=subprocess.PIPE,
-                                      stderr=subprocess.PIPE)
+                    backend_utils.run(
+                        f'bash {config_dict["tpu-delete-script"]}',
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE)
             else:
                 if tpu_name is not None:
                     backend_utils.run(
@@ -478,23 +481,20 @@ class CloudVmRayBackend(backends.Backend):
 
         - (required) A cached head node public IP.
         - (required) Path to a cluster.yaml file.
-        - (optional) If TPU(s) are managed, a tuple of paths: (creation,
-            deletion) scripts.
+        - (optional) If TPU(s) are managed, a path to a deletion script.
         """
 
-        def __init__(self,
-                     head_ip: str,
-                     cluster_yaml: str,
-                     managed_tpu: Optional[Tuple[str, str]] = None) -> None:
+        def __init__(self, head_ip: str, cluster_yaml: str,
+                     tpu_delete_script: str) -> None:
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
-            self.managed_tpu = managed_tpu
+            self.tpu_delete_script = tpu_delete_script
 
         def __repr__(self):
             return (f'ResourceHandle(\n\thead_ip={self.head_ip},'
                     '\n\tcluster_yaml='
                     f'{backend_utils.get_rel_path(self.cluster_yaml)}, '
-                    f'\n\tmanaged_tpu={self.managed_tpu})')
+                    f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
     def __init__(self):
         run_id = backend_utils.get_run_id()
@@ -539,8 +539,8 @@ class CloudVmRayBackend(backends.Backend):
             # Cache head ip in the handle to speed up ssh operations.
             self._get_node_ips(cluster_config_file, task.num_nodes)[0],
             cluster_config_file,
-            # gcloud: TPU.
-            config_dict.get('gcloud'))
+            # TPU.
+            config_dict.get('tpu-delete-script'))
         global_user_state.add_or_update_cluster(cluster_name, handle)
         return handle
 
@@ -870,14 +870,14 @@ class CloudVmRayBackend(backends.Backend):
                 f'{style.BRIGHT}ray attach {relpath} {style.RESET_ALL}\n'
                 '\nTo tear down the cluster:'
                 f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n')
-            if handle.managed_tpu is not None:
+            if handle.tpu_delete_script is not None:
                 logger.info(
                     'Tip: `sky down` will delete launched TPU(s) as well.')
 
     def teardown(self, handle: ResourceHandle) -> None:
         backend_utils.run(f'ray down -y {handle.cluster_yaml}')
-        if handle.managed_tpu is not None:
-            backend_utils.run(f'bash {handle.managed_tpu[1]}')
+        if handle.tpu_delete_script is not None:
+            backend_utils.run(f'bash {handle.tpu_delete_script}')
 
     def _get_node_ips(self,
                       cluster_yaml: str,

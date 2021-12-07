@@ -1,4 +1,10 @@
 # A minimal example.
+#
+# Runs a task that simply lists the default conda environments.
+#
+# Usage:
+#   sky run minimal.yaml
+
 resources:
   cloud: aws
 
