@@ -821,9 +821,19 @@ class CloudVmRayBackend(backends.Backend):
                 logger.info('To tear down the TPU(s):\t'
                             f'{style.BRIGHT}bash {tpu_script}'
                             f'{style.RESET_ALL}\n')
-
+    
     def teardown(self, handle: ResourceHandle) -> None:
-        backend_utils.run(f'ray down -y {handle}')
+        with open(handle, 'r') as f:
+            config = yaml.safe_load(f)
+        cloud = config['provider']['type']
+        cluster_name = config['cluster_name']
+        if cloud.lower() == 'azure':
+            # This workaround is to solve the issue caused by `ray down`
+            # To delete replace `az vm deallocate` with `az vm delete`.
+            # TODO: Do we need run `ray stop` first before deleting?
+            backend_utils.run(f'az vm deallocate --ids $(az vm list --query "[? contains(name, \'{cluster_name}\')].id" -o tsv)')
+        else:
+            backend_utils.run(f'ray down -y {handle}')
         if self._managed_tpu is not None:
             backend_utils.run(f'bash {self._managed_tpu[1]}')
 
