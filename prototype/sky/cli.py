@@ -435,8 +435,9 @@ def _terminate_or_stop(name: Optional[str], apply_to_all: Optional[bool],
                   'Letting --all take effect.')
             name = None
     if not to_down:
-        if name is not None:
-            print(f'Cluster {name} is not found (see `sky status`).')
+        if len(names) > 0:
+            cluster_list = ', '.join(names)
+            print(f'Cluster(s) {cluster_list} not found (see `sky status`).')
         else:
             print('No existing clusters found (see `sky status`).')
 
