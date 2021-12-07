@@ -830,11 +830,9 @@ class CloudVmRayBackend(backends.Backend):
         if cloud.lower() == 'azure':
             # This workaround is to solve the issue caused by `ray down`
             # To delete replace `az vm deallocate` with `az vm delete`.
-            # TODO: Do we need run `ray stop` first before deleting?
             backend_utils.run(
                 'az vm deallocate --ids $(az vm list --query '
-                '"[? contains(name, \'{cluster_name}\')].id" -o tsv)'
-            )
+                f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)')
         else:
             backend_utils.run(f'ray down -y {handle}')
         if self._managed_tpu is not None:
