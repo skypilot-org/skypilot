@@ -373,6 +373,10 @@ def down(
       sky down cluster_name
 
       \b
+      # Tear down multiple clusters.
+      sky down cluster1 cluster2
+
+      \b
       # Tear down all existing clusters.
       sky down -a
     """
