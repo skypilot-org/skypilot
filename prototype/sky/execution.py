@@ -88,8 +88,7 @@ def execute(dag: sky.Dag,
     if task.storage is not None:
         # Optimizer should eventually choose where to store bucket
         # Hardcoded right now, @zongheng Ideas on how to approach this?
-        optimizer_storage_backend = 'AWS'
-        backend.add_storage_backend(task, optimizer_storage_backend)
+        backend.add_storage_backend(task, task.best_storage_backend)
 
     if stages is None or Stage.PROVISION in stages:
         if handle is None:
@@ -133,4 +132,6 @@ def execute(dag: sky.Dag,
 
     if stages is None or Stage.TEARDOWN in stages:
         if teardown:
+            if task.storage is not None:
+                backend.teardown_storage(task)
             backend.teardown(handle)

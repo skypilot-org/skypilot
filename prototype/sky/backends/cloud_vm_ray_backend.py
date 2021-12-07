@@ -112,8 +112,8 @@ def _get_cluster_config_template(task):
     return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
 
-def _to_accelerator_and_count(resources: Optional[Resources]
-                             ) -> Tuple[Optional[str], int]:
+def _to_accelerator_and_count(
+        resources: Optional[Resources]) -> Tuple[Optional[str], int]:
     acc = None
     acc_count = 0
     if resources is not None:
@@ -481,10 +481,10 @@ class CloudVmRayBackend(backends.Backend):
                                    's3://' + storage.name + '/')
 
     def sync_file_mounts(
-            self,
-            handle: ResourceHandle,
-            all_file_mounts: Dict[Path, Path],
-            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        self,
+        handle: ResourceHandle,
+        all_file_mounts: Dict[Path, Path],
+        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         # TODO: this function currently only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
@@ -803,6 +803,11 @@ class CloudVmRayBackend(backends.Backend):
                 logger.info('To tear down the TPU(s):\t'
                             f'{style.BRIGHT}bash {tpu_script}'
                             f'{style.RESET_ALL}\n')
+
+    def teardown_storage(self, task: App) -> None:
+        storage = task.storage
+        if storage is not None and not storage.persistent:
+            storage.cleanup()
 
     def teardown(self, handle: ResourceHandle) -> None:
         backend_utils.run(f'ray down -y {handle}')

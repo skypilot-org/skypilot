@@ -12,6 +12,7 @@ Resources = resources_lib.Resources
 # A lambda generating commands (node addrs -> {addr: cmd_i}).
 CommandGen = Callable[[List[str]], Dict[str, str]]
 CommandOrCommandGen = Union[str, CommandGen]
+Storage = Any
 
 CLOUD_REGISTRY = {
     'aws': clouds.AWS(),
@@ -30,19 +31,19 @@ class Task(object):
     """Task: a coarse-grained stage in an application."""
 
     def __init__(
-            self,
-            name: Optional[str] = None,
-            *,
-            setup: Optional[str] = None,
-            run: CommandOrCommandGen = None,
-            workdir: Optional[str] = None,
-            num_nodes: Optional[int] = None,
-            # Advanced:
-            storage: Optional[Any] = None,
-            post_setup_fn: Optional[CommandGen] = None,
-            docker_image: Optional[str] = None,
-            container_name: Optional[str] = None,
-            private_key: Optional[str] = '~/.ssh/sky-key',
+        self,
+        name: Optional[str] = None,
+        *,
+        setup: Optional[str] = None,
+        run: CommandOrCommandGen = None,
+        workdir: Optional[str] = None,
+        num_nodes: Optional[int] = None,
+        # Advanced:
+        storage: Optional[Storage] = None,
+        post_setup_fn: Optional[CommandGen] = None,
+        docker_image: Optional[str] = None,
+        container_name: Optional[str] = None,
+        private_key: Optional[str] = '~/.ssh/sky-key',
     ):
         """Initializes a Task.
 
@@ -82,6 +83,7 @@ class Task(object):
         self.best_resources = None
         self.run = run
         self.storage = storage
+        self.best_storage_backend = 'AWS'
         self.setup = setup
         self.post_setup_fn = post_setup_fn
         self.workdir = workdir
@@ -215,9 +217,6 @@ class Task(object):
 
     def get_resources(self):
         return self.resources
-
-    def get_storage(self):
-        return self.storage
 
     def add_storage_backend(self, name):
         self.storage.add_backend(name)

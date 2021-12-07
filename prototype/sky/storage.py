@@ -1,7 +1,8 @@
 """Storage and StorageBackend Classes for Sky Data
 """
-# pylint: disable=maybe-no-member
 import os
+import glob
+from multiprocessing.pool import ThreadPool
 from typing import Dict, Tuple
 
 import boto3
@@ -10,6 +11,8 @@ from google.api_core.exceptions import NotFound
 
 from sky.backends import data_utils, data_transfer
 from sky import logging
+
+logger = logging.init_logger(__name__)
 
 Path = str
 StorageHandle = str
@@ -26,7 +29,6 @@ class StorageBackend:
         self.name = name
         self.path = path
         self.is_initialized = False
-        self.storage_handle = None
 
     def cleanup(self) -> None:
         """
@@ -40,6 +42,47 @@ class StorageBackend:
         to VM/containers :return: StorageHandle for the storage backend
         """
         return self.storage_handle
+
+    def upload_local_dir(self, local_path: str, num_threads: int = 32) -> None:
+        """Uploads directory specified by local_path to the remote bucket
+
+        Args:
+          local_path: Local path on user's device
+          num_threads: Number of threads to upload individual files
+        """
+        assert local_path is not None
+        local_path = os.path.expanduser(local_path)
+        all_paths = glob.glob(local_path + '/**', recursive=True)
+        del all_paths[0]
+
+        def _upload_thread(local_file):
+            remote_path = local_file.replace(local_path, '')
+            logger.info(f'Uploading {local_file} to {remote_path}')
+            if os.path.isfile(local_file):
+                self.upload_file(local_file, remote_path)
+
+        pool = ThreadPool(processes=num_threads)
+        pool.map(_upload_thread, all_paths)
+
+    def download_remote_dir(self, local_path: str) -> None:
+        """Downloads directory from remote bucket to the specified
+        local_path
+
+        Args:
+          local_path: Local path on user's device
+        """
+        assert local_path is not None
+        local_path = os.path.expanduser(local_path)
+        iterator = self.remote_filepath_iterator()
+        for remote_path in iterator:
+            remote_path = next(iterator)
+            if remote_path[-1] == '/':
+                continue
+            path = os.path.join(local_path, remote_path)
+            if not os.path.exists(os.path.dirname(path)):
+                os.makedirs(os.path.dirname(path))
+            logger.info(f'Downloading {remote_path} to {path}')
+            self.download_file(remote_path, path)
 
 
 class AWSStorageBackend(StorageBackend):
@@ -62,15 +105,15 @@ class AWSStorageBackend(StorageBackend):
         assert not is_new_bucket or self.path
         if 's3://' not in self.path:
             if is_new_bucket:
-                logging.info('Uploading Local to S3')
-                self.upload_from_local(self.path)
+                logger.info('Uploading Local to S3')
+                self.upload_local_dir(self.path)
             else:
-                logging.info('Syncing Local to S3')
+                logger.info('Syncing Local to S3')
                 self.sync_from_local()
         self.is_initialized = True
 
     def cleanup(self) -> None:
-        logging.info(f'Deleting S3 Bucket {self.name}')
+        logger.info(f'Deleting S3 Bucket {self.name}')
         return self.delete_s3_bucket(self.name)
 
     def get_handle(self) -> StorageHandle:
@@ -93,23 +136,33 @@ class AWSStorageBackend(StorageBackend):
             return bucket, False
         return self.create_s3_bucket(self.name), True
 
-    def upload_from_local(self, local_path) -> None:
-        """Uploads folder from local_path to S3 bucket
+    def upload_file(self, local_path: str, remote_path: str) -> None:
+        """Uploads file from local path to remote path on s3 bucket
+        using the boto3 API
 
         Args:
           local_path: str; Local path on user's device
+          remote_path: str; Remote path on S3 bucket
         """
-        data_transfer.local_to_s3(local_path, self)
+        self.client.upload_file(local_path, self.name, remote_path)
 
-    def download_to_local(self, local_path) -> None:
-        """Uploads folder from local_path to S3 bucket
+    def download_file(self, remote_path: str, local_path: str) -> None:
+        """Downloads file from remote to local on s3 bucket
+        using the boto3 API
 
         Args:
+          remote_path: str; Remote path on S3 bucket
           local_path: str; Local path on user's device
         """
-        data_transfer.s3_to_local(self, local_path)
+        self.bucket.download_file(remote_path, local_path)
 
-    def create_s3_bucket(self, bucket_name, region='us-east-2'):
+    def remote_filepath_iterator(self) -> str:
+        """Generator that yields the remote file paths from the S3 bucket
+        """
+        for obj in self.bucket.objects.filter():
+            yield obj.key
+
+    def create_s3_bucket(self, bucket_name: str, region='us-east-2') -> None:
         """Creates S3 bucket with specific name in specific region
 
         Args:
@@ -124,13 +177,13 @@ class AWSStorageBackend(StorageBackend):
                 location = {'LocationConstraint': region}
                 s3_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
-                logging.info(f'Created S3 bucket {bucket_name} in {region}')
+                logger.info(f'Created S3 bucket {bucket_name} in {region}')
         except ClientError as e:
-            logging.info(e)
+            logger.info(e)
             return None
         return boto3.resource('s3').Bucket(bucket_name)
 
-    def delete_s3_bucket(self, bucket_name):
+    def delete_s3_bucket(self, bucket_name: str) -> None:
         """Deletes S3 bucket, including all objects in bucket
 
         Args:
@@ -155,10 +208,10 @@ class GCSStorageBackend(StorageBackend):
                  backends=None):
         super().__init__(name, path)
         self.backends = backends
-        if 'gcs://' in self.path:
+        if 'gs://' in self.path:
             assert name == data_utils.split_gcs_path(path)[
                 0], 'GCS Bucket is specified as path, the name should be the \
-             same as GCS bucket!'
+                same as GCS bucket!'
 
         self.client = data_utils.create_gcs_client()
         self.name = name
@@ -166,22 +219,22 @@ class GCSStorageBackend(StorageBackend):
         self.bucket, is_new_bucket = self.get_bucket()
         self.path = path
         assert not is_new_bucket or self.path
-        if 'gcs://' not in self.path:
+        if 'gs://' not in self.path:
             if 's3://' in self.path:
-                logging.info('Initating GCS Data Transfer Service from S3->GCS')
+                logger.info('Initating GCS Data Transfer Service from S3->GCS')
                 aws_backend = backends['AWS']
                 self.transfer_to_gcs(aws_backend)
             elif is_new_bucket and 's3://' not in self.path:
-                logging.info('Uploading Local to GCS')
-                self.upload_from_local(self.path)
+                logger.info('Uploading Local to GCS')
+                self.upload_local_dir(self.path)
             else:
-                logging.info('Syncing Local to GCS')
+                logger.info('Syncing Local to GCS')
                 self.sync_from_local()
 
         self.is_initialized = True
 
     def cleanup(self):
-        logging.info(f'Deleting GCS Bucket {self.name}')
+        logger.info(f'Deleting GCS Bucket {self.name}')
         return self.delete_gcs_bucket(self.name)
 
     def get_handle(self):
@@ -213,23 +266,38 @@ class GCSStorageBackend(StorageBackend):
         except NotFound:
             return self.create_gcs_bucket(self.name), True
 
-    def upload_from_local(self, local_path):
-        """Uploads folder from local_path to GCS bucket
+    def upload_file(self, local_file: str, remote_path: str) -> None:
+        """Uploads file from local path to remote path on GCS bucket
 
         Args:
           local_path: str; Local path on user's device
+          remote_path: str; Remote path on GCS bucket
         """
-        data_transfer.local_to_gcs(local_path, self)
+        blob = self.bucket.blob(remote_path)
+        blob.upload_from_filename(local_file)
 
-    def download_to_local(self, local_path):
-        """Uploads folder from local_path to GCS bucket
+    def download_file(self, remote_path: str, local_path: str) -> None:
+        """Downloads file from remote to local on GS bucket
 
         Args:
+          remote_path: str; Remote path on GS bucket
           local_path: str; Local path on user's device
         """
-        data_transfer.gcs_to_local(self, local_path)
+        blob = self.bucket.blob(remote_path)
+        blob.download_to_filename(local_path)
 
-    def create_gcs_bucket(self, bucket_name, region='us-central1'):
+    def remote_filepath_iterator(self) -> str:
+        """Generator that yields the remote file paths from the S3 bucket
+        """
+        iterator = self.bucket.list_blobs()
+        while True:
+            try:
+                obj = next(iterator)
+                yield obj.name
+            except StopIteration:
+                break
+
+    def create_gcs_bucket(self, bucket_name: str, region='us-central1'):
         """Creates GCS bucket with specific name in specific region
 
         Args:
@@ -239,12 +307,12 @@ class GCSStorageBackend(StorageBackend):
         bucket = self.client.bucket(bucket_name)
         bucket.storage_class = 'STANDARD'
         new_bucket = self.client.create_bucket(bucket, location=region)
-        logging.info(
+        logger.info(
             f'Created GCS bucket {new_bucket.name} in {new_bucket.location} \
             with storage class {new_bucket.storage_class}')
         return new_bucket
 
-    def delete_gcs_bucket(self, bucket_name):
+    def delete_gcs_bucket(self, bucket_name: str):
         """Deletes GCS bucket, including all objects in bucket
 
         Args:

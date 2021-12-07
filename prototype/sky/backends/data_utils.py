@@ -25,7 +25,7 @@ def split_gcs_path(gcs_path: str) -> Tuple[str, str]:
     Args:
       gcs_path: str; GCS Path, e.g. gcs://imagenet/train/
     """
-    path_parts = gcs_path.replace('gcs://', '').split('/')
+    path_parts = gcs_path.replace('gs://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key

@@ -15,7 +15,6 @@ TODO:
 - All combinations of Azure Transfer
 - GCS -> S3
 """
-# pylint: disable=maybe-no-member
 from datetime import datetime
 import glob
 import json
@@ -29,6 +28,8 @@ from google.cloud import storage
 from oauth2client.client import GoogleCredentials
 
 from sky import logging
+
+logger = logging.init_logger(__name__)
 
 AWSStorageBackend = Any
 GCSStorageBackend = Any
@@ -52,10 +53,11 @@ def s3_to_gcs(aws_backend: AWSStorageBackend,
 
     session = boto3.Session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
-    import pdb
-    pdb.set_trace()
+
+    with open(os.environ["GOOGLE_APPLICATION_CREDENTIALS"], "r") as fp:
+        credentials = json.load(fp)
+    project_id = credentials["project_id"]
     # Update cloud bucket IAM role to allow for data transfer
-    project_id = 'intercloud-320520'
     storage_account = storagetransfer.googleServiceAccounts().get(
         projectId=project_id).execute()
     _add_bucket_iam_member(gcs_backend.name, 'roles/storage.admin',
@@ -94,55 +96,7 @@ def s3_to_gcs(aws_backend: AWSStorageBackend,
     }
 
     result = storagetransfer.transferJobs().create(body=transfer_job).execute()
-    logging.info(f'AWS -> GCS Transfer Job: {json.dumps(result, indent=4)}')
-
-
-def local_to_gcs(local_path: str, gcs_backend: GCSStorageBackend) -> None:
-    """Creates a one-time transfer from Local to GCS.
-
-    Args:
-      local_path: str; Local path on user's device
-      gcs_backend: StorageBackend; GCS Backend that contains a
-      corresponding GCS bucket
-    """
-    assert local_path is not None
-    local_path = os.path.expanduser(local_path)
-    all_paths = glob.glob(local_path + '/**', recursive=True)
-    del all_paths[0]
-
-    def _upload_thread(local_file):
-        remote_path = local_file.replace(local_path, '')
-        logging.info(f'Uploading {local_file} to {remote_path}')
-        if os.path.isfile(local_file):
-            blob = gcs_backend.bucket.blob(remote_path)
-            blob.upload_from_filename(local_file)
-
-    pool = ThreadPool(processes=32)
-    pool.map(_upload_thread, all_paths)
-
-
-def local_to_s3(local_path: str, aws_backend: AWSStorageBackend) -> None:
-    """Creates a one-time transfer from Local to S3.
-
-    Args:
-      local_path: str; Local path on user's device
-      aws_backend: StorageBackend; AWS Backend that contains a
-      corresponding S3 bucket
-    """
-    assert local_path is not None
-    local_path = os.path.expanduser(local_path)
-    all_paths = glob.glob(local_path + '/**', recursive=True)
-    del all_paths[0]
-
-    def _upload_thread(local_file):
-        remote_path = local_file.replace(local_path, '')
-        logging.info(f'Uploading {local_file} to {remote_path}')
-        if os.path.isfile(local_file):
-            aws_backend.client.upload_file(local_file, aws_backend.name,
-                                           remote_path)
-
-    pool = ThreadPool(processes=32)
-    pool.map(_upload_thread, all_paths)
+    logger.info(f'AWS -> GCS Transfer Job: {json.dumps(result, indent=4)}')
 
 
 def s3_to_local(aws_backend: AWSStorageBackend, local_path: str) -> None:
@@ -161,7 +115,7 @@ def s3_to_local(aws_backend: AWSStorageBackend, local_path: str) -> None:
         path = os.path.join(local_path, obj.key)
         if not os.path.exists(os.path.dirname(path)):
             os.makedirs(os.path.dirname(path))
-        logging.info(f'Downloading {obj.key} to {path}')
+        logger.info(f'Downloading {obj.key} to {path}')
         aws_backend.bucket.download_file(obj.key, path)
 
 
@@ -181,7 +135,7 @@ def gcs_to_local(gcs_backend: GCSStorageBackend, local_path: str) -> None:
         path = os.path.join(local_path, obj.name)
         if not os.path.exists(os.path.dirname(path)):
             os.makedirs(os.path.dirname(path))
-        logging.info(f'Downloading {obj.name} to {path}')
+        logger.info(f'Downloading {obj.name} to {path}')
         obj.download_to_filename(path)
 
 
@@ -194,4 +148,4 @@ def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:
 
     bucket.set_iam_policy(policy)
 
-    logging.info(f'Added {member} with role {role} to {bucket_name}.')
+    logger.info(f'Added {member} with role {role} to {bucket_name}.')

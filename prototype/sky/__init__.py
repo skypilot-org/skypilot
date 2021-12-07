@@ -6,11 +6,11 @@ from sky import clouds
 from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag, DagContext
 from sky.execution import execute
-from sky.optimizer import Optimizer, OptimizeTarget
-from sky.registry import fill_in_launchable_resources
 from sky.resources import Resources
-from sky.storage import Storage
 from sky.task import ParTask, Task
+from sky.registry import fill_in_launchable_resources
+from sky.optimizer import Optimizer, OptimizeTarget
+from sky.storage import Storage
 
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
