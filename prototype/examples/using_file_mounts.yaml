@@ -44,6 +44,6 @@ run: |
   pip3 install -e .
 
   du -schL /train-00001-of-01024
-  # head /train-00001-of-01024
+  head /train-00001-of-01024
 
   ls -lH /data/fake_imagenet | head -n10
