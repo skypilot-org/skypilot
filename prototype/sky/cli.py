@@ -441,14 +441,14 @@ def gpunode(cluster: str, port_forward: Optional[List[int]]):
     """Launches an interactive GPU node.
 
     Automatically syncs current working directory.
-    
+
     Examples:
 
       \b
       # start gpunode
       sky gpunode
-      
-      # gpunode, creating a cluster with the name `cluster` or an existing cluster.
+
+      # creating a gpunode with name `cluster` or connecting to existed node.
       sky gpunode -c cluster_name
 
       \b
@@ -486,14 +486,14 @@ def cpunode(cluster: str, port_forward: Optional[List[int]]):
     """Launches an interactive CPU node.
 
     Automatically syncs current working directory.
-    
+
      Examples:
 
       \b
       # start cpunode
       sky cpunode
-      
-      # cpunode, creating a cluster with the name `cluster` or an existing cluster.
+
+      # creating a cpunode with name `cluster` or connecting to existed node.
       sky cpunode -c cluster_name
 
       \b
