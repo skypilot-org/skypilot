@@ -28,10 +28,14 @@ from googleapiclient import discovery
 from google.cloud import storage
 from oauth2client.client import GoogleCredentials
 
-StorageBackend = Any
+from sky import logging
+
+AWSStorageBackend = Any
+GCSStorageBackend = Any
 
 
-def s3_to_gcs(aws_backend: StorageBackend, gcs_backend: StorageBackend) -> None:
+def s3_to_gcs(aws_backend: AWSStorageBackend,
+              gcs_backend: GCSStorageBackend) -> None:
     """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
     Can be viewed from: https://console.cloud.google.com/transfer/cloud
 
@@ -42,13 +46,14 @@ def s3_to_gcs(aws_backend: StorageBackend, gcs_backend: StorageBackend) -> None:
       corresponding GCS bucket
     """
     credentials = GoogleCredentials.get_application_default()
-    storagetransfer = discovery.build('storagetransfer',
-                                      'v1',
+    storagetransfer = discovery.build(serviceName='storagetransfer',
+                                      version='v1',
                                       credentials=credentials)
 
     session = boto3.Session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
-
+    import pdb
+    pdb.set_trace()
     # Update cloud bucket IAM role to allow for data transfer
     project_id = 'intercloud-320520'
     storage_account = storagetransfer.googleServiceAccounts().get(
@@ -89,10 +94,10 @@ def s3_to_gcs(aws_backend: StorageBackend, gcs_backend: StorageBackend) -> None:
     }
 
     result = storagetransfer.transferJobs().create(body=transfer_job).execute()
-    print(f'AWS -> GCS Transfer Job: {json.dumps(result, indent=4)}')
+    logging.info(f'AWS -> GCS Transfer Job: {json.dumps(result, indent=4)}')
 
 
-def local_to_gcs(local_path: str, gcs_backend: StorageBackend) -> None:
+def local_to_gcs(local_path: str, gcs_backend: GCSStorageBackend) -> None:
     """Creates a one-time transfer from Local to GCS.
 
     Args:
@@ -107,7 +112,7 @@ def local_to_gcs(local_path: str, gcs_backend: StorageBackend) -> None:
 
     def _upload_thread(local_file):
         remote_path = local_file.replace(local_path, '')
-        print(f'Uploading {local_file} to {remote_path}')
+        logging.info(f'Uploading {local_file} to {remote_path}')
         if os.path.isfile(local_file):
             blob = gcs_backend.bucket.blob(remote_path)
             blob.upload_from_filename(local_file)
@@ -116,7 +121,7 @@ def local_to_gcs(local_path: str, gcs_backend: StorageBackend) -> None:
     pool.map(_upload_thread, all_paths)
 
 
-def local_to_s3(local_path: str, aws_backend: StorageBackend) -> None:
+def local_to_s3(local_path: str, aws_backend: AWSStorageBackend) -> None:
     """Creates a one-time transfer from Local to S3.
 
     Args:
@@ -131,7 +136,7 @@ def local_to_s3(local_path: str, aws_backend: StorageBackend) -> None:
 
     def _upload_thread(local_file):
         remote_path = local_file.replace(local_path, '')
-        print(f'Uploading {local_file} to {remote_path}')
+        logging.info(f'Uploading {local_file} to {remote_path}')
         if os.path.isfile(local_file):
             aws_backend.client.upload_file(local_file, aws_backend.name,
                                            remote_path)
@@ -140,7 +145,7 @@ def local_to_s3(local_path: str, aws_backend: StorageBackend) -> None:
     pool.map(_upload_thread, all_paths)
 
 
-def s3_to_local(aws_backend: StorageBackend, local_path: str) -> None:
+def s3_to_local(aws_backend: AWSStorageBackend, local_path: str) -> None:
     """Creates a one-time transfer from S3 to Local.
 
     Args:
@@ -156,11 +161,11 @@ def s3_to_local(aws_backend: StorageBackend, local_path: str) -> None:
         path = os.path.join(local_path, obj.key)
         if not os.path.exists(os.path.dirname(path)):
             os.makedirs(os.path.dirname(path))
-        print(f'Downloading {obj.key} to {path}')
+        logging.info(f'Downloading {obj.key} to {path}')
         aws_backend.bucket.download_file(obj.key, path)
 
 
-def gcs_to_local(gcs_backend: StorageBackend, local_path: str) -> None:
+def gcs_to_local(gcs_backend: GCSStorageBackend, local_path: str) -> None:
     """Creates a one-time transfer from GCS to Local.
 
     Args:
@@ -176,11 +181,11 @@ def gcs_to_local(gcs_backend: StorageBackend, local_path: str) -> None:
         path = os.path.join(local_path, obj.name)
         if not os.path.exists(os.path.dirname(path)):
             os.makedirs(os.path.dirname(path))
-        print(f'Downloading {obj.name} to {path}')
+        logging.info(f'Downloading {obj.name} to {path}')
         obj.download_to_filename(path)
 
 
-def _add_bucket_iam_member(bucket_name, role, member):
+def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
 
@@ -189,4 +194,4 @@ def _add_bucket_iam_member(bucket_name, role, member):
 
     bucket.set_iam_policy(policy)
 
-    print(f'Added {member} with role {role} to {bucket_name}.')
+    logging.info(f'Added {member} with role {role} to {bucket_name}.')

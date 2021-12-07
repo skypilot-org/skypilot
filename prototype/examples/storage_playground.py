@@ -32,3 +32,6 @@ def test_bucket_transfer():
                       default_mount_path="/tmp/data/")
     storage.add_backend("AWS")
     storage.add_backend("GCP")
+
+
+test_bucket_transfer()

@@ -11,6 +11,7 @@ import os
 import pathlib
 import sqlite3
 import time
+from typing import Optional
 import uuid
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
@@ -47,11 +48,11 @@ def remove_task(task_id):
     _CONN.commit()
 
 
-def add_cluster(cluster_name, cluster_handle):
-    """Adds cluster_name -> cluster_handle mapping."""
+def add_or_update_cluster(cluster_name, cluster_handle):
+    """Adds or updates cluster_name -> cluster_handle mapping."""
     cluster_launched_at = int(time.time())
     _CURSOR.execute(
-        'INSERT INTO clusters VALUES '
+        'INSERT OR REPLACE INTO clusters VALUES '
         f'(\'{cluster_name}\',{cluster_launched_at},\'{cluster_handle}\')')
     _CONN.commit()
 
@@ -62,7 +63,7 @@ def remove_cluster(cluster_name):
     _CONN.commit()
 
 
-def get_handle_from_cluster_name(cluster_name):
+def get_handle_from_cluster_name(cluster_name) -> Optional[str]:
     rows = _CURSOR.execute(
         f'SELECT handle FROM clusters WHERE name=\'{cluster_name}\'')
     for (handle,) in rows:
@@ -78,15 +79,23 @@ def get_cluster_name_from_handle(cluster_handle):
 
 def get_tasks():
     rows = _CURSOR.execute('select * from tasks')
+    records = []
     for task_id, name, launched_at in rows:
-        yield {
+        records.append({
             'id': task_id,
             'name': name,
             'launched_at': launched_at,
-        }
+        })
+    return records
 
 
 def get_clusters():
     rows = _CURSOR.execute('select * from clusters')
+    records = []
     for name, launched_at, handle in rows:
-        yield {'name': name, 'launched_at': launched_at, 'handle': handle}
+        records.append({
+            'name': name,
+            'launched_at': launched_at,
+            'handle': handle
+        })
+    return records

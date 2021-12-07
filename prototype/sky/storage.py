@@ -9,6 +9,7 @@ from botocore.exceptions import ClientError
 from google.api_core.exceptions import NotFound
 
 from sky.backends import data_utils, data_transfer
+from sky import logging
 
 Path = str
 StorageHandle = str
@@ -61,15 +62,15 @@ class AWSStorageBackend(StorageBackend):
         assert not is_new_bucket or self.path
         if 's3://' not in self.path:
             if is_new_bucket:
-                print('Uploading Local to S3')
+                logging.info('Uploading Local to S3')
                 self.upload_from_local(self.path)
             else:
-                print('Syncing Local to S3')
+                logging.info('Syncing Local to S3')
                 self.sync_from_local()
         self.is_initialized = True
 
     def cleanup(self) -> None:
-        print(f'Deleting S3 Bucket {self.name}')
+        logging.info(f'Deleting S3 Bucket {self.name}')
         return self.delete_s3_bucket(self.name)
 
     def get_handle(self) -> StorageHandle:
@@ -123,8 +124,9 @@ class AWSStorageBackend(StorageBackend):
                 location = {'LocationConstraint': region}
                 s3_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
+                logging.info(f'Created S3 bucket {bucket_name} in {region}')
         except ClientError as e:
-            print(e)
+            logging.info(e)
             return None
         return boto3.resource('s3').Bucket(bucket_name)
 
@@ -166,20 +168,20 @@ class GCSStorageBackend(StorageBackend):
         assert not is_new_bucket or self.path
         if 'gcs://' not in self.path:
             if 's3://' in self.path:
-                print('Initating GCS Data Transfer Service from S3->GCS')
+                logging.info('Initating GCS Data Transfer Service from S3->GCS')
                 aws_backend = backends['AWS']
                 self.transfer_to_gcs(aws_backend)
             elif is_new_bucket and 's3://' not in self.path:
-                print('Uploading Local to GCS')
+                logging.info('Uploading Local to GCS')
                 self.upload_from_local(self.path)
             else:
-                print('Syncing Local to GCS')
+                logging.info('Syncing Local to GCS')
                 self.sync_from_local()
 
         self.is_initialized = True
 
     def cleanup(self):
-        print(f'Deleting GCS Bucket {self.name}')
+        logging.info(f'Deleting GCS Bucket {self.name}')
         return self.delete_gcs_bucket(self.name)
 
     def get_handle(self):
@@ -237,8 +239,9 @@ class GCSStorageBackend(StorageBackend):
         bucket = self.client.bucket(bucket_name)
         bucket.storage_class = 'STANDARD'
         new_bucket = self.client.create_bucket(bucket, location=region)
-        print('Created bucket {} in {} with storage class {}'.format(
-            new_bucket.name, new_bucket.location, new_bucket.storage_class))
+        logging.info(
+            f'Created GCS bucket {new_bucket.name} in {new_bucket.location} \
+            with storage class {new_bucket.storage_class}')
         return new_bucket
 
     def delete_gcs_bucket(self, bucket_name):

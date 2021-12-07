@@ -2,9 +2,12 @@
 """
 import boto3
 from google.cloud import storage
+from typing import Any, Tuple
+
+Client = Any
 
 
-def split_s3_path(s3_path):
+def split_s3_path(s3_path: str) -> Tuple[str, str]:
     """Splits S3 Path into Bucket name and Relative Path to Bucket
 
     Args:
@@ -16,7 +19,7 @@ def split_s3_path(s3_path):
     return bucket, key
 
 
-def split_gcs_path(gcs_path):
+def split_gcs_path(gcs_path: str) -> Tuple[str, str]:
     """Splits GCS Path into Bucket name and Relative Path to Bucket
 
     Args:
@@ -28,7 +31,7 @@ def split_gcs_path(gcs_path):
     return bucket, key
 
 
-def create_s3_client(region: str = 'us-east-2'):
+def create_s3_client(region: str = 'us-east-2') -> Client:
     """Helper method that connects to Boto3 client for S3 Bucket
 
     Args:
@@ -37,7 +40,7 @@ def create_s3_client(region: str = 'us-east-2'):
     return boto3.client('s3', region_name=region)
 
 
-def create_gcs_client():
+def create_gcs_client() -> Client:
     """Helper method that connects to GCS Storage Client for
     GCS Bucket
 
