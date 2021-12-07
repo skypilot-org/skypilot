@@ -227,7 +227,7 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if 'An error occurred' in s.strip()
+            if 'Exception Details:' in s.strip()
         ]
         if not errors:
             logger.info('====== stdout ======')
