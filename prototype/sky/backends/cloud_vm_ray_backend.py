@@ -427,7 +427,8 @@ class CloudVmRayBackend(backends.Backend):
 
     def register_info(self, **kwargs) -> None:
         self._dag = kwargs['dag']
-        self._optimize_target = kwargs['optimize_target']
+        self._optimize_target = kwargs.pop('optimize_target',
+                                           OptimizeTarget.COST)
 
     def provision(self,
                   task: App,
