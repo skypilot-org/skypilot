@@ -2,8 +2,6 @@ import subprocess
 
 import sky
 
-import time_estimators
-
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
@@ -69,7 +67,9 @@ with sky.Dag() as dag:
         # sky.Resources(sky.AWS(), accelerators='K80', use_spot=True),
         # sky.Resources(accelerators='tpu-v3-8'),
         # sky.Resources(accelerators='V100', use_spot=True),
+        # sky.Resources(accelerators={'T4': 4}),
         sky.Resources(sky.AWS(), accelerators='V100'),
+        # sky.Resources(sky.GCP(), accelerators={'V100': 4}),
         # sky.Resources(sky.AWS(), accelerators='V100', use_spot=True),
         # sky.Resources(sky.AWS(), accelerators={'V100': 8}),
     })
@@ -77,6 +77,5 @@ with sky.Dag() as dag:
     # Optionally, specify a time estimator: Resources -> time in seconds.
     # train.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
-dag = sky.optimize(dag, minimize=sky.Optimizer.COST)
 # sky.execute(dag, dryrun=True)
 sky.execute(dag)

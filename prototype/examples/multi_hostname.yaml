@@ -1,7 +1,7 @@
 name: multi_hostname
 
 resources:
-  cloud: aws
+  cloud: gcp
 
 num_nodes: 2
 

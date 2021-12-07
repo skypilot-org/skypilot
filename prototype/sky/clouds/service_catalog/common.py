@@ -1,3 +1,4 @@
+"""Common utilities for service_catalog."""
 import os
 from typing import Dict, List, Optional
 

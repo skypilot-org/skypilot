@@ -1,3 +1,4 @@
+"""The Sky package."""
 import os
 
 from sky import backends
@@ -8,7 +9,7 @@ from sky.execution import execute
 from sky.resources import Resources
 from sky.task import ParTask, Task
 from sky.registry import fill_in_launchable_resources
-from sky.optimizer import Optimizer
+from sky.optimizer import Optimizer, OptimizeTarget
 
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
@@ -25,6 +26,7 @@ __all__ = [
     'Dag',
     'DagContext',
     'Optimizer',
+    'OptimizeTarget',
     'ParTask',
     'Resources',
     'Task',

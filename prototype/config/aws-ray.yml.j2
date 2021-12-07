@@ -1,4 +1,4 @@
-cluster_name: sky-aws
+cluster_name: {{cluster_name}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
@@ -64,6 +64,13 @@ file_mounts: {
   "{{remote_path}}": "{{local_path}}",
 {%- endfor %}
 }
+
+{%- if initialization_commands is not none %}
+initialization_commands:
+{%- for cmd in initialization_commands %}
+  - {{cmd}}
+{%- endfor %}
+{%- endif %}
 
 # Patterns for files to exclude when running rsync up or rsync down
 # rsync_exclude:

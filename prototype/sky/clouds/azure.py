@@ -1,3 +1,4 @@
+"""Azure."""
 import copy
 import json
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -7,6 +8,8 @@ from sky.clouds.service_catalog import azure_catalog
 
 
 class Azure(clouds.Cloud):
+    """Azure."""
+
     _REPR = 'Azure'
     _regions: List[clouds.Region] = []
 
@@ -17,7 +20,8 @@ class Azure(clouds.Cloud):
         # In general, query this from the cloud:
         #   https://azure.microsoft.com/en-us/pricing/details/bandwidth/
         # NOTE: egress from US East.
-        # NOTE: Not accurate as the pricing tier is based on cumulative monthly usage.
+        # NOTE: Not accurate as the pricing tier is based on cumulative monthly
+        # usage.
         if num_gigabytes > 150 * 1024:
             return 0.05 * num_gigabytes
         cost = 0.0
@@ -109,7 +113,8 @@ class Azure(clouds.Cloud):
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
-        assert not r.use_spot, f"We currently do not support spot instances for Azure"
+        assert not r.use_spot, \
+            'We currently do not support spot instances for Azure.'
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:

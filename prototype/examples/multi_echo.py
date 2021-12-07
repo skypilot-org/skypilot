@@ -11,5 +11,4 @@ with sky.Dag() as dag:
     total = sky.Resources(accelerators={'K80': 1})
     task.set_resources(total)
 
-dag = sky.optimize(dag)
 sky.execute(dag)
