@@ -485,7 +485,7 @@ class CloudVmRayBackend(backends.Backend):
         """
 
         def __init__(self, head_ip: str, cluster_yaml: str,
-                     tpu_delete_script: str) -> None:
+                     tpu_delete_script: Optional[str]) -> None:
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
             self.tpu_delete_script = tpu_delete_script

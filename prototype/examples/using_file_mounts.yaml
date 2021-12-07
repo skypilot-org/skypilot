@@ -1,9 +1,8 @@
 # Example: using file mounts
 #
-# File mounts allow syncing local files (or cloud URLs) to the VM where a Task
-# will run.  Syncing is done before the Task's execution so that its run command
-# can access these files.  After syncing, the mounted paths can be opened, read,
-# or written as usual.
+# File mounts sync local files (or cloud URLs) to the VM where a Task will run.
+# Syncing is done before the Task's execution so that it can access these files.
+# After syncing, the paths can be opened, read, or written as usual.
 #
 # Destination paths must be absolute paths, not relative.
 #
