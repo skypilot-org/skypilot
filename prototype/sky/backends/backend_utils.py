@@ -318,8 +318,14 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
 
-    out_io = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
-    err_io = io.TextIOWrapper(proc.stderr, encoding='utf-8', newline='')
+    out_io = io.TextIOWrapper(proc.stdout,
+                              encoding='utf-8',
+                              newline='',
+                              errors='replace')
+    err_io = io.TextIOWrapper(proc.stderr,
+                              encoding='utf-8',
+                              newline='',
+                              errors='replace')
     sel = selectors.DefaultSelector()
     sel.register(out_io, selectors.EVENT_READ)
     sel.register(err_io, selectors.EVENT_READ)
