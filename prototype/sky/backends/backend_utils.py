@@ -5,6 +5,7 @@ import os
 import pathlib
 import selectors
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -336,25 +337,27 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
     start_streaming_flag = False
     with open(log_path, 'a') as fout:
         while len(sel.get_map()) > 0:
-            for key, _ in sel.select():
+            events = sel.select()
+            for key, _ in events:
                 line = key.fileobj.readline()
                 if not line:
+                    # Unregister the io when EOF reached
                     sel.unregister(key.fileobj)
-                    break
+                    continue
                 # Remove special characters to avoid cursor hidding
                 line = line.replace('\x1b[?25l', '')
                 if start_streaming_at in line:
                     start_streaming_flag = True
                 if key.fileobj is out_io:
                     stdout += line
-                    fout.write(line)
-                    fout.flush()
+                    out_stream = sys.stdout
                 else:
                     stderr += line
-                    fout.write(line)
-                    fout.flush()
+                    out_stream = sys.stderr
                 if stream_logs and start_streaming_flag:
-                    print(line, end='')
+                    out_stream.write(line)
+                    out_stream.flush()
+                fout.write(line)
     return stdout, stderr
 
 
@@ -373,10 +376,10 @@ def run_no_outputs(cmd, **kwargs):
                **kwargs)
 
 
-def run_with_log(cmd,
-                 log_path,
-                 stream_logs=False,
-                 start_streaming_at='',
+def run_with_log(cmd: List[str],
+                 log_path: str,
+                 stream_logs: bool = False,
+                 start_streaming_at: str = '',
                  **kwargs):
     """Runs a command and logs its output to a file.
 
