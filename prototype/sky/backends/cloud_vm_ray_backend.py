@@ -220,8 +220,9 @@ class RetryingVmProvisioner(object):
         self._blocked_regions.add(region.name)
 
     def _update_blocklist_on_azure_error(self, region, zones, stdout, stderr):
+        del zones  # Unused.
         # The underlying ray autoscaler will try all zones of a region at once.
-        Style = colorama.Style
+        style = colorama.Style
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
         errors = [
@@ -239,9 +240,9 @@ class RetryingVmProvisioner(object):
             assert False, \
                 'Errors occurred during setup command; check logs above.'
 
-        logger.warn(f'Got error(s) in all zones of {region.name}:')
+        logger.warning(f'Got error(s) in all zones of {region.name}:')
         messages = '\n\t'.join(errors)
-        logger.warn(f'{Style.DIM}\t{messages}{Style.RESET_ALL}')
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_regions.add(region.name)
 
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
