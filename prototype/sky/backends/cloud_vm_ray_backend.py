@@ -944,8 +944,8 @@ class CloudVmRayBackend(backends.Backend):
         else:
             backend_utils.run_no_outputs(command)
 
-    def _run_command_on_head_via_ssh(self, handle, cmd, log_path, stream_logs):
-        """Uses 'ssh' to run 'cmd' on a cluster's head node."""
+    def ssh_head_command(self, handle) -> List[str]:
+        """Returns a 'ssh' command that logs into a cluster's head node."""
         assert handle.head_ip is not None, \
             f'provision() should have cached head ip: {handle}'
         with open(handle.cluster_yaml, 'r') as f:
@@ -954,15 +954,19 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
         # Build command.  Imitating ray here.
-        command = ['ssh', '-tt'] + _ssh_options_list(
-            ssh_private_key, self._ssh_control_path(handle)) + [
-                f'{ssh_user}@{handle.head_ip}',
-                'bash',
-                '--login',
-                '-c',
-                '-i',
-                shlex.quote(
-                    f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                    f'PYTHONWARNINGS=ignore && ({cmd})'),
-            ]
+        return ['ssh', '-tt'] + _ssh_options_list(
+            ssh_private_key,
+            self._ssh_control_path(handle)) + [f'{ssh_user}@{handle.head_ip}']
+
+    def _run_command_on_head_via_ssh(self, handle, cmd, log_path, stream_logs):
+        """Uses 'ssh' to run 'cmd' on a cluster's head node."""
+        base_ssh_command = self.ssh_head_command(handle)
+        command = base_ssh_command + [
+            'bash',
+            '--login',
+            '-c',
+            '-i',
+            shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                        f'PYTHONWARNINGS=ignore && ({cmd})'),
+        ]
         backend_utils.run_with_log(command, log_path, stream_logs)
