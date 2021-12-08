@@ -302,7 +302,7 @@ class RetryingVmProvisioner(object):
         else:
             assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, task: App, cloud: clouds.Cloud,
+    def _yield_region_zones(self, cloud: clouds.Cloud,
                             cluster_name: Optional[str]):
         region = None
         zones = None
@@ -317,16 +317,15 @@ class RetryingVmProvisioner(object):
                     config = yaml.safe_load(f)
 
                 cloud_config = clouds.cloud_factory[config['provider']['type']]
-                assert isinstance(cloud, cloud_config), (cloud, config)
-
-                if type(cloud) in (clouds.AWS, clouds.GCP):
-                    region = config['provider']['region']
-                    zones = config['provider']['availability_zone']
-                elif isinstance(cloud, clouds.Azure):
-                    region = config['provider']['location']
-                    zones = None
-                else:
-                    assert False, cloud
+                if isinstance(cloud, cloud_config):
+                    if type(cloud) in (clouds.AWS, clouds.GCP):
+                        region = config['provider']['region']
+                        zones = config['provider']['availability_zone']
+                    elif isinstance(cloud, clouds.Azure):
+                        region = config['provider']['location']
+                        zones = None
+                    else:
+                        assert False, cloud
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -352,7 +351,8 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         self._clear_blocklist()
-        for region, zones in self._yield_region_zones(task, to_provision.cloud):
+        for region, zones in self._yield_region_zones(to_provision.cloud,
+                                                      cluster_name):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
             logger.info(

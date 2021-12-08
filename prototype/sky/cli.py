@@ -230,13 +230,15 @@ def status():
         ])
 
     cluster_table = prettytable.PrettyTable()
-    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED']
+    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED', 'RESOURCES']
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
+        handle = cluster_status['handle']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         cluster_table.add_row([
             cluster_status['name'],
             duration.diff_for_humans(),
+            handle.resources
         ])
 
     click.echo(f'Tasks\n{task_table}')
