@@ -51,48 +51,19 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
+        # NOTE on zones: Ray Autoscaler does not support specifying
+        # availability zones, and Azure CLI will try launching VMs in all
+        # zones. Hence for our purposes we do not keep track of zones.
         if not cls._regions:
             cls._regions = [
-                clouds.Region('centralus').set_zones([
-                    clouds.Zone('1'),
-                    clouds.Zone('2'),
-                    clouds.Zone('3'),
-                ]),
-                clouds.Region('eastus').set_zones([
-                    clouds.Zone('1'),
-                    clouds.Zone('2'),
-                    clouds.Zone('3'),
-                ]),
-                clouds.Region('eastus2').set_zones([
-                    clouds.Zone('1'),
-                    clouds.Zone('2'),
-                    clouds.Zone('3'),
-                ]),
-                clouds.Region('northcentralus').set_zones([
-                    clouds.Zone('1'),
-                    clouds.Zone('2'),
-                    clouds.Zone('3'),
-                ]),
-                clouds.Region('southcentralus').set_zones([
-                    clouds.Zone('1'),
-                    clouds.Zone('2'),
-                    clouds.Zone('3'),
-                ]),
-                clouds.Region('westcentralus').set_zones([
-                    clouds.Zone('1'),
-                    clouds.Zone('2'),
-                    clouds.Zone('3'),
-                ]),
-                clouds.Region('westus').set_zones([
-                    clouds.Zone('1'),
-                    clouds.Zone('2'),
-                    clouds.Zone('3'),
-                ]),
-                clouds.Region('westus2').set_zones([
-                    clouds.Zone('1'),
-                    clouds.Zone('2'),
-                    clouds.Zone('3'),
-                ]),
+                clouds.Region('centralus'),
+                clouds.Region('eastus'),
+                clouds.Region('eastus2'),
+                clouds.Region('northcentralus'),
+                clouds.Region('southcentralus'),
+                clouds.Region('westcentralus'),
+                clouds.Region('westus'),
+                clouds.Region('westus2'),
             ]
         return cls._regions
 

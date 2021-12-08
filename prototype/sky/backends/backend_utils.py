@@ -107,12 +107,16 @@ def write_cluster_config(run_id: RunId,
         region = cloud.get_default_region()
         zones = region.zones
     else:
-        assert zones is not None, \
-            'Set either both or neither for: region, zones.'
+        assert isinstance(
+            cloud, clouds.Azure
+        ) or zones is not None, 'Set either both or neither for: region, zones.'
     region = region.name
     if isinstance(cloud, clouds.AWS):
         # Only AWS supports multiple zones in the 'availability_zone' field.
         zones = [zone.name for zone in zones]
+    elif isinstance(cloud, clouds.Azure):
+        # Azure does not support specific zones.
+        zones = []
     else:
         zones = [zones[0].name]
 

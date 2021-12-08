@@ -199,6 +199,9 @@ class RetryingVmProvisioner(object):
     def _in_blocklist(self, cloud, region, zones):
         if region.name in self._blocked_regions:
             return True
+        # We do not keep track of zones in Azure.
+        if isinstance(cloud, clouds.Azure):
+            return False
         assert zones, (cloud, region, zones)
         for zone in zones:
             if zone.name not in self._blocked_zones:
@@ -342,7 +345,7 @@ class RetryingVmProvisioner(object):
                 zones = config['provider']['availability_zone']
             elif isinstance(cloud, clouds.Azure):
                 region = config['provider']['location']
-                zones = str(config['provider']['zone'])
+                zones = None
             else:
                 assert False, cloud
         except FileNotFoundError:
@@ -376,7 +379,8 @@ class RetryingVmProvisioner(object):
             logger.info(
                 f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
                 f'{region.name} '
-                f'({",".join(z.name for z in zones)}).{style.RESET_ALL}')
+                f'({",".join(z.name for z in zones) if zones else ""}).{style.RESET_ALL}'
+            )
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
