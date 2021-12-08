@@ -50,14 +50,20 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
         print('cluster_resources:', ray.cluster_resources())
         print('available_resources:', ray.available_resources())
         print('live nodes:', ray.state.node_ids())
-
+        
         def redirect_process_output(
-          proc, log_path, stream_logs, start_streaming_at=''):
+            proc, log_path, stream_logs, start_streaming_at=''):
             dirname = os.path.dirname(log_path)
             os.makedirs(dirname, exist_ok=True)
 
-            out_io = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
-            err_io = io.TextIOWrapper(proc.stderr, encoding='utf-8', newline='')
+            out_io = io.TextIOWrapper(proc.stdout,
+                                    encoding='utf-8',
+                                    newline='',
+                                    errors='replace')
+            err_io = io.TextIOWrapper(proc.stderr,
+                                    encoding='utf-8',
+                                    newline='',
+                                    errors='replace')
             sel = selectors.DefaultSelector()
             sel.register(out_io, selectors.EVENT_READ)
             sel.register(err_io, selectors.EVENT_READ)
@@ -68,25 +74,27 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
             start_streaming_flag = False
             with open(log_path, 'a') as fout:
                 while len(sel.get_map()) > 0:
-                    for key, _ in sel.select():
+                    events = sel.select()
+                    for key, _ in events:
                         line = key.fileobj.readline()
                         if not line:
+                            # Unregister the io when EOF reached
                             sel.unregister(key.fileobj)
-                            break
-                        # Remove special characters from the line, to avoid cursor hidding
+                            continue
+                        # Remove special characters to avoid cursor hidding
                         line = line.replace('\x1b[?25l', '')
                         if start_streaming_at in line:
                             start_streaming_flag = True
                         if key.fileobj is out_io:
                             stdout += line
-                            fout.write(line)
-                            fout.flush()
+                            out_stream = sys.stdout
                         else:
                             stderr += line
-                            fout.write(line)
-                            fout.flush()
+                            out_stream = sys.stderr
                         if stream_logs and start_streaming_flag:
-                            print(line, end='')
+                            out_stream.write(line)
+                            out_stream.flush()
+                        fout.write(line)
             return stdout, stderr
 
         futures = []
