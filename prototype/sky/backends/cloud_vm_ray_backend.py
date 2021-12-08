@@ -102,13 +102,12 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
 """
 
 
-def _get_cluster_config_template(task):
+def _get_cluster_config_template(cloud):
     cloud_to_template = {
         clouds.AWS: 'config/aws-ray.yml.j2',
         # clouds.Azure: 'config/azure-ray.yml.j2',
         clouds.GCP: 'config/gcp-ray.yml.j2',
     }
-    cloud = task.best_resources.cloud
     path = cloud_to_template[type(cloud)]
     return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
@@ -316,7 +315,7 @@ class RetryingVmProvisioner(object):
                 with open(path, 'r') as f:
                     config = yaml.safe_load(f)
 
-                cloud_config = clouds.cloud_factory[config['provider']['type']]
+                cloud_config = clouds.cloud_factory(config['provider']['type'])
                 if isinstance(cloud, cloud_config):
                     if type(cloud) in (clouds.AWS, clouds.GCP):
                         region = config['provider']['region']
@@ -362,7 +361,7 @@ class RetryingVmProvisioner(object):
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
-                _get_cluster_config_template(task),
+                _get_cluster_config_template(to_provision.cloud),
                 region=region,
                 zones=zones,
                 dryrun=dryrun,
@@ -444,6 +443,7 @@ class RetryingVmProvisioner(object):
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if handle is not None:
+                task.best_resources = handle.resources
                 to_provision = handle.resources
 
         # Retrying launchable resources.
