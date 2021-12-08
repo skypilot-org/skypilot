@@ -12,8 +12,11 @@ import pathlib
 import pickle
 import sqlite3
 import time
-from typing import Optional
+from typing import Any, Dict, List, Optional
 import uuid
+
+from sky import backends
+from sky import task as task_lib
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
@@ -33,7 +36,7 @@ except sqlite3.OperationalError:
 _CONN.commit()
 
 
-def add_task(task):
+def add_task(task: task_lib.Task) -> str:
     task_id = str(uuid.uuid4())[:6]  # TODO: make ids more pleasant
     task_name = task.name
     task_launched_at = int(time.time())
@@ -44,12 +47,13 @@ def add_task(task):
     return task_id
 
 
-def remove_task(task_id):
+def remove_task(task_id: str):
     _CURSOR.execute('DELETE FROM tasks WHERE id=(?)', (task_id,))
     _CONN.commit()
 
 
-def add_or_update_cluster(cluster_name, cluster_handle):
+def add_or_update_cluster(cluster_name: str,
+                          cluster_handle: backends.Backend.ResourceHandle):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
@@ -58,20 +62,21 @@ def add_or_update_cluster(cluster_name, cluster_handle):
     _CONN.commit()
 
 
-def remove_cluster(cluster_name):
+def remove_cluster(cluster_name: str):
     """Removes cluster_name mapping."""
     _CURSOR.execute('DELETE FROM clusters WHERE name=(?)', (cluster_name,))
     _CONN.commit()
 
 
-def get_handle_from_cluster_name(cluster_name) -> Optional[str]:
+def get_handle_from_cluster_name(cluster_name: str) -> Optional[str]:
     rows = _CURSOR.execute('SELECT handle FROM clusters WHERE name=(?)',
                            (cluster_name,))
     for (handle,) in rows:
         return pickle.loads(handle)
 
 
-def get_cluster_name_from_handle(cluster_handle):
+def get_cluster_name_from_handle(
+        cluster_handle: backends.Backend.ResourceHandle,) -> Optional[str]:
     handle = pickle.dumps(cluster_handle)
     rows = _CURSOR.execute('SELECT name FROM clusters WHERE handle=(?)',
                            (handle,))
@@ -79,7 +84,7 @@ def get_cluster_name_from_handle(cluster_handle):
         return name
 
 
-def get_tasks():
+def get_tasks() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from tasks')
     records = []
     for task_id, name, launched_at in rows:
@@ -91,7 +96,7 @@ def get_tasks():
     return records
 
 
-def get_clusters():
+def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')
     records = []
     for name, launched_at, handle in rows:
