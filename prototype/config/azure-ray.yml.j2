@@ -25,7 +25,7 @@ available_node_types:
             imageSku: 1804-gen2
             imageVersion: 21.09.13
         # TODO: attach disk
-    {% if num_nodes > 1 %}
+{% if num_nodes > 1 %}
     ray.worker.default:
       min_workers: {{num_nodes - 1}}
       max_workers: {{num_nodes - 1}}
@@ -38,7 +38,7 @@ available_node_types:
             imageOffer: ubuntu-1804
             imageSku: 1804-gen2
             imageVersion: 21.09.13
-  {%- endif %}
+{%- endif %}
 
 head_node_type: ray.head.default
 

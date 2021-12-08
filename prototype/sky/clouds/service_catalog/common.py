@@ -1,4 +1,4 @@
-"""Common utilities for service_catalog."""
+"""Common utilities for service catalog."""
 import os
 from typing import Dict, List, Optional
 
@@ -90,13 +90,15 @@ def get_instance_type_for_accelerator_impl(
             for t in instance_types:
                 assert t.startswith('g4dn') or t.endswith(
                     '_T4_v3'), instance_types
-    result.sort_values('Price', ascending=True, inplace=True)
+        result.sort_values('Price', ascending=True, inplace=True)
     return result.iloc[0]['InstanceType']
 
 
 def list_accelerators_impl(df: pd.DataFrame,
                            gpus_only: bool) -> Dict[str, List[int]]:
-    """Returns a mapping from the canonical names of accelerators to a list of
+    """Lists accelerators offered in a cloud service catalog.
+    
+    Returns a mapping from the canonical names of accelerators to a list of
     counts, each representing an instance type offered by this cloud.
     """
     if gpus_only:
