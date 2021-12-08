@@ -476,9 +476,10 @@ class CloudVmRayBackend(backends.Backend):
         storage = task.storage
         storage.add_backend(cloud_type)
         if cloud_type == 'AWS':
-            task.append_file_mount('~/.aws', '~/.aws')
-            task.append_file_mount(storage.default_mount_path,
-                                   's3://' + storage.name + '/')
+            task.update_file_mounts({
+                '~/.aws': '~/.aws',
+                storage.default_mount_path: 's3://' + storage.name + '/',
+            })
 
     def sync_file_mounts(
         self,
@@ -807,7 +808,7 @@ class CloudVmRayBackend(backends.Backend):
     def teardown_storage(self, task: App) -> None:
         storage = task.storage
         if storage is not None and not storage.persistent:
-            storage.cleanup()
+            storage.delete()
 
     def teardown(self, handle: ResourceHandle) -> None:
         backend_utils.run(f'ray down -y {handle}')

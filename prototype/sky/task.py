@@ -260,14 +260,27 @@ class Task(object):
                                  f' not relative or "~/...".  Found: {remote}')
         return self
 
-    def append_file_mount(self, src: str, destination: str):
-        """Appends a file mount for this Task
+    def update_file_mounts(self, file_mounts: Dict[str, str]):
+        """Updates the file mount for this Task
 
-        This should be run before provisioning
+        This should be run before provisioning.
+
+        Example:
+
+            task.update_file_mounts({
+                '~/.config': '~/Documents/config',
+                '/tmp/workdir': '/local/workdir/cnn-cifar10',
+            })
+
+        Args:
+          file_mounts: a dict of { remote_path: local_path }, where remote is
+            the VM on which this Task will eventually run on, and local is the
+            node from which the task is launched.
         """
         if self.file_mounts is None:
             self.file_mounts = {}
-        self.file_mounts[src] = destination
+        for k, v in file_mounts.items():
+            self.file_mounts[k] = v
 
     def set_blocked_clouds(self, blocked_clouds: Set[clouds.Cloud]):
         """Sets the clouds that this task should not run on."""

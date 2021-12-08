@@ -1,6 +1,7 @@
 """The Sky package."""
 import os
 
+# Keep this order to avoid cyclic imports
 from sky import backends
 from sky import clouds
 from sky.clouds.service_catalog import list_accelerators

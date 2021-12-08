@@ -1,4 +1,8 @@
-"""Storage and StorageBackend Classes for Sky Data
+"""Storage and StorageBackend Classes for Sky Data.
+
+asdfasdfasdfasdfasdfasdfsadfasdf
+
+  Typical 
 """
 import os
 import glob
@@ -15,7 +19,7 @@ from sky import logging
 logger = logging.init_logger(__name__)
 
 Path = str
-StorageHandle = str
+StorageHandle = Any
 
 
 class StorageBackend:
@@ -30,7 +34,7 @@ class StorageBackend:
         self.path = path
         self.is_initialized = False
 
-    def cleanup(self) -> None:
+    def delete(self) -> None:
         """
         Removes the storage object from the cloud
         """
@@ -41,7 +45,7 @@ class StorageBackend:
         Returns the storage handle for use by the execution backend to attach
         to VM/containers :return: StorageHandle for the storage backend
         """
-        return self.storage_handle
+        raise NotImplementedError
 
     def upload_local_dir(self, local_path: str, num_threads: int = 32) -> None:
         """Uploads directory specified by local_path to the remote bucket
@@ -112,7 +116,7 @@ class AWSStorageBackend(StorageBackend):
                 self.sync_from_local()
         self.is_initialized = True
 
-    def cleanup(self) -> None:
+    def delete(self) -> None:
         logger.info(f'Deleting S3 Bucket {self.name}')
         return self.delete_s3_bucket(self.name)
 
@@ -122,6 +126,10 @@ class AWSStorageBackend(StorageBackend):
     def sync_from_local(self) -> None:
         """Syncs Local folder with S3 Bucket. This method is called after
         the folder is already uploaded onto the S3 bucket.
+
+        AWS Sync by default uses 10 threads to upload files to the bucket.
+        To increase parallelism, modify max_concurrent_requests in your
+        aws config file (Default path: ~/.aws/config).
         """
         sync_command = f'aws s3 sync {self.path} s3://{self.name}/'
         os.system(sync_command)
@@ -162,7 +170,9 @@ class AWSStorageBackend(StorageBackend):
         for obj in self.bucket.objects.filter():
             yield obj.key
 
-    def create_s3_bucket(self, bucket_name: str, region='us-east-2') -> None:
+    def create_s3_bucket(self,
+                         bucket_name: str,
+                         region='us-east-2') -> StorageHandle:
         """Creates S3 bucket with specific name in specific region
 
         Args:
@@ -233,21 +243,21 @@ class GCSStorageBackend(StorageBackend):
 
         self.is_initialized = True
 
-    def cleanup(self):
+    def delete(self) -> None:
         logger.info(f'Deleting GCS Bucket {self.name}')
         return self.delete_gcs_bucket(self.name)
 
-    def get_handle(self):
+    def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
 
-    def sync_from_local(self):
+    def sync_from_local(self) -> None:
         """Syncs Local folder with GCS Bucket. This method is called after
         the folder is already uploaded onto the GCS bucket.
         """
         sync_command = f'gsutil -m rsync -r {self.path} gs://{self.name}/'
         os.system(sync_command)
 
-    def transfer_to_gcs(self, aws_backend: StorageBackend):
+    def transfer_to_gcs(self, aws_backend: StorageBackend) -> None:
         """Transfer data from S3 to GCS bucket using Google's Data Transfer
         service
 
@@ -256,7 +266,7 @@ class GCSStorageBackend(StorageBackend):
         """
         data_transfer.s3_to_gcs(aws_backend, self)
 
-    def get_bucket(self):
+    def get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the GCS bucket. If the GCS bucket does not exist, this
         method will create the GCS bucket
         """
@@ -297,7 +307,9 @@ class GCSStorageBackend(StorageBackend):
             except StopIteration:
                 break
 
-    def create_gcs_bucket(self, bucket_name: str, region='us-central1'):
+    def create_gcs_bucket(self,
+                          bucket_name: str,
+                          region='us-central1') -> StorageHandle:
         """Creates GCS bucket with specific name in specific region
 
         Args:
@@ -312,7 +324,7 @@ class GCSStorageBackend(StorageBackend):
             with storage class {new_bucket.storage_class}')
         return new_bucket
 
-    def delete_gcs_bucket(self, bucket_name: str):
+    def delete_gcs_bucket(self, bucket_name: str) -> None:
         """Deletes GCS bucket, including all objects in bucket
 
         Args:
@@ -332,23 +344,27 @@ class Storage(object):
 
     def __init__(self,
                  name: str,
-                 source_path: str,
-                 default_mount_path: Path,
+                 source: Path,
                  storage_backends: Dict[str, StorageBackend] = None,
                  persistent: bool = True):
-        """
-        :param name: Name of the storage object. Used as the unique id for
-        persistence.
-        :param initialize_fn: Shell commands to run to initialize storage.
-        All paths must be absolute (using the default_mount_path)
-        :param default_mount_path: Default path to mount this storage at.
-        :param storage_backends: Optional - specify  pre-initialized
-        storage backends
-        :param persistent: Whether to persist across sky runs.
+        """Initializes a Storage object
+
+        Three fields are required: the name of the storage, the source path where
+        the data is initially located, and the default mount path where the data
+        will be mounted to on the cloud.
+
+        Args:
+          name: str; Name of the storage object. Typically used as the bucket name
+            in backing object stores.
+          source: str; File path where the data is initially stored. Can be
+            on local machine or on cloud (s3://, gs://, etc.). Paths do not need
+            to be absolute.
+          storage_backends: Optional; - specify  pre-initialized
+            storage backends
+          persistent: bool; Whether to persist across sky runs.
         """
         self.name = name
-        self.source_path = source_path
-        self.default_mount_path = default_mount_path
+        self.source = source
         self.persistent = persistent
 
         # Sky optimizer either adds a storage backend instance or selects
@@ -369,11 +385,11 @@ class Storage(object):
 
         if cloud_type == 'AWS':
             backend = AWSStorageBackend(self.name,
-                                        self.source_path,
+                                        self.source,
                                         backends=self.storage_backends)
         elif cloud_type == 'GCP':
             backend = GCSStorageBackend(self.name,
-                                        self.source_path,
+                                        self.source,
                                         backends=self.storage_backends)
         else:
             raise ValueError(f'{cloud_type} not supported as Storage Backend!')
@@ -388,10 +404,8 @@ class Storage(object):
 
         self.storage_backends[cloud_type] = backend
 
-    def cleanup(self):
-        """
-        If not persistent, deletes data from all storage backends.
-        :return:
+    def delete(self) -> None:
+        """Deletes data from all storage backends.
         """
         for _, backend in self.storage_backends.items():
-            backend.cleanup()
+            backend.delete()

@@ -1,9 +1,6 @@
 import subprocess
 
 import sky
-from sky import clouds, Storage
-
-import time_estimators
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
@@ -35,9 +32,11 @@ with sky.Dag() as dag:
         --model_dir=resnet-model-dir \
         --amp --xla --loss_scale=128'
 
-    storage = Storage(name="imagenet-bucket",
-                      source_path="s3://imagenet-bucket",
-                      default_mount_path=data_mount_path)
+    # If the backend to be added is not specified, then Sky optimizer will
+    # choose the backend bucket to be stored.
+    storage = sky.Storage(name="imagenet-bucket",
+                          source="s3://imagenet-bucket",
+                          default_mount_path=data_mount_path)
     train = sky.Task(
         'train',
         workdir=workdir,
@@ -49,11 +48,8 @@ with sky.Dag() as dag:
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
         ##### Fully specified
-        sky.Resources(clouds.AWS(), 'p3.2xlarge'),
+        sky.Resources(sky.AWS(), 'p3.2xlarge'),
     })
-
-    # Optionally, specify a time estimator: Resources -> time in seconds.
-    # train.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
 dag = sky.Optimizer.optimize(dag, minimize=sky.Optimizer.COST)
 # sky.execute(dag, dryrun=True)

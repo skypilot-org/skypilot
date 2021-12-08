@@ -30,11 +30,14 @@ class Backend(object):
         raise NotImplementedError
 
     def sync_file_mounts(
-            self,
-            handle: ResourceHandle,
-            all_file_mounts: Dict[Path, Path],
-            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        self,
+        handle: ResourceHandle,
+        all_file_mounts: Dict[Path, Path],
+        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
+        raise NotImplementedError
+
+    def add_storage_backend(self, task: App, cloud_type: str) -> None:
         raise NotImplementedError
 
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
