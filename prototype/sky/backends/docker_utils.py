@@ -58,7 +58,7 @@ def create_dockerfile(
     """
     dockerfile_contents = DOCKERFILE_TEMPLATE.format(base_image=base_image)
 
-    workdir_name = ""
+    workdir_name = ''
     if copy_path:
         workdir_name = os.path.basename(os.path.dirname(copy_path))
         # NOTE: This relies on copy_path being copied to build context.

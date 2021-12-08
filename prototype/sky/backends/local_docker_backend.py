@@ -145,7 +145,7 @@ class LocalDockerBackend(backends.Backend):
         image_tag = self.images[handle]
         logger.info(f'Image {image_tag} found. Running container now.')
         volumes = self.volume_mounts[handle]
-        runtime = "nvidia" if self.use_gpu else None
+        runtime = 'nvidia' if self.use_gpu else None
         try:
             container = self.client.containers.run(image_tag,
                                                    remove=True,
@@ -154,10 +154,10 @@ class LocalDockerBackend(backends.Backend):
                                                    volumes=volumes,
                                                    runtime=runtime)
         except docker.errors.APIError as e:
-            if "Unknown runtime specified nvidia" in e.explanation:
+            if 'Unknown runtime specified nvidia' in e.explanation:
                 logger.error(
-                    "Unable to run container - nvidia runtime for docker not "
-                    "found. Have you installed nvidia-docker on your machine?")
+                    'Unable to run container - nvidia runtime for docker not '
+                    'found. Have you installed nvidia-docker on your machine?')
         self.containers[handle] = container
         logger.info(
             f'Your container is now running with name {container.name}.\n'

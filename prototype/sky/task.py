@@ -83,7 +83,8 @@ class Task(object):
         self.setup = setup
         self.post_setup_fn = post_setup_fn
         self.workdir = workdir
-        self.docker_image = docker_image if docker_image else 'continuumio/miniconda3'
+        self.docker_image = docker_image if docker_image \
+            else 'continuumio/miniconda3'
         self.container_name = container_name
         self._explicit_num_nodes = num_nodes  # Used as a scheduling constraint.
         self.num_nodes = 1 if num_nodes is None else num_nodes
