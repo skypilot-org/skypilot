@@ -1,0 +1,16 @@
+# A minimal example.
+#
+# Runs a task that simply lists the default conda environments.
+#
+# Usage:
+#   sky run -c min minimal.yaml
+#   sky down -c min
+
+resources:
+  cloud: aws
+
+setup: |
+  echo "running setup"
+
+run: |
+  conda env list

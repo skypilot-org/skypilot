@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import datetime
+import getpass
 import io
 import os
 import pathlib
@@ -95,7 +96,8 @@ def write_cluster_config(run_id: RunId,
     Returns: {provisioner: path to yaml, the provisioning spec}.
       'provisioner' can be
         - 'ray'
-        - 'gcloud' (if TPU is requested)
+        - 'tpu-create-script' (if TPU is requested)
+        - 'tpu-delete-script' (if TPU is requested)
     """
     cloud = task.best_resources.cloud
     resources_vars = cloud.make_deploy_resources_variables(task)
@@ -121,7 +123,8 @@ def write_cluster_config(run_id: RunId,
 
     if cluster_name is None:
         # TODO: change this ID formatting to something more pleasant.
-        cluster_name = f'sky-{uuid.uuid4().hex[:6]}'
+        # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
+        cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
     setup_sh_path = None
     if task.setup is not None:
@@ -204,7 +207,7 @@ def write_cluster_config(run_id: RunId,
         return config_dict
     _add_ssh_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
-        config_dict['gcloud'] = tuple(
+        scripts = tuple(
             _fill_template(
                 path,
                 dict(resources_vars, **{
@@ -217,6 +220,8 @@ def write_cluster_config(run_id: RunId,
                 replace('config/', 'config/user/'),
             ) for path in
             ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
+        config_dict['tpu-create-script'] = scripts[0]
+        config_dict['tpu-delete-script'] = scripts[1]
     return config_dict
 
 
