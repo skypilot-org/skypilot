@@ -85,7 +85,7 @@ def _create_interactive_node(
         )
         task.set_resources(resources)
 
-    backend = backend()
+    backend = backend() if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag)
 
     dag = sky.optimize(dag)
