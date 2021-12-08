@@ -97,7 +97,7 @@ def get_instance_type_for_accelerator_impl(
 def list_accelerators_impl(df: pd.DataFrame,
                            gpus_only: bool) -> Dict[str, List[int]]:
     """Lists accelerators offered in a cloud service catalog.
-    
+
     Returns a mapping from the canonical names of accelerators to a list of
     counts, each representing an instance type offered by this cloud.
     """
