@@ -306,9 +306,9 @@ class RetryingVmProvisioner(object):
         region = None
         zones = None
         if cluster_name is not None:
+            # Try loading previously launched region/zones and try them first,
+            # because we may have an existing cluster there.
             try:
-                # Try reading previously launched region/zones and try them first,
-                # because we may have an existing cluster there.
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
                 path = handle.cluster_yaml
