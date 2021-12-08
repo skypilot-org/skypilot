@@ -264,7 +264,7 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
     if num_nodes <= 1:
         return
     expected_worker_count = num_nodes - 1
-    if isinstance(cloud, clouds.AWS):
+    if isinstance(cloud, clouds.AWS) or isinstance(cloud, clouds.Azure):
         worker_str = 'ray.worker.default'
     elif isinstance(cloud, clouds.GCP):
         worker_str = 'ray_worker_default'

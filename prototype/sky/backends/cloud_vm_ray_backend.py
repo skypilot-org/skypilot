@@ -240,7 +240,7 @@ class RetryingVmProvisioner(object):
             assert False, \
                 'Errors occurred during setup command; check logs above.'
 
-        logger.warning(f'Got error(s) in all zones of {region.name}:')
+        logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_regions.add(region.name)
@@ -823,20 +823,24 @@ class CloudVmRayBackend(backends.Backend):
                             f'{style.RESET_ALL}\n')
 
     def teardown(self, handle: ResourceHandle) -> None:
+        if self._maybe_azure_teardown():
+            return
+        backend_utils.run(f'ray down -y {handle}')
+        if self._managed_tpu is not None:
+            backend_utils.run(f'bash {self._managed_tpu[1]}')
+
+    def _maybe_azure_teardown(self, handle: ResourceHandle) -> bool:
+        """Special handling because `ray down` is buggy with Azure."""
         with open(handle, 'r') as f:
             config = yaml.safe_load(f)
         cloud = config['provider']['type']
         cluster_name = config['cluster_name']
         if cloud.lower() == 'azure':
-            # This workaround is to solve the issue caused by `ray down`
-            # To delete replace `az vm deallocate` with `az vm delete`.
             backend_utils.run(
-                'az vm deallocate --ids $(az vm list --query '
+                'az vm delete --ids $(az vm list --query '
                 f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)')
-        else:
-            backend_utils.run(f'ray down -y {handle}')
-        if self._managed_tpu is not None:
-            backend_utils.run(f'bash {self._managed_tpu[1]}')
+            return True
+        return False
 
     def _get_node_ips(self,
                       handle: ResourceHandle,
