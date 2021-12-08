@@ -45,6 +45,7 @@ _TASK_LAUNCH_CODE_GENERATOR = """\
         import io
         import os
         import ray
+        import sys
         import selectors
         import subprocess
         ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
