@@ -292,10 +292,13 @@ class Task(object):
     def __repr__(self):
         if self.name:
             return self.name
-        if len(self.run) > 20:
-            s = 'Task(run=\'{}...\')'.format(self.run[:20])
+        if isinstance(self.run, str):
+            if len(self.run) > 20:
+                s = 'Task(run=\'{}...\')'.format(self.run[:20])
+            else:
+                s = 'Task(run=\'{}\')'.format(self.run)
         else:
-            s = 'Task(run=\'{}\')'.format(self.run)
+            s = 'Task(run=<generated>)'
         if self.inputs is not None:
             s += '\n  inputs: {}'.format(self.inputs)
         if self.outputs is not None:
