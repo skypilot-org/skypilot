@@ -14,6 +14,7 @@ import time
 from typing import Any, Dict, List, Optional
 import uuid
 
+from sky import backends
 from sky import task as task_lib
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
@@ -50,7 +51,8 @@ def remove_task(task_id: str):
     _CONN.commit()
 
 
-def add_or_update_cluster(cluster_name: str, cluster_handle: Any):
+def add_or_update_cluster(cluster_name: str,
+                          cluster_handle: backends.Backend.ResourceHandle):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     cluster_launched_at = int(time.time())
     _CURSOR.execute(
@@ -72,7 +74,8 @@ def get_handle_from_cluster_name(cluster_name: str) -> Optional[str]:
         return handle
 
 
-def get_cluster_name_from_handle(cluster_handle: Any) -> Optional[str]:
+def get_cluster_name_from_handle(cluster_handle: backends.Backend.ResourceHandle
+                                ) -> Optional[str]:
     rows = _CURSOR.execute(
         f'SELECT name FROM clusters WHERE handle=\'{cluster_handle}\'')
     for (name,) in rows:
