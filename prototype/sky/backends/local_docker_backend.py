@@ -22,7 +22,7 @@ logger = logging.init_logger(__name__)
 class LocalDockerBackend(backends.Backend):
     """Local docker backend for debugging.
 
-    Ignores resource demands when allocating.
+    Ignores resource demands when allocating. Optionally uses GPU if required.
     """
 
     class ResourceHandle(str):
@@ -37,7 +37,13 @@ class LocalDockerBackend(backends.Backend):
         }
     }
 
-    def __init__(self):
+    def __init__(self, use_gpu: bool = False):
+        """
+        Args:
+            use_gpu: Whether to use GPUs or not. Sets container runtime
+              to 'nvidia' if set to True, else uses default runtime.
+        """
+        self.use_gpu = use_gpu
         self.volume_mounts = {}  # Stores the ResourceHandle->volume mounts map
         self.images = {}  # Stores the ResourceHandle->images map
         self.containers = {}
@@ -139,11 +145,19 @@ class LocalDockerBackend(backends.Backend):
         image_tag = self.images[handle]
         logger.info(f'Image {image_tag} found. Running container now.')
         volumes = self.volume_mounts[handle]
-        container = self.client.containers.run(image_tag,
-                                               remove=True,
-                                               detach=True,
-                                               privileged=True,
-                                               volumes=volumes)
+        runtime = "nvidia" if self.use_gpu else None
+        try:
+            container = self.client.containers.run(image_tag,
+                                                   remove=True,
+                                                   detach=True,
+                                                   privileged=True,
+                                                   volumes=volumes,
+                                                   runtime=runtime)
+        except docker.errors.APIError as e:
+            if "Unknown runtime specified nvidia" in e.explanation:
+                logger.error(
+                    "Unable to run container - nvidia runtime for docker not "
+                    "found. Have you installed nvidia-docker on your machine?")
         self.containers[handle] = container
         logger.info(
             f'Your container is now running with name {container.name}.\n'

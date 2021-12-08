@@ -23,6 +23,8 @@ DOCKERFILE_SETUPCMD = """RUN {setup_command}"""
 DOCKERFILE_COPYCMD = """COPY {copy_command}"""
 DOCKERFILE_RUNCMD = """CMD {run_command}"""
 
+CONDA_SETUP_PREFIX = """conda init bash && . /root/.bashrc && """
+
 
 def create_dockerfile(
         base_image: str,
@@ -56,20 +58,27 @@ def create_dockerfile(
     """
     dockerfile_contents = DOCKERFILE_TEMPLATE.format(base_image=base_image)
 
+    workdir_name = ""
     if copy_path:
-        dir_name = os.path.basename(os.path.dirname(copy_path))
+        workdir_name = os.path.basename(os.path.dirname(copy_path))
         # NOTE: This relies on copy_path being copied to build context.
-        copy_docker_cmd = f'{dir_name} /{dir_name}/'
+        copy_docker_cmd = f'{workdir_name} /{workdir_name}/'
         dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
             copy_command=copy_docker_cmd)
 
     if setup_command:
+        # cd to workdir and prepend conda init commands
+        cmd = f'/bin/bash -c "cd /{workdir_name} && \
+                {CONDA_SETUP_PREFIX + setup_command}"'
+
         dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(
-            setup_command=setup_command)
+            setup_command=cmd)
 
     if run_command:
-        dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(
-            run_command=run_command)
+        cmd = f'/bin/bash -c "cd /{workdir_name} && \
+                {CONDA_SETUP_PREFIX + run_command}"'
+
+        dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=cmd)
 
     if output_path:
         with open(output_path, 'w') as f:
