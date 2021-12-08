@@ -69,15 +69,27 @@ def get_instance_type_for_accelerator_impl(
         return None
     instance_types = set(result['InstanceType'])
     if len(instance_types) > 1:
-        for t in instance_types:
-            # Assert that only one instance type exists for a given accelerator
-            # and count. Throw so we can manually investigate. The current
-            # whitelist consists of:
-            # - T4, offered by AWS g4dn.{1,2,4,8,16x}
+        # Assert that only one instance type exists for a given accelerator
+        # and count. Throw so we can manually investigate. The current
+        # whitelist consists of:
+        if len(instance_types) == 2:
+            # - M60, offered by AWS g3s.xl and g3.4xl
+            # - "Promo" instance types offered by Azure
+            its = sorted(instance_types)
+            assert its == ['g3.4xlarge', 'g3s.xlarge'
+                          ] or its[0] + '_Promo' == its[1], its
+        elif len(instance_types) == 4:
+            its = sorted(instance_types)
+            assert its == [
+                'Standard_NV12s_v3', 'Standard_NV6', 'Standard_NV6_Promo',
+                'Standard_NV6s_v2'
+            ], its
+        else:
+            # - T4, offered by AWS g4dn.{1,2,4,8,16}xl
             # - T4, offered by Azure Standard_NC{4,8,16}as_T4_v3
-            # - K80, offered by Azure Standard_NC{6,12,24}[_Promo]
-            assert t.startswith('g4dn') or t.startswith(
-                'Standard_NC6') or t.endswith('_T4_v3'), result['InstanceType']
+            for t in instance_types:
+                assert t.startswith('g4dn') or t.endswith(
+                    '_T4_v3'), instance_types
     result.sort_values('Price', ascending=True, inplace=True)
     return result.iloc[0]['InstanceType']
 
