@@ -201,6 +201,7 @@ def write_cluster_config(run_id: RunId,
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
             }))
+    config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
@@ -362,9 +363,11 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
 
 
 def run(cmd, **kwargs):
+    shell = kwargs.pop('shell', True)
+    check = kwargs.pop('check', True)
     return subprocess.run(cmd,
-                          shell=True,
-                          check=True,
+                          shell=shell,
+                          check=check,
                           executable='/bin/bash',
                           **kwargs)
 
