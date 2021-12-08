@@ -1,9 +1,8 @@
 # Example: using file mounts
 #
-# File mounts allow syncing local files (or cloud URLs) to the VM where a Task
-# will run.  Syncing is done before the Task's execution so that its run command
-# can access these files.  After syncing, the mounted paths can be opened, read,
-# or written as usual.
+# File mounts sync local files (or cloud URLs) to the VM where a Task will run.
+# Syncing is done before the Task's execution so that it can access these files.
+# After syncing, the paths can be opened, read, or written as usual.
 #
 # Destination paths must be absolute paths, not relative.
 #
@@ -32,10 +31,12 @@ file_mounts:
 
   # Syncing a regular object.
   /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
+  /data/: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
 
   # If a source path points to a "directory", its contents will be recursively
   # synced (subdirectories included).
-  /data/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet
+  # Commenting out as this takes a while.
+  # /data/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet
 
 run: |
   ls -l /setup.py
@@ -43,7 +44,8 @@ run: |
   cd /sky
   pip3 install -e .
 
+  ls -l /data/train-00001-of-01024
   du -schL /train-00001-of-01024
   head /train-00001-of-01024
 
-  ls -lH /data/fake_imagenet | head -n10
+  # ls -lH /data/fake_imagenet | head -n10
