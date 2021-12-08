@@ -1,4 +1,4 @@
-"""Sky global user state.
+"""Sky global user state, backed by a sqlite database.
 
 Concepts:
 - Cluster name: a user-supplied or auto-generated unique name to identify a
@@ -10,6 +10,7 @@ import os
 import pathlib
 import pickle
 import sqlite3
+import sys
 import time
 from typing import Any, Dict, List, Optional
 
@@ -25,9 +26,31 @@ try:
     _CURSOR.execute('select * from clusters limit 0')
 except sqlite3.OperationalError:
     # Tables do not exist, create them.
-    _CURSOR.execute("""CREATE TABLE clusters
-                (name TEXT PRIMARY KEY, lauched_at INTEGER, handle BLOB)""")
+    _CURSOR.execute("""\
+      CREATE TABLE clusters (
+        name TEXT PRIMARY KEY,
+        lauched_at INTEGER,
+        handle BLOB,
+        last_use TEXT)""")
 _CONN.commit()
+
+
+def _get_pretty_entry_point() -> str:
+    """Returns the prettified entry point of this process (sys.argv).
+
+    Example return values:
+
+        $ sky run app.yaml  # 'sky run app.yaml'
+        $ sky gpunode  # 'sky gpunode'
+        $ python examples/app.py  # 'app.py'
+    """
+    argv = sys.argv
+    basename = os.path.basename(argv[0])
+    if basename == 'sky':
+        # Turn '/.../anaconda/envs/py36/bin/sky' into 'sky', but keep other
+        # things like 'examples/app.py'.
+        argv[0] = basename
+    return ' '.join(argv)
 
 
 def add_or_update_cluster(cluster_name: str,
@@ -35,8 +58,9 @@ def add_or_update_cluster(cluster_name: str,
     """Adds or updates cluster_name -> cluster_handle mapping."""
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
-    _CURSOR.execute('INSERT OR REPLACE INTO clusters VALUES (?, ?, ?)',
-                    (cluster_name, cluster_launched_at, handle))
+    last_use = _get_pretty_entry_point()
+    _CURSOR.execute('INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?)',
+                    (cluster_name, cluster_launched_at, handle, last_use))
     _CONN.commit()
 
 
@@ -65,10 +89,11 @@ def get_cluster_name_from_handle(
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')
     records = []
-    for name, launched_at, handle in rows:
+    for name, launched_at, handle, last_use in rows:
         records.append({
             'name': name,
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
+            'last_use': last_use,
         })
     return records

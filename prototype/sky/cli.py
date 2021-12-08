@@ -226,13 +226,14 @@ def status():
     """Show launched clusters."""
     clusters_status = global_user_state.get_clusters()
     cluster_table = prettytable.PrettyTable()
-    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED']
+    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED', 'LAST USE']
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         cluster_table.add_row([
             cluster_status['name'],
             duration.diff_for_humans(),
+            cluster_status['last_use'],
         ])
     click.echo(f'Clusters\n{cluster_table}')
 
