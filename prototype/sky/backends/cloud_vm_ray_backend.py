@@ -905,7 +905,7 @@ class CloudVmRayBackend(backends.Backend):
                     'Tip: `sky down` will delete launched TPU(s) as well.')
 
     def teardown(self, handle: ResourceHandle) -> None:
-        if self._maybe_azure_teardown():
+        if self._maybe_azure_teardown(handle):
             return
         backend_utils.run(f'ray down -y {handle.cluster_yaml}')
         if handle.tpu_delete_script is not None:
@@ -913,7 +913,7 @@ class CloudVmRayBackend(backends.Backend):
 
     def _maybe_azure_teardown(self, handle: ResourceHandle) -> bool:
         """Special handling because `ray down` is buggy with Azure."""
-        with open(handle, 'r') as f:
+        with open(handle.cluster_yaml, 'r') as f:
             config = yaml.safe_load(f)
         cloud = config['provider']['type']
         cluster_name = config['cluster_name']
