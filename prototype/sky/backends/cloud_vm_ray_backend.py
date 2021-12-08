@@ -457,6 +457,7 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name)
+                config_dict['resources'] = to_provision
             except exceptions.ResourcesUnavailableError as e:
                 if launchable_retries_disabled:
                     logger.warning(
@@ -481,7 +482,6 @@ class RetryingVmProvisioner(object):
                 task = self._dag.tasks[task_index]
                 to_provision = task.best_resources
                 assert to_provision is not None, task
-        config_dict['resources'] = to_provision
         return config_dict
 
 
