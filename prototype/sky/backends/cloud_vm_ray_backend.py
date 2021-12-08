@@ -762,8 +762,6 @@ class CloudVmRayBackend(backends.Backend):
                 stream_logs: bool) -> None:
         # Execution logic differs for three types of tasks.
 
-        global_user_state.add_task(task)
-
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):
             return self._execute_par_task(handle, task, stream_logs)
