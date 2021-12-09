@@ -51,9 +51,9 @@ def s3_to_gcs(s3_store: S3Store, gs_store: GsStore) -> None:
     session = boto3.Session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
 
-    with open(os.environ["GOOGLE_APPLICATION_CREDENTIALS"], "r") as fp:
+    with open(os.environ['GOOGLE_APPLICATION_CREDENTIALS'], 'r') as fp:
         gcp_credentials = json.load(fp)
-    project_id = gcp_credentials["project_id"]
+    project_id = gcp_credentials['project_id']
 
     # Update cloud bucket IAM role to allow for data transfer
     storage_account = storagetransfer.googleServiceAccounts().get(

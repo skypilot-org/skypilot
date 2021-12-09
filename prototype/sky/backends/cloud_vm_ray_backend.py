@@ -113,8 +113,8 @@ def _get_cluster_config_template(task):
     return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
 
-def _to_accelerator_and_count(
-        resources: Optional[Resources]) -> Tuple[Optional[str], int]:
+def _to_accelerator_and_count(resources: Optional[Resources]
+                             ) -> Tuple[Optional[str], int]:
     acc = None
     acc_count = 0
     if resources is not None:
@@ -484,7 +484,7 @@ class CloudVmRayBackend(backends.Backend):
         storage_mounts = task.storage_mounts
         storage_plans = task.storage_plans
         for store, mnt_path in storage_mounts.items():
-            storage_type = task.storage_plans[store]
+            storage_type = storage_plans[store]
             if storage_type not in cache:
                 if storage_type is storage.StorageType.S3:
                     # TODO: allow for Storage mounting of different clouds
@@ -513,10 +513,10 @@ class CloudVmRayBackend(backends.Backend):
                     does not exist!')
 
     def sync_file_mounts(
-        self,
-        handle: ResourceHandle,
-        all_file_mounts: Dict[Path, Path],
-        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+            self,
+            handle: ResourceHandle,
+            all_file_mounts: Dict[Path, Path],
+            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         # TODO: this function currently only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
@@ -839,7 +839,7 @@ class CloudVmRayBackend(backends.Backend):
     def teardown_storage(self, task: App) -> None:
         storage_mounts = task.storage_mounts
         if storage_mounts is not None:
-            for store, mount_path in storage_mounts.items():
+            for store, _ in storage_mounts.items():
                 if not store.persistent:
                     store.delete()
 

@@ -26,4 +26,7 @@ def test_bucket_transfer():
     storage_2.get_or_copy_to_gcs()  # Transfer data from S3 to Gs bucket
 
 
-test_bucket_transfer()
+if __name__ == "__main__":
+    test_bucket_creation()
+    test_bucket_deletion()
+    test_bucket_transfer()

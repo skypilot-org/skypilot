@@ -99,7 +99,7 @@ class Storage(object):
     """Storage objects handle persistent and large volume storage in the sky.
 
     Users create Storage objects by defining the storage object name and the
-    source, where the data originally comes from. Power users can specify their 
+    source, where the data originally comes from. Power users can specify their
     pre-initialized stores if their data is already on the cloud.
 
       Typical Usage: (See prototype/examples/playground/storage_playground.py)
@@ -122,13 +122,13 @@ class Storage(object):
                  persistent: bool = True):
         """Initializes a Storage object
 
-        Three fields are required: the name of the storage, the source path where
-        the data is initially located, and the default mount path where the data
-        will be mounted to on the cloud.
+        Three fields are required: the name of the storage, the source
+        path where the data is initially located, and the default mount
+        path where the data will be mounted to on the cloud.
 
         Args:
-          name: str; Name of the storage object. Typically used as the bucket name
-            in backing object stores.
+          name: str; Name of the storage object. Typically used as the
+            bucket name in backing object stores.
           source: str; File path where the data is initially stored. Can be
             on local machine or on cloud (s3://, gs://, etc.). Paths do not need
             to be absolute.
@@ -150,13 +150,13 @@ class Storage(object):
         """Adds AWS S3 Store to Storage
         """
         s3_store = self.add_store(StorageType.S3)
-        return "s3://" + s3_store.name
+        return 's3://' + s3_store.name
 
     def get_or_copy_to_gcs(self):
         """Adds GCS Store to Storage
         """
         gs_store = self.add_store(StorageType.GCS)
-        return "gs://" + gs_store.name
+        return 'gs://' + gs_store.name
 
     def get_or_copy_to_azure_blob(self):
         """Adds Azure Blob Store to Storage
@@ -208,8 +208,8 @@ class S3Store(AbstractStore):
     for S3 buckets.
 
         Typical Usage Example:
-          # To initialize an S3Store implicitly, do this: 
-          storage = Storage(name='imagenet-bucket', source='~/Documents/imagenet')
+          # To initialize an S3Store implicitly, do this:
+          storage = Storage(name='imagenet-bucket', source='~/imagenet')
 
           # Move data to S3, and creates an S3Store
           storage.get_or_copy_to_s3()
@@ -290,8 +290,7 @@ class S3Store(AbstractStore):
         for obj in self.bucket.objects.filter():
             yield obj.key
 
-    def create_s3_bucket(self,
-                         bucket_name: str,
+    def create_s3_bucket(self, bucket_name: str,
                          region='us-east-2') -> StorageHandle:
         """Creates S3 bucket with specific name in specific region
 
@@ -330,8 +329,8 @@ class GsStore(AbstractStore):
     for GCS buckets.
 
         Typical Usage Example:
-          # To initialize an GsStore implicitly, do this: 
-          storage = Storage(name='imagenet-bucket', source='~/Documents/imagenet')
+          # To initialize an GsStore implicitly, do this:
+          storage = Storage(name='imagenet-bucket', source='~/imagenet')
 
           # Move data to Gcs, and creates an GsStore
           storage.get_or_copy_to_gcs()
@@ -430,8 +429,7 @@ class GsStore(AbstractStore):
             except StopIteration:
                 break
 
-    def create_gcs_bucket(self,
-                          bucket_name: str,
+    def create_gcs_bucket(self, bucket_name: str,
                           region='us-central1') -> StorageHandle:
         """Creates GCS bucket with specific name in specific region
 
