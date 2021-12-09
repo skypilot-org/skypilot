@@ -53,6 +53,21 @@ Path = str
 Backend = backends.Backend
 
 
+def _truncate_long_string(s: str, max_length: int = 30) -> str:
+    if len(s) <= max_length:
+        return s
+    splits = s.split(' ')
+    total = 0
+    if len(splits[0]) > max_length:
+        return splits[0][:max_length] + '...'
+    # Truncate on word boundary.
+    for i, part in enumerate(splits):
+        total += len(part)
+        if total >= max_length:
+            break
+    return ' '.join(splits[:i]) + '...'
+
+
 def _default_interactive_node_name(node_type: str):
     """Returns a deterministic name to refer to the same node."""
     assert node_type in ('cpunode', 'gpunode'), node_type
@@ -238,7 +253,7 @@ def status():
         cluster_table.add_row([
             cluster_status['name'],
             duration.diff_for_humans(),
-            cluster_status['last_use'],
+            _truncate_long_string(cluster_status['last_use']),
         ])
     cluster_table.align['LAST USE'] = 'l'
     click.echo(f'Clusters\n{cluster_table}')
