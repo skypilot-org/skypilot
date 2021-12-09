@@ -26,6 +26,7 @@ from sky import optimizer
 from sky import resources as resources_lib
 from sky import task as task_mod
 from sky.backends import backend_utils
+from sky.data import storage
 
 App = backend_utils.App
 
@@ -472,14 +473,44 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.run(
             f'ray rsync_up {handle} {workdir}/ {SKY_REMOTE_WORKDIR}')
 
-    def add_storage_backend(self, task: App, cloud_type: str) -> None:
-        storage = task.storage
-        storage.add_backend(cloud_type)
-        if cloud_type == 'AWS':
-            task.update_file_mounts({
-                '~/.aws': '~/.aws',
-                storage.default_mount_path: 's3://' + storage.name + '/',
-            })
+    def add_storage_objects(self, task: App) -> None:
+        # Hack: Hardcode storage_plans to AWS for optimal plan
+        # Optimizer is supposed to choose storage plan but we
+        # move this hear temporarily
+        for k in task.storage_mounts.keys():
+            task.storage_plans[k] = storage.StorageType.S3
+
+        cache = []
+        storage_mounts = task.storage_mounts
+        storage_plans = task.storage_plans
+        for storage, mnt_path in storage_mounts.items():
+            storage_type = task.storage_plans[storage]
+            if storage_type not in cache:
+                if storage_type is storage.StorageType.S3:
+                    # TODO: allow for Storage mounting of different clouds
+                    task.update_file_mounts({'~/.aws': '~/.aws'})
+                elif storage_type is storage.StorageType.GCS:
+                    pass
+                elif storage_type is storage.StorageType.AZURE:
+                    pass
+                else:
+                    raise ValueError(f'Storage Type {storage_type} \
+                        does not exist!')
+                cache.append(storage_type)
+
+            if storage_type is storage.StorageType.S3:
+                task.update_file_mounts({
+                    mnt_path: 's3://' + storage.name + '/',
+                })
+            elif storage_type is storage.StorageType.GCS:
+                task.update_file_mounts({
+                    mnt_path: 'gs://' + storage.name + '/',
+                })
+            elif storage_type is storage.StorageType.AZURE:
+                pass
+            else:
+                raise ValueError(f'Storage Type {storage_type} \
+                    does not exist!')
 
     def sync_file_mounts(
         self,
@@ -806,9 +837,11 @@ class CloudVmRayBackend(backends.Backend):
                             f'{style.RESET_ALL}\n')
 
     def teardown_storage(self, task: App) -> None:
-        storage = task.storage
-        if storage is not None and not storage.persistent:
-            storage.delete()
+        storage_mounts = task.storage_mounts
+        if storage_mounts is not None:
+            for storage, mount_path in storage_mounts.items():
+                if not storage.persistent:
+                    storage.delete()
 
     def teardown(self, handle: ResourceHandle) -> None:
         backend_utils.run(f'ray down -y {handle}')

@@ -16,9 +16,7 @@ TODO:
 - GCS -> S3
 """
 from datetime import datetime
-import glob
 import json
-from multiprocessing.pool import ThreadPool
 import os
 from typing import Any
 
@@ -31,19 +29,18 @@ from sky import logging
 
 logger = logging.init_logger(__name__)
 
-AWSStorageBackend = Any
-GCSStorageBackend = Any
+S3Store = Any
+GsStore = Any
 
 
-def s3_to_gcs(aws_backend: AWSStorageBackend,
-              gcs_backend: GCSStorageBackend) -> None:
+def s3_to_gcs(s3_store: S3Store, gs_store: GsStore) -> None:
     """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
     Can be viewed from: https://console.cloud.google.com/transfer/cloud
 
     Args:
-      aws_backend: StorageBackend; AWS Backend that contains a
+      s3_store: S3Store; AWS S3 Store that contains a
       corresponding S3 bucket
-      gcs_backend: StorageBackend; GCS Backend that contains a
+      gs_store: GsStore; GCP Gs Store that contains a
       corresponding GCS bucket
     """
     credentials = GoogleCredentials.get_application_default()
@@ -55,18 +52,19 @@ def s3_to_gcs(aws_backend: AWSStorageBackend,
     aws_credentials = session.get_credentials().get_frozen_credentials()
 
     with open(os.environ["GOOGLE_APPLICATION_CREDENTIALS"], "r") as fp:
-        credentials = json.load(fp)
-    project_id = credentials["project_id"]
+        gcp_credentials = json.load(fp)
+    project_id = gcp_credentials["project_id"]
+
     # Update cloud bucket IAM role to allow for data transfer
     storage_account = storagetransfer.googleServiceAccounts().get(
         projectId=project_id).execute()
-    _add_bucket_iam_member(gcs_backend.name, 'roles/storage.admin',
+    _add_bucket_iam_member(gs_store.name, 'roles/storage.admin',
                            'serviceAccount:' + storage_account['accountEmail'])
 
     starttime = datetime.utcnow()
     transfer_job = {
         'description': f'Transferring data from S3 Bucket \
-         {aws_backend.name} to GCS Bucket {gcs_backend.name}',
+        {s3_store.name} to GCS Bucket {gs_store.name}',
         'status': 'ENABLED',
         'projectId': project_id,
         'schedule': {
@@ -83,60 +81,20 @@ def s3_to_gcs(aws_backend: AWSStorageBackend,
         },
         'transferSpec': {
             'awsS3DataSource': {
-                'bucketName': aws_backend.name,
+                'bucketName': s3_store.name,
                 'awsAccessKey': {
                     'accessKeyId': aws_credentials.access_key,
                     'secretAccessKey': aws_credentials.secret_key,
                 }
             },
             'gcsDataSink': {
-                'bucketName': gcs_backend.name,
+                'bucketName': gs_store.name,
             }
         }
     }
 
     result = storagetransfer.transferJobs().create(body=transfer_job).execute()
     logger.info(f'AWS -> GCS Transfer Job: {json.dumps(result, indent=4)}')
-
-
-def s3_to_local(aws_backend: AWSStorageBackend, local_path: str) -> None:
-    """Creates a one-time transfer from S3 to Local.
-
-    Args:
-      aws_backend: StorageBackend; AWS Backend that contains a
-      corresponding S3 bucket
-      local_path: str; Local path on user's device
-    """
-    assert local_path is not None
-    local_path = os.path.expanduser(local_path)
-    for obj in aws_backend.bucket.objects.filter():
-        if obj.key[-1] == '/':
-            continue
-        path = os.path.join(local_path, obj.key)
-        if not os.path.exists(os.path.dirname(path)):
-            os.makedirs(os.path.dirname(path))
-        logger.info(f'Downloading {obj.key} to {path}')
-        aws_backend.bucket.download_file(obj.key, path)
-
-
-def gcs_to_local(gcs_backend: GCSStorageBackend, local_path: str) -> None:
-    """Creates a one-time transfer from GCS to Local.
-
-    Args:
-      gcs_backend: StorageBackend; GCS Backend that contains a
-      corresponding GCS bucket
-      local_path: str; Local path on user's device
-    """
-    assert local_path is not None
-    local_path = os.path.expanduser(local_path)
-    for obj in gcs_backend.bucket.list_blobs():
-        if obj.name[-1] == '/':
-            continue
-        path = os.path.join(local_path, obj.name)
-        if not os.path.exists(os.path.dirname(path)):
-            os.makedirs(os.path.dirname(path))
-        logger.info(f'Downloading {obj.name} to {path}')
-        obj.download_to_filename(path)
 
 
 def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:

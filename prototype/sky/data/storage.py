@@ -1,19 +1,16 @@
-"""Storage and StorageBackend Classes for Sky Data.
-
-asdfasdfasdfasdfasdfasdfsadfasdf
-
-  Typical 
+"""Storage and Object Classes for Sky Data.
 """
+import enum
 import os
 import glob
-from multiprocessing.pool import ThreadPool
-from typing import Dict, Tuple
+from multiprocessing import pool
+from typing import Any, Dict, Tuple
 
 import boto3
-from botocore.exceptions import ClientError
-from google.api_core.exceptions import NotFound
+from botocore import exceptions as S3Exception
+from google.api_core import exceptions as GSException
 
-from sky.backends import data_utils, data_transfer
+from sky.data import data_utils, data_transfer
 from sky import logging
 
 logger = logging.init_logger(__name__)
@@ -22,11 +19,20 @@ Path = str
 StorageHandle = Any
 
 
-class StorageBackend:
-    """
-    StorageBackends abstract away the different storage types exposed by
-    different clouds. They return a StorageHandle that must be handled by the
-    ExecutionBackend to mount onto VMs or containers.
+class StorageType(enum.Enum):
+    S3 = 0
+    GCS = 1
+    AZURE = 2
+
+
+class AbstractStore:
+    """AbstractStore abstracts away the different storage types exposed by
+    different clouds.
+
+    AbstractStore returns a StorageHandle that must be handled by the
+    ExecutionBackend to download onto VMs or containers.
+
+    TODO: Mounting AbstractStore onto VMs
     """
 
     def __init__(self, name: str, path: str):
@@ -43,7 +49,7 @@ class StorageBackend:
     def get_handle(self) -> StorageHandle:
         """
         Returns the storage handle for use by the execution backend to attach
-        to VM/containers :return: StorageHandle for the storage backend
+        to VM/containers
         """
         raise NotImplementedError
 
@@ -65,8 +71,8 @@ class StorageBackend:
             if os.path.isfile(local_file):
                 self.upload_file(local_file, remote_path)
 
-        pool = ThreadPool(processes=num_threads)
-        pool.map(_upload_thread, all_paths)
+        pp = pool.ThreadPool(processes=num_threads)
+        pp.map(_upload_thread, all_paths)
 
     def download_remote_dir(self, local_path: str) -> None:
         """Downloads directory from remote bucket to the specified
@@ -89,15 +95,129 @@ class StorageBackend:
             self.download_file(remote_path, path)
 
 
-class AWSStorageBackend(StorageBackend):
-    """
-    AWSStorageBackend inherits from StorageBackend and represents the backend
-    for S3 buckets.
+class Storage(object):
+    """Storage objects handle persistent and large volume storage in the sky.
+
+    Users create Storage objects by defining the storage object name and the
+    source, where the data originally comes from. Power users can specify their 
+    pre-initialized stores if their data is already on the cloud.
+
+      Typical Usage: (See prototype/examples/playground/storage_playground.py)
+        storage = Storage(name='imagenet-bucket', source='~/Documents/imagenet')
+
+        # Move data to S3
+        storage.get_or_copy_to_s3()
+
+        # Move data to Google Cloud Storage
+        storage.get_or_copy_to_gcs()
+
+        # Delete Storage for both S3 and GCS
+        storage.delete()
     """
 
-    def __init__(self, name: str, path: str, region='us-east-2', backends=None):
+    def __init__(self,
+                 name: str,
+                 source: Path,
+                 stores: Dict[str, AbstractStore] = None,
+                 persistent: bool = True):
+        """Initializes a Storage object
+
+        Three fields are required: the name of the storage, the source path where
+        the data is initially located, and the default mount path where the data
+        will be mounted to on the cloud.
+
+        Args:
+          name: str; Name of the storage object. Typically used as the bucket name
+            in backing object stores.
+          source: str; File path where the data is initially stored. Can be
+            on local machine or on cloud (s3://, gs://, etc.). Paths do not need
+            to be absolute.
+          stores: Optional; - specify pre-initialized stores (S3Store, GsStore)
+          persistent: bool; Whether to persist across sky runs.
+        """
+        self.name = name
+        self.source = source
+        self.persistent = persistent
+
+        # Sky optimizer either adds a storage object instance or selects
+        # from existing ones
+        if stores is None:
+            self.stores = {}
+        else:
+            self.stores = stores
+
+    def get_or_copy_to_s3(self):
+        """Adds AWS S3 Store to Storage
+        """
+        s3_store = self.add_store('AWS')
+        return "s3://" + s3_store.name
+
+    def get_or_copy_to_gcs(self):
+        """Adds GCS Store to Storage
+        """
+        gs_store = self.add_store('GCP')
+        return "gs://" + gs_store.name
+
+    def get_or_copy_to_azure_blob(self):
+        """Adds Azure Blob Store to Storage
+
+        TODO: Finish Azure Blob Backend class
+        """
+        raise NotImplementedError
+
+    def add_store(self, cloud_type: StorageType) -> AbstractStore:
+        """Invoked by the optimizer after it has selected a store to
+        add it to Storage.
+
+        Args:
+          cloud_type: StorageType; Type of the storage [S3, GS, AZURE]
+        """
+        store = None
+
+        if cloud_type == 'AWS':
+            store = S3Store(name=self.name,
+                            path=self.source,
+                            stores=self.stores)
+        elif cloud_type == 'GCP':
+            store = GsStore(name=self.name,
+                            path=self.source,
+                            stores=self.stores)
+        else:
+            raise ValueError(f'{cloud_type} not supported as a Store!')
+
+        assert store.is_initialized
+        assert cloud_type not in self.stores, f'Storage type \
+                                                    {cloud_type} \
+                                                    already exists, \
+                                                    why do you want to \
+                                                    add another of \
+                                                    the same type? '
+
+        self.stores[cloud_type] = store
+        return store
+
+    def delete(self) -> None:
+        """Deletes data for all storage objects.
+        """
+        for _, store in self.stores.items():
+            store.delete()
+
+
+class S3Store(AbstractStore):
+    """S3Store inherits from Storage Object and represents the backend
+    for S3 buckets.
+
+        Typical Usage Example:
+          # To initialize an S3Store implicitly, do this: 
+          storage = Storage(name='imagenet-bucket', source='~/Documents/imagenet')
+
+          # Move data to S3, and creates an S3Store
+          storage.get_or_copy_to_s3()
+    """
+
+    def __init__(self, name: str, path: str, region='us-east-2', stores=None):
         super().__init__(name, path)
-        self.backends = backends
+        self.stores = stores
         if 's3://' in self.path:
             assert name == data_utils.split_s3_path(path)[
                 0], 'S3 Bucket is specified as path, the name should be the \
@@ -188,7 +308,7 @@ class AWSStorageBackend(StorageBackend):
                 s3_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
-        except ClientError as e:
+        except S3Exception.ClientError as e:
             logger.info(e)
             return None
         return boto3.resource('s3').Bucket(bucket_name)
@@ -205,19 +325,21 @@ class AWSStorageBackend(StorageBackend):
         bucket.delete()
 
 
-class GCSStorageBackend(StorageBackend):
-    """
-    GCSStorageBackend inherits from StorageBackend and represents the backend
+class GsStore(AbstractStore):
+    """GsStore inherits from Storage Object and represents the backend
     for GCS buckets.
+
+        Typical Usage Example:
+          # To initialize an GsStore implicitly, do this: 
+          storage = Storage(name='imagenet-bucket', source='~/Documents/imagenet')
+
+          # Move data to Gcs, and creates an GsStore
+          storage.get_or_copy_to_gcs()
     """
 
-    def __init__(self,
-                 name: str,
-                 path: str,
-                 region='us-central1',
-                 backends=None):
+    def __init__(self, name: str, path: str, region='us-central1', stores=None):
         super().__init__(name, path)
-        self.backends = backends
+        self.stores = stores
         if 'gs://' in self.path:
             assert name == data_utils.split_gcs_path(path)[
                 0], 'GCS Bucket is specified as path, the name should be the \
@@ -232,8 +354,8 @@ class GCSStorageBackend(StorageBackend):
         if 'gs://' not in self.path:
             if 's3://' in self.path:
                 logger.info('Initating GCS Data Transfer Service from S3->GCS')
-                aws_backend = backends['AWS']
-                self.transfer_to_gcs(aws_backend)
+                s3_store = stores['AWS']
+                self.transfer_to_gcs(s3_store)
             elif is_new_bucket and 's3://' not in self.path:
                 logger.info('Uploading Local to GCS')
                 self.upload_local_dir(self.path)
@@ -257,14 +379,14 @@ class GCSStorageBackend(StorageBackend):
         sync_command = f'gsutil -m rsync -r {self.path} gs://{self.name}/'
         os.system(sync_command)
 
-    def transfer_to_gcs(self, aws_backend: StorageBackend) -> None:
+    def transfer_to_gcs(self, s3_store: AbstractStore) -> None:
         """Transfer data from S3 to GCS bucket using Google's Data Transfer
         service
 
         Args:
-          aws_backend: StorageBackend; S3 Backend, see AWSStorageBackend
+          s3_store: Object; S3 Backend, see S3Store
         """
-        data_transfer.s3_to_gcs(aws_backend, self)
+        data_transfer.s3_to_gcs(s3_store, self)
 
     def get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the GCS bucket. If the GCS bucket does not exist, this
@@ -273,7 +395,8 @@ class GCSStorageBackend(StorageBackend):
         try:
             bucket = self.client.get_bucket(self.name)
             return bucket, False
-        except NotFound:
+        except GSException.NotFound as e:
+            logger.info(e)
             return self.create_gcs_bucket(self.name), True
 
     def upload_file(self, local_file: str, remote_path: str) -> None:
@@ -332,80 +455,3 @@ class GCSStorageBackend(StorageBackend):
         """
         bucket = self.client.get_bucket(bucket_name)
         bucket.delete(force=True)
-
-
-class Storage(object):
-    """
-    Storage objects handle persistent and large volume storage in the sky.
-    Users create Storage objects with an initialize_fn and a default mount poth.
-    Power users can specify their pre-initialized backends if their data is
-    already on the cloud.
-    """
-
-    def __init__(self,
-                 name: str,
-                 source: Path,
-                 storage_backends: Dict[str, StorageBackend] = None,
-                 persistent: bool = True):
-        """Initializes a Storage object
-
-        Three fields are required: the name of the storage, the source path where
-        the data is initially located, and the default mount path where the data
-        will be mounted to on the cloud.
-
-        Args:
-          name: str; Name of the storage object. Typically used as the bucket name
-            in backing object stores.
-          source: str; File path where the data is initially stored. Can be
-            on local machine or on cloud (s3://, gs://, etc.). Paths do not need
-            to be absolute.
-          storage_backends: Optional; - specify  pre-initialized
-            storage backends
-          persistent: bool; Whether to persist across sky runs.
-        """
-        self.name = name
-        self.source = source
-        self.persistent = persistent
-
-        # Sky optimizer either adds a storage backend instance or selects
-        # from existing ones
-        if storage_backends is None:
-            self.storage_backends = {}
-        else:
-            self.storage_backends = storage_backends
-
-    def add_backend(self, cloud_type: str) -> None:
-        """Invoked by the optimizer after it has created a storage backend to
-        add it to Storage.
-
-        Args:
-          cloud_type: str; Type of the storage [AWS, GCP, Azure]
-        """
-        backend = None
-
-        if cloud_type == 'AWS':
-            backend = AWSStorageBackend(self.name,
-                                        self.source,
-                                        backends=self.storage_backends)
-        elif cloud_type == 'GCP':
-            backend = GCSStorageBackend(self.name,
-                                        self.source,
-                                        backends=self.storage_backends)
-        else:
-            raise ValueError(f'{cloud_type} not supported as Storage Backend!')
-
-        assert backend.is_initialized
-        assert cloud_type not in self.storage_backends, f'Storage type \
-                                                    {cloud_type} \
-                                                    already exists, \
-                                                    why do you want to \
-                                                    add another of \
-                                                    the same type? '
-
-        self.storage_backends[cloud_type] = backend
-
-    def delete(self) -> None:
-        """Deletes data from all storage backends.
-        """
-        for _, backend in self.storage_backends.items():
-            backend.delete()

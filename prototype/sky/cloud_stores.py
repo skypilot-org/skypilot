@@ -44,6 +44,9 @@ class S3CloudStorage(CloudStorage):
         get_awscli = [
             'pip install awscli',
         ]
+        # AWS Sync by default uses 10 threads to upload files to the bucket.
+        # To increase parallelism, modify max_concurrent_requests in your
+        # aws config file (Default path: ~/.aws/config).
         download_via_awscli = f'mkdir -p {destination} && \
                                 aws s3 sync {source} {destination}'
 

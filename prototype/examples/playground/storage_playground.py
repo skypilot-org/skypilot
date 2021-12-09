@@ -1,25 +1,29 @@
-from sky import Storage
+from sky.data import storage
 
 
 def test_bucket_creation():
-    storage = Storage(name='mluo-data', source='~/Downloads/temp/')
+    storage_1 = storage.Storage(name='mluo-data', source='~/Downloads/temp/')
 
-    storage.add_backend('AWS')
-    storage.add_backend('GCP')
+    storage_1.get_or_copy_to_s3()  # Transfers data from local to S3
+    storage_1.get_or_copy_to_gcs()  # Transfers data from local to GCS
 
 
 def test_bucket_deletion():
-    storage = Storage(name='mluo-data', source='~/Downloads/temp/')
-    storage.add_backend('AWS')
-    storage.add_backend('GCP')
-    storage.delete()
+    storage_1 = storage.Storage(name='mluo-data', source='~/Downloads/temp/')
+    storage_1.get_or_copy_to_s3()
+    storage_1.get_or_copy_to_gcs()
+    storage_1.delete()  # Deletes Data
 
 
 def test_bucket_transfer():
     # First time upload to s3
-    storage = Storage(name='mluo-data', source='~/Downloads/temp/')
-    storage.add_backend("AWS")
+    storage_1 = storage.Storage(name='mluo-data', source='~/Downloads/temp/')
+    bucket_path = storage_1.get_or_copy_to_s3(
+    )  # Transfers data from local to S3
 
-    storage = Storage(name='mluo-data', source='s3://mluo-data')
-    storage.add_backend('AWS')
-    storage.add_backend('GCP')
+    storage_2 = storage.Storage(name='mluo-data', source=bucket_path)
+    storage_2.get_or_copy_to_s3()  # Connects to existing S3 bucket
+    storage_2.get_or_copy_to_gcs()  # Transfer data from S3 to Gs bucket
+
+
+test_bucket_transfer()

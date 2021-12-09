@@ -11,7 +11,7 @@ from sky.resources import Resources
 from sky.task import ParTask, Task
 from sky.registry import fill_in_launchable_resources
 from sky.optimizer import Optimizer, OptimizeTarget
-from sky.storage import Storage
+from sky.data import Storage, StorageType
 
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
@@ -38,4 +38,5 @@ __all__ = [
     'list_accelerators',
     '__root_dir__',
     'Storage',
+    'StorageType',
 ]

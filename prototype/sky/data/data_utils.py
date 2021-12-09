@@ -1,8 +1,9 @@
 """Miscellaneous Utils for Sky Data
 """
+from typing import Any, Tuple
+
 import boto3
 from google.cloud import storage
-from typing import Any, Tuple
 
 Client = Any
 

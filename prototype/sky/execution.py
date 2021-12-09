@@ -85,10 +85,9 @@ def execute(dag: sky.Dag,
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
-    if task.storage is not None:
+    if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
-        # Hardcoded right now, @zongheng Ideas on how to approach this?
-        backend.add_storage_backend(task, task.best_storage_backend)
+        backend.add_storage_objects(task)
 
     if stages is None or Stage.PROVISION in stages:
         if handle is None:
@@ -132,6 +131,5 @@ def execute(dag: sky.Dag,
 
     if stages is None or Stage.TEARDOWN in stages:
         if teardown:
-            if task.storage is not None:
-                backend.teardown_storage(task)
+            backend.teardown_storage(task)
             backend.teardown(handle)

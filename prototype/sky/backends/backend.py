@@ -37,7 +37,7 @@ class Backend(object):
     ) -> None:
         raise NotImplementedError
 
-    def add_storage_backend(self, task: App, cloud_type: str) -> None:
+    def add_storage_objects(self, task: App) -> None:
         raise NotImplementedError
 
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
@@ -50,6 +50,9 @@ class Backend(object):
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         """Post execute(): e.g., print helpful inspection messages."""
+        raise NotImplementedError
+
+    def teardown_storage(self, task: App) -> None:
         raise NotImplementedError
 
     def teardown(self, handle: ResourceHandle) -> None:
