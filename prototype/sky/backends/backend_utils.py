@@ -391,6 +391,7 @@ def run_with_log(cmd: List[str],
                  log_path: str,
                  stream_logs: bool = False,
                  start_streaming_at: str = '',
+                 no_return: bool = False,
                  **kwargs):
     """Runs a command and logs its output to a file.
 
@@ -404,6 +405,8 @@ def run_with_log(cmd: List[str],
         stdout, stderr = redirect_process_output(
             proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
         proc.wait()
+        if no_return:
+            return
         return proc, stdout, stderr
 
 
