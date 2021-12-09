@@ -799,7 +799,7 @@ class CloudVmRayBackend(backends.Backend):
             codegen.append(
                 textwrap.dedent(f"""\
         futures.append(run_with_log \\
-              .options(name='{name}'{resources_str}{num_gpus_str}) \\
+                .options(name='{name}'{resources_str}{num_gpus_str}) \\
                 .remote(
                     {cmd}, 
                     '{log_path}', 
