@@ -347,14 +347,21 @@ def cli():
               is_flag=True,
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
+@click.option('--docker',
+              'backend_name',
+              flag_value=backends.LocalDockerBackend.NAME,
+              default=False,
+              help='If used, runs locally inside a docker container.')
 def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
-           detach_run: bool):
+           detach_run: bool, backend_name: str):
     """Launch a task from a YAML or command (rerun setup if cluster exists).
 
     If entrypoint points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command to be
     executed on the head node of the cluster.
     """
+    if backend_name is None:
+        backend_name = backends.CloudVmRayBackend.NAME
     entrypoint = ' '.join(entrypoint)
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
@@ -372,11 +379,21 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
+    click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
+
+    if backend_name == backends.LocalDockerBackend.NAME:
+        backend = backends.LocalDockerBackend()
+    elif backend_name == backends.CloudVmRayBackend.NAME:
+        backend = backends.CloudVmRayBackend()
+    else:
+        raise ValueError(f'{backend_name} backend is not supported.')
+
     sky.launch(dag,
                dryrun=dryrun,
                stream_logs=True,
                cluster_name=cluster,
-               detach_run=detach_run)
+               detach_run=detach_run,
+               backend=backend)
 
 
 @cli.command()
@@ -466,6 +483,7 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
     """
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
+    backend = backend_utils.get_backend_from_handle(handle)
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
                                  'Use `sky run` to provision first.')
@@ -483,6 +501,7 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
 
+            # TODO(romilb): Fix this
             # Run inline commands directly on head node if the resources is not
             # set. User should take the responsibility to not overload cluster.
             # TODO(zhwu): Fix this when we support CPU in resources.
@@ -507,7 +526,7 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
             task.name = name
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
-    sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
+    sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
 def _readable_time_duration(start_time: int):
@@ -544,14 +563,19 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         launched_at = cluster_status['launched_at']
         handle = cluster_status['handle']
         resources_str = '<initializing>'
-        if (handle.launched_nodes is not None and
-                handle.launched_resources is not None):
-            launched_resource_str = str(handle.launched_resources)
-            if not show_all:
-                launched_resource_str = _truncate_long_string(
-                    launched_resource_str)
-            resources_str = (f'{handle.launched_nodes}x '
-                             f'{launched_resource_str}')
+        if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+            resources_str = 'docker'
+        elif isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+            if (handle.launched_nodes is not None and
+                    handle.launched_resources is not None):
+                launched_resource_str = str(handle.launched_resources)
+                if not show_all:
+                    launched_resource_str = _truncate_long_string(
+                        launched_resource_str)
+                resources_str = (f'{handle.launched_nodes}x '
+                                 f'{launched_resource_str}')
+        else:
+            raise ValueError(f'Unknown handle type {type(handle)} encountered.')
         cluster_table.add_row([
             # NAME
             cluster_status['name'],
@@ -586,7 +610,6 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     all_jobs = not skip_finished
-    backend = backends.CloudVmRayBackend()
 
     codegen = backend_utils.JobLibCodeGen()
     username = getpass.getuser()
@@ -604,8 +627,19 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         clusters = [c['name'] for c in cluster_infos]
         handles = [c['handle'] for c in cluster_infos]
 
+    unsupported_clusters = []
     for cluster, handle in zip(clusters, handles):
+        backend = backend_utils.get_backend_from_handle(handle)
+        if isinstance(backend, backends.LocalDockerBackend):
+            # LocalDockerBackend does not support job queues
+            unsupported_clusters.append(cluster)
+            continue
         _show_job_queue_on_cluster(cluster, handle, backend, code)
+    if unsupported_clusters:
+        click.secho(
+            f'Note: Job queues are not supported on clusters: '
+            f'{", ".join(unsupported_clusters)}',
+            fg='yellow')
 
 
 def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
@@ -643,9 +677,12 @@ def logs(cluster: str, job_id: str, sync_down: bool):
     """Tail the log of a job."""
     # TODO: Add an option for downloading logs.
     cluster_name = cluster
-    backend = backends.CloudVmRayBackend()
-
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+        raise click.UsageError('Sky logs is not available with '
+                               'LocalDockerBackend.')
+    backend = backend_utils.get_backend_from_handle(handle)
+
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
                                  ' (see `sky status`).')
@@ -897,11 +934,10 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         else:
             print('No existing clusters found (see `sky status`).')
 
-    # FIXME: Assumes a specific backend.
-    backend = cloud_vm_ray_backend.CloudVmRayBackend()
     for record in to_down:  # TODO: parallelize.
         name = record['name']
         handle = record['handle']
+        backend = backend_utils.get_backend_from_handle(handle)
         backend.teardown(handle, terminate=terminate)
         if terminate:
             click.secho(f'Terminating cluster {name}...done.', fg='green')

@@ -1,0 +1,19 @@
+# A minimal ping example.
+#
+# Runs a task that pings localhost 100 times.
+#
+# Usage:
+#   sky launch -c ping ping.yaml --docker
+#   sky down -c ping
+
+name: ping
+
+resources:
+  cloud: aws
+
+setup: |
+  apt-get update --allow-insecure-repositories
+  apt-get install -y iputils-ping
+
+run: |
+  ping 127.0.0.1 -c 100

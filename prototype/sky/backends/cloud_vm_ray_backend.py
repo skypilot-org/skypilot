@@ -13,7 +13,6 @@ import subprocess
 import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
-import uuid
 
 import colorama
 from ray.autoscaler import sdk
@@ -971,6 +970,8 @@ class CloudVmRayBackend(backends.Backend):
       * Cloud providers' implementations under clouds/
     """
 
+    NAME = 'cloudvmray'
+
     class ResourceHandle(object):
         """A pickle-able tuple of:
 
@@ -1073,9 +1074,7 @@ class CloudVmRayBackend(backends.Backend):
         """Provisions using 'ray up'."""
         # Try to launch the exiting cluster first
         if cluster_name is None:
-            # TODO: change this ID formatting to something more pleasant.
-            # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-            cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+            cluster_name = backend_utils.generate_cluster_name()
         _check_cluster_name_is_valid(cluster_name)
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
@@ -1208,21 +1207,23 @@ class CloudVmRayBackend(backends.Backend):
                     f'File mounts\n\t{src} -> {dst}\nfailed to sync. '
                     f'See errors above and log: {log_path}')
 
-    def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
+    def run_post_setup(self, handle: ResourceHandle,
+                       post_setup_fn: Optional[PostSetupFn],
                        task: Task) -> None:
-        ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
-        config = backend_utils.read_yaml(handle.cluster_yaml)
-        ssh_user = config['auth']['ssh_user'].strip()
-        ip_to_command = post_setup_fn(ip_list)
-        for ip, cmd in ip_to_command.items():
-            if cmd is not None:
-                cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
-                       f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
-                backend_utils.run_command_on_ip_via_ssh(ip,
-                                                        cmd,
-                                                        task.private_key,
-                                                        task.container_name,
-                                                        ssh_user=ssh_user)
+        if post_setup_fn is not None:
+            ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
+            config = backend_utils.read_yaml(handle.cluster_yaml)
+            ssh_user = config['auth']['ssh_user'].strip()
+            ip_to_command = post_setup_fn(ip_list)
+            for ip, cmd in ip_to_command.items():
+                if cmd is not None:
+                    cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
+                           f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
+                    backend_utils.run_command_on_ip_via_ssh(ip,
+                                                            cmd,
+                                                            task.private_key,
+                                                            task.container_name,
+                                                            ssh_user=ssh_user)
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()

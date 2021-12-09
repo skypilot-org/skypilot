@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import datetime
+import getpass
 import os
 import pathlib
 import subprocess
@@ -7,6 +8,7 @@ import tempfile
 import textwrap
 import time
 from typing import Dict, List, Optional
+import uuid
 import yaml
 import zlib
 
@@ -14,6 +16,7 @@ import jinja2
 
 import sky
 from sky import authentication as auth
+from sky import backends
 from sky import clouds
 from sky import sky_logging
 from sky import resources
@@ -604,7 +607,10 @@ def run_no_outputs(cmd, **kwargs):
 
 
 def check_local_gpus() -> bool:
-    """Returns whether GPUs are available on the local machine by checking
+    """
+    Checks if GPUs are available locally.
+
+    Returns whether GPUs are available on the local machine by checking
     if nvidia-smi is installed.
 
     Returns True if nvidia-smi is installed, false if not.
@@ -626,6 +632,28 @@ def make_task_bash_script(codegen: str) -> str:
     ]
     script = '\n'.join(script)
     return script
+
+
+def generate_cluster_name():
+    # TODO: change this ID formatting to something more pleasant.
+    # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
+    return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+
+
+def get_backend_from_handle(handle: backends.Backend.ResourceHandle):
+    """
+    Get a backend object from a handle.
+
+    Inspects handle type to infer the backend used for the resource.
+    """
+    if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        backend = backends.CloudVmRayBackend()
+    elif isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+        backend = backends.LocalDockerBackend()
+    else:
+        raise NotImplementedError(
+            f'Handle type {type(handle)} is not supported yet.')
+    return backend
 
 
 class JobLibCodeGen(object):
