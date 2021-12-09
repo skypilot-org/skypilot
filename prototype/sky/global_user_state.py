@@ -6,6 +6,7 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for Sky to
   interact with a cluster.
 """
+import json
 import os
 import pathlib
 import pickle
@@ -16,6 +17,8 @@ from typing import Any, Dict, List, Optional
 
 from sky import backends
 
+_ENABLED_CLOUDS_KEY = 'enabled_clouds'
+
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
@@ -24,6 +27,7 @@ _CURSOR = _CONN.cursor()
 
 try:
     _CURSOR.execute('select * from clusters limit 0')
+    _CURSOR.execute('select * from config limit 0')
 except sqlite3.OperationalError:
     # Tables do not exist, create them.
     _CURSOR.execute("""\
@@ -32,6 +36,8 @@ except sqlite3.OperationalError:
         lauched_at INTEGER,
         handle BLOB,
         last_use TEXT)""")
+    _CURSOR.execute("""\
+        CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT)""")
 _CONN.commit()
 
 
@@ -97,3 +103,16 @@ def get_clusters() -> List[Dict[str, Any]]:
             'last_use': last_use,
         })
     return records
+
+
+def get_enabled_clouds() -> List[str]:
+    rows = _CURSOR.execute('SELECT value FROM config WHERE key = ?',
+                           (_ENABLED_CLOUDS_KEY,))
+    for (value,) in rows:
+        return json.loads(value)
+
+
+def set_enabled_clouds(enabled_clouds: List[str]) -> None:
+    _CURSOR.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
+                    (_ENABLED_CLOUDS_KEY, json.dumps(enabled_clouds)))
+    _CONN.commit()

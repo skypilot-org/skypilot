@@ -1,9 +1,15 @@
 """Azure."""
 import copy
 import json
-from typing import Dict, Optional
+import subprocess
+from typing import Dict, Optional, Tuple
 
 from sky import clouds
+
+
+def _run_output(cmd):
+    proc = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE)
+    return proc.stdout.decode('ascii')
 
 
 class Azure(clouds.Cloud):
@@ -124,3 +130,13 @@ class Azure(clouds.Cloud):
         if instance_type is None:
             return []
         return _make(instance_type)
+
+    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud."""
+        try:
+            output = _run_output('az account show --output=json')
+        except subprocess.CalledProcessError:
+            return False, 'AWS CLI not installed properly.'
+        if output.startswith('{'):
+            return True, None
+        return False, 'Azure credentials not set. Run `az login`.'

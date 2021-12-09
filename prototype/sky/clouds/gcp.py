@@ -3,6 +3,8 @@ import copy
 import json
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import google.auth
+
 from sky import clouds
 
 
@@ -215,3 +217,11 @@ class GCP(clouds.Cloud):
             instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return None
+
+    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud."""
+        try:
+            google.auth.default()
+        except google.auth.exceptions.DefaultCredentialsError:
+            return False, 'GCP credentials not set. Run `gcloud auth application-default login`.'
+        return True, None
