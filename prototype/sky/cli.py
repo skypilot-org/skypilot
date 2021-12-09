@@ -10,7 +10,7 @@ Example usage:
   >> sky run task.yaml
   >> sky run [-c cluster_name] task.yaml
 
-  # Show the list of tasks and running clusters.
+  # Show the list of running clusters.
   >> sky status
 
   # Tear down a specific cluster.
@@ -27,6 +27,7 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import getpass
 import os
 import time
 from typing import List, Optional
@@ -52,46 +53,67 @@ Path = str
 Backend = backends.Backend
 
 
+def _truncate_long_string(s: str, max_length: int = 30) -> str:
+    if len(s) <= max_length:
+        return s
+    splits = s.split(' ')
+    if len(splits[0]) > max_length:
+        return splits[0][:max_length] + '...'
+    # Truncate on word boundary.
+    i = 0
+    total = 0
+    for i, part in enumerate(splits):
+        total += len(part)
+        if total >= max_length:
+            break
+    return ' '.join(splits[:i]) + '...'
+
+
+def _default_interactive_node_name(node_type: str):
+    """Returns a deterministic name to refer to the same node."""
+    assert node_type in ('cpunode', 'gpunode'), node_type
+    return f'sky-{node_type}-{getpass.getuser()}'
+
+
 # TODO: --screen; while uploading ~/.screenrc.
 # TODO: skip installing ray to speed up provisioning.
-def _create_interactive_node(
-        name: str,
+def _create_and_ssh_into_node(
+        node_type: str,
         resources: sky.Resources,
-        cluster_handle: backend_lib.Backend.ResourceHandle = None,
+        cluster_name: str,
         backend: Optional[backend_lib.Backend] = None,
         port_forward: Optional[List[int]] = None,
-        cluster_name: Optional[str] = None):
-    """Creates an interactive session.
+):
+    """Creates and attaches to an interactive node.
 
     Args:
-        name: Name of the sky.Task to create.
+        node_type: Type of the interactive node: { 'cpunode', 'gpunode' }.
         resources: Resources to attach to VM.
-        cluster_handle: Cluster YAML file.
-        backend: Backend to use.
+        cluster_name: a cluster name to identify the interactive node.
+        backend: the Backend to use (currently only CloudVmRayBackend).
         port_forward: List of ports to forward.
-        cluster_name: Name of the cluster.
     """
-
+    assert node_type in ('cpunode', 'gpunode'), node_type
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
         # should be setup =
         # 'conda env export | grep -v "^prefix: " > environment.yml'
         # && conda env create -f environment.yml
         task = sky.Task(
-            name,
+            node_type,
             workdir=os.getcwd(),
             setup=None,
             run='',
         )
         task.set_resources(resources)
 
-    backend = backend() if backend is not None else backends.CloudVmRayBackend()
+    backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag)
 
     dag = sky.optimize(dag)
     task = dag.tasks[0]
 
-    handle = cluster_handle
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         handle = backend.provision(task,
                                    task.best_resources,
@@ -99,23 +121,23 @@ def _create_interactive_node(
                                    stream_logs=True,
                                    cluster_name=cluster_name)
 
-    global_user_state.add_task(task)
-
     # TODO: cd into workdir immediately on the VM
     # TODO: Delete the temporary cluster config yml (or figure out a way to
     # re-use it)
-    attach_options = ''
-    if port_forward is not None:
-        attach_options = ' '.join(
-            [f'--port-forward {port}' for port in port_forward])
-    # Disable check, since the returncode could be non-zero if the user Ctrl-D
-    backend_utils.run(f'ray attach {attach_options} {handle}', check=False)
+    # Use ssh rather than 'ray attach' to suppress ray messages, speed up
+    # connection, and for allowing adding 'cd workdir' in the future.
+    backend_utils.run(backend.ssh_head_command(handle,
+                                               port_forward=port_forward),
+                      shell=False)
 
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
-    relpath = backend_utils.get_rel_path(handle.cluster_yaml)
     click.echo('The interactive node is still running.')
     click.echo('  To attach to it again:  ', nl=False)
-    click.secho(f'ray attach {relpath}', bold=True)
+    if cluster_name == _default_interactive_node_name(node_type):
+        option = ''
+    else:
+        option = f' -c {cluster_name}'
+    click.secho(f'sky {node_type}{option}', bold=True)
     click.echo('  To tear down the node:  ', nl=False)
     click.secho(f'sky down {cluster_name}', bold=True)
 
@@ -222,35 +244,66 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
 
 @cli.command()
 def status():
-    """Show launched clusters and tasks."""
-
-    tasks_status = global_user_state.get_tasks()
+    """Show launched clusters."""
     clusters_status = global_user_state.get_clusters()
-
-    task_table = prettytable.PrettyTable()
-    task_table.field_names = ['TASK ID', 'TASK NAME', 'LAUNCHED']
-    for task_status in tasks_status:
-        launched_at = task_status['launched_at']
-        duration = pendulum.now().subtract(seconds=time.time() - launched_at)
-        task_table.add_row([
-            task_status['id'],
-            task_status['name'],
-            duration.diff_for_humans(),
-        ])
-
     cluster_table = prettytable.PrettyTable()
-    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED']
+    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED', 'LAST USE']
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         cluster_table.add_row([
             cluster_status['name'],
             duration.diff_for_humans(),
+            _truncate_long_string(cluster_status['last_use']),
         ])
-
-    click.echo(f'Tasks\n{task_table}')
-    click.echo()
+    cluster_table.align['LAST USE'] = 'l'
     click.echo(f'Clusters\n{cluster_table}')
+
+
+@cli.command()
+@click.argument('cluster', required=False)
+@click.option('--port-forward',
+              '-p',
+              multiple=True,
+              default=[],
+              type=int,
+              required=False,
+              help=('Port to be forwarded. To forward multiple ports, '
+                    'use this option multiple times.'))
+def ssh(cluster: str, port_forward: Optional[List[int]]):
+    """SSH into an existing cluster.
+
+    CLUSTER is the name of the cluster to attach to.  If CLUSTER is not
+    supplied, the cluster launched last will be used.
+
+    Examples:
+
+      \b
+      # ssh into a specific cluster.
+      sky ssh cluster_name
+
+      \b
+      # Port forward.
+      sky ssh --port-forward 8080 --port-forward 4650 cluster_name
+      sky ssh -p 8080 -p 4650 cluster_name
+    """
+    name = cluster
+    if name is None:
+        launched_clusters = global_user_state.get_clusters()
+        if len(launched_clusters) == 0:
+            raise click.UsageError(
+                'No launched clusters found (see `sky status`).')
+        name = sorted(launched_clusters,
+                      key=lambda x: x['launched_at'])[-1]['name']
+    assert isinstance(name, str) and name, name
+    handle = global_user_state.get_handle_from_cluster_name(name)
+    if handle is None:
+        raise click.UsageError(
+            f'Cluster {name} is not found (see `sky status`).')
+    command = backends.CloudVmRayBackend().ssh_head_command(
+        handle, port_forward=port_forward)
+    # Disable check, since the returncode could be non-zero if the user Ctrl-D.
+    backend_utils.run(command, shell=False, check=False)
 
 
 @cli.command()
@@ -260,7 +313,10 @@ def status():
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
-def down(cluster: str, all: Optional[bool]):  # pylint: disable=redefined-builtin
+def down(
+        cluster: str,
+        all: Optional[bool],  # pylint: disable=redefined-builtin
+):
     """Tear down cluster(s).
 
     CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
@@ -313,103 +369,6 @@ def down(cluster: str, all: Optional[bool]):  # pylint: disable=redefined-builti
 
 
 @cli.command()
-@click.argument('cluster', required=False)
-@click.option('--port-forward',
-              '-p',
-              multiple=True,
-              default=[],
-              type=int,
-              required=False,
-              help='Port to be forwarded. To forward multiple ports, '
-              'use this option multiple times.')
-def ssh(cluster: str, port_forward: Optional[List[int]]):
-    """ssh to the cluster CLUSTER.
-
-    CLUSTER is the name of the cluster to attach.  If CLUSTER is not supplied,
-    the last cluster will be attached.
-
-    Examples:
-
-      \b
-      # ssh to a specific cluster.
-      sky ssh cluster_name
-
-      \b
-      # Port forward.
-      sky ssh --port-forward 8080 --port-forward 4650 cluster_name
-      sky ssh -p 8080 -p 4650 cluster_name
-    """
-    # FIXME: make TPU part of handles; so that this kills TPUs too.
-    name = cluster
-
-    to_ssh = name
-    if to_ssh is None:
-        launched_clusters = global_user_state.get_clusters()
-        if len(launched_clusters) == 0:
-            raise click.UsageError(
-                'No launched clusters found (see `sky status`).')
-        to_ssh = sorted(launched_clusters, key=lambda x: x['launched_at'])[-1]
-    handle = global_user_state.get_handle_from_cluster_name(to_ssh)
-
-    if handle is None:
-        raise click.UsageError(
-            f'Cluster {to_ssh} is not found (see `sky status`).')
-
-    # FIXME: Assumes a specific backend.
-    _create_interactive_node(name,
-                             sky.Resources(),
-                             handle,
-                             port_forward=port_forward)
-
-
-@click.argument('task_id', required=False, type=str)
-@click.option('--all',
-              '-a',
-              default=None,
-              is_flag=True,
-              help='Cancel all tasks.')
-def cancel(task_id: str, all: Optional[bool]):  # pylint: disable=redefined-builtin
-    """Cancel task(s).
-
-    TASK_ID is the id of the task to cancel.  If both TASK_ID and --all are
-    supplied, the latter takes precedence.
-
-    Examples:
-
-      \b
-      sky cancel task_id
-      sky cancel -a
-    """
-    downall = all
-    if task_id is None and downall is None:
-        raise click.UsageError(
-            'sky cancel requires either a task id (see `sky status`) '
-            'or --all.')
-    to_down = []
-    if task_id is not None:
-        to_down = [task_id]
-    if downall:
-        records = global_user_state.get_tasks()
-        to_down = [r['id'] for r in records]
-        if task_id is not None:
-            print('Both --all and TASK_ID specified for sky cancel. '
-                  'Letting --all take effect.')
-            task_id = None
-    if not to_down:
-        if task_id is not None:
-            print(f'Task {task_id} is not found (see `sky status`).')
-        else:
-            print('No existing tasks found (see `sky status`).')
-        return
-    # TODO: Current implementation is blocking and will wait for the task to
-    # complete.  If this is changed to non-blocking, then we will need a way to
-    # kill async tasks with ray exec.
-    for tid in to_down:
-        global_user_state.remove_task(tid)
-    click.secho('Done.', fg='green')
-
-
-@cli.command()
 @click.option('--cluster',
               '-c',
               default=None,
@@ -421,37 +380,46 @@ def cancel(task_id: str, all: Optional[bool]):  # pylint: disable=redefined-buil
               default=[],
               type=int,
               required=False,
-              help='Port to be forwarded. To forward multiple ports, '
-              'use this option multiple times.')
+              help=('Port to be forwarded. To forward multiple ports, '
+                    'use this option multiple times.'))
 def gpunode(cluster: str, port_forward: Optional[List[int]]):
-    """Launches an interactive GPU node.
+    """Launch or attach to an interactive GPU node.
 
-    Automatically syncs current working directory.
+    Automatically syncs the current working directory.
 
-    Examples:
+    Example:
 
       \b
-      # start gpunode
-      sky gpunode
+      # Launch a default gpunode.
+      $ sky gpunode
 
-      # creating a gpunode with name `cluster` or connecting to existed node.
-      sky gpunode -c cluster_name
+      \b
+      # Do work, then log out.  The node is kept running.
+
+      \b
+      # Attach back to the same node and do more work.
+      $ sky gpunode
+
+      \b
+      # Alternatively, create multiple interactive nodes by specifying names
+      # via --cluster (-c).
+      $ sky gpunode -c node0
+      $ sky gpunode -c node1
 
       \b
       # Port forward.
-      sky gpunode --port-forward 8080 --port-forward 4650 cluster_name
-      sky gpunode -p 8080 -p 4650 cluster_name
+      sky gpunode --port-forward 8080 --port-forward 4650 -c cluster_name
+      sky gpunode -p 8080 -p 4650 -c cluster_name
     """
-    # TODO: Sync code files between local and interactive node (watch rsync?)
-    handle = None
-    if cluster is not None:
-        handle = global_user_state.get_handle_from_cluster_name(cluster)
-
-    _create_interactive_node('gpunode',
-                             {sky.Resources(sky.AWS(), accelerators='V100')},
-                             cluster_handle=handle,
-                             port_forward=port_forward,
-                             cluster_name=cluster)
+    name = cluster
+    if name is None:
+        name = _default_interactive_node_name('gpunode')
+    _create_and_ssh_into_node(
+        'gpunode',
+        sky.Resources(sky.AWS(), accelerators='V100'),
+        cluster_name=name,
+        port_forward=port_forward,
+    )
 
 
 @cli.command()
@@ -466,35 +434,46 @@ def gpunode(cluster: str, port_forward: Optional[List[int]]):
               default=[],
               type=int,
               required=False,
-              help='Port to be forwarded. To forward multiple ports, '
-              'use this option multiple times.')
+              help=('Port to be forwarded. To forward multiple ports, '
+                    'use this option multiple times.'))
 def cpunode(cluster: str, port_forward: Optional[List[int]]):
-    """Launches an interactive CPU node.
+    """Launch or attach to an interactive CPU node.
 
-    Automatically syncs current working directory.
+    Automatically syncs the current working directory.
 
-     Examples:
+    Example:
 
       \b
-      # start cpunode
-      sky cpunode
+      # Launch a default cpunode.
+      $ sky cpunode
 
-      # creating a cpunode with name `cluster` or connecting to existed node.
-      sky cpunode -c cluster_name
+      \b
+      # Do work, then log out.  The node is kept running.
+
+      \b
+      # Attach back to the same node and do more work.
+      $ sky cpunode
+
+      \b
+      # Alternatively, create multiple interactive nodes by specifying names
+      # via --cluster (-c).
+      $ sky cpunode -c node0
+      $ sky cpunode -c node1
 
       \b
       # Port forward.
-      sky cpunode --port-forward 8080 --port-forward 4650 cluster_name
-      sky cpunode -p 8080 -p 4650 cluster_name
+      sky cpunode --port-forward 8080 --port-forward 4650 -c cluster_name
+      sky cpunode -p 8080 -p 4650 -c cluster_name
     """
-    handle = None
-    if cluster is not None:
-        handle = global_user_state.get_handle_from_cluster_name(cluster)
-
-    _create_interactive_node('cpunode', {sky.Resources(sky.AWS())},
-                             cluster_handle=handle,
-                             port_forward=port_forward,
-                             cluster_name=cluster)
+    name = cluster
+    if name is None:
+        name = _default_interactive_node_name('cpunode')
+    _create_and_ssh_into_node(
+        'cpunode',
+        sky.Resources(sky.AWS()),
+        cluster_name=name,
+        port_forward=port_forward,
+    )
 
 
 def main():
