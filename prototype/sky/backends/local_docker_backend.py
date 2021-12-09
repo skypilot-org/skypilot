@@ -67,9 +67,11 @@ class LocalDockerBackend(backends.Backend):
         del cluster_name  # Unused.
         if stream_logs:
             logger.info(
-                'Streaming logs is not supported in LocalDockerBackend. '
-                'Logs will be shown on build failure.')
+                'Streaming build logs is not supported in LocalDockerBackend. '
+                'Build logs will be shown on failure.')
         handle = task.name
+        assert handle is not None, 'Task should have a name to be run with ' \
+                                   'LocalDockerBackend.'
         logger.info(f'Building docker image for task {task.name}. '
                     'This might take some time.')
         image_tag = docker_utils.build_dockerimage_from_task(task)

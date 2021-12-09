@@ -402,8 +402,7 @@ def check_local_gpus() -> bool:
 
     Returns True if nvidia-smi is installed, false if not.
     """
-    p = subprocess.run(["which", "nvidia-smi"], capture_output=True)
-    if p.returncode == 0:
-        return True
-    else:
-        return False
+    p = subprocess.run(['which', 'nvidia-smi'],
+                       capture_output=True,
+                       check=False)
+    return p.returncode == 0
