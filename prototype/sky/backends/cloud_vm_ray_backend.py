@@ -575,7 +575,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'ray exec {handle.cluster_yaml} \'{command}\'',
                 os.path.abspath(log_path),
                 stream_logs=True,
-            )
+                shell=True)
             if proc.returncode:
                 raise ValueError(
                     f'File mounts\n\t{src} -> {dst}\nfailed to sync. '
@@ -646,13 +646,15 @@ class CloudVmRayBackend(backends.Backend):
 
             task_i_codegen = textwrap.dedent(f"""\
         futures.append(run_with_log \\
-              .options(name='{name}'{resources_str}{num_gpus_str}) \\
-              .remote({cmd}, 
+                .options(name='{name}'{resources_str}{num_gpus_str}) \\
+                .remote(
+                    {cmd}, 
                     '{log_path}', 
                     {stream_logs},
-                    no_return=True,
+                    return_none=True,
                     shell=True,
-                    executable='/bin/bash'))
+                    executable='/bin/bash',
+                ))
         """)
             codegen.append(task_i_codegen)
         # Block.
@@ -798,12 +800,14 @@ class CloudVmRayBackend(backends.Backend):
                 textwrap.dedent(f"""\
         futures.append(run_with_log \\
               .options(name='{name}'{resources_str}{num_gpus_str}) \\
-              .remote({cmd}, 
+                .remote(
+                    {cmd}, 
                     '{log_path}', 
                     {stream_logs},
-                    no_return=True,
+                    return_none=True,
                     shell=True,
-                    executable='/bin/bash'))
+                    executable='/bin/bash',
+                ))
         """))
         # Block.
         codegen.append('ray.get(futures)\n')
