@@ -1,14 +1,13 @@
 import subprocess
 
 import sky
-from sky.backends import LocalDockerBackend
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
-    workdir = '/home/romilb/repos/tpu'
-    # subprocess.run(f'cd {workdir} && git checkout 222cc86',
-    #                shell=True,
-    #                check=True)
+    workdir = '~/Downloads/tpu'
+    subprocess.run(f'cd {workdir} && git checkout 222cc86',
+                   shell=True,
+                   check=True)
 
     # The setup command.  Will be run under the working directory.
     setup = 'pip install --upgrade pip && \
@@ -44,7 +43,6 @@ with sky.Dag() as dag:
         workdir=workdir,
         setup=setup,
         run=run,
-        docker_image='gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'
     )
     train.set_file_mounts(file_mounts)
     # TODO: allow option to say (or detect) no download/egress cost.
@@ -80,4 +78,4 @@ with sky.Dag() as dag:
     # train.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
 # sky.execute(dag, dryrun=True)
-sky.execute(dag, backend=LocalDockerBackend())
+sky.execute(dag)
