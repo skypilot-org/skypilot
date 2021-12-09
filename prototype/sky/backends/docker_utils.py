@@ -151,11 +151,12 @@ def build_dockerimage(dockerfile_contents, copy_path, tag):
 
 def build_dockerimage_from_task(task: task_mod.Task):
     """ Builds a docker image from a Task"""
+    copy_path = os.path.join(task.workdir, '')  # Add trailing slash if missing
     dockerfile_contents = create_dockerfile(base_image=task.docker_image,
                                             setup_command=task.setup,
-                                            copy_path=task.workdir,
+                                            copy_path=copy_path,
                                             run_command=task.run)
-    tag = build_dockerimage(dockerfile_contents, task.workdir, tag=task.name)
+    tag = build_dockerimage(dockerfile_contents, copy_path, tag=task.name)
     return tag
 
 
