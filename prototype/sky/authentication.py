@@ -172,7 +172,8 @@ def setup_gcp_authentication(config):
 
 def _unexpand_user(path):
     """Inverse of `os.path.expanduser`."""
-    return ('~' / pathlib.Path(path).relative_to(pathlib.Path.home())).as_posix()
+    return ('~' /
+            pathlib.Path(path).relative_to(pathlib.Path.home())).as_posix()
 
 
 # Takes in config, a yaml dict and outputs a postprocessed dict
