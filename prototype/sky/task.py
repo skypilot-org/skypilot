@@ -39,7 +39,7 @@ class Task(object):
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
         # Advanced:
-        storage_mounts: Optional[Dict[Storage, str]] = None,
+        storage_mounts: Optional[Dict[Storage, str]] = {},
         post_setup_fn: Optional[CommandGen] = None,
         docker_image: Optional[str] = None,
         container_name: Optional[str] = None,

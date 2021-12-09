@@ -149,13 +149,13 @@ class Storage(object):
     def get_or_copy_to_s3(self):
         """Adds AWS S3 Store to Storage
         """
-        s3_store = self.add_store('AWS')
+        s3_store = self.add_store(StorageType.S3)
         return "s3://" + s3_store.name
 
     def get_or_copy_to_gcs(self):
         """Adds GCS Store to Storage
         """
-        gs_store = self.add_store('GCP')
+        gs_store = self.add_store(StorageType.GCS)
         return "gs://" + gs_store.name
 
     def get_or_copy_to_azure_blob(self):
@@ -174,11 +174,11 @@ class Storage(object):
         """
         store = None
 
-        if cloud_type == 'AWS':
+        if cloud_type == StorageType.S3:
             store = S3Store(name=self.name,
                             path=self.source,
                             stores=self.stores)
-        elif cloud_type == 'GCP':
+        elif cloud_type == StorageType.GCS:
             store = GsStore(name=self.name,
                             path=self.source,
                             stores=self.stores)
@@ -354,7 +354,7 @@ class GsStore(AbstractStore):
         if 'gs://' not in self.path:
             if 's3://' in self.path:
                 logger.info('Initating GCS Data Transfer Service from S3->GCS')
-                s3_store = stores['AWS']
+                s3_store = stores[StorageType.S3]
                 self.transfer_to_gcs(s3_store)
             elif is_new_bucket and 's3://' not in self.path:
                 logger.info('Uploading Local to GCS')

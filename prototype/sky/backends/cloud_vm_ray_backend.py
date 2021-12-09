@@ -476,15 +476,15 @@ class CloudVmRayBackend(backends.Backend):
     def add_storage_objects(self, task: App) -> None:
         # Hack: Hardcode storage_plans to AWS for optimal plan
         # Optimizer is supposed to choose storage plan but we
-        # move this hear temporarily
+        # move this here temporarily
         for k in task.storage_mounts.keys():
             task.storage_plans[k] = storage.StorageType.S3
 
         cache = []
         storage_mounts = task.storage_mounts
         storage_plans = task.storage_plans
-        for storage, mnt_path in storage_mounts.items():
-            storage_type = task.storage_plans[storage]
+        for store, mnt_path in storage_mounts.items():
+            storage_type = task.storage_plans[store]
             if storage_type not in cache:
                 if storage_type is storage.StorageType.S3:
                     # TODO: allow for Storage mounting of different clouds
@@ -500,11 +500,11 @@ class CloudVmRayBackend(backends.Backend):
 
             if storage_type is storage.StorageType.S3:
                 task.update_file_mounts({
-                    mnt_path: 's3://' + storage.name + '/',
+                    mnt_path: 's3://' + store.name + '/',
                 })
             elif storage_type is storage.StorageType.GCS:
                 task.update_file_mounts({
-                    mnt_path: 'gs://' + storage.name + '/',
+                    mnt_path: 'gs://' + store.name + '/',
                 })
             elif storage_type is storage.StorageType.AZURE:
                 pass
@@ -531,15 +531,15 @@ class CloudVmRayBackend(backends.Backend):
             # (download gsutil on remote, run gsutil on remote).  Consider
             # alternatives (smart_open, each provider's own sdk), a
             # data-transfer container etc.
-            storage = cloud_stores.get_storage_from_path(src)
+            store = cloud_stores.get_storage_from_path(src)
             # Sync to a safe-to-write "wrapped" path.
             wrapped_dst = backend_utils.wrap_file_mount(dst)
-            if storage.is_directory(src):
-                sync = storage.make_sync_dir_command(source=src,
-                                                     destination=wrapped_dst)
+            if store.is_directory(src):
+                sync = store.make_sync_dir_command(source=src,
+                                                   destination=wrapped_dst)
             else:
-                sync = storage.make_sync_file_command(source=src,
-                                                      destination=wrapped_dst)
+                sync = store.make_sync_file_command(source=src,
+                                                    destination=wrapped_dst)
             # Symlink to the wrapped path.
             symlink_to_make = dst.rstrip('/')
             dir_of_symlink = os.path.dirname(symlink_to_make)
@@ -839,9 +839,9 @@ class CloudVmRayBackend(backends.Backend):
     def teardown_storage(self, task: App) -> None:
         storage_mounts = task.storage_mounts
         if storage_mounts is not None:
-            for storage, mount_path in storage_mounts.items():
-                if not storage.persistent:
-                    storage.delete()
+            for store, mount_path in storage_mounts.items():
+                if not store.persistent:
+                    store.delete()
 
     def teardown(self, handle: ResourceHandle) -> None:
         backend_utils.run(f'ray down -y {handle}')

@@ -12,7 +12,10 @@ TODO:
 import subprocess
 import urllib.parse
 
+import boto3
+
 from sky.backends import backend_utils
+from sky.data import data_utils
 
 
 class CloudStorage(object):
@@ -38,19 +41,53 @@ class CloudStorage(object):
 class S3CloudStorage(CloudStorage):
     """AWS Cloud Storage."""
 
-    def make_download_dir_command(self, source: str, destination: str) -> str:
+    # List of commands to install AWS CLI
+    _GET_AWSCLI = [
+        'pip install awscli',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether S3 'url' is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        s3 = boto3.resource('s3')
+        bucket_name, path = data_utils.split_s3_path(url)
+        bucket = s3.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            # If there are more than 1 object in filter, then it is a directory
+            if num_objects == 3:
+                return True
+
+        # A directory with few or no items
+        return True
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads using AWS CLI.
         """
-        get_awscli = [
-            'pip install awscli',
-        ]
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
         download_via_awscli = f'mkdir -p {destination} && \
                                 aws s3 sync {source} {destination}'
 
-        all_commands = get_awscli
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI.
+        """
+        download_via_awscli = f'mkdir -p {destination} && \
+                                aws s3 cp {source} {destination}'
+
+        all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
         return ' && '.join(all_commands)
 
