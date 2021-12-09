@@ -57,10 +57,11 @@ def _truncate_long_string(s: str, max_length: int = 30) -> str:
     if len(s) <= max_length:
         return s
     splits = s.split(' ')
-    total = 0
     if len(splits[0]) > max_length:
         return splits[0][:max_length] + '...'
     # Truncate on word boundary.
+    i = 0
+    total = 0
     for i, part in enumerate(splits):
         total += len(part)
         if total >= max_length:
