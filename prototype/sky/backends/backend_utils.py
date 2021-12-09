@@ -365,10 +365,13 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
 def run(cmd, **kwargs):
     shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
+    executable = kwargs.pop('executable', '/bin/bash')
+    if not shell:
+        executable = None
     return subprocess.run(cmd,
                           shell=shell,
                           check=check,
-                          executable='/bin/bash',
+                          executable=executable,
                           **kwargs)
 
 
