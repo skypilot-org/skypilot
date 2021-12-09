@@ -73,7 +73,8 @@ class Task(object):
             before 'run'.  A typical use case is to set environment variables
             on each node based on all node IPs.
           docker_image: The base docker image that this Task will be built on.
-            In effect when LocalDockerBackend is used.  Defaults to 'ubuntu'.
+            In effect when LocalDockerBackend is used.  Defaults to
+            'continuumio/miniconda3'.
           container_name: Unused?
           private_key: Unused?
         """

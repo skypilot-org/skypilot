@@ -75,8 +75,9 @@ def create_dockerfile(
             setup_command=cmd)
 
     if run_command:
-        cmd = f'/bin/bash -c "cd /{workdir_name} && \
-                {CONDA_SETUP_PREFIX + run_command}"'
+        # Source .bashrc since it's not done on non-interactive shells
+        cmd = f'/bin/bash -c ". /root/.bashrc && cd /{workdir_name} && \
+                {run_command}"'
 
         dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=cmd)
 

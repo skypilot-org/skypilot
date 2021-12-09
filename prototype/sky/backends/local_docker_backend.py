@@ -1,5 +1,5 @@
 """Local docker backend for sky"""
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 import colorama
 import docker
@@ -37,13 +37,17 @@ class LocalDockerBackend(backends.Backend):
         }
     }
 
-    def __init__(self, use_gpu: bool = False):
+    def __init__(self, use_gpu: Union[bool, str] = 'auto'):
         """
         Args:
-            use_gpu: Whether to use GPUs or not. Sets container runtime
-              to 'nvidia' if set to True, else uses default runtime.
+            use_gpu: Whether to use GPUs. Either of True, False or 'auto'.
+              Sets container runtime to 'nvidia' if set to True, else uses the
+              default runtime. If set to 'auto', it detects if GPUs are present
+              and automatically sets the container runtime.
+
         """
-        self.use_gpu = use_gpu
+        self._use_gpu = backend_utils.check_local_gpus() if use_gpu == 'auto' \
+            else use_gpu
         self.volume_mounts = {}  # Stores the ResourceHandle->volume mounts map
         self.images = {}  # Stores the ResourceHandle->images map
         self.containers = {}
@@ -143,9 +147,10 @@ class LocalDockerBackend(backends.Backend):
         assert handle in self.images[handle], \
             f'No image found for {handle}, have you run Backend.provision()?'
         image_tag = self.images[handle]
-        logger.info(f'Image {image_tag} found. Running container now.')
         volumes = self.volume_mounts[handle]
-        runtime = 'nvidia' if self.use_gpu else None
+        runtime = 'nvidia' if self._use_gpu else None
+        logger.info(f'Image {image_tag} found. Running container now. use_gpu '
+                    f'is {self._use_gpu}')
         try:
             container = self.client.containers.run(image_tag,
                                                    remove=True,
@@ -158,6 +163,7 @@ class LocalDockerBackend(backends.Backend):
                 logger.error(
                     'Unable to run container - nvidia runtime for docker not '
                     'found. Have you installed nvidia-docker on your machine?')
+            raise e
         self.containers[handle] = container
         logger.info(
             f'Your container is now running with name {container.name}.\n'

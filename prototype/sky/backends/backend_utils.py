@@ -394,3 +394,16 @@ def run_with_log(cmd,
             proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
         proc.wait()
         return proc, stdout, stderr
+
+
+def check_local_gpus() -> bool:
+    """Returns whether GPUs are available on the local machine by checking
+    if nvidia-smi is installed.
+
+    Returns True if nvidia-smi is installed, false if not.
+    """
+    p = subprocess.run(["which", "nvidia-smi"], capture_output=True)
+    if p.returncode == 0:
+        return True
+    else:
+        return False
