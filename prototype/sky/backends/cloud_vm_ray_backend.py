@@ -376,11 +376,10 @@ class RetryingVmProvisioner(object):
         for region, zones in self._yield_region_zones(task, to_provision.cloud):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
-            logger.info(
-                f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
-                f'{region.name} '
-                f'({",".join(z.name for z in zones) if zones else ""}).{style.RESET_ALL}'
-            )
+            logger.info(f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
+                        f'{region.name} '
+                        f'({",".join(z.name for z in zones) if zones else ""})'
+                        f'.{style.RESET_ALL}')
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
