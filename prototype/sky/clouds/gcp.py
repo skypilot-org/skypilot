@@ -223,5 +223,6 @@ class GCP(clouds.Cloud):
         try:
             google.auth.default()
         except google.auth.exceptions.DefaultCredentialsError:
-            return False, 'GCP credentials not set. Run `gcloud auth application-default login`.'
+            return False, ('GCP credentials not set.' +
+                           ' Run `gcloud auth application-default login`.')
         return True, None

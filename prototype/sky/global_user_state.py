@@ -110,6 +110,7 @@ def get_enabled_clouds() -> List[str]:
                            (_ENABLED_CLOUDS_KEY,))
     for (value,) in rows:
         return json.loads(value)
+    return []
 
 
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:

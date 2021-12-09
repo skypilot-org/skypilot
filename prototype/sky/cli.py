@@ -479,12 +479,12 @@ def cpunode(cluster: str, port_forward: Optional[List[int]]):
 @cli.command()
 def init():
     """Determines a set of clouds that Sky will use.
-    
+
     It checks access credentials for AWS, Azure and GCP. Sky jobs will only
     run in clouds that you have access to. After configuring access for a
     cloud, rerun `sky init` to reflect the changes.
     """
-    click.echo('Sky will use the following clouds to run jobs.'
+    click.echo('Sky will use the following clouds to run jobs. '
                'To change this, configure\ncloud access credentials,'
                ' and rerun ' + click.style('sky init', bold=True) + '.\n')
 
@@ -492,10 +492,13 @@ def init():
     for cloud in [sky.AWS(), sky.Azure(), sky.GCP()]:
         click.echo(f'  Checking {cloud}...', nl=False)
         ok, reason = cloud.check_credentials()
-        click.echo(f'\r', nl=False)
-        status_msg = "enabled" if ok else "disabled"
+        click.echo('\r', nl=False)
+        status_msg = 'enabled' if ok else 'disabled'
         status_color = 'green' if ok else 'red'
-        click.echo('  ' + click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) + ' ' * 20)
+        click.echo(
+            '  ' +
+            click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
+            ' ' * 10)
         if ok:
             enabled_clouds.append(str(cloud))
         else:
