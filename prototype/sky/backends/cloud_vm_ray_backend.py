@@ -182,7 +182,7 @@ def _ssh_options_list(ssh_private_key: Optional[str],
 
 
 class RetryingVmProvisioner(object):
-    """A provisioner that retries different regions/zones within a cloud."""
+    """A provisioner that retries different cloud/regions/zones."""
 
     def __init__(self, log_dir: str, dag: Dag, optimize_target: OptimizeTarget):
         self._blocked_regions = set()
@@ -308,26 +308,27 @@ class RetryingVmProvisioner(object):
         if cluster_name is not None:
             # Try loading previously launched region/zones and try them first,
             # because we may have an existing cluster there.
-            try:
-                handle = global_user_state.get_handle_from_cluster_name(
-                    cluster_name)
-                path = handle.cluster_yaml
-                with open(path, 'r') as f:
-                    config = yaml.safe_load(f)
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            if handle is not None:
+                try:
+                    path = handle.cluster_yaml
+                    with open(path, 'r') as f:
+                        config = yaml.safe_load(f)
 
-                cloud_config = clouds.cloud_factory(config['provider']['type'])
-                if isinstance(cloud, cloud_config):
-                    if type(cloud) in (clouds.AWS, clouds.GCP):
-                        region = config['provider']['region']
-                        zones = config['provider']['availability_zone']
-                    elif isinstance(cloud, clouds.Azure):
-                        region = config['provider']['location']
-                        zones = None
-                    else:
-                        assert False, cloud
-            except FileNotFoundError:
-                # Happens if no previous cluster.yaml exists.
-                pass
+                    prev_resources = handle.resources
+                    if cloud.is_same_cloud(prev_resources.cloud):
+                        if type(cloud) in (clouds.AWS, clouds.GCP):
+                            region = config['provider']['region']
+                            zones = config['provider']['availability_zone']
+                        elif isinstance(cloud, clouds.Azure):
+                            region = config['provider']['location']
+                            zones = None
+                        else:
+                            assert False, cloud
+                except FileNotFoundError:
+                    # Happens if no previous cluster.yaml exists.
+                    pass
         if region is not None:
             region = clouds.Region(name=region)
             if zones is not None:
@@ -503,13 +504,17 @@ class CloudVmRayBackend(backends.Backend):
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
 
-        def __init__(self, head_ip: str, cluster_yaml: str,
-                     resources: Resources,
-                     tpu_delete_script: Optional[str]) -> None:
+        def __init__(
+                self,
+                head_ip: str,
+                cluster_yaml: str,
+                resources: Resources,
+                tpu_delete_script: Optional[str],
+        ) -> None:
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
-            self.tpu_delete_script = tpu_delete_script
             self.resources = resources
+            self.tpu_delete_script = tpu_delete_script
 
         def __repr__(self):
             return (f'ResourceHandle(\n\thead_ip={self.head_ip},'
