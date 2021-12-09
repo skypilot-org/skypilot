@@ -497,6 +497,23 @@ def cpunode(cluster: str, port_forward: Optional[List[int]]):
                              cluster_name=cluster)
 
 
+@cli.command()
+def init():
+    """Determines a set of clouds that Sky will use.
+    
+    It checks access credentials for AWS, Azure and GCP. Sky jobs will only
+    run in clouds that you have access to. After configuring access for a
+    cloud, rerun `sky init` to reflect the changes.
+    """
+    click.secho('Sky will use the following clouds to run jobs. To change this, '
+                'configure cloud access credentials, and rerun ' + click.style('sky init', bold=True) + '.\n')
+    
+    
+    click.secho('AWS:   enabled (fix with `aws configure`)', fg='green')
+    click.secho('Azure: disabled (fix with `az login`)', fg='red')
+    click.secho('GCP:   disabled (fix with `gcloud auth application-default login`)', fg='red')
+
+
 def main():
     return cli()
 

@@ -7,6 +7,7 @@ Examples/concepts:
     <cluster handle>: Automatically generated handle by Sky to interact with a
       cluster.
 """
+import json
 import os
 import pathlib
 import pickle
@@ -18,6 +19,8 @@ import uuid
 from sky import backends
 from sky import task as task_lib
 
+_AVAILABLE_CLOUDS_KEY = "available_clouds"
+
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
@@ -27,12 +30,15 @@ _CURSOR = _CONN.cursor()
 try:
     _CURSOR.execute('select * from tasks limit 0')
     _CURSOR.execute('select * from clusters limit 0')
+    _CURSOR.execute('select * from configurations limit 0')
 except sqlite3.OperationalError:
     # Tables do not exist, create them.
     _CURSOR.execute("""CREATE TABLE tasks
                 (id TEXT PRIMARY KEY, name TEXT, launched_at INTEGER)""")
     _CURSOR.execute("""CREATE TABLE clusters
                 (name TEXT PRIMARY KEY, lauched_at INTEGER, handle BLOB)""")
+    _CURSOR.execute("""CREATE TABLE configurations
+                (key TEXT PRIMARY KEY, value TEXT)""")
 _CONN.commit()
 
 
@@ -106,3 +112,14 @@ def get_clusters() -> List[Dict[str, Any]]:
             'handle': pickle.loads(handle),
         })
     return records
+
+def get_available_clouds() -> List[str]:
+    rows = _CURSOR.execute('SELECT value FROM configurations WHERE key = ?',
+                           (_AVAILABLE_CLOUDS_KEY,))
+    for (value,) in rows:
+        return json.loads(value)
+
+def set_available_clouds(available_clouds: List[str]) -> None:
+    _CURSOR.execute('INSERT OR REPLACE INTO configurations VALUES (?, ?)',
+                    (_AVAILABLE_CLOUDS_KEY, json.dumps(available_clouds)))
+    _CONN.commit()
