@@ -940,7 +940,9 @@ class CloudVmRayBackend(backends.Backend):
         else:
             backend_utils.run_no_outputs(command)
 
-    def ssh_head_command(self, handle) -> List[str]:
+    def ssh_head_command(self,
+                         handle: ResourceHandle,
+                         port_forward: Optional[List[int]] = None) -> List[str]:
         """Returns a 'ssh' command that logs into a cluster's head node."""
         assert handle.head_ip is not None, \
             f'provision() should have cached head ip: {handle}'
@@ -950,7 +952,14 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
         # Build command.  Imitating ray here.
-        return ['ssh', '-tt'] + _ssh_options_list(
+        ssh = ['ssh', '-tt']
+        if port_forward is not None:
+            for port in port_forward:
+                local = remote = port
+                logger.debug(
+                    f'Forwarding port {local} to port {remote} on localhost.')
+                ssh += ['-L', '{}:localhost:{}'.format(remote, local)]
+        return ssh + _ssh_options_list(
             ssh_private_key,
             self._ssh_control_path(handle)) + [f'{ssh_user}@{handle.head_ip}']
 
