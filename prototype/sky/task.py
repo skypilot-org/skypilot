@@ -73,7 +73,8 @@ class Task(object):
             before 'run'.  A typical use case is to set environment variables
             on each node based on all node IPs.
           docker_image: The base docker image that this Task will be built on.
-            In effect when LocalDockerBackend is used.  Defaults to 'ubuntu'.
+            In effect when LocalDockerBackend is used.  Defaults to
+            'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'.
           container_name: Unused?
           private_key: Unused?
         """
@@ -83,7 +84,8 @@ class Task(object):
         self.setup = setup
         self.post_setup_fn = post_setup_fn
         self.workdir = workdir
-        self.docker_image = docker_image if docker_image else 'ubuntu'
+        self.docker_image = docker_image if docker_image \
+            else 'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'
         self.container_name = container_name
         self._explicit_num_nodes = num_nodes  # Used as a scheduling constraint.
         self.num_nodes = 1 if num_nodes is None else num_nodes
