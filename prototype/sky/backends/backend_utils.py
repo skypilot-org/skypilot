@@ -202,6 +202,7 @@ def write_cluster_config(run_id: RunId,
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
             }))
+    config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
@@ -367,10 +368,15 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
 
 
 def run(cmd, **kwargs):
+    shell = kwargs.pop('shell', True)
+    check = kwargs.pop('check', True)
+    executable = kwargs.pop('executable', '/bin/bash')
+    if not shell:
+        executable = None
     return subprocess.run(cmd,
-                          shell=True,
-                          check=True,
-                          executable='/bin/bash',
+                          shell=shell,
+                          check=check,
+                          executable=executable,
                           **kwargs)
 
 
@@ -399,3 +405,15 @@ def run_with_log(cmd: List[str],
             proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
         proc.wait()
         return proc, stdout, stderr
+
+
+def check_local_gpus() -> bool:
+    """Returns whether GPUs are available on the local machine by checking
+    if nvidia-smi is installed.
+
+    Returns True if nvidia-smi is installed, false if not.
+    """
+    p = subprocess.run(['which', 'nvidia-smi'],
+                       capture_output=True,
+                       check=False)
+    return p.returncode == 0

@@ -419,13 +419,12 @@ class RetryingVmProvisioner(object):
                     backend_utils.run(
                         f'ray exec {cluster_config_file} '
                         f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
-                relpath = backend_utils.get_rel_path(cluster_config_file)
+                cluster_name = config_dict['cluster_name']
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing VM(s). Setup completed.{style.RESET_ALL}')
-                logger.info(
-                    f'\nTo log into the head VM:\t{style.BRIGHT}ray attach'
-                    f' {relpath}{style.RESET_ALL}\n')
+                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}sky ssh'
+                            f' {cluster_name}{style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -517,7 +516,8 @@ class CloudVmRayBackend(backends.Backend):
 
     def register_info(self, **kwargs) -> None:
         self._dag = kwargs['dag']
-        self._optimize_target = kwargs['optimize_target']
+        self._optimize_target = kwargs.pop('optimize_target',
+                                           OptimizeTarget.COST)
 
     def provision(self,
                   task: App,
@@ -773,8 +773,6 @@ class CloudVmRayBackend(backends.Backend):
                 stream_logs: bool) -> None:
         # Execution logic differs for three types of tasks.
 
-        global_user_state.add_task(task)
-
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):
             return self._execute_par_task(handle, task, stream_logs)
@@ -874,13 +872,11 @@ class CloudVmRayBackend(backends.Backend):
         colorama.init()
         style = colorama.Style
         if not teardown:
-            relpath = backend_utils.get_rel_path(handle.cluster_yaml)
             name = global_user_state.get_cluster_name_from_handle(handle)
-            logger.info(
-                '\nTo log into the head VM:\t'
-                f'{style.BRIGHT}ray attach {relpath} {style.RESET_ALL}\n'
-                '\nTo tear down the cluster:'
-                f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n')
+            logger.info('\nTo log into the head VM:\t'
+                        f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
+                        '\nTo tear down the cluster:'
+                        f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n')
             if handle.tpu_delete_script is not None:
                 logger.info(
                     'Tip: `sky down` will delete launched TPU(s) as well.')
@@ -955,8 +951,10 @@ class CloudVmRayBackend(backends.Backend):
         else:
             backend_utils.run_no_outputs(command)
 
-    def _run_command_on_head_via_ssh(self, handle, cmd, log_path, stream_logs):
-        """Uses 'ssh' to run 'cmd' on a cluster's head node."""
+    def ssh_head_command(self,
+                         handle: ResourceHandle,
+                         port_forward: Optional[List[int]] = None) -> List[str]:
+        """Returns a 'ssh' command that logs into a cluster's head node."""
         assert handle.head_ip is not None, \
             f'provision() should have cached head ip: {handle}'
         with open(handle.cluster_yaml, 'r') as f:
@@ -965,15 +963,26 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
         # Build command.  Imitating ray here.
-        command = ['ssh', '-tt'] + _ssh_options_list(
-            ssh_private_key, self._ssh_control_path(handle)) + [
-                f'{ssh_user}@{handle.head_ip}',
-                'bash',
-                '--login',
-                '-c',
-                '-i',
-                shlex.quote(
-                    f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                    f'PYTHONWARNINGS=ignore && ({cmd})'),
-            ]
+        ssh = ['ssh', '-tt']
+        if port_forward is not None:
+            for port in port_forward:
+                local = remote = port
+                logger.debug(
+                    f'Forwarding port {local} to port {remote} on localhost.')
+                ssh += ['-L', '{}:localhost:{}'.format(remote, local)]
+        return ssh + _ssh_options_list(
+            ssh_private_key,
+            self._ssh_control_path(handle)) + [f'{ssh_user}@{handle.head_ip}']
+
+    def _run_command_on_head_via_ssh(self, handle, cmd, log_path, stream_logs):
+        """Uses 'ssh' to run 'cmd' on a cluster's head node."""
+        base_ssh_command = self.ssh_head_command(handle)
+        command = base_ssh_command + [
+            'bash',
+            '--login',
+            '-c',
+            '-i',
+            shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                        f'PYTHONWARNINGS=ignore && ({cmd})'),
+        ]
         backend_utils.run_with_log(command, log_path, stream_logs)

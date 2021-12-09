@@ -38,8 +38,8 @@ with sky.Dag() as dag:
         sky.Resources(accelerators='V100'),
     })
 
-    # Use 'ray attach --port-forward=4650 <config_file>' to forward port to local.
-    # e.g., for AWS, 'ray attach --port-forward=4650 config/user/sky-<cluster_name>.yml'
+    # Use 'sky ssh --port-forward=4650 <cluster_name>' to forward port to local.
+    # e.g., for AWS, 'sky ssh --port-forward=4650 sky-12345'
     tensorboard = sky.Task(
         'tensorboard',
         workdir=workdir,
