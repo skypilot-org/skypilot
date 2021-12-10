@@ -16,6 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from sky import backends
+from sky import clouds
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
@@ -108,9 +109,11 @@ def get_clusters() -> List[Dict[str, Any]]:
 def get_enabled_clouds() -> List[str]:
     rows = _CURSOR.execute('SELECT value FROM config WHERE key = ?',
                            (_ENABLED_CLOUDS_KEY,))
+    ret = []
     for (value,) in rows:
-        return json.loads(value)
-    return []
+        ret = json.loads(value)
+        break
+    return [clouds.cloud_factory(cloud)() for cloud in ret]
 
 
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:

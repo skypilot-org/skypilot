@@ -17,6 +17,7 @@ from typing import Any, List, Optional
 
 import sky
 from sky import backends
+from sky import global_user_state
 from sky import logging
 from sky import optimizer
 
@@ -75,6 +76,7 @@ def execute(dag: sky.Dag,
     # TODO: Azure.
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]
+    task.set_enabled_clouds(global_user_state.get_enabled_clouds())
 
     if stages is None or Stage.OPTIMIZE in stages:
         if task.best_resources is None:

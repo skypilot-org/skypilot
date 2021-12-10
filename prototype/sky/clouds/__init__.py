@@ -14,3 +14,13 @@ __all__ = [
     'Region',
     'Zone',
 ]
+
+__CLOUD_DICT__ = {
+    'AWS': AWS,
+    'Azure': Azure,
+    'GCP': GCP,
+}
+
+
+def cloud_factory(name):
+    return __CLOUD_DICT__[name]

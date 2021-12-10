@@ -1,6 +1,6 @@
 """Service registry."""
 import collections
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import sky
 from sky import clouds
@@ -8,22 +8,11 @@ from sky import resources as resources_lib
 
 Resources = resources_lib.Resources
 
-_CLOUDS = [
-    clouds.AWS(),
-    clouds.Azure(),
-    clouds.GCP(),
-]
-
-
-def _filter_out_blocked_clouds(task: sky.Task):
-    available_clouds = []
-    for cloud in _CLOUDS:
-        for blocked_cloud in task.blocked_clouds:
-            if cloud.is_same_cloud(blocked_cloud):
-                break
-        else:  # non-blocked cloud (no break)
-            available_clouds.append(cloud)
-    return available_clouds
+def _is_cloud_in_list(cloud: clouds.Cloud, enabled_clouds: List[clouds.Cloud]):
+    for c in enabled_clouds:
+        if cloud.is_same_cloud(c):
+            return True
+    return False
 
 
 def _launchable_resources_fuzzy_eq(r1: Resources, r2: Resources):
@@ -55,21 +44,22 @@ def _filter_out_blocked_launchable_resources(
 def fill_in_launchable_resources(
         task: sky.Task,
         blocked_launchable_resources: Optional[List[Resources]],
-):
+) -> Dict[Resources, List[Resources]]:
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
     launchable = collections.defaultdict(list)
     for resources in task.get_resources():
-        if resources.is_launchable():
+        if resources.cloud is not None and not _is_cloud_in_list(
+                resources.cloud, task.enabled_clouds):
+            launchable[resources] = []
+        elif resources.is_launchable():
             launchable[resources] = [resources]
         elif resources.cloud is not None:
             launchable[
                 resources] = resources.cloud.get_feasible_launchable_resources(
                     resources)
         else:
-            # Remove blocked clouds.
-            available_clouds = _filter_out_blocked_clouds(task)
-            for cloud in available_clouds:
+            for cloud in task.enabled_clouds:
                 feasible_resources = cloud.get_feasible_launchable_resources(
                     resources)
                 launchable[resources].extend(feasible_resources)
