@@ -39,7 +39,6 @@ class Task(object):
             workdir: Optional[str] = None,
             num_nodes: Optional[int] = None,
             # Advanced:
-            storage_mounts: Optional[Dict[storage_lib.Storage, str]] = None,
             post_setup_fn: Optional[CommandGen] = None,
             docker_image: Optional[str] = None,
             container_name: Optional[str] = None,
@@ -70,8 +69,6 @@ class Task(object):
             treated as 1 node.  If > 1, each node will execute its own
             setup/run command; 'run' can either be a str, meaning all nodes get
             the same command, or a lambda, as documented above.
-          storage_mounts: A dictionary mapping a Storage object to the mount
-          path on the VM
           post_setup_fn: If specified, this generates commands to be run on all
             node(s), which are run after resource provisioning and 'setup' but
             before 'run'.  A typical use case is to set environment variables
@@ -84,7 +81,7 @@ class Task(object):
         self.name = name
         self.best_resources = None
         self.run = run
-        self.storage_mounts = {} if storage_mounts is None else storage_mounts
+        self.storage_mounts = {}
         self.storage_plans = {}
         self.setup = setup
         self.post_setup_fn = post_setup_fn
@@ -106,11 +103,6 @@ class Task(object):
 
         # Block some of the clouds.
         self.blocked_clouds = set()
-
-        # TODO: Allow for multiple storage mounts
-        assert len(
-            self.storage_mounts) <= 1, 'Multiple storage mounts is currently \
-        not supported yet!'
 
         # Semantics.
         if num_nodes is not None and num_nodes > 1 and isinstance(

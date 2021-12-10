@@ -35,14 +35,19 @@ with sky.Dag() as dag:
     # If the backend to be added is not specified, then Sky optimizer will
     # choose the backend bucket to be stored.
     storage = sky.Storage(name="imagenet-bucket", source="s3://imagenet-bucket")
+    # Can also be from a local dir
+    # storage = sky.Storage(name="imagenet-bucket", source="~/imagenet-data/")
 
     train = sky.Task(
         'train',
         workdir=workdir,
-        storage_mounts={storage: data_mount_path},
         setup=setup,
         run=run,
     )
+    train.set_storage_mounts({
+        storage: data_mount_path,
+    })
+
     train.set_inputs('s3://imagenet-bucket', estimated_size_gigabytes=150)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({

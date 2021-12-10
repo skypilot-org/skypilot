@@ -1,9 +1,9 @@
-"""Storage and Object Classes for Sky Data."""
+"""Storage and Store Classes for Sky Data."""
 import enum
 import os
 import glob
 from multiprocessing import pool
-from typing import Optional, Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import boto3
 from botocore import exceptions as s3_exceptions
@@ -51,6 +51,11 @@ class AbstractStore:
         """
         raise NotImplementedError
 
+    def sync_local_dir(self) -> None:
+        """Syncs local directory with Store bucket
+        """
+        raise NotImplementedError
+
     def upload_local_dir(self, local_path: str, num_threads: int = 32) -> None:
         """Uploads directory specified by local_path to the remote bucket
 
@@ -67,7 +72,7 @@ class AbstractStore:
             remote_path = local_file.replace(local_path, '')
             logger.info(f'Uploading {local_file} to {remote_path}')
             if os.path.isfile(local_file):
-                self.upload_file(local_file, remote_path)
+                self._upload_file(local_file, remote_path)
 
         pp = pool.ThreadPool(processes=num_threads)
         pp.map(_upload_thread, all_paths)
@@ -81,7 +86,7 @@ class AbstractStore:
         """
         assert local_path is not None
         local_path = os.path.expanduser(local_path)
-        iterator = self.remote_filepath_iterator()
+        iterator = self._remote_filepath_iterator()
         for remote_path in iterator:
             remote_path = next(iterator)
             if remote_path[-1] == '/':
@@ -90,7 +95,30 @@ class AbstractStore:
             if not os.path.exists(os.path.dirname(path)):
                 os.makedirs(os.path.dirname(path))
             logger.info(f'Downloading {remote_path} to {path}')
-            self.download_file(remote_path, path)
+            self._download_file(remote_path, path)
+
+    def _download_file(self, remote_path: str, local_path: str) -> None:
+        """Downloads file from remote to local on Store
+
+        Args:
+          remote_path: str; Remote file path on Store
+          local_path: str; Local file path on user's device
+        """
+        raise NotImplementedError
+
+    def _upload_file(self, local_path: str, remote_path: str) -> None:
+        """Uploads file from local path to remote path on Store
+
+        Args:
+          local_path: str; Local file path on user's device
+          remote_path: str; Remote file path on Store
+        """
+        raise NotImplementedError
+
+    def _remote_filepath_iterator(self) -> str:
+        """Generator that yields the remote file paths for the Store
+        """
+        raise NotImplementedError
 
 
 class Storage(object):
@@ -177,7 +205,7 @@ class Storage(object):
             raise ValueError(f'{cloud_type} not supported as a Store!')
 
         # Transfer data between buckets if needed
-        self._determine_bucket_transfer(store)
+        self._perform_bucket_transfer(store)
 
         assert store.is_initialized
         assert cloud_type not in self.stores, f'Storage type \
@@ -196,7 +224,7 @@ class Storage(object):
         for _, store in self.stores.items():
             store.delete()
 
-    def _determine_bucket_transfer(self, cur_store: AbstractStore):
+    def _perform_bucket_transfer(self, cur_store: AbstractStore):
         """Private Method that determines if buckets should transfer data
         between each other
 
@@ -229,7 +257,7 @@ class S3Store(AbstractStore):
 
         self.client = data_utils.create_s3_client(region)
         self.region = region
-        self.bucket, is_new_bucket = self.get_bucket()
+        self.bucket, is_new_bucket = self._get_bucket()
         assert not is_new_bucket or self.source
         if not self.source.startswith('s3://') and not self.source.startswith(
                 'gs://'):
@@ -238,7 +266,7 @@ class S3Store(AbstractStore):
                 self.upload_local_dir(self.source)
             else:
                 logger.info('Syncing Local to S3')
-                self.sync_from_local()
+                self.sync_local_dir()
         self.is_initialized = True
 
     def delete(self) -> None:
@@ -248,7 +276,7 @@ class S3Store(AbstractStore):
     def get_handle(self) -> StorageHandle:
         return boto3.resource('s3').Bucket(self.name)
 
-    def sync_from_local(self) -> None:
+    def sync_local_dir(self) -> None:
         """Syncs Local folder with S3 Bucket. This method is called after
         the folder is already uploaded onto the S3 bucket.
 
@@ -259,7 +287,7 @@ class S3Store(AbstractStore):
         sync_command = f'aws s3 sync {self.source} s3://{self.name}/'
         os.system(sync_command)
 
-    def get_bucket(self) -> Tuple[StorageHandle, bool]:
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the S3 bucket. If the S3 bucket does not exist, this
         method will create the S3 bucket
         """
@@ -269,7 +297,7 @@ class S3Store(AbstractStore):
             return bucket, False
         return self._create_s3_bucket(self.name), True
 
-    def upload_file(self, local_path: str, remote_path: str) -> None:
+    def _upload_file(self, local_path: str, remote_path: str) -> None:
         """Uploads file from local path to remote path on s3 bucket
         using the boto3 API
 
@@ -279,7 +307,7 @@ class S3Store(AbstractStore):
         """
         self.client.upload_file(local_path, self.name, remote_path)
 
-    def download_file(self, remote_path: str, local_path: str) -> None:
+    def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
         using the boto3 API
 
@@ -289,7 +317,7 @@ class S3Store(AbstractStore):
         """
         self.bucket.download_file(remote_path, local_path)
 
-    def remote_filepath_iterator(self) -> str:
+    def _remote_filepath_iterator(self) -> str:
         """Generator that yields the remote file paths from the S3 bucket
         """
         for obj in self.bucket.objects.filter():
@@ -343,7 +371,7 @@ class GcsStore(AbstractStore):
 
         self.client = data_utils.create_gcs_client()
         self.region = region
-        self.bucket, is_new_bucket = self.get_bucket()
+        self.bucket, is_new_bucket = self._get_bucket()
         assert not is_new_bucket or self.source
         if not self.source.startswith('gs://') and not self.source.startswith(
                 's3://'):
@@ -352,7 +380,7 @@ class GcsStore(AbstractStore):
                 self.upload_local_dir(self.source)
             else:
                 logger.info('Syncing Local to GCS')
-                self.sync_from_local()
+                self.sync_local_dir()
 
         self.is_initialized = True
 
@@ -363,7 +391,7 @@ class GcsStore(AbstractStore):
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
 
-    def sync_from_local(self) -> None:
+    def sync_local_dir(self) -> None:
         """Syncs Local folder with GCS Bucket. This method is called after
         the folder is already uploaded onto the GCS bucket.
         """
@@ -379,7 +407,7 @@ class GcsStore(AbstractStore):
         """
         data_transfer.s3_to_gcs(s3_store, self)
 
-    def get_bucket(self) -> Tuple[StorageHandle, bool]:
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the GCS bucket. If the GCS bucket does not exist, this
         method will create the GCS bucket
         """
@@ -390,7 +418,7 @@ class GcsStore(AbstractStore):
             logger.info(e)
             return self._create_gcs_bucket(self.name), True
 
-    def upload_file(self, local_file: str, remote_path: str) -> None:
+    def _upload_file(self, local_file: str, remote_path: str) -> None:
         """Uploads file from local path to remote path on GCS bucket
 
         Args:
@@ -400,7 +428,7 @@ class GcsStore(AbstractStore):
         blob = self.bucket.blob(remote_path)
         blob.upload_from_filename(local_file)
 
-    def download_file(self, remote_path: str, local_path: str) -> None:
+    def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
 
         Args:
@@ -410,7 +438,7 @@ class GcsStore(AbstractStore):
         blob = self.bucket.blob(remote_path)
         blob.download_to_filename(local_path)
 
-    def remote_filepath_iterator(self) -> str:
+    def _remote_filepath_iterator(self) -> str:
         """Generator that yields the remote file paths from the S3 bucket
         """
         iterator = self.bucket.list_blobs()
