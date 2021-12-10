@@ -1,6 +1,7 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
 import hashlib
+import inspect
 import json
 import os
 import pathlib
@@ -41,65 +42,27 @@ SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
 
 logger = logging.init_logger(__name__)
 
-_TASK_LAUNCH_CODE_GENERATOR = """\
+_TASK_LAUNCH_CODE_GENERATOR = textwrap.dedent("""\
         import io
         import os
         import ray
+        import sys
         import selectors
         import subprocess
+        from typing import Dict, List, Optional, Union
+        
         ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
         print('cluster_resources:', ray.cluster_resources())
         print('available_resources:', ray.available_resources())
         print('live nodes:', ray.state.node_ids())
-
-        def redirect_process_output(
-          proc, log_path, stream_logs, start_streaming_at=''):
-            dirname = os.path.dirname(log_path)
-            os.makedirs(dirname, exist_ok=True)
-
-            out_io = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
-            err_io = io.TextIOWrapper(proc.stderr, encoding='utf-8', newline='')
-            sel = selectors.DefaultSelector()
-            sel.register(out_io, selectors.EVENT_READ)
-            sel.register(err_io, selectors.EVENT_READ)
-
-            stdout = ''
-            stderr = ''
-
-            start_streaming_flag = False
-            with open(log_path, 'a') as fout:
-                while len(sel.get_map()) > 0:
-                    for key, _ in sel.select():
-                        line = key.fileobj.readline()
-                        if not line:
-                            sel.unregister(key.fileobj)
-                            break
-                        if start_streaming_at in line:
-                            start_streaming_flag = True
-                        if key.fileobj is out_io:
-                            stdout += line
-                            fout.write(line)
-                            fout.flush()
-                        else:
-                            stderr += line
-                            fout.write(line)
-                            fout.flush()
-                        if stream_logs and start_streaming_flag:
-                            print(line, end='')
-            return stdout, stderr
-
+        
         futures = []
+""")
 
-        def start_task(cmd, log_path, stream_logs):
-            # Set the executable to /bin/bash, so that the 'source ~/.bashrc'
-            # and 'source activate conda_env' can be used.
-            proc = subprocess.Popen(cmd,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    shell=True,
-                                    executable='/bin/bash')
-            redirect_process_output(proc, log_path, stream_logs)
-"""
+_TASK_LAUNCH_CODE_GENERATOR += inspect.getsource(
+    backend_utils.redirect_process_output)
+_TASK_LAUNCH_CODE_GENERATOR += inspect.getsource(backend_utils.run_with_log)
+_TASK_LAUNCH_CODE_GENERATOR += 'run_with_log = ray.remote(run_with_log)'
 
 
 def _get_cluster_config_template(task):
@@ -656,10 +619,7 @@ class CloudVmRayBackend(backends.Backend):
         # TODO: possible to open the port in the yaml?  Run Ray inside docker?
         log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
                                'tasks')
-        codegen = [
-            textwrap.dedent(
-                _TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
-        ]
+        codegen = [_TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs)]
         for i, t in enumerate(par_task.tasks):
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
             # to initialize conda, so that 'conda activate ...' works.
@@ -685,9 +645,16 @@ class CloudVmRayBackend(backends.Backend):
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
 
             task_i_codegen = textwrap.dedent(f"""\
-        futures.append(ray.remote(start_task) \\
-              .options(name='{name}'{resources_str}{num_gpus_str}) \\
-              .remote({cmd}, '{log_path}', {stream_logs}))
+        futures.append(run_with_log \\
+                .options(name='{name}'{resources_str}{num_gpus_str}) \\
+                .remote(
+                    {cmd}, 
+                    '{log_path}', 
+                    {stream_logs},
+                    return_none=True,
+                    shell=True,
+                    executable='/bin/bash',
+                ))
         """)
             codegen.append(task_i_codegen)
         # Block.
@@ -802,10 +769,7 @@ class CloudVmRayBackend(backends.Backend):
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
                                'tasks')
-        codegen = [
-            textwrap.dedent(
-                _TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
-        ]
+        codegen = [_TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs)]
         unused_acc, acc_count = _to_accelerator_and_count(task.best_resources)
         # Get private ips here as Ray internally uses 'node:private_ip' as
         # per-node custom resources.
@@ -834,9 +798,16 @@ class CloudVmRayBackend(backends.Backend):
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
             codegen.append(
                 textwrap.dedent(f"""\
-        futures.append(ray.remote(start_task) \\
-              .options(name='{name}'{resources_str}{num_gpus_str}) \\
-              .remote({cmd}, '{log_path}', {stream_logs}))
+        futures.append(run_with_log \\
+                .options(name='{name}'{resources_str}{num_gpus_str}) \\
+                .remote(
+                    {cmd}, 
+                    '{log_path}', 
+                    {stream_logs},
+                    return_none=True,
+                    shell=True,
+                    executable='/bin/bash',
+                ))
         """))
         # Block.
         codegen.append('ray.get(futures)\n')
