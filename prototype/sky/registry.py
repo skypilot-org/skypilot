@@ -8,7 +8,7 @@ from sky import resources as resources_lib
 
 Resources = resources_lib.Resources
 
-ALL_CLOUDS = [sky.AWS(), sky.Azure(), sky.GCP()]
+ALL_CLOUDS = [clouds.AWS(), clouds.Azure(), clouds.GCP()]
 
 
 def _is_cloud_in_list(cloud: clouds.Cloud, enabled_clouds: List[clouds.Cloud]):
