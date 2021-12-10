@@ -27,7 +27,6 @@ from sky import optimizer
 from sky import resources as resources_lib
 from sky import task as task_mod
 from sky.backends import backend_utils
-from sky.data import storage
 
 App = backend_utils.App
 
@@ -555,45 +554,6 @@ class CloudVmRayBackend(backends.Backend):
                         target=SKY_REMOTE_WORKDIR,
                         with_outputs=True)
 
-    def add_storage_objects(self, task: App) -> None:
-        # Hack: Hardcode storage_plans to AWS for optimal plan
-        # Optimizer is supposed to choose storage plan but we
-        # move this here temporarily
-        for k in task.storage_mounts.keys():
-            task.storage_plans[k] = storage.StorageType.S3
-
-        cache = []
-        storage_mounts = task.storage_mounts
-        storage_plans = task.storage_plans
-        for store, mnt_path in storage_mounts.items():
-            storage_type = storage_plans[store]
-            if storage_type not in cache:
-                if storage_type is storage.StorageType.S3:
-                    # TODO: allow for Storage mounting of different clouds
-                    task.update_file_mounts({'~/.aws': '~/.aws'})
-                elif storage_type is storage.StorageType.GCS:
-                    pass
-                elif storage_type is storage.StorageType.AZURE:
-                    pass
-                else:
-                    raise ValueError(f'Storage Type {storage_type} \
-                        does not exist!')
-                cache.append(storage_type)
-
-            if storage_type is storage.StorageType.S3:
-                task.update_file_mounts({
-                    mnt_path: 's3://' + store.name + '/',
-                })
-            elif storage_type is storage.StorageType.GCS:
-                task.update_file_mounts({
-                    mnt_path: 'gs://' + store.name + '/',
-                })
-            elif storage_type is storage.StorageType.AZURE:
-                pass
-            else:
-                raise ValueError(f'Storage Type {storage_type} \
-                    does not exist!')
-
     def sync_file_mounts(
             self,
             handle: ResourceHandle,
@@ -613,20 +573,21 @@ class CloudVmRayBackend(backends.Backend):
             # (download gsutil on remote, run gsutil on remote).  Consider
             # alternatives (smart_open, each provider's own sdk), a
             # data-transfer container etc.
-            store = cloud_stores.get_storage_from_path(src)
+            storage = cloud_stores.get_storage_from_path(src)
             # Sync 'src' to 'wrapped_dst', a safe-to-write "wrapped" path.
             wrapped_dst = backend_utils.wrap_file_mount(dst)
-            if store.is_directory(src):
-                sync = store.make_sync_dir_command(source=src,
-                                                   destination=wrapped_dst)
+            if storage.is_directory(src):
+                sync = storage.make_sync_dir_command(source=src,
+                                                     destination=wrapped_dst)
                 # It is a directory so make sure it exists.
                 mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
             else:
-                sync = store.make_sync_file_command(source=src,
-                                                    destination=wrapped_dst)
+                sync = storage.make_sync_file_command(source=src,
+                                                      destination=wrapped_dst)
                 # It is a file so make sure *its parent dir* exists.
                 mkdir_for_wrapped_dst = \
                     f'mkdir -p {os.path.dirname(wrapped_dst)}'
+            # Goal: point dst --> wrapped_dst.
             symlink_to_make = dst.rstrip('/')
             dir_of_symlink = os.path.dirname(symlink_to_make)
             # Below, use sudo in case the symlink needs sudo access to create.
@@ -909,12 +870,12 @@ class CloudVmRayBackend(backends.Backend):
                 logger.info(
                     'Tip: `sky down` will delete launched TPU(s) as well.')
 
-    def teardown_storage(self, task: App) -> None:
+    def teardown_ephemeral_storage(self, task: App) -> None:
         storage_mounts = task.storage_mounts
         if storage_mounts is not None:
-            for store, _ in storage_mounts.items():
-                if not store.persistent:
-                    store.delete()
+            for storage, _ in storage_mounts.items():
+                if not storage.persistent:
+                    storage.delete()
 
     def teardown(self, handle: ResourceHandle) -> None:
         backend_utils.run(f'ray down -y {handle.cluster_yaml}')

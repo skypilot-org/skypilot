@@ -3,7 +3,6 @@ from sky.data import storage
 
 def test_bucket_creation():
     storage_1 = storage.Storage(name='mluo-data', source='~/Downloads/temp/')
-
     storage_1.get_or_copy_to_s3()  # Transfers data from local to S3
     storage_1.get_or_copy_to_gcs()  # Transfers data from local to GCS
 
@@ -22,11 +21,11 @@ def test_bucket_transfer():
     )  # Transfers data from local to S3
 
     storage_2 = storage.Storage(name='mluo-data', source=bucket_path)
-    storage_2.get_or_copy_to_s3()  # Connects to existing S3 bucket
+    storage_2.get_or_copy_to_s3()
     storage_2.get_or_copy_to_gcs()  # Transfer data from S3 to Gs bucket
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     test_bucket_creation()
     test_bucket_deletion()
     test_bucket_transfer()

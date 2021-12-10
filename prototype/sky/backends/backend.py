@@ -52,7 +52,7 @@ class Backend(object):
         """Post execute(): e.g., print helpful inspection messages."""
         raise NotImplementedError
 
-    def teardown_storage(self, task: App) -> None:
+    def teardown_ephemeral_storage(self, task: App) -> None:
         raise NotImplementedError
 
     def teardown(self, handle: ResourceHandle) -> None:

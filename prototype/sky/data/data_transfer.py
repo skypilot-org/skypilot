@@ -30,17 +30,17 @@ from sky import logging
 logger = logging.init_logger(__name__)
 
 S3Store = Any
-GsStore = Any
+GcsStore = Any
 
 
-def s3_to_gcs(s3_store: S3Store, gs_store: GsStore) -> None:
+def s3_to_gcs(s3_store: S3Store, gs_store: GcsStore) -> None:
     """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
     Can be viewed from: https://console.cloud.google.com/transfer/cloud
 
     Args:
       s3_store: S3Store; AWS S3 Store that contains a
       corresponding S3 bucket
-      gs_store: GsStore; GCP Gs Store that contains a
+      gs_store: GcsStore; GCP Gs Store that contains a
       corresponding GCS bucket
     """
     credentials = GoogleCredentials.get_application_default()

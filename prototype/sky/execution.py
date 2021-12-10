@@ -86,8 +86,10 @@ def execute(dag: sky.Dag,
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
     if task.storage_mounts is not None:
+        import pdb
+        pdb.set_trace()
         # Optimizer should eventually choose where to store bucket
-        backend.add_storage_objects(task)
+        task.add_storage_mounts()
 
     if stages is None or Stage.PROVISION in stages:
         if handle is None:
@@ -131,5 +133,5 @@ def execute(dag: sky.Dag,
 
     if stages is None or Stage.TEARDOWN in stages:
         if teardown:
-            backend.teardown_storage(task)
+            backend.teardown_ephemeral_storage(task)
             backend.teardown(handle)

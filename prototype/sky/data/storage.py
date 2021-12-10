@@ -1,14 +1,13 @@
-"""Storage and Object Classes for Sky Data.
-"""
+"""Storage and Object Classes for Sky Data."""
 import enum
 import os
 import glob
 from multiprocessing import pool
-from typing import Any, Dict, Tuple
+from typing import Optional, Any, Dict, Tuple
 
 import boto3
-from botocore import exceptions as S3Exception
-from google.api_core import exceptions as GSException
+from botocore import exceptions as s3_exceptions
+from google.api_core import exceptions as gcs_exceptions
 
 from sky.data import data_utils, data_transfer
 from sky import logging
@@ -35,9 +34,9 @@ class AbstractStore:
     TODO: Mounting AbstractStore onto VMs
     """
 
-    def __init__(self, name: str, path: str):
+    def __init__(self, name: str, source: str):
         self.name = name
-        self.path = path
+        self.source = source
         self.is_initialized = False
 
     def delete(self) -> None:
@@ -47,8 +46,7 @@ class AbstractStore:
         raise NotImplementedError
 
     def get_handle(self) -> StorageHandle:
-        """
-        Returns the storage handle for use by the execution backend to attach
+        """Returns the storage handle for use by the execution backend to attach
         to VM/containers
         """
         raise NotImplementedError
@@ -118,7 +116,7 @@ class Storage(object):
     def __init__(self,
                  name: str,
                  source: Path,
-                 stores: Dict[str, AbstractStore] = None,
+                 stores: Optional[Dict[StorageType, AbstractStore]] = None,
                  persistent: bool = True):
         """Initializes a Storage object
 
@@ -132,7 +130,7 @@ class Storage(object):
           source: str; File path where the data is initially stored. Can be
             on local machine or on cloud (s3://, gs://, etc.). Paths do not need
             to be absolute.
-          stores: Optional; - specify pre-initialized stores (S3Store, GsStore)
+          stores: Optional; - specify pre-initialized stores (S3Store, GcsStore)
           persistent: bool; Whether to persist across sky runs.
         """
         self.name = name
@@ -141,10 +139,7 @@ class Storage(object):
 
         # Sky optimizer either adds a storage object instance or selects
         # from existing ones
-        if stores is None:
-            self.stores = {}
-        else:
-            self.stores = stores
+        self.stores = {} if stores is None else stores
 
     def get_or_copy_to_s3(self):
         """Adds AWS S3 Store to Storage
@@ -175,15 +170,14 @@ class Storage(object):
         store = None
 
         if cloud_type == StorageType.S3:
-            store = S3Store(name=self.name,
-                            path=self.source,
-                            stores=self.stores)
+            store = S3Store(name=self.name, source=self.source)
         elif cloud_type == StorageType.GCS:
-            store = GsStore(name=self.name,
-                            path=self.source,
-                            stores=self.stores)
+            store = GcsStore(name=self.name, source=self.source)
         else:
             raise ValueError(f'{cloud_type} not supported as a Store!')
+
+        # Transfer data between buckets if needed
+        self._determine_bucket_transfer(store)
 
         assert store.is_initialized
         assert cloud_type not in self.stores, f'Storage type \
@@ -202,35 +196,46 @@ class Storage(object):
         for _, store in self.stores.items():
             store.delete()
 
+    def _determine_bucket_transfer(self, cur_store: AbstractStore):
+        """Private Method that determines if buckets should transfer data
+        between each other
+
+        Args:
+          cur_store: AbstractStore; The current store that is being added
+          to self.stores
+        """
+        if self.source.startswith('s3://'):
+            if isinstance(cur_store, GcsStore):
+                logger.info('Initating GCS Data Transfer Service from S3->GCS')
+                assert StorageType.S3 in self.stores
+                s3_store = self.stores[StorageType.S3]
+                cur_store.transfer_to_gcs(s3_store)
+        elif self.source.startswith('gs://'):
+            if isinstance(cur_store, S3Store):
+                assert False, 'GCS -> S3 Data Transfer not implemented yet'
+
 
 class S3Store(AbstractStore):
     """S3Store inherits from Storage Object and represents the backend
     for S3 buckets.
-
-        Typical Usage Example:
-          # To initialize an S3Store implicitly, do this:
-          storage = Storage(name='imagenet-bucket', source='~/imagenet')
-
-          # Move data to S3, and creates an S3Store
-          storage.get_or_copy_to_s3()
     """
 
-    def __init__(self, name: str, path: str, region='us-east-2', stores=None):
-        super().__init__(name, path)
-        self.stores = stores
-        if 's3://' in self.path:
-            assert name == data_utils.split_s3_path(path)[
+    def __init__(self, name: str, source: str, region='us-east-2'):
+        super().__init__(name, source)
+        if self.source.startswith('s3://'):
+            assert name == data_utils.split_s3_path(source)[
                 0], 'S3 Bucket is specified as path, the name should be the \
              same as S3 bucket!'
 
         self.client = data_utils.create_s3_client(region)
         self.region = region
         self.bucket, is_new_bucket = self.get_bucket()
-        assert not is_new_bucket or self.path
-        if 's3://' not in self.path:
+        assert not is_new_bucket or self.source
+        if not self.source.startswith('s3://') and not self.source.startswith(
+                'gs://'):
             if is_new_bucket:
                 logger.info('Uploading Local to S3')
-                self.upload_local_dir(self.path)
+                self.upload_local_dir(self.source)
             else:
                 logger.info('Syncing Local to S3')
                 self.sync_from_local()
@@ -238,7 +243,7 @@ class S3Store(AbstractStore):
 
     def delete(self) -> None:
         logger.info(f'Deleting S3 Bucket {self.name}')
-        return self.delete_s3_bucket(self.name)
+        return self._delete_s3_bucket(self.name)
 
     def get_handle(self) -> StorageHandle:
         return boto3.resource('s3').Bucket(self.name)
@@ -251,7 +256,7 @@ class S3Store(AbstractStore):
         To increase parallelism, modify max_concurrent_requests in your
         aws config file (Default path: ~/.aws/config).
         """
-        sync_command = f'aws s3 sync {self.path} s3://{self.name}/'
+        sync_command = f'aws s3 sync {self.source} s3://{self.name}/'
         os.system(sync_command)
 
     def get_bucket(self) -> Tuple[StorageHandle, bool]:
@@ -262,7 +267,7 @@ class S3Store(AbstractStore):
         bucket = s3.Bucket(self.name)
         if bucket in s3.buckets.all():
             return bucket, False
-        return self.create_s3_bucket(self.name), True
+        return self._create_s3_bucket(self.name), True
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         """Uploads file from local path to remote path on s3 bucket
@@ -290,8 +295,8 @@ class S3Store(AbstractStore):
         for obj in self.bucket.objects.filter():
             yield obj.key
 
-    def create_s3_bucket(self, bucket_name: str,
-                         region='us-east-2') -> StorageHandle:
+    def _create_s3_bucket(self, bucket_name: str,
+                          region='us-east-2') -> StorageHandle:
         """Creates S3 bucket with specific name in specific region
 
         Args:
@@ -307,12 +312,12 @@ class S3Store(AbstractStore):
                 s3_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
-        except S3Exception.ClientError as e:
+        except s3_exceptions.ClientError as e:
             logger.info(e)
             return None
         return boto3.resource('s3').Bucket(bucket_name)
 
-    def delete_s3_bucket(self, bucket_name: str) -> None:
+    def _delete_s3_bucket(self, bucket_name: str) -> None:
         """Deletes S3 bucket, including all objects in bucket
 
         Args:
@@ -324,40 +329,27 @@ class S3Store(AbstractStore):
         bucket.delete()
 
 
-class GsStore(AbstractStore):
-    """GsStore inherits from Storage Object and represents the backend
+class GcsStore(AbstractStore):
+    """GcsStore inherits from Storage Object and represents the backend
     for GCS buckets.
-
-        Typical Usage Example:
-          # To initialize an GsStore implicitly, do this:
-          storage = Storage(name='imagenet-bucket', source='~/imagenet')
-
-          # Move data to Gcs, and creates an GsStore
-          storage.get_or_copy_to_gcs()
     """
 
-    def __init__(self, name: str, path: str, region='us-central1', stores=None):
-        super().__init__(name, path)
-        self.stores = stores
-        if 'gs://' in self.path:
-            assert name == data_utils.split_gcs_path(path)[
+    def __init__(self, name: str, source: str, region='us-central1'):
+        super().__init__(name, source)
+        if 'gs://' in self.source:
+            assert name == data_utils.split_gcs_path(source)[
                 0], 'GCS Bucket is specified as path, the name should be the \
                 same as GCS bucket!'
 
         self.client = data_utils.create_gcs_client()
-        self.name = name
         self.region = region
         self.bucket, is_new_bucket = self.get_bucket()
-        self.path = path
-        assert not is_new_bucket or self.path
-        if 'gs://' not in self.path:
-            if 's3://' in self.path:
-                logger.info('Initating GCS Data Transfer Service from S3->GCS')
-                s3_store = stores[StorageType.S3]
-                self.transfer_to_gcs(s3_store)
-            elif is_new_bucket and 's3://' not in self.path:
+        assert not is_new_bucket or self.source
+        if not self.source.startswith('gs://') and not self.source.startswith(
+                's3://'):
+            if is_new_bucket:
                 logger.info('Uploading Local to GCS')
-                self.upload_local_dir(self.path)
+                self.upload_local_dir(self.source)
             else:
                 logger.info('Syncing Local to GCS')
                 self.sync_from_local()
@@ -366,7 +358,7 @@ class GsStore(AbstractStore):
 
     def delete(self) -> None:
         logger.info(f'Deleting GCS Bucket {self.name}')
-        return self.delete_gcs_bucket(self.name)
+        return self._delete_gcs_bucket(self.name)
 
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
@@ -375,7 +367,7 @@ class GsStore(AbstractStore):
         """Syncs Local folder with GCS Bucket. This method is called after
         the folder is already uploaded onto the GCS bucket.
         """
-        sync_command = f'gsutil -m rsync -r {self.path} gs://{self.name}/'
+        sync_command = f'gsutil -m rsync -r {self.source} gs://{self.name}/'
         os.system(sync_command)
 
     def transfer_to_gcs(self, s3_store: AbstractStore) -> None:
@@ -394,9 +386,9 @@ class GsStore(AbstractStore):
         try:
             bucket = self.client.get_bucket(self.name)
             return bucket, False
-        except GSException.NotFound as e:
+        except gcs_exceptions.NotFound as e:
             logger.info(e)
-            return self.create_gcs_bucket(self.name), True
+            return self._create_gcs_bucket(self.name), True
 
     def upload_file(self, local_file: str, remote_path: str) -> None:
         """Uploads file from local path to remote path on GCS bucket
@@ -429,8 +421,8 @@ class GsStore(AbstractStore):
             except StopIteration:
                 break
 
-    def create_gcs_bucket(self, bucket_name: str,
-                          region='us-central1') -> StorageHandle:
+    def _create_gcs_bucket(self, bucket_name: str,
+                           region='us-central1') -> StorageHandle:
         """Creates GCS bucket with specific name in specific region
 
         Args:
@@ -445,7 +437,7 @@ class GsStore(AbstractStore):
             with storage class {new_bucket.storage_class}')
         return new_bucket
 
-    def delete_gcs_bucket(self, bucket_name: str) -> None:
+    def _delete_gcs_bucket(self, bucket_name: str) -> None:
         """Deletes GCS bucket, including all objects in bucket
 
         Args:

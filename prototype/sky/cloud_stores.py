@@ -69,8 +69,7 @@ class S3CloudStorage(CloudStorage):
         return True
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Downloads using AWS CLI.
-        """
+        """Downloads using AWS CLI."""
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
@@ -82,8 +81,7 @@ class S3CloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
-        """Downloads a file using AWS CLI.
-        """
+        """Downloads a file using AWS CLI."""
         download_via_awscli = f'mkdir -p {destination} && \
                                 aws s3 cp {source} {destination}'
 
