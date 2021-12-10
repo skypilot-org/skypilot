@@ -4,7 +4,6 @@ import getpass
 import hashlib
 import json
 import os
-import pathlib
 import re
 import shlex
 import subprocess
@@ -476,6 +475,8 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name)
+                if dryrun:
+                    return
             except exceptions.ResourcesUnavailableError as e:
                 if launchable_retries_disabled:
                     logger.warning(
