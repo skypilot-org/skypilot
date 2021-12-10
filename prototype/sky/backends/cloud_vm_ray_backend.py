@@ -1,6 +1,7 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
 import hashlib
+import inspect
 import json
 import os
 import pathlib
@@ -41,65 +42,27 @@ SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
 
 logger = logging.init_logger(__name__)
 
-_TASK_LAUNCH_CODE_GENERATOR = """\
+_TASK_LAUNCH_CODE_GENERATOR = textwrap.dedent("""\
         import io
         import os
         import ray
+        import sys
         import selectors
         import subprocess
+        from typing import Dict, List, Optional, Union
+        
         ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
         print('cluster_resources:', ray.cluster_resources())
         print('available_resources:', ray.available_resources())
         print('live nodes:', ray.state.node_ids())
-
-        def redirect_process_output(
-          proc, log_path, stream_logs, start_streaming_at=''):
-            dirname = os.path.dirname(log_path)
-            os.makedirs(dirname, exist_ok=True)
-
-            out_io = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
-            err_io = io.TextIOWrapper(proc.stderr, encoding='utf-8', newline='')
-            sel = selectors.DefaultSelector()
-            sel.register(out_io, selectors.EVENT_READ)
-            sel.register(err_io, selectors.EVENT_READ)
-
-            stdout = ''
-            stderr = ''
-
-            start_streaming_flag = False
-            with open(log_path, 'a') as fout:
-                while len(sel.get_map()) > 0:
-                    for key, _ in sel.select():
-                        line = key.fileobj.readline()
-                        if not line:
-                            sel.unregister(key.fileobj)
-                            break
-                        if start_streaming_at in line:
-                            start_streaming_flag = True
-                        if key.fileobj is out_io:
-                            stdout += line
-                            fout.write(line)
-                            fout.flush()
-                        else:
-                            stderr += line
-                            fout.write(line)
-                            fout.flush()
-                        if stream_logs and start_streaming_flag:
-                            print(line, end='')
-            return stdout, stderr
-
+        
         futures = []
+""")
 
-        def start_task(cmd, log_path, stream_logs):
-            # Set the executable to /bin/bash, so that the 'source ~/.bashrc'
-            # and 'source activate conda_env' can be used.
-            proc = subprocess.Popen(cmd,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    shell=True,
-                                    executable='/bin/bash')
-            redirect_process_output(proc, log_path, stream_logs)
-"""
+_TASK_LAUNCH_CODE_GENERATOR += inspect.getsource(
+    backend_utils.redirect_process_output)
+_TASK_LAUNCH_CODE_GENERATOR += inspect.getsource(backend_utils.run_with_log)
+_TASK_LAUNCH_CODE_GENERATOR += 'run_with_log = ray.remote(run_with_log)'
 
 
 def _get_cluster_config_template(cloud):
@@ -416,13 +379,12 @@ class RetryingVmProvisioner(object):
                     backend_utils.run(
                         f'ray exec {cluster_config_file} '
                         f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
-                relpath = backend_utils.get_rel_path(cluster_config_file)
+                cluster_name = config_dict['cluster_name']
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing VM(s). Setup completed.{style.RESET_ALL}')
-                logger.info(
-                    f'\nTo log into the head VM:\t{style.BRIGHT}ray attach'
-                    f' {relpath}{style.RESET_ALL}\n')
+                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}sky ssh'
+                            f' {cluster_name}{style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -533,7 +495,8 @@ class CloudVmRayBackend(backends.Backend):
 
     def register_info(self, **kwargs) -> None:
         self._dag = kwargs['dag']
-        self._optimize_target = kwargs['optimize_target']
+        self._optimize_target = kwargs.pop('optimize_target',
+                                           OptimizeTarget.COST)
 
     def provision(self,
                   task: App,
@@ -685,10 +648,7 @@ class CloudVmRayBackend(backends.Backend):
         # TODO: possible to open the port in the yaml?  Run Ray inside docker?
         log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
                                'tasks')
-        codegen = [
-            textwrap.dedent(
-                _TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
-        ]
+        codegen = [_TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs)]
         for i, t in enumerate(par_task.tasks):
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
             # to initialize conda, so that 'conda activate ...' works.
@@ -714,9 +674,16 @@ class CloudVmRayBackend(backends.Backend):
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
 
             task_i_codegen = textwrap.dedent(f"""\
-        futures.append(ray.remote(start_task) \\
-              .options(name='{name}'{resources_str}{num_gpus_str}) \\
-              .remote({cmd}, '{log_path}', {stream_logs}))
+        futures.append(run_with_log \\
+                .options(name='{name}'{resources_str}{num_gpus_str}) \\
+                .remote(
+                    {cmd}, 
+                    '{log_path}', 
+                    {stream_logs},
+                    return_none=True,
+                    shell=True,
+                    executable='/bin/bash',
+                ))
         """)
             codegen.append(task_i_codegen)
         # Block.
@@ -791,8 +758,6 @@ class CloudVmRayBackend(backends.Backend):
                 stream_logs: bool) -> None:
         # Execution logic differs for three types of tasks.
 
-        global_user_state.add_task(task)
-
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):
             return self._execute_par_task(handle, task, stream_logs)
@@ -833,10 +798,7 @@ class CloudVmRayBackend(backends.Backend):
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
                                'tasks')
-        codegen = [
-            textwrap.dedent(
-                _TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
-        ]
+        codegen = [_TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs)]
         unused_acc, acc_count = _to_accelerator_and_count(task.best_resources)
         # Get private ips here as Ray internally uses 'node:private_ip' as
         # per-node custom resources.
@@ -865,9 +827,16 @@ class CloudVmRayBackend(backends.Backend):
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
             codegen.append(
                 textwrap.dedent(f"""\
-        futures.append(ray.remote(start_task) \\
-              .options(name='{name}'{resources_str}{num_gpus_str}) \\
-              .remote({cmd}, '{log_path}', {stream_logs}))
+        futures.append(run_with_log \\
+                .options(name='{name}'{resources_str}{num_gpus_str}) \\
+                .remote(
+                    {cmd}, 
+                    '{log_path}', 
+                    {stream_logs},
+                    return_none=True,
+                    shell=True,
+                    executable='/bin/bash',
+                ))
         """))
         # Block.
         codegen.append('ray.get(futures)\n')
@@ -892,16 +861,21 @@ class CloudVmRayBackend(backends.Backend):
         colorama.init()
         style = colorama.Style
         if not teardown:
-            relpath = backend_utils.get_rel_path(handle.cluster_yaml)
             name = global_user_state.get_cluster_name_from_handle(handle)
-            logger.info(
-                '\nTo log into the head VM:\t'
-                f'{style.BRIGHT}ray attach {relpath} {style.RESET_ALL}\n'
-                '\nTo tear down the cluster:'
-                f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n')
+            logger.info('\nTo log into the head VM:\t'
+                        f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
+                        '\nTo tear down the cluster:'
+                        f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n')
             if handle.tpu_delete_script is not None:
                 logger.info(
                     'Tip: `sky down` will delete launched TPU(s) as well.')
+
+    def teardown_ephemeral_storage(self, task: App) -> None:
+        storage_mounts = task.storage_mounts
+        if storage_mounts is not None:
+            for storage, _ in storage_mounts.items():
+                if not storage.persistent:
+                    storage.delete()
 
     def teardown(self, handle: ResourceHandle) -> None:
         backend_utils.run(f'ray down -y {handle.cluster_yaml}')
@@ -973,8 +947,10 @@ class CloudVmRayBackend(backends.Backend):
         else:
             backend_utils.run_no_outputs(command)
 
-    def _run_command_on_head_via_ssh(self, handle, cmd, log_path, stream_logs):
-        """Uses 'ssh' to run 'cmd' on a cluster's head node."""
+    def ssh_head_command(self,
+                         handle: ResourceHandle,
+                         port_forward: Optional[List[int]] = None) -> List[str]:
+        """Returns a 'ssh' command that logs into a cluster's head node."""
         assert handle.head_ip is not None, \
             f'provision() should have cached head ip: {handle}'
         with open(handle.cluster_yaml, 'r') as f:
@@ -983,15 +959,26 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
         # Build command.  Imitating ray here.
-        command = ['ssh', '-tt'] + _ssh_options_list(
-            ssh_private_key, self._ssh_control_path(handle)) + [
-                f'{ssh_user}@{handle.head_ip}',
-                'bash',
-                '--login',
-                '-c',
-                '-i',
-                shlex.quote(
-                    f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                    f'PYTHONWARNINGS=ignore && ({cmd})'),
-            ]
+        ssh = ['ssh', '-tt']
+        if port_forward is not None:
+            for port in port_forward:
+                local = remote = port
+                logger.debug(
+                    f'Forwarding port {local} to port {remote} on localhost.')
+                ssh += ['-L', '{}:localhost:{}'.format(remote, local)]
+        return ssh + _ssh_options_list(
+            ssh_private_key,
+            self._ssh_control_path(handle)) + [f'{ssh_user}@{handle.head_ip}']
+
+    def _run_command_on_head_via_ssh(self, handle, cmd, log_path, stream_logs):
+        """Uses 'ssh' to run 'cmd' on a cluster's head node."""
+        base_ssh_command = self.ssh_head_command(handle)
+        command = base_ssh_command + [
+            'bash',
+            '--login',
+            '-c',
+            '-i',
+            shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                        f'PYTHONWARNINGS=ignore && ({cmd})'),
+        ]
         backend_utils.run_with_log(command, log_path, stream_logs)

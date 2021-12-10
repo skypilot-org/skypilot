@@ -100,6 +100,9 @@ else
    format_changed
 fi
 
+# Run pylint
+pylint --load-plugins pylint_quotes sky
+
 if ! git diff --quiet &>/dev/null; then
     echo 'Reformatted files. Please review and stage the changes.'
     echo 'Changes not staged for commit:'
