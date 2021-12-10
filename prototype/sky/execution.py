@@ -86,8 +86,6 @@ def execute(dag: sky.Dag,
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
     if task.storage_mounts is not None:
-        import pdb
-        pdb.set_trace()
         # Optimizer should eventually choose where to store bucket
         task.add_storage_mounts()
 

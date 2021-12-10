@@ -1,6 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import os
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Callable, Dict, List, Optional, Set, Union
 from urllib import parse
 import yaml
 
