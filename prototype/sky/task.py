@@ -7,6 +7,7 @@ import yaml
 import sky
 from sky import clouds
 from sky import resources as resources_lib
+from sky.data import storage as storage_lib
 
 Resources = resources_lib.Resources
 # A lambda generating commands (node addrs -> {addr: cmd_i}).
@@ -81,6 +82,8 @@ class Task(object):
         self.name = name
         self.best_resources = None
         self.run = run
+        self.storage_mounts = {}
+        self.storage_plans = {}
         self.setup = setup
         self.post_setup_fn = post_setup_fn
         self.workdir = workdir
@@ -229,6 +232,63 @@ class Task(object):
                 'call set_time_estimator() first'.format(self))
         return self.time_estimator_func(resources)
 
+    def set_storage_mounts(self,
+                           storage_mounts: Dict[storage_lib.Storage, str]):
+        """Sets the storage mounts for this Task
+
+        Advanced method for users. Storage mounts map a Storage object
+        (see sky/data/storage.py) to a mount path on the Cloud VM.
+        The storage object can be from a local folder or from an existing
+        cloud bucket.
+
+        Example:
+            task.set_storage_mounts({
+                Storage(name='imagenet', source='s3://imagenet-bucket'): \
+                '/tmp/imagenet/',
+            })
+
+        Args:
+            storage_mounts: a dict of {Storage : mount_path}, where mount_path
+            is the path on the Cloud VM where the Storage object will be
+            mounted on
+        """
+        self.storage_mounts = storage_mounts
+        return self
+
+    def add_storage_mounts(self) -> None:
+        """Adds storage mounts to the Storage object
+        """
+        # Hack: Hardcode storage_plans to AWS for optimal plan
+        # Optimizer is supposed to choose storage plan but we
+        # move this here temporarily
+        for store in self.storage_mounts.keys():
+            if len(store.stores) == 0:
+                self.storage_plans[store] = storage_lib.StorageType.S3
+                store.get_or_copy_to_s3()
+            else:
+                assert storage_lib.StorageType.S3 in store.stores
+
+        storage_mounts = self.storage_mounts
+        storage_plans = self.storage_plans
+        for store, mnt_path in storage_mounts.items():
+            storage_type = storage_plans[store]
+            if storage_type is storage_lib.StorageType.S3:
+                # TODO: allow for Storage mounting of different clouds
+                self.update_file_mounts({'~/.aws': '~/.aws'})
+                self.update_file_mounts({
+                    mnt_path: 's3://' + store.name + '/',
+                })
+            elif storage_type is storage_lib.StorageType.GCS:
+                self.update_file_mounts({
+                    mnt_path: 'gs://' + store.name + '/',
+                })
+                assert False, 'TODO: GCS Authentication not done'
+            elif storage_type is storage_lib.StorageType.AZURE:
+                assert False, 'TODO: Azure Blob not mountable yet'
+            else:
+                raise ValueError(f'Storage Type {storage_type} \
+                    does not exist!')
+
     def set_file_mounts(self, file_mounts: Dict[str, str]):
         """Sets the file mounts for this Task.
 
@@ -254,6 +314,27 @@ class Task(object):
                 raise ValueError('File mounts: remote paths should be absolute,'
                                  f' not relative or "~/...".  Found: {remote}')
         return self
+
+    def update_file_mounts(self, file_mounts: Dict[str, str]):
+        """Updates the file mount for this Task
+
+        This should be run before provisioning.
+
+        Example:
+
+            task.update_file_mounts({
+                '~/.config': '~/Documents/config',
+                '/tmp/workdir': '/local/workdir/cnn-cifar10',
+            })
+
+        Args:
+          file_mounts: a dict of { remote_path: local_path }, where remote is
+            the VM on which this Task will eventually run on, and local is the
+            node from which the task is launched.
+        """
+        if self.file_mounts is None:
+            self.file_mounts = {}
+        self.file_mounts.update(file_mounts)
 
     def set_blocked_clouds(self, blocked_clouds: Set[clouds.Cloud]):
         """Sets the clouds that this task should not run on."""

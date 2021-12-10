@@ -870,6 +870,13 @@ class CloudVmRayBackend(backends.Backend):
                 logger.info(
                     'Tip: `sky down` will delete launched TPU(s) as well.')
 
+    def teardown_ephemeral_storage(self, task: App) -> None:
+        storage_mounts = task.storage_mounts
+        if storage_mounts is not None:
+            for storage, _ in storage_mounts.items():
+                if not storage.persistent:
+                    storage.delete()
+
     def teardown(self, handle: ResourceHandle) -> None:
         backend_utils.run(f'ray down -y {handle.cluster_yaml}')
         if handle.tpu_delete_script is not None:
