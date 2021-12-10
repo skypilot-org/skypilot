@@ -158,9 +158,9 @@ class Optimizer(object):
 
     @staticmethod
     def _optimize_cost(
-            dag: Dag,
-            minimize_cost: bool = True,
-            blocked_launchable_resources: Optional[List[Resources]] = None,
+        dag: Dag,
+        minimize_cost: bool = True,
+        blocked_launchable_resources: Optional[List[Resources]] = None,
     ):
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
@@ -171,8 +171,8 @@ class Optimizer(object):
         # node -> {resources -> best estimated cost}
         dp_best_cost = collections.defaultdict(dict)
         # d[node][resources][parent] = (best parent resources, best parent cost)
-        dp_point_backs = collections.defaultdict(lambda: collections.
-                                                 defaultdict(dict))
+        dp_point_backs = collections.defaultdict(
+            lambda: collections.defaultdict(dict))
 
         for node_i, node in enumerate(topo_order):
             # Base case: a special source node.
@@ -201,8 +201,8 @@ class Optimizer(object):
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     raise exceptions.ResourcesUnavailableError(
-                        f'No launchable resource found for task `{node}`. '
-                        'To fix: relax its Resources() requirements, '
+                        f'No launchable resource found for task\n{node}. '
+                        'To fix: relax its Resources() requirements,'
                         'and run `sky init` to check your access to clouds.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.warning(
