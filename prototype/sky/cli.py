@@ -71,6 +71,9 @@ def _truncate_long_string(s: str, max_length: int = 50) -> str:
 
 def _default_interactive_node_name(node_type: str):
     """Returns a deterministic name to refer to the same node."""
+    # FIXME: this technically can collide in Azure/GCP with another
+    # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
+    # which is the current cloud for interactive nodes.
     assert node_type in ('cpunode', 'gpunode'), node_type
     return f'sky-{node_type}-{getpass.getuser()}'
 

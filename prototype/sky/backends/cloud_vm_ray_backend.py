@@ -1,5 +1,6 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
+import getpass
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import subprocess
 import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
+import uuid
 import yaml
 
 import colorama
@@ -556,22 +558,24 @@ class CloudVmRayBackend(backends.Backend):
                   stream_logs: bool,
                   cluster_name: Optional[str] = None) -> ResourceHandle:
         """Provisions using 'ray up'."""
+        if cluster_name is None:
+            # TODO: change this ID formatting to something more pleasant.
+            # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
+            cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                             self._optimize_target)
         try:
             config_dict = provisioner.provision_with_retries(
                 task, to_provision, dryrun, stream_logs, cluster_name)
-        except exceptions.ResourcesUnavailableError:
+        except exceptions.ResourcesUnavailableError as e:
             # TODO: mention what the "requested resources" are.
             raise exceptions.ResourcesUnavailableError(
-                'Failed to provision all possible launchable resources. '
-                'To fix, relax the task\'s resource requirements.')
+                'Failed to provision all possible launchable resources.') from e
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
-        if cluster_name is None:
-            cluster_name = pathlib.Path(cluster_config_file).stem
 
         handle = self.ResourceHandle(
             cluster_yaml=cluster_config_file,

@@ -1,6 +1,5 @@
 """Util constants/functions for the backends."""
 import datetime
-import getpass
 import io
 import os
 import pathlib
@@ -10,7 +9,6 @@ import tempfile
 import textwrap
 import time
 from typing import Dict, List, Optional, Union
-import uuid
 import yaml
 import zlib
 
@@ -119,11 +117,6 @@ def write_cluster_config(run_id: RunId,
     aws_default_ami = None
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
-
-    if cluster_name is None:
-        # TODO: change this ID formatting to something more pleasant.
-        # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-        cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
     setup_sh_path = None
     if task.setup is not None:
