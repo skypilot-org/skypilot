@@ -84,10 +84,9 @@ rsync_filter:
 setup_commands:
   # This AMI's system Python is version 2+.
   - pip3 install -U ray==1.7.0
+  - mkdir -p /tmp/workdir
 {%- if setup_sh_path is not none %}
-  - mkdir -p /tmp/workdir && cd /tmp/workdir && bash /tmp/setup.sh
-{%- else %}
-  - mkdir -p /tmp/workdir && cd /tmp/workdir
+  - cd /tmp/workdir && bash /tmp/setup.sh
 {%- endif %}
 
 # Command to start ray on the head node. You don't need to change this.
