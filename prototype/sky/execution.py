@@ -95,6 +95,10 @@ def execute(
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
+    if task.storage_mounts is not None:
+        # Optimizer should eventually choose where to store bucket
+        task.add_storage_mounts()
+
     if stages is None or Stage.PROVISION in stages:
         if handle is None:
             # **Dangerous**.  If passing a handle, changes to (1) setup commands
@@ -137,4 +141,5 @@ def execute(
 
     if stages is None or Stage.TEARDOWN in stages:
         if teardown:
+            backend.teardown_ephemeral_storage(task)
             backend.teardown(handle)
