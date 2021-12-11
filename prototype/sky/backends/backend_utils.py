@@ -421,38 +421,6 @@ def check_local_gpus() -> bool:
     return p.returncode == 0
 
 
-def is_same_resources(r1: Resources, r2: Resources) -> bool:
-    """Returns whether two resources are the same.
-
-    Returns True if they are the same, False if not.
-    """
-    if (r1.cloud is None) != (r2.cloud is None):
-        # r1 and r2's cloud should be both None or both not None
-        return False
-
-    if r1.cloud is not None and not r1.cloud.is_same_cloud(r2.cloud):
-        return False
-    # Now: r1.cloud == r2.cloud
-
-    if r1.instance_type is not None and r1.instance_type != r2.instance_type:
-        return False
-    # Now: r1.instance_type == r2.instance_type
-
-    if r1.accelerators != r2.accelerators:
-        return False
-    # Now: r1.accelerators == r2.accelerators
-
-    if r1.accelerator_args != r2.accelerator_args:
-        return False
-    # Now: r1.accelerator_args == r2.accelerator_args
-
-    if r1.use_spot != r2.use_spot:
-        return False
-
-    # Now: r1 == r2
-    return True
-
-
 def is_same_requested_resources(r1: Set[Resources], r2: Set[Resources]):
     """Returns whether the requested resources are the same.
 
@@ -463,14 +431,7 @@ def is_same_requested_resources(r1: Set[Resources], r2: Set[Resources]):
     Returns:
         True if the resources are the same, false otherwise.
     """
-    if len(r1) != len(r2):
-        return False
-    r2 = copy.deepcopy(r2)
-    for r in r1:
-        for o_r in r2:
-            if is_same_resources(r, o_r):
-                r2.remove(o_r)
-                break
-        else:  # no same resource found
-            return False
-    return True
+    assert len(r1) == 1 and len(r2) == 1
+    r1 = list(r1)[0]
+    r2 = list(r2)[0]
+    return r1.is_same_resources(r2)

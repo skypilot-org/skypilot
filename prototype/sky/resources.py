@@ -102,3 +102,46 @@ class Resources(object):
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
                 self.accelerators)
         return hourly_cost * hours
+    
+    
+    def is_same_resources(self, other) -> bool:
+        """Returns whether two resources are the same.
+
+        Returns True if they are the same, False if not.
+        """
+        if (self.cloud is None) != (other.cloud is None):
+            # self and other's cloud should be both None or both not None
+            return False
+
+        if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
+            return False
+        # self.cloud == other.cloud
+
+        if self.instance_type is not None and self.instance_type != other.instance_type:
+            return False
+        # self.instance_type == other.instance_type
+
+        if self.accelerators != other.accelerators:
+            return False
+        # self.accelerators == other.accelerators
+
+        if self.accelerator_args != other.accelerator_args:
+            return False
+        # self.accelerator_args == other.accelerator_args
+
+        if self.use_spot != other.use_spot:
+            return False
+
+        # self == other
+        return True
+
+    def is_launchable_fuzzy_equal(self, other) -> bool:
+        """Whether the resources are the fuzzily same launchable resources."""
+        assert self.cloud is not None and other.cloud is not None
+        if not self.cloud.is_same_cloud(other.cloud):
+            return False
+        if self.instance_type is not None or other.instance_type is not None:
+            return self.instance_type == other.instance_type
+        # For GCP, when a accelerator type fails to launch, it should be blocked
+        # regardless of the count, since the larger number will fail either.
+        return self.accelerators.keys() == other.accelerators.keys()

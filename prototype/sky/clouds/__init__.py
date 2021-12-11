@@ -1,7 +1,4 @@
 """Clouds in Sky."""
-import importlib
-import os
-
 from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import Region
 from sky.clouds.cloud import Zone
@@ -17,13 +14,3 @@ __all__ = [
     'Region',
     'Zone',
 ]
-
-__CLOUD_DICT__ = {
-    'aws': AWS,
-    'azure': Azure,
-    'gcp': GCP,
-}
-
-
-def cloud_factory(name):
-    return __CLOUD_DICT__[name]

@@ -413,7 +413,7 @@ class RetryingVmProvisioner(object):
                     stream_logs=stream_logs,
                     cluster_name=cluster_name)
                 if config_dict is not None:
-                    config_dict['resources'] = to_provision
+                    config_dict['launched_resources'] = to_provision
             except exceptions.ResourcesUnavailableError as e:
                 if launchable_retries_disabled:
                     logger.warning(
@@ -480,7 +480,8 @@ class CloudVmRayBackend(backends.Backend):
             return (f'ResourceHandle(\n\thead_ip={self.head_ip},'
                     '\n\tcluster_yaml='
                     f'{backend_utils.get_rel_path(self.cluster_yaml)}, '
-                    f'\n\trequested_resources={self.requested_resources}'
+                    f'\n\trequested_resources={self.requested_nodes}x '
+                    f'{self.requested_resources}, '
                     f'\n\tlaunched_resources={self.launched_resources}'
                     f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
@@ -501,18 +502,14 @@ class CloudVmRayBackend(backends.Backend):
             self,
             task: App,
             to_provision: Resources,
-            cluster_name: Optional[str],
-            dryrun: bool,
+            cluster_name: str,
     ):
-        # Try to launch the exiting cluster first
-        if cluster_name is None:
-            # TODO: change this ID formatting to something more pleasant.
-            # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-            cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
-        if dryrun:
-            return cluster_name, to_provision
+
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
+            # Cluster already exists. Check if the  resources are equal
+            # for the previous and current request. Only reuse the cluster
+            # when the requested resources are the same.
             if task.num_nodes == handle.requested_nodes and \
                 backend_utils.is_same_requested_resources(
                     handle.requested_resources, task.resources):
@@ -549,12 +546,18 @@ class CloudVmRayBackend(backends.Backend):
                   stream_logs: bool,
                   cluster_name: Optional[str] = None):
         """Provisions using 'ray up'."""
+        # Try to launch the exiting cluster first
+        if cluster_name is None:
+            # TODO: change this ID formatting to something more pleasant.
+            # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
+            cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                             self._optimize_target)
 
-        cluster_name, to_provision = self._check_existing_cluster(
-            task, to_provision, cluster_name, dryrun)
+        if not dryrun:  # dry run doesn't need to check existing cluster.
+            cluster_name, to_provision = self._check_existing_cluster(
+                task, to_provision, cluster_name)
         requested_resources = task.resources
         try:
             config_dict = provisioner.provision_with_retries(
@@ -566,7 +569,7 @@ class CloudVmRayBackend(backends.Backend):
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
-        provisioned_resources = config_dict['resources']
+        provisioned_resources = config_dict['launched_resources']
         backend_utils.wait_until_ray_cluster_ready(provisioned_resources.cloud,
                                                    cluster_config_file,
                                                    task.num_nodes)
