@@ -21,7 +21,7 @@ with sky.Dag() as dag:
             --do_train \
             --max_seq_length 128 \
             --per_device_train_batch_size 32 \
-            --num_train_epochs 1 \
+            --max_steps 50 \
             --fp16 2>&1 | tee run-{lr}.log'
 
     per_trial_resources = sky.Resources(accelerators={'V100': 1})

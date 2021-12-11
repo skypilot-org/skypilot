@@ -53,7 +53,7 @@ Path = str
 Backend = backends.Backend
 
 
-def _truncate_long_string(s: str, max_length: int = 30) -> str:
+def _truncate_long_string(s: str, max_length: int = 50) -> str:
     if len(s) <= max_length:
         return s
     splits = s.split(' ')
@@ -66,11 +66,14 @@ def _truncate_long_string(s: str, max_length: int = 30) -> str:
         total += len(part)
         if total >= max_length:
             break
-    return ' '.join(splits[:i]) + '...'
+    return ' '.join(splits[:i]) + ' ...'
 
 
 def _default_interactive_node_name(node_type: str):
     """Returns a deterministic name to refer to the same node."""
+    # FIXME: this technically can collide in Azure/GCP with another
+    # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
+    # which is the current cloud for interactive nodes.
     assert node_type in ('cpunode', 'gpunode'), node_type
     return f'sky-{node_type}-{getpass.getuser()}'
 
@@ -126,9 +129,11 @@ def _create_and_ssh_into_node(
     # re-use it)
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
+    # Disable check, since the returncode could be non-zero if the user Ctrl-D.
     backend_utils.run(backend.ssh_head_command(handle,
                                                port_forward=port_forward),
-                      shell=False)
+                      shell=False,
+                      check=False)
 
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
     click.echo('The interactive node is still running.')
@@ -167,7 +172,7 @@ def cli():
 @click.option('--dryrun',
               '-n',
               default=False,
-              type=bool,
+              is_flag=True,
               help='If True, do not actually run the job.')
 def run(yaml_path: Path, cluster: str, dryrun: bool):
     """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
@@ -243,24 +248,54 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
-def status():
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+def status(all):  # pylint: disable=redefined-builtin
     """Show launched clusters."""
+    show_all = all
     clusters_status = global_user_state.get_clusters()
     cluster_table = prettytable.PrettyTable()
     cluster_table.field_names = [
-        'CLUSTER NAME', 'LAUNCHED', 'RESOURCES', 'LAST USE'
+        'NAME',
+        'LAUNCHED',
+        'RESOURCES',
+        'COMMAND',
+        'STATUS',
     ]
+    cluster_table.align['COMMAND'] = 'l'
+
+    def shorten_duration_diff_string(diff):
+        diff = diff.replace('second', 'sec')
+        diff = diff.replace('minute', 'min')
+        diff = diff.replace('hour', 'hr')
+        return diff
+
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
         handle = cluster_status['handle']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
+        resources_str = '<initializing>'
+        if (handle.requested_nodes is not None and
+                handle.launched_resources is not None):
+            resources_str = (f'{handle.requested_nodes}x '
+                             f'{handle.launched_resources}')
         cluster_table.add_row([
+            # NAME
             cluster_status['name'],
-            duration.diff_for_humans(),
-            f'{handle.requested_nodes}x {handle.launched_resources}',
-            _truncate_long_string(cluster_status['last_use']),
+            # LAUNCHED
+            shorten_duration_diff_string(duration.diff_for_humans()),
+            # RESOURCES
+            resources_str,
+            # COMMAND
+            cluster_status['last_use']
+            if show_all else _truncate_long_string(cluster_status['last_use']),
+            # STATUS
+            cluster_status['status'],
         ])
-    cluster_table.align['LAST USE'] = 'l'
     click.echo(f'Clusters\n{cluster_table}')
 
 

@@ -31,7 +31,8 @@ except sqlite3.OperationalError:
         name TEXT PRIMARY KEY,
         lauched_at INTEGER,
         handle BLOB,
-        last_use TEXT)""")
+        last_use TEXT,
+        status TEXT)""")
 _CONN.commit()
 
 
@@ -54,13 +55,15 @@ def _get_pretty_entry_point() -> str:
 
 
 def add_or_update_cluster(cluster_name: str,
-                          cluster_handle: backends.Backend.ResourceHandle):
+                          cluster_handle: backends.Backend.ResourceHandle,
+                          ready: bool):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
     last_use = _get_pretty_entry_point()
-    _CURSOR.execute('INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?)',
-                    (cluster_name, cluster_launched_at, handle, last_use))
+    _CURSOR.execute('INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?, ?)',
+                    (cluster_name, cluster_launched_at, handle, last_use,
+                     'UP' if ready else 'INIT'))
     _CONN.commit()
 
 
@@ -89,11 +92,12 @@ def get_cluster_name_from_handle(
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')
     records = []
-    for name, launched_at, handle, last_use in rows:
+    for name, launched_at, handle, last_use, status in rows:
         records.append({
             'name': name,
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
+            'status': status,
         })
     return records
