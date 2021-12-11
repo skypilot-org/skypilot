@@ -247,13 +247,17 @@ def status():
     """Show launched clusters."""
     clusters_status = global_user_state.get_clusters()
     cluster_table = prettytable.PrettyTable()
-    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED', 'LAST USE']
+    cluster_table.field_names = [
+        'CLUSTER NAME', 'LAUNCHED', 'RESOURCES', 'LAST USE'
+    ]
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
+        handle = cluster_status['handle']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         cluster_table.add_row([
             cluster_status['name'],
             duration.diff_for_humans(),
+            f'{handle.requested_nodes}x {handle.launched_resources}',
             _truncate_long_string(cluster_status['last_use']),
         ])
     cluster_table.align['LAST USE'] = 'l'
@@ -364,7 +368,7 @@ def down(
         name = record['name']
         handle = record['handle']
         backend.teardown(handle)
-        global_user_state.remove_cluster(name)
+
         click.secho(f'Tearing down cluster {name}...done.', fg='green')
 
 
