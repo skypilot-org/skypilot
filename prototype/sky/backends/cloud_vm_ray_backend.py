@@ -531,8 +531,8 @@ class CloudVmRayBackend(backends.Backend):
                     'Do you want to relaunch the cluster with the new request?',
                     default=True,
                     abort=True)
-                self.teardown(handle)
-                return cluster_name, to_provision
+            self.teardown(handle)
+            return cluster_name, to_provision
         logger.info('Hint: if you want to reuse an existing cluster, '
                     'you can use the --cluster-name flag or '
                     'specify sky.execute(dag, cluster_name=cluster_name). '
