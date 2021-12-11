@@ -2,6 +2,7 @@
 import ast
 import getpass
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -42,74 +43,35 @@ SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
 
 logger = logging.init_logger(__name__)
 
-_TASK_LAUNCH_CODE_GENERATOR = """\
+_TASK_LAUNCH_CODE_GENERATOR = textwrap.dedent("""\
         import io
         import os
         import ray
+        import sys
         import selectors
         import subprocess
+        from typing import Dict, List, Optional, Union
+        
         ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
         print('cluster_resources:', ray.cluster_resources())
         print('available_resources:', ray.available_resources())
         print('live nodes:', ray.state.node_ids())
-
-        def redirect_process_output(
-          proc, log_path, stream_logs, start_streaming_at=''):
-            dirname = os.path.dirname(log_path)
-            os.makedirs(dirname, exist_ok=True)
-
-            out_io = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
-            err_io = io.TextIOWrapper(proc.stderr, encoding='utf-8', newline='')
-            sel = selectors.DefaultSelector()
-            sel.register(out_io, selectors.EVENT_READ)
-            sel.register(err_io, selectors.EVENT_READ)
-
-            stdout = ''
-            stderr = ''
-
-            start_streaming_flag = False
-            with open(log_path, 'a') as fout:
-                while len(sel.get_map()) > 0:
-                    for key, _ in sel.select():
-                        line = key.fileobj.readline()
-                        if not line:
-                            sel.unregister(key.fileobj)
-                            break
-                        if start_streaming_at in line:
-                            start_streaming_flag = True
-                        if key.fileobj is out_io:
-                            stdout += line
-                            fout.write(line)
-                            fout.flush()
-                        else:
-                            stderr += line
-                            fout.write(line)
-                            fout.flush()
-                        if stream_logs and start_streaming_flag:
-                            print(line, end='')
-            return stdout, stderr
-
+        
         futures = []
+""")
 
-        def start_task(cmd, log_path, stream_logs):
-            # Set the executable to /bin/bash, so that the 'source ~/.bashrc'
-            # and 'source activate conda_env' can be used.
-            proc = subprocess.Popen(cmd,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    shell=True,
-                                    executable='/bin/bash')
-            redirect_process_output(proc, log_path, stream_logs)
-"""
+_TASK_LAUNCH_CODE_GENERATOR += inspect.getsource(
+    backend_utils.redirect_process_output)
+_TASK_LAUNCH_CODE_GENERATOR += inspect.getsource(backend_utils.run_with_log)
+_TASK_LAUNCH_CODE_GENERATOR += 'run_with_log = ray.remote(run_with_log)'
 
 
-def _get_cluster_config_template(task):
+def _get_cluster_config_template(cloud):
     cloud_to_template = {
         clouds.AWS: 'config/aws-ray.yml.j2',
         # clouds.Azure: 'config/azure-ray.yml.j2',
         clouds.GCP: 'config/gcp-ray.yml.j2',
     }
-    cloud = task.best_resources.cloud
     path = cloud_to_template[type(cloud)]
     return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
@@ -184,7 +146,7 @@ def _ssh_options_list(ssh_private_key: Optional[str],
 
 
 class RetryingVmProvisioner(object):
-    """A provisioner that retries different regions/zones within a cloud."""
+    """A provisioner that retries different cloud/regions/zones."""
 
     def __init__(self, log_dir: str, dag: Dag, optimize_target: OptimizeTarget):
         self._blocked_regions = set()
@@ -313,26 +275,31 @@ class RetryingVmProvisioner(object):
         else:
             assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, task: App, cloud: clouds.Cloud):
+    def _yield_region_zones(self, cloud: clouds.Cloud, cluster_name: str):
         region = None
         zones = None
-        try:
-            # Try reading previously launched region/zones and try them first,
-            # because we may have an existing cluster there.
-            path = _get_cluster_config_template(task)[:-len('.j2')]
-            with open(path, 'r') as f:
-                config = yaml.safe_load(f)
-            if type(cloud) in (clouds.AWS, clouds.GCP):
-                region = config['provider']['region']
-                zones = config['provider']['availability_zone']
-            elif isinstance(cloud, clouds.Azure):
-                region = config['provider']['location']
-                zones = None
-            else:
-                assert False, cloud
-        except FileNotFoundError:
-            # Happens if no previous cluster.yaml exists.
-            pass
+        # Try loading previously launched region/zones and try them first,
+        # because we may have an existing cluster there.
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        if handle is not None:
+            try:
+                path = handle.cluster_yaml
+                with open(path, 'r') as f:
+                    config = yaml.safe_load(f)
+
+                prev_resources = handle.launched_resources
+                if cloud.is_same_cloud(prev_resources.cloud):
+                    if type(cloud) in (clouds.AWS, clouds.GCP):
+                        region = config['provider']['region']
+                        zones = config['provider']['availability_zone']
+                    elif isinstance(cloud, clouds.Azure):
+                        region = config['provider']['location']
+                        zones = None
+                    else:
+                        assert False, cloud
+            except FileNotFoundError:
+                # Happens if no previous cluster.yaml exists.
+                pass
         if region is not None:
             region = clouds.Region(name=region)
             if zones is not None:
@@ -355,7 +322,8 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         self._clear_blocklist()
-        for region, zones in self._yield_region_zones(task, to_provision.cloud):
+        for region, zones in self._yield_region_zones(to_provision.cloud,
+                                                      cluster_name):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
             logger.info(
@@ -365,7 +333,7 @@ class RetryingVmProvisioner(object):
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
-                _get_cluster_config_template(task),
+                _get_cluster_config_template(to_provision.cloud),
                 region=region,
                 zones=zones,
                 dryrun=dryrun,
@@ -461,8 +429,10 @@ class RetryingVmProvisioner(object):
                                dryrun: bool, stream_logs: bool,
                                cluster_name: str):
         """Provision with retries for all launchable resources."""
+        assert cluster_name is not None, 'cluster_name must be specified.'
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
+
         style = colorama.Style
         # Retrying launchable resources.
         provision_failed = True
@@ -477,6 +447,7 @@ class RetryingVmProvisioner(object):
                     cluster_name=cluster_name)
                 if dryrun:
                     return
+                config_dict['launched_resources'] = to_provision
             except exceptions.ResourcesUnavailableError as e:
                 if launchable_retries_disabled:
                     logger.warning(
@@ -521,6 +492,9 @@ class CloudVmRayBackend(backends.Backend):
         - (required) Path to a cluster.yaml file.
         - (optional) A cached head node public IP.  Filled in after a
             successful provision().
+        - (required) Requested resources
+        - (required) Requested num nodes
+        - (required) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
 
@@ -528,15 +502,24 @@ class CloudVmRayBackend(backends.Backend):
                      *,
                      cluster_yaml: str,
                      head_ip: Optional[str] = None,
+                     requested_resources: Resources,
+                     requested_nodes: int,
+                     launched_resources: Resources,
                      tpu_delete_script: Optional[str] = None) -> None:
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
+            self.requested_resources = requested_resources
+            self.requested_nodes = requested_nodes
+            self.launched_resources = launched_resources
             self.tpu_delete_script = tpu_delete_script
 
         def __repr__(self):
             return (f'ResourceHandle(\n\thead_ip={self.head_ip},'
                     '\n\tcluster_yaml='
                     f'{backend_utils.get_rel_path(self.cluster_yaml)}, '
+                    f'\n\trequested_resources={self.requested_nodes}x '
+                    f'{self.requested_resources}, '
+                    f'\n\tlaunched_resources={self.launched_resources}'
                     f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
     def __init__(self):
@@ -552,21 +535,60 @@ class CloudVmRayBackend(backends.Backend):
         self._optimize_target = kwargs.pop('optimize_target',
                                            OptimizeTarget.COST)
 
+    def _check_existing_cluster(
+            self,
+            task: App,
+            to_provision: Resources,
+            cluster_name: str,
+    ):
+
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+
+        if handle is not None:
+            # Cluster already exists. Check if the  resources are equal
+            # for the previous and current request. Only reuse the cluster
+            # when the requested resources are the same.
+            if task.num_nodes == handle.requested_nodes and \
+                backend_utils.is_same_requested_resources(
+                    handle.requested_resources, task.resources):
+
+                # Use the existing cluster.
+                task.best_resources = handle.launched_resources
+                return cluster_name, handle.launched_resources
+            logger.warning(f'Reusing existing cluster {cluster_name} with '
+                           'different requested resources.\n'
+                           f'Existing requested resources: '
+                           f'\t{handle.requested_resources}\n'
+                           f'Newly requested resources: \t{task.resources}\n')
+            logger.info(
+                f'Creating new cluster {cluster_name}: {to_provision} ...\n')
+        logger.info(f'Creating new cluster {cluster_name}: {to_provision} ...\n'
+                    'Hint: if you want to reuse an existing cluster, '
+                    'you can use the --cluster-name flag or '
+                    'specify sky.execute(dag, cluster_name=cluster_name). '
+                    '(use `sky status` to see the cluster names)')
+        return cluster_name, to_provision
+
     def provision(self,
                   task: App,
                   to_provision: Resources,
                   dryrun: bool,
                   stream_logs: bool,
-                  cluster_name: Optional[str] = None) -> ResourceHandle:
+                  cluster_name: Optional[str] = None):
         """Provisions using 'ray up'."""
+        # Try to launch the exiting cluster first
         if cluster_name is None:
             # TODO: change this ID formatting to something more pleasant.
             # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
             cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
-
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                             self._optimize_target)
+
+        if not dryrun:  # dry run doesn't need to check existing cluster.
+            cluster_name, to_provision = self._check_existing_cluster(
+                task, to_provision, cluster_name)
+        requested_resources = task.resources
         try:
             config_dict = provisioner.provision_with_retries(
                 task, to_provision, dryrun, stream_logs, cluster_name)
@@ -577,11 +599,18 @@ class CloudVmRayBackend(backends.Backend):
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
+        provisioned_resources = config_dict['launched_resources']
+        backend_utils.wait_until_ray_cluster_ready(provisioned_resources.cloud,
+                                                   cluster_config_file,
+                                                   task.num_nodes)
 
         handle = self.ResourceHandle(
             cluster_yaml=cluster_config_file,
             # Cache head ip in the handle to speed up ssh operations.
             head_ip=self._get_node_ips(cluster_config_file, task.num_nodes)[0],
+            requested_resources=requested_resources,
+            requested_nodes=task.num_nodes,
+            launched_resources=provisioned_resources,
             # TPU.
             tpu_delete_script=config_dict.get('tpu-delete-script'))
         global_user_state.add_or_update_cluster(cluster_name,
@@ -703,10 +732,7 @@ class CloudVmRayBackend(backends.Backend):
         # TODO: possible to open the port in the yaml?  Run Ray inside docker?
         log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
                                'tasks')
-        codegen = [
-            textwrap.dedent(
-                _TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
-        ]
+        codegen = [_TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs)]
         for i, t in enumerate(par_task.tasks):
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
             # to initialize conda, so that 'conda activate ...' works.
@@ -732,9 +758,16 @@ class CloudVmRayBackend(backends.Backend):
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
 
             task_i_codegen = textwrap.dedent(f"""\
-        futures.append(ray.remote(start_task) \\
-              .options(name='{name}'{resources_str}{num_gpus_str}) \\
-              .remote({cmd}, '{log_path}', {stream_logs}))
+        futures.append(run_with_log \\
+                .options(name='{name}'{resources_str}{num_gpus_str}) \\
+                .remote(
+                    {cmd}, 
+                    '{log_path}', 
+                    {stream_logs},
+                    return_none=True,
+                    shell=True,
+                    executable='/bin/bash',
+                ))
         """)
             codegen.append(task_i_codegen)
         # Block.
@@ -858,10 +891,7 @@ class CloudVmRayBackend(backends.Backend):
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
                                'tasks')
-        codegen = [
-            textwrap.dedent(
-                _TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs))
-        ]
+        codegen = [_TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs)]
         unused_acc, acc_count = _to_accelerator_and_count(task.best_resources)
         # Get private ips here as Ray internally uses 'node:private_ip' as
         # per-node custom resources.
@@ -890,9 +920,16 @@ class CloudVmRayBackend(backends.Backend):
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
             codegen.append(
                 textwrap.dedent(f"""\
-        futures.append(ray.remote(start_task) \\
-              .options(name='{name}'{resources_str}{num_gpus_str}) \\
-              .remote({cmd}, '{log_path}', {stream_logs}))
+        futures.append(run_with_log \\
+                .options(name='{name}'{resources_str}{num_gpus_str}) \\
+                .remote(
+                    {cmd}, 
+                    '{log_path}', 
+                    {stream_logs},
+                    return_none=True,
+                    shell=True,
+                    executable='/bin/bash',
+                ))
         """))
         # Block.
         codegen.append('ray.get(futures)\n')
@@ -927,10 +964,19 @@ class CloudVmRayBackend(backends.Backend):
                 logger.info(
                     'Tip: `sky down` will delete launched TPU(s) as well.')
 
+    def teardown_ephemeral_storage(self, task: App) -> None:
+        storage_mounts = task.storage_mounts
+        if storage_mounts is not None:
+            for storage, _ in storage_mounts.items():
+                if not storage.persistent:
+                    storage.delete()
+
     def teardown(self, handle: ResourceHandle) -> None:
         backend_utils.run(f'ray down -y {handle.cluster_yaml}')
         if handle.tpu_delete_script is not None:
             backend_utils.run(f'bash {handle.tpu_delete_script}')
+        name = global_user_state.get_cluster_name_from_handle(handle)
+        global_user_state.remove_cluster(name)
 
     def _get_node_ips(self,
                       cluster_yaml: str,

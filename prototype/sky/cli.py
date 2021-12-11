@@ -262,9 +262,11 @@ def status(all):  # pylint: disable=redefined-builtin
     cluster_table.field_names = [
         'NAME',
         'LAUNCHED',
+        'RESOURCES',
         'COMMAND',
         'STATUS',
     ]
+    cluster_table.align['COMMAND'] = 'l'
 
     def shorten_duration_diff_string(diff):
         diff = diff.replace('second', 'sec')
@@ -274,15 +276,21 @@ def status(all):  # pylint: disable=redefined-builtin
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
+        handle = cluster_status['handle']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         cluster_table.add_row([
+            # NAME
             cluster_status['name'],
+            # LAUNCHED
             shorten_duration_diff_string(duration.diff_for_humans()),
+            # RESOURCES
+            f'{handle.requested_nodes}x {handle.launched_resources}',
+            # COMMAND
             cluster_status['last_use']
             if show_all else _truncate_long_string(cluster_status['last_use']),
+            # STATUS
             cluster_status['status'],
         ])
-    cluster_table.align['COMMAND'] = 'l'
     click.echo(f'Clusters\n{cluster_table}')
 
 
@@ -390,7 +398,7 @@ def down(
         name = record['name']
         handle = record['handle']
         backend.teardown(handle)
-        global_user_state.remove_cluster(name)
+
         click.secho(f'Tearing down cluster {name}...done.', fg='green')
 
 

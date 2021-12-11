@@ -23,6 +23,8 @@ DOCKERFILE_SETUPCMD = """RUN {setup_command}"""
 DOCKERFILE_COPYCMD = """COPY {copy_command}"""
 DOCKERFILE_RUNCMD = """CMD {run_command}"""
 
+CONDA_SETUP_PREFIX = """. $(conda info --base)/etc/profile.d/conda.sh || true"""
+
 
 def create_dockerfile(
         base_image: str,
@@ -56,20 +58,33 @@ def create_dockerfile(
     """
     dockerfile_contents = DOCKERFILE_TEMPLATE.format(base_image=base_image)
 
+    # Copy workdir to image
+    workdir_name = ''
     if copy_path:
-        dir_name = os.path.basename(os.path.dirname(copy_path))
+        workdir_name = os.path.basename(os.path.dirname(copy_path))
         # NOTE: This relies on copy_path being copied to build context.
-        copy_docker_cmd = f'{dir_name} /{dir_name}/'
+        copy_docker_cmd = f'{workdir_name} /{workdir_name}/'
         dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
             copy_command=copy_docker_cmd)
 
+    # Add setup commands (if they exist) after initializing conda
     if setup_command:
-        dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(
-            setup_command=setup_command)
+        setup_command_append = f' && {setup_command}'
+    else:
+        setup_command_append = ''
+    # cd to workdir and prepend conda init commands
+    cmd = f'/bin/bash -c "cd /{workdir_name} && \
+            {CONDA_SETUP_PREFIX + setup_command_append}"'
 
+    dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(setup_command=cmd)
+
+    # Add run commands to Dockerfile
     if run_command:
-        dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(
-            run_command=run_command)
+        # Source .bashrc since it's not done on non-interactive shells
+        cmd = f'/bin/bash -c "{CONDA_SETUP_PREFIX} && cd /{workdir_name} && \
+                {run_command}"'
+
+        dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=cmd)
 
     if output_path:
         with open(output_path, 'w') as f:
@@ -136,11 +151,12 @@ def build_dockerimage(dockerfile_contents, copy_path, tag):
 
 def build_dockerimage_from_task(task: task_mod.Task):
     """ Builds a docker image from a Task"""
+    copy_path = os.path.join(task.workdir, '')  # Add trailing slash if missing
     dockerfile_contents = create_dockerfile(base_image=task.docker_image,
                                             setup_command=task.setup,
-                                            copy_path=task.workdir,
+                                            copy_path=copy_path,
                                             run_command=task.run)
-    tag = build_dockerimage(dockerfile_contents, task.workdir, tag=task.name)
+    tag = build_dockerimage(dockerfile_contents, copy_path, tag=task.name)
     return tag
 
 
