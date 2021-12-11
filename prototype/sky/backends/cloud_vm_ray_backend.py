@@ -5,7 +5,6 @@ import hashlib
 import inspect
 import json
 import os
-import pathlib
 import re
 import shlex
 import subprocess
@@ -519,10 +518,11 @@ class CloudVmRayBackend(backends.Backend):
                 # Use the existing cluster.
                 task.best_resources = handle.launched_resources
                 return cluster_name, handle.launched_resources
-            logger.warning(
-                f'Reusing existing cluster {cluster_name} with different requested resources.\n'
-                f'Existing requested resources: \t{handle.requested_resources}\n'
-                f'Newly requested resources: \t{task.resources}\n')
+            logger.warning(f'Reusing existing cluster {cluster_name} with '
+                           'different requested resources.\n'
+                           f'Existing requested resources: '
+                           f'\t{handle.requested_resources}\n'
+                           f'Newly requested resources: \t{task.resources}\n')
             click.confirm(
                 'Do you want to relaunch the cluster with the new request?',
                 default=True,

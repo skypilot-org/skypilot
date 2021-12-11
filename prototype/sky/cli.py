@@ -247,7 +247,9 @@ def status():
     """Show launched clusters."""
     clusters_status = global_user_state.get_clusters()
     cluster_table = prettytable.PrettyTable()
-    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED', 'RESOURCES', 'LAST USE']
+    cluster_table.field_names = [
+        'CLUSTER NAME', 'LAUNCHED', 'RESOURCES', 'LAST USE'
+    ]
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
         handle = cluster_status['handle']
@@ -366,7 +368,7 @@ def down(
         name = record['name']
         handle = record['handle']
         backend.teardown(handle)
-        
+
         click.secho(f'Tearing down cluster {name}...done.', fg='green')
 
 
