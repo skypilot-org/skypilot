@@ -6,6 +6,8 @@
 #   bash examples/run_smoke_tests.sh 2>&1 | tee run.log
 set -ex
 
+export SKY_FORCE_PROVISION=true
+
 DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Dry run.  2 Tasks in a chain.
