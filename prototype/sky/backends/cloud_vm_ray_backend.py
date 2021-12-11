@@ -15,7 +15,6 @@ import uuid
 import yaml
 
 import colorama
-import click
 from ray.autoscaler import sdk
 
 import sky
@@ -507,9 +506,6 @@ class CloudVmRayBackend(backends.Backend):
 
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
 
-        force_provision = os.environ.get('SKY_FORCE_PROVISION', False)
-        if force_provision.lower() == 'true':
-            force_provision = True
         if handle is not None:
             # Cluster already exists. Check if the  resources are equal
             # for the previous and current request. Only reuse the cluster
@@ -526,23 +522,13 @@ class CloudVmRayBackend(backends.Backend):
                            f'Existing requested resources: '
                            f'\t{handle.requested_resources}\n'
                            f'Newly requested resources: \t{task.resources}\n')
-            if not force_provision:
-                click.confirm(
-                    'Do you want to relaunch the cluster with the new request?',
-                    default=True,
-                    abort=True)
-            self.teardown(handle)
-            return cluster_name, to_provision
-        logger.info('Hint: if you want to reuse an existing cluster, '
+            logger.info(
+                f'Creating new cluster {cluster_name}: {to_provision} ...\n')
+        logger.info(f'Creating new cluster {cluster_name}: {to_provision} ...\n'
+                    'Hint: if you want to reuse an existing cluster, '
                     'you can use the --cluster-name flag or '
                     'specify sky.execute(dag, cluster_name=cluster_name). '
                     '(use `sky status` to see the cluster names)')
-        if not force_provision:
-            click.confirm(
-                'Do you want to create a new cluster?',
-                default=True,
-                abort=True,
-            )
         return cluster_name, to_provision
 
     def provision(self,
