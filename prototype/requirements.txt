@@ -16,4 +16,3 @@ awscli==1.22.17
 azure-cli
 google-api-python-client
 google-cloud-storage
-oauth2client
