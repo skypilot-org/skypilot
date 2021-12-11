@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import copy
 import datetime
 import io
 import os

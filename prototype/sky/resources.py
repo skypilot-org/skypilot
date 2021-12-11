@@ -102,8 +102,7 @@ class Resources(object):
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
                 self.accelerators)
         return hourly_cost * hours
-    
-    
+
     def is_same_resources(self, other) -> bool:
         """Returns whether two resources are the same.
 
@@ -117,7 +116,8 @@ class Resources(object):
             return False
         # self.cloud == other.cloud
 
-        if self.instance_type is not None and self.instance_type != other.instance_type:
+        if self.instance_type is not None and \
+            self.instance_type != other.instance_type:
             return False
         # self.instance_type == other.instance_type
 

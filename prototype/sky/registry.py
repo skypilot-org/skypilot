@@ -25,6 +25,7 @@ def _filter_out_blocked_clouds(task: sky.Task):
             available_clouds.append(cloud)
     return available_clouds
 
+
 def _filter_out_blocked_launchable_resources(
         launchable_resources: List[Resources],
         blocked_launchable_resources: List[Resources]):
