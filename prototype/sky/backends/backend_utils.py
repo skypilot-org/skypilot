@@ -366,9 +366,10 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
 
 
 def run(cmd, **kwargs):
+    check = kwargs.pop('check', True)
     return subprocess.run(cmd,
                           shell=True,
-                          check=True,
+                          check=check,
                           executable='/bin/bash',
                           **kwargs)
 

@@ -918,8 +918,9 @@ class CloudVmRayBackend(backends.Backend):
         cluster_name = config['cluster_name']
         if cloud.lower() == 'azure':
             backend_utils.run(
-                'az vm delete --ids $(az vm list --query '
-                f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)')
+                'az vm delete --yes --ids $(az vm list --query '
+                f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
+                check=False)
             return True
         return False
 
