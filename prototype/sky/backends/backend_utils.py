@@ -1,6 +1,5 @@
 """Util constants/functions for the backends."""
 import datetime
-import getpass
 import io
 import os
 import pathlib
@@ -10,8 +9,7 @@ import sys
 import tempfile
 import textwrap
 import time
-from typing import Dict, List, Optional, Union
-import uuid
+from typing import Dict, List, Optional, Union, Set
 import yaml
 import zlib
 
@@ -21,6 +19,7 @@ import sky
 from sky import authentication as auth
 from sky import clouds
 from sky import logging
+from sky import resources
 from sky import task as task_lib
 
 logger = logging.init_logger(__name__)
@@ -28,6 +27,8 @@ logger = logging.init_logger(__name__)
 # An application.  These are the task types to support.
 App = Union[task_lib.Task, task_lib.ParTask]
 RunId = str
+Resources = resources.Resources
+
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
@@ -87,10 +88,10 @@ def wrap_file_mount(path: str) -> str:
 def write_cluster_config(run_id: RunId,
                          task: task_lib.Task,
                          cluster_config_template: str,
+                         cluster_name: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False,
-                         cluster_name: Optional[str] = None):
+                         dryrun: bool = False):
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -121,10 +122,7 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
-    if cluster_name is None:
-        # TODO: change this ID formatting to something more pleasant.
-        # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-        cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+    assert cluster_name is not None
 
     setup_sh_path = None
     if task.setup is not None:
@@ -420,3 +418,19 @@ def check_local_gpus() -> bool:
                        capture_output=True,
                        check=False)
     return p.returncode == 0
+
+
+def is_same_requested_resources(r1: Set[Resources], r2: Set[Resources]):
+    """Returns whether the requested resources are the same.
+
+    Args:
+        r1: Set of Resources requested previously.
+        r2: Set of Resources newly requested.
+
+    Returns:
+        True if the resources are the same, false otherwise.
+    """
+    assert len(r1) == 1 and len(r2) == 1
+    r1 = list(r1)[0]
+    r2 = list(r2)[0]
+    return r1.is_same_resources(r2)

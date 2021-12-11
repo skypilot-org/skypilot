@@ -375,10 +375,11 @@ class Task(object):
     def __repr__(self):
         if self.name:
             return self.name
+        run_msg = self.run.replace('\n', '\\n')
         if len(self.run) > 20:
-            s = 'Task(run=\'{}...\')'.format(self.run[:20])
+            s = 'Task(run=\'{}...\')'.format(run_msg[:20])
         else:
-            s = 'Task(run=\'{}\')'.format(self.run)
+            s = 'Task(run=\'{}\')'.format(run_msg)
         if self.inputs is not None:
             s += '\n  inputs: {}'.format(self.inputs)
         if self.outputs is not None:
