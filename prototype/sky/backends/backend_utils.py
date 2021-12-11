@@ -240,10 +240,16 @@ def _add_ssh_to_cluster_config(cloud_type, cluster_config_file):
         config = auth.setup_azure_authentication(config)
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
-    yaml_dump(cluster_config_file, config)
+    dump_yaml(cluster_config_file, config)
 
 
-def yaml_dump(path, config):
+def read_yaml(path):
+    with open(path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def dump_yaml(path, config):
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
 
@@ -265,7 +271,8 @@ def get_run_id() -> RunId:
 
 
 def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
-                                 num_nodes: int):
+                                 num_nodes: int) -> bool:
+    """Returns whether there's a cluster provisioning failure."""
     if num_nodes <= 1:
         return
     expected_worker_count = num_nodes - 1
@@ -285,7 +292,13 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
         logger.info(output)
         if f'{expected_worker_count} {worker_str}' in output:
             break
+        if '(no pending nodes)' in output and '(no failures)' in output:
+            # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
+            # GCP can satisfy only by half, the worker node would be forgotten.
+            # The correct behavior should be for it to error out.
+            return True  # failed
         time.sleep(10)
+    return False  # success
 
 
 def run_command_on_ip_via_ssh(ip: str,
