@@ -176,12 +176,6 @@ class RetryingVmProvisioner(object):
         style = colorama.Style
         assert len(zones) == 1, zones
         zone = zones[0]
-        if stdout is None:
-            # Gang scheduling failure.  Simply block the region.
-            assert stderr is None, stderr
-            self._blocked_regions.add(region.name)
-            return
-
         splits = stderr.split('\n')
         exception_str = [s for s in splits if s.startswith('Exception: ')]
         if len(exception_str) == 1:
@@ -268,6 +262,12 @@ class RetryingVmProvisioner(object):
         underlying clouds' SDKs.  If we did that, we could catch proper
         exceptions instead.
         """
+        if stdout is None:
+            # Gang scheduling failure.  Simply block the region.
+            assert stderr is None, stderr
+            self._blocked_regions.add(region.name)
+            return
+
         if isinstance(cloud, clouds.GCP):
             return self._update_blocklist_on_gcp_error(region, zones, stdout,
                                                        stderr)
@@ -393,12 +393,15 @@ class RetryingVmProvisioner(object):
                 if gang_failed:
                     # There exist partial nodes (e.g., head node) so we must
                     # down before moving on to other regions.
-                    self._teardown(handle)
-                    self._update_blocklist_on_error(to_provision.cloud,
-                                                    region,
-                                                    zones,
-                                                    stdout=None,
-                                                    stderr=None)
+                    # TODO: this signals refactoring opportunities?
+                    CloudVmRayBackend().teardown(handle)
+                    self._update_blocklist_on_error(
+                        to_provision.cloud,
+                        region,
+                        # Ignored and block region:
+                        zones=None,
+                        stdout=None,
+                        stderr=None)
                 else:
                     self._update_blocklist_on_error(to_provision.cloud, region,
                                                     zones, stdout, stderr)
@@ -421,14 +424,6 @@ class RetryingVmProvisioner(object):
                    ' Try changing resource requirements or use another cloud.')
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
-
-    def _teardown(self, handle: 'CloudVmRayBackend.ResourceHandle') -> None:
-        # FIXME: unfortunate code dup which signals refactoring opportunities.
-        backend_utils.run(f'ray down -y {handle.cluster_yaml}')
-        if handle.tpu_delete_script is not None:
-            backend_utils.run(f'bash {handle.tpu_delete_script}')
-        name = global_user_state.get_cluster_name_from_handle(handle)
-        global_user_state.remove_cluster(name)
 
     def _gang_schedule_ray_up(self, task: App, to_provision_cloud: clouds.Cloud,
                               cluster_config_file: str, log_abs_path: str,
@@ -482,8 +477,10 @@ class RetryingVmProvisioner(object):
         # Fast paths for "no need to gang schedule":
         #  (1) task.num_nodes == 1, no need to pre-provision.
         #  (2) otherwise, if cluster configs have not changed, no need either.
-        #    TODO: can relax further: if e.g., (num_nodes x instance type) now
-        #    == existing (num_nodes x instance_type), then skip Step 1.
+        #    TODO: can relax further: if (num_nodes x requested_resources) now
+        #    == existing, then skip Step 1.  Requested resources =
+        #    cloud(instance_type, acc, acc_args).  If requested clouds are
+        #    different, we still need to gang schedule on the new cloud.
         if task.num_nodes == 1:
             # ray up the full yaml.
             proc, stdout, stderr = ray_up(
@@ -491,6 +488,13 @@ class RetryingVmProvisioner(object):
             return False, proc, stdout, stderr
         elif is_cluster_yaml_identical():
             ray_up_on_full_confg_only = True
+            # NOTE: consider the exceptional case where cluster yamls are
+            # identical, but existing cluster has a few nodes killed (e.g.,
+            # spot).  For that case, we ray up once on the full config, instead
+            # of doing gang schedule first.  This seems an ok tradeoff because
+            # (1) checking how many nodes remain maybe slow, a price the common
+            # cases should not pay; (2) setup on the (presumably live) head
+            # node is likely no-op.  We can revisit.
 
         # Step 1: ray up the emptied config.
         if not ray_up_on_full_confg_only:
