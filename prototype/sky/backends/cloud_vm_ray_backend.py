@@ -704,7 +704,7 @@ class CloudVmRayBackend(backends.Backend):
                           handle: ResourceHandle,
                           par_task: task_mod.ParTask,
                           stream_logs: bool,
-                          download_logs: bool = False) -> None:
+                          download_logs: bool = True) -> None:
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         for t in par_task.tasks:
             assert t.num_nodes == 1, \
@@ -843,7 +843,7 @@ class CloudVmRayBackend(backends.Backend):
             return self._execute_par_task(handle,
                                           task,
                                           stream_logs,
-                                          download_logs=False)
+                                          download_logs=True)
 
         # Otherwise, handle a basic Task.
         if task.run is None:
@@ -859,7 +859,7 @@ class CloudVmRayBackend(backends.Backend):
         return self._execute_task_n_nodes(handle,
                                           task,
                                           stream_logs,
-                                          download_logs=False)
+                                          download_logs=True)
 
     def _execute_task_one_node(self, handle: ResourceHandle, task: App,
                                stream_logs: bool) -> None:
@@ -880,7 +880,7 @@ class CloudVmRayBackend(backends.Backend):
                               handle: ResourceHandle,
                               task: App,
                               stream_logs: bool,
-                              download_logs: bool = False) -> None:
+                              download_logs: bool = True) -> None:
         # Strategy:
         #   ray.init(..., log_to_driver=False); otherwise too many logs.
         #   for node:
