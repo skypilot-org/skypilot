@@ -1,16 +1,15 @@
 """Util constants/functions for the backends."""
 import datetime
-import getpass
 import io
 import os
 import pathlib
 import selectors
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
-from typing import Dict, List, Optional, Union
-import uuid
+from typing import Dict, List, Optional, Union, Set
 import yaml
 import zlib
 
@@ -20,6 +19,7 @@ import sky
 from sky import authentication as auth
 from sky import clouds
 from sky import logging
+from sky import resources
 from sky import task as task_lib
 
 logger = logging.init_logger(__name__)
@@ -27,6 +27,8 @@ logger = logging.init_logger(__name__)
 # An application.  These are the task types to support.
 App = Union[task_lib.Task, task_lib.ParTask]
 RunId = str
+Resources = resources.Resources
+
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
@@ -86,10 +88,10 @@ def wrap_file_mount(path: str) -> str:
 def write_cluster_config(run_id: RunId,
                          task: task_lib.Task,
                          cluster_config_template: str,
+                         cluster_name: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False,
-                         cluster_name: Optional[str] = None):
+                         dryrun: bool = False):
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -124,10 +126,7 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
-    if cluster_name is None:
-        # TODO: change this ID formatting to something more pleasant.
-        # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-        cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+    assert cluster_name is not None
 
     setup_sh_path = None
     if task.setup is not None:
@@ -205,6 +204,7 @@ def write_cluster_config(run_id: RunId,
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
             }))
+    config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
@@ -345,32 +345,40 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
     start_streaming_flag = False
     with open(log_path, 'a') as fout:
         while len(sel.get_map()) > 0:
-            for key, _ in sel.select():
+            events = sel.select()
+            for key, _ in events:
                 line = key.fileobj.readline()
                 if not line:
+                    # Unregister the io when EOF reached
                     sel.unregister(key.fileobj)
-                    break
+                    continue
+                # Remove special characters to avoid cursor hidding
+                line = line.replace('\x1b[?25l', '')
                 if start_streaming_at in line:
                     start_streaming_flag = True
                 if key.fileobj is out_io:
                     stdout += line
-                    fout.write(line)
-                    fout.flush()
+                    out_stream = sys.stdout
                 else:
                     stderr += line
-                    fout.write(line)
-                    fout.flush()
+                    out_stream = sys.stderr
                 if stream_logs and start_streaming_flag:
-                    print(line, end='')
+                    out_stream.write(line)
+                    out_stream.flush()
+                fout.write(line)
     return stdout, stderr
 
 
 def run(cmd, **kwargs):
+    shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
+    executable = kwargs.pop('executable', '/bin/bash')
+    if not shell:
+        executable = None
     return subprocess.run(cmd,
-                          shell=True,
+                          shell=shell,
                           check=check,
-                          executable='/bin/bash',
+                          executable=executable,
                           **kwargs)
 
 
@@ -381,10 +389,11 @@ def run_no_outputs(cmd, **kwargs):
                **kwargs)
 
 
-def run_with_log(cmd,
-                 log_path,
-                 stream_logs=False,
-                 start_streaming_at='',
+def run_with_log(cmd: List[str],
+                 log_path: str,
+                 stream_logs: bool = False,
+                 start_streaming_at: str = '',
+                 return_none: bool = False,
                  **kwargs):
     """Runs a command and logs its output to a file.
 
@@ -398,4 +407,34 @@ def run_with_log(cmd,
         stdout, stderr = redirect_process_output(
             proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
         proc.wait()
+        if return_none:
+            return None
         return proc, stdout, stderr
+
+
+def check_local_gpus() -> bool:
+    """Returns whether GPUs are available on the local machine by checking
+    if nvidia-smi is installed.
+
+    Returns True if nvidia-smi is installed, false if not.
+    """
+    p = subprocess.run(['which', 'nvidia-smi'],
+                       capture_output=True,
+                       check=False)
+    return p.returncode == 0
+
+
+def is_same_requested_resources(r1: Set[Resources], r2: Set[Resources]):
+    """Returns whether the requested resources are the same.
+
+    Args:
+        r1: Set of Resources requested previously.
+        r2: Set of Resources newly requested.
+
+    Returns:
+        True if the resources are the same, false otherwise.
+    """
+    assert len(r1) == 1 and len(r2) == 1
+    r1 = list(r1)[0]
+    r2 = list(r2)[0]
+    return r1.is_same_resources(r2)

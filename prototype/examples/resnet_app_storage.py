@@ -5,12 +5,17 @@ import sky
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
+    data_mount_path = '/tmp/imagenet'
     subprocess.run(f'cd {workdir} && git checkout 222cc86',
                    shell=True,
                    check=True)
 
     # The setup command.  Will be run under the working directory.
-    setup = 'pip install --upgrade pip && \
+    setup = 'echo \"alias python=python3\" >> ~/.bashrc && \
+        echo \"alias pip3=pip\" >> ~/.bashrc && \
+        source ~/.bashrc && \
+        pip install --upgrade pip && \
+        pip install awscli botocore boto3 && \
         conda init bash && \
         conda activate resnet || \
           (conda create -n resnet python=3.7 -y && \
@@ -19,13 +24,19 @@ with sky.Dag() as dag:
            cd models && pip install -e .)'
 
     # The command to run.  Will be run under the working directory.
-    run = 'conda activate resnet && mkdir -p resnet-model-dir && \
+    run = f'conda activate resnet && \
         python -u models/official/resnet/resnet_main.py --use_tpu=False \
         --mode=train --train_batch_size=256 --train_steps=250 \
         --iterations_per_loop=125 \
-        --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
+        --data_dir={data_mount_path} \
         --model_dir=resnet-model-dir \
         --amp --xla --loss_scale=128'
+
+    # If the backend to be added is not specified, then Sky optimizer will
+    # choose the backend bucket to be stored.
+    storage = sky.Storage(name="imagenet-bucket", source="s3://imagenet-bucket")
+    # Can also be from a local dir
+    # storage = sky.Storage(name="imagenet-bucket", source="~/imagenet-data/")
 
     train = sky.Task(
         'train',
@@ -33,25 +44,14 @@ with sky.Dag() as dag:
         setup=setup,
         run=run,
     )
-
-    train.set_resources({
-        sky.Resources(accelerators='V100'),
+    train.set_storage_mounts({
+        storage: data_mount_path,
     })
 
-    # Use 'sky ssh --port-forward=4650 <cluster_name>' to forward port to local.
-    # e.g., for AWS, 'sky ssh --port-forward=4650 sky-12345'
-    tensorboard = sky.Task(
-        'tensorboard',
-        workdir=workdir,
-        setup=setup,
-        run='conda activate resnet && \
-            tensorboard --logdir resnet-model-dir --port 4650',
-    )
+    train.set_inputs('s3://imagenet-bucket', estimated_size_gigabytes=150)
+    train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
+    train.set_resources({
+        sky.Resources(sky.AWS(), 'p3.2xlarge'),
+    })
 
-    # Run the training and tensorboard in parallel.
-    task = sky.ParTask([train, tensorboard])
-    total = sky.Resources(sky.AWS(), accelerators={'V100': 1})
-    task.set_resources(total)
-
-# sky.execute(dag, dryrun=True)
 sky.execute(dag)

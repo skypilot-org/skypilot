@@ -1,22 +1,20 @@
-"""Sky global user state.
+"""Sky global user state, backed by a sqlite database.
 
-Examples/concepts:
-    <task id>: Auto-generated unique ID used for tracking tasks.
-    <task name>: User-supplied value for task, not necessarily unique.
-    <cluster name>: User-supplied, unique name to identify a cluster.
-    <cluster handle>: Automatically generated handle by Sky to interact with a
-      cluster.
+Concepts:
+- Cluster name: a user-supplied or auto-generated unique name to identify a
+  cluster.
+- Cluster handle: (non-user facing) an opaque backend handle for Sky to
+  interact with a cluster.
 """
 import os
 import pathlib
 import pickle
 import sqlite3
+import sys
 import time
 from typing import Any, Dict, List, Optional
-import uuid
 
 from sky import backends
-from sky import task as task_lib
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
@@ -25,31 +23,34 @@ _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
 
 try:
-    _CURSOR.execute('select * from tasks limit 0')
     _CURSOR.execute('select * from clusters limit 0')
 except sqlite3.OperationalError:
     # Tables do not exist, create them.
-    _CURSOR.execute("""CREATE TABLE tasks
-                (id TEXT PRIMARY KEY, name TEXT, launched_at INTEGER)""")
-    _CURSOR.execute("""CREATE TABLE clusters
-                (name TEXT PRIMARY KEY, lauched_at INTEGER, handle BLOB)""")
+    _CURSOR.execute("""\
+      CREATE TABLE clusters (
+        name TEXT PRIMARY KEY,
+        lauched_at INTEGER,
+        handle BLOB,
+        last_use TEXT)""")
 _CONN.commit()
 
 
-def add_task(task: task_lib.Task) -> str:
-    task_id = str(uuid.uuid4())[:6]  # TODO: make ids more pleasant
-    task_name = task.name
-    task_launched_at = int(time.time())
+def _get_pretty_entry_point() -> str:
+    """Returns the prettified entry point of this process (sys.argv).
 
-    _CURSOR.execute('INSERT INTO tasks VALUES (?,?,?)',
-                    (task_id, task_name, task_launched_at))
-    _CONN.commit()
-    return task_id
+    Example return values:
 
-
-def remove_task(task_id: str):
-    _CURSOR.execute('DELETE FROM tasks WHERE id=(?)', (task_id,))
-    _CONN.commit()
+        $ sky run app.yaml  # 'sky run app.yaml'
+        $ sky gpunode  # 'sky gpunode'
+        $ python examples/app.py  # 'app.py'
+    """
+    argv = sys.argv
+    basename = os.path.basename(argv[0])
+    if basename == 'sky':
+        # Turn '/.../anaconda/envs/py36/bin/sky' into 'sky', but keep other
+        # things like 'examples/app.py'.
+        argv[0] = basename
+    return ' '.join(argv)
 
 
 def add_or_update_cluster(cluster_name: str,
@@ -57,8 +58,9 @@ def add_or_update_cluster(cluster_name: str,
     """Adds or updates cluster_name -> cluster_handle mapping."""
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
-    _CURSOR.execute('INSERT OR REPLACE INTO clusters VALUES (?, ?, ?)',
-                    (cluster_name, cluster_launched_at, handle))
+    last_use = _get_pretty_entry_point()
+    _CURSOR.execute('INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?)',
+                    (cluster_name, cluster_launched_at, handle, last_use))
     _CONN.commit()
 
 
@@ -84,25 +86,14 @@ def get_cluster_name_from_handle(
         return name
 
 
-def get_tasks() -> List[Dict[str, Any]]:
-    rows = _CURSOR.execute('select * from tasks')
-    records = []
-    for task_id, name, launched_at in rows:
-        records.append({
-            'id': task_id,
-            'name': name,
-            'launched_at': launched_at,
-        })
-    return records
-
-
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')
     records = []
-    for name, launched_at, handle in rows:
+    for name, launched_at, handle, last_use in rows:
         records.append({
             'name': name,
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
+            'last_use': last_use,
         })
     return records
