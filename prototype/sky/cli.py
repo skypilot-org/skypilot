@@ -255,7 +255,7 @@ def status():
         cluster_table.add_row([
             cluster_status['name'],
             duration.diff_for_humans(),
-            handle.resources,
+            f'{handle.requested_nodes}x {handle.launched_resources}',
             _truncate_long_string(cluster_status['last_use']),
         ])
     cluster_table.align['LAST USE'] = 'l'
@@ -366,7 +366,7 @@ def down(
         name = record['name']
         handle = record['handle']
         backend.teardown(handle)
-        global_user_state.remove_cluster(name)
+        
         click.secho(f'Tearing down cluster {name}...done.', fg='green')
 
 

@@ -1,5 +1,6 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
+import getpass
 import hashlib
 import inspect
 import json
@@ -11,9 +12,11 @@ import subprocess
 import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
+import uuid
 import yaml
 
 import colorama
+import click
 from ray.autoscaler import sdk
 
 import sky
@@ -264,34 +267,31 @@ class RetryingVmProvisioner(object):
         else:
             assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, cloud: clouds.Cloud,
-                            cluster_name: Optional[str]):
+    def _yield_region_zones(self, cloud: clouds.Cloud, cluster_name: str):
         region = None
         zones = None
-        if cluster_name is not None:
-            # Try loading previously launched region/zones and try them first,
-            # because we may have an existing cluster there.
-            handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
-            if handle is not None:
-                try:
-                    path = handle.cluster_yaml
-                    with open(path, 'r') as f:
-                        config = yaml.safe_load(f)
+        # Try loading previously launched region/zones and try them first,
+        # because we may have an existing cluster there.
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        if handle is not None:
+            try:
+                path = handle.cluster_yaml
+                with open(path, 'r') as f:
+                    config = yaml.safe_load(f)
 
-                    prev_resources = handle.resources
-                    if cloud.is_same_cloud(prev_resources.cloud):
-                        if type(cloud) in (clouds.AWS, clouds.GCP):
-                            region = config['provider']['region']
-                            zones = config['provider']['availability_zone']
-                        elif isinstance(cloud, clouds.Azure):
-                            region = config['provider']['location']
-                            zones = None
-                        else:
-                            assert False, cloud
-                except FileNotFoundError:
-                    # Happens if no previous cluster.yaml exists.
-                    pass
+                prev_resources = handle.launched_resources
+                if cloud.is_same_cloud(prev_resources.cloud):
+                    if type(cloud) in (clouds.AWS, clouds.GCP):
+                        region = config['provider']['region']
+                        zones = config['provider']['availability_zone']
+                    elif isinstance(cloud, clouds.Azure):
+                        region = config['provider']['location']
+                        zones = None
+                    else:
+                        assert False, cloud
+            except FileNotFoundError:
+                # Happens if no previous cluster.yaml exists.
+                pass
         if region is not None:
             region = clouds.Region(name=region)
             if zones is not None:
@@ -394,20 +394,13 @@ class RetryingVmProvisioner(object):
 
     def provision_with_retries(self, task: App, to_provision: Resources,
                                dryrun: bool, stream_logs: bool,
-                               cluster_name: Optional[str]):
+                               cluster_name: str):
         """Provision with retries for all launchable resources."""
+        assert cluster_name is not None, 'cluster_name must be specified.'
         launchable_retries_disabled = self._dag is None or \
                                     self._optimize_target is None
 
         style = colorama.Style
-
-        # Try to launch the exiting cluster first
-        if cluster_name is not None:
-            handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
-            if handle is not None:
-                task.best_resources = handle.resources
-                to_provision = handle.resources
 
         # Retrying launchable resources.
         provision_failed = True
@@ -462,7 +455,9 @@ class CloudVmRayBackend(backends.Backend):
 
         - (required) A cached head node public IP.
         - (required) Path to a cluster.yaml file.
-        - (required) Launchable resources
+        - (required) Requested resources
+        - (required) Requested nodes
+        - (required) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
 
@@ -470,19 +465,24 @@ class CloudVmRayBackend(backends.Backend):
                 self,
                 head_ip: str,
                 cluster_yaml: str,
-                resources: Resources,
+                requested_resources: Resources,
+                requested_nodes: int,
+                launched_resources: Resources,
                 tpu_delete_script: Optional[str],
         ) -> None:
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
-            self.resources = resources
+            self.requested_resources = requested_resources
+            self.requested_nodes = requested_nodes
+            self.launched_resources = launched_resources
             self.tpu_delete_script = tpu_delete_script
 
         def __repr__(self):
             return (f'ResourceHandle(\n\thead_ip={self.head_ip},'
                     '\n\tcluster_yaml='
                     f'{backend_utils.get_rel_path(self.cluster_yaml)}, '
-                    f'\n\tresources={self.resources}'
+                    f'\n\trequested_resources={self.requested_resources}'
+                    f'\n\tlaunched_resources={self.launched_resources}'
                     f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
     def __init__(self):
@@ -498,6 +498,48 @@ class CloudVmRayBackend(backends.Backend):
         self._optimize_target = kwargs.pop('optimize_target',
                                            OptimizeTarget.COST)
 
+    def _check_existing_cluster(
+            self,
+            task: App,
+            to_provision: Resources,
+            cluster_name: Optional[str],
+    ):
+        # Try to launch the exiting cluster first
+        if cluster_name is None:
+            # TODO: change this ID formatting to something more pleasant.
+            # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
+            cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        if handle is not None:
+            if task.num_nodes == handle.requested_nodes and \
+                backend_utils.is_same_requested_resources(
+                    handle.requested_resources, task.resources):
+
+                # Use the existing cluster.
+                task.best_resources = handle.launched_resources
+                return cluster_name, handle.launched_resources
+            logger.warning(
+                f'Reusing existing cluster {cluster_name} with different requested resources.\n'
+                f'Existing requested resources: \t{handle.requested_resources}\n'
+                f'Newly requested resources: \t{task.resources}\n')
+            click.confirm(
+                'Do you want to relaunch the cluster with the new request?',
+                default=True,
+                abort=True)
+            self.teardown(handle)
+            return cluster_name, to_provision
+        logger.info('Hint: if you want to reuse an existing cluster, '
+                    'you can use the --cluster-name flag or '
+                    'specify sky.execute(dag, cluster_name=cluster_name). '
+                    '(use `sky status` to see the cluster names)')
+        click.confirm(
+            'Do you want to create a new cluster?',
+            default=True,
+            abort=True,
+        )
+        return cluster_name, to_provision
+
     def provision(self,
                   task: App,
                   to_provision: Resources,
@@ -508,13 +550,17 @@ class CloudVmRayBackend(backends.Backend):
         # ray up: the VMs.
         provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                             self._optimize_target)
+
+        cluster_name, to_provision = self._check_existing_cluster(
+            task, to_provision, cluster_name)
+        requested_resources = task.resources
         try:
             config_dict = provisioner.provision_with_retries(
                 task, to_provision, dryrun, stream_logs, cluster_name)
         except exceptions.ResourcesUnavailableError as e:
-            logger.error(e)
-            assert False, \
-                'Failed to provision all possible launchable resources.'
+            logger.error(
+                'Failed to provision all possible launchable resources.')
+            raise e
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
@@ -523,13 +569,12 @@ class CloudVmRayBackend(backends.Backend):
                                                    cluster_config_file,
                                                    task.num_nodes)
 
-        if cluster_name is None:
-            cluster_name = pathlib.Path(cluster_config_file).stem
-
         handle = self.ResourceHandle(
             # Cache head ip in the handle to speed up ssh operations.
             self._get_node_ips(cluster_config_file, task.num_nodes)[0],
             cluster_config_file,
+            requested_resources,
+            task.num_nodes,
             provisioned_resources,
             # TPU.
             config_dict.get('tpu-delete-script'))
@@ -881,6 +926,8 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.run(f'ray down -y {handle.cluster_yaml}')
         if handle.tpu_delete_script is not None:
             backend_utils.run(f'bash {handle.tpu_delete_script}')
+        name = global_user_state.get_cluster_name_from_handle(handle)
+        global_user_state.remove_cluster(name)
 
     def _get_node_ips(self,
                       cluster_yaml: str,
