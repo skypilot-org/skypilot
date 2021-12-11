@@ -51,12 +51,12 @@ _TASK_LAUNCH_CODE_GENERATOR = textwrap.dedent("""\
         import selectors
         import subprocess
         from typing import Dict, List, Optional, Union
-        
+
         ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
         print('cluster_resources:', ray.cluster_resources())
         print('available_resources:', ray.available_resources())
         print('live nodes:', ray.state.node_ids())
-        
+
         futures = []
 """)
 
@@ -286,9 +286,9 @@ class RetryingVmProvisioner(object):
                 path = handle.cluster_yaml
                 with open(path, 'r') as f:
                     config = yaml.safe_load(f)
-
                 prev_resources = handle.launched_resources
-                if cloud.is_same_cloud(prev_resources.cloud):
+                if prev_resources is not None and cloud.is_same_cloud(
+                        prev_resources.cloud):
                     if type(cloud) in (clouds.AWS, clouds.GCP):
                         region = config['provider']['region']
                         zones = config['provider']['availability_zone']
@@ -372,6 +372,10 @@ class RetryingVmProvisioner(object):
                 cluster_name,
                 cluster_handle=CloudVmRayBackend.ResourceHandle(
                     cluster_yaml=cluster_config_file,
+                    requested_resources=task.resources,
+                    requested_nodes=task.num_nodes,
+                    # OK for this to be shown in CLI as status == INIT.
+                    launched_resources=to_provision,
                     tpu_delete_script=config_dict.get('tpu-delete-script')),
                 ready=False)
 
@@ -492,9 +496,9 @@ class CloudVmRayBackend(backends.Backend):
         - (required) Path to a cluster.yaml file.
         - (optional) A cached head node public IP.  Filled in after a
             successful provision().
-        - (required) Requested resources
-        - (required) Requested num nodes
-        - (required) Launched resources
+        - (optional) Requested resources
+        - (optional) Requested num nodes
+        - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
 
@@ -502,9 +506,9 @@ class CloudVmRayBackend(backends.Backend):
                      *,
                      cluster_yaml: str,
                      head_ip: Optional[str] = None,
-                     requested_resources: Resources,
-                     requested_nodes: int,
-                     launched_resources: Resources,
+                     requested_resources: Optional[Resources] = None,
+                     requested_nodes: Optional[int] = None,
+                     launched_resources: Optional[Resources] = None,
                      tpu_delete_script: Optional[str] = None) -> None:
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
@@ -535,15 +539,9 @@ class CloudVmRayBackend(backends.Backend):
         self._optimize_target = kwargs.pop('optimize_target',
                                            OptimizeTarget.COST)
 
-    def _check_existing_cluster(
-            self,
-            task: App,
-            to_provision: Resources,
-            cluster_name: str,
-    ):
-
+    def _check_existing_cluster(self, task: App, to_provision: Resources,
+                                cluster_name: str) -> (str, Resources):
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-
         if handle is not None:
             # Cluster already exists. Check if the  resources are equal
             # for the previous and current request. Only reuse the cluster
@@ -553,6 +551,8 @@ class CloudVmRayBackend(backends.Backend):
                     handle.requested_resources, task.resources):
 
                 # Use the existing cluster.
+                assert handle.launched_resources is not None, (cluster_name,
+                                                               handle)
                 task.best_resources = handle.launched_resources
                 return cluster_name, handle.launched_resources
             logger.warning(f'Reusing existing cluster {cluster_name} with '
@@ -560,13 +560,12 @@ class CloudVmRayBackend(backends.Backend):
                            f'Existing requested resources: '
                            f'\t{handle.requested_resources}\n'
                            f'Newly requested resources: \t{task.resources}\n')
-            logger.info(
-                f'Creating new cluster {cluster_name}: {to_provision} ...\n')
-        logger.info(f'Creating new cluster {cluster_name}: {to_provision} ...\n'
-                    'Hint: if you want to reuse an existing cluster, '
-                    'you can use the --cluster-name flag or '
-                    'specify sky.execute(dag, cluster_name=cluster_name). '
-                    '(use `sky status` to see the cluster names)')
+        logger.info(f'Creating a new cluster {cluster_name}: '
+                    f'{task.num_nodes}x {to_provision}.\n'
+                    'Tip: to reuse an existing cluster, '
+                    'use the --cluster-name flag or '
+                    'specify sky.execute(..., cluster_name=cluster_name). '
+                    'Use `sky status` to see cluster names.')
         return cluster_name, to_provision
 
     def provision(self,
@@ -600,9 +599,6 @@ class CloudVmRayBackend(backends.Backend):
             return
         cluster_config_file = config_dict['ray']
         provisioned_resources = config_dict['launched_resources']
-        backend_utils.wait_until_ray_cluster_ready(provisioned_resources.cloud,
-                                                   cluster_config_file,
-                                                   task.num_nodes)
 
         handle = self.ResourceHandle(
             cluster_yaml=cluster_config_file,
@@ -761,8 +757,8 @@ class CloudVmRayBackend(backends.Backend):
         futures.append(run_with_log \\
                 .options(name='{name}'{resources_str}{num_gpus_str}) \\
                 .remote(
-                    {cmd}, 
-                    '{log_path}', 
+                    {cmd},
+                    '{log_path}',
                     {stream_logs},
                     return_none=True,
                     shell=True,
@@ -923,8 +919,8 @@ class CloudVmRayBackend(backends.Backend):
         futures.append(run_with_log \\
                 .options(name='{name}'{resources_str}{num_gpus_str}) \\
                 .remote(
-                    {cmd}, 
-                    '{log_path}', 
+                    {cmd},
+                    '{log_path}',
                     {stream_logs},
                     return_none=True,
                     shell=True,

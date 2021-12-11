@@ -278,13 +278,18 @@ def status(all):  # pylint: disable=redefined-builtin
         launched_at = cluster_status['launched_at']
         handle = cluster_status['handle']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
+        resources_str = '<initializing>'
+        if (handle.requested_nodes is not None and
+                handle.launched_resources is not None):
+            resources_str = (f'{handle.requested_nodes}x '
+                             f'{handle.launched_resources}')
         cluster_table.add_row([
             # NAME
             cluster_status['name'],
             # LAUNCHED
             shorten_duration_diff_string(duration.diff_for_humans()),
             # RESOURCES
-            f'{handle.requested_nodes}x {handle.launched_resources}',
+            resources_str,
             # COMMAND
             cluster_status['last_use']
             if show_all else _truncate_long_string(cluster_status['last_use']),
