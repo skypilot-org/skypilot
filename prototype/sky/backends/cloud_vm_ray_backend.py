@@ -502,13 +502,15 @@ class CloudVmRayBackend(backends.Backend):
             task: App,
             to_provision: Resources,
             cluster_name: Optional[str],
+            dryrun: bool,
     ):
         # Try to launch the exiting cluster first
         if cluster_name is None:
             # TODO: change this ID formatting to something more pleasant.
             # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
             cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
-
+        if dryrun:
+            return cluster_name, to_provision
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             if task.num_nodes == handle.requested_nodes and \
@@ -552,7 +554,7 @@ class CloudVmRayBackend(backends.Backend):
                                             self._optimize_target)
 
         cluster_name, to_provision = self._check_existing_cluster(
-            task, to_provision, cluster_name)
+            task, to_provision, cluster_name, dryrun)
         requested_resources = task.resources
         try:
             config_dict = provisioner.provision_with_retries(
