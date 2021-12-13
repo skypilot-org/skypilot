@@ -262,6 +262,12 @@ class RetryingVmProvisioner(object):
         underlying clouds' SDKs.  If we did that, we could catch proper
         exceptions instead.
         """
+        if stdout is None:
+            # Gang scheduling failure.  Simply block the region.
+            assert stderr is None, stderr
+            self._blocked_regions.add(region.name)
+            return
+
         if isinstance(cloud, clouds.GCP):
             return self._update_blocklist_on_gcp_error(region, zones, stdout,
                                                        stderr)
@@ -310,10 +316,10 @@ class RetryingVmProvisioner(object):
             yield (region, zones)
 
     def _retry_region_zones(self, task: App, to_provision: Resources,
-                            dryrun: bool, stream_logs: bool, cluster_name: str):
+                            dryrun: bool, stream_logs: bool, cluster_name: str,
+                            prev_cluster_config: Optional[Dict[str, Any]]):
         """The provision retry loop."""
         style = colorama.Style
-
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
@@ -368,17 +374,80 @@ class RetryingVmProvisioner(object):
             # Record early, so if anything goes wrong, 'sky status' will show
             # the cluster name and users can appropriately 'sky down'.  It also
             # means a second 'sky run -c <name>' will attempt to reuse.
-            global_user_state.add_or_update_cluster(
-                cluster_name,
-                cluster_handle=CloudVmRayBackend.ResourceHandle(
-                    cluster_yaml=cluster_config_file,
-                    requested_resources=task.resources,
-                    requested_nodes=task.num_nodes,
-                    # OK for this to be shown in CLI as status == INIT.
-                    launched_resources=to_provision,
-                    tpu_delete_script=config_dict.get('tpu-delete-script')),
-                ready=False)
+            handle = CloudVmRayBackend.ResourceHandle(
+                cluster_yaml=cluster_config_file,
+                requested_resources=task.resources,
+                requested_nodes=task.num_nodes,
+                # OK for this to be shown in CLI as status == INIT.
+                launched_resources=to_provision,
+                tpu_delete_script=config_dict.get('tpu-delete-script'))
+            global_user_state.add_or_update_cluster(cluster_name,
+                                                    cluster_handle=handle,
+                                                    ready=False)
 
+            gang_failed, proc, stdout, stderr = self._gang_schedule_ray_up(
+                task, to_provision.cloud, cluster_config_file, log_abs_path,
+                stream_logs, prev_cluster_config)
+
+            if gang_failed or proc.returncode != 0:
+                if gang_failed:
+                    # There exist partial nodes (e.g., head node) so we must
+                    # down before moving on to other regions.
+                    # TODO: this signals refactoring opportunities?
+                    CloudVmRayBackend().teardown(handle)
+                    self._update_blocklist_on_error(
+                        to_provision.cloud,
+                        region,
+                        # Ignored and block region:
+                        zones=None,
+                        stdout=None,
+                        stderr=None)
+                else:
+                    self._update_blocklist_on_error(to_provision.cloud, region,
+                                                    zones, stdout, stderr)
+            else:
+                # Success.
+                if tpu_name is not None:
+                    backend_utils.run(
+                        f'ray exec {cluster_config_file} '
+                        f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
+                cluster_name = config_dict['cluster_name']
+                plural = '' if task.num_nodes == 1 else 's'
+                logger.info(
+                    f'{style.BRIGHT}Successfully provisioned or found'
+                    f' existing VM{plural}. Setup completed.{style.RESET_ALL}')
+                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}sky ssh'
+                            f' {cluster_name}{style.RESET_ALL}\n')
+                return config_dict
+        message = ('Failed to acquire resources in all regions/zones'
+                   f' (requested {to_provision}).'
+                   ' Try changing resource requirements or use another cloud.')
+        logger.error(message)
+        raise exceptions.ResourcesUnavailableError()
+
+    def _gang_schedule_ray_up(self, task: App, to_provision_cloud: clouds.Cloud,
+                              cluster_config_file: str, log_abs_path: str,
+                              stream_logs: bool,
+                              prev_cluster_config: Optional[Dict[str, Any]]):
+        """Provisions a cluster via 'ray up' with gang scheduling.
+
+        Steps for provisioning > 1 node:
+          1) ray up an empty config (no filemounts, no setup commands)
+          2) ray up a full config (with filemounts and setup commands)
+
+        For provisioning 1 node, only step 2 is run.
+
+        Benefits:
+          - Ensures all nodes are allocated first before potentially expensive
+            file_mounts/setup.  (If not all nodes aren't allocated, step 1
+            would fail.)
+
+        Returns:
+          (did gang scheduling failed; proc; stdout; stderr).
+        """
+        style = colorama.Style
+
+        def ray_up(start_streaming_at):
             # Redirect stdout/err to the file and streaming (if stream_logs).
             proc, stdout, stderr = backend_utils.run_with_log(
                 # NOTE: --no-restart solves the following bug.  Without it, if
@@ -393,41 +462,85 @@ class RetryingVmProvisioner(object):
                 ['ray', 'up', '-y', '--no-restart', cluster_config_file],
                 log_abs_path,
                 stream_logs,
-                start_streaming_at='Shared connection to')
+                start_streaming_at=start_streaming_at)
+            return proc, stdout, stderr
 
-            if proc.returncode != 0:
-                self._update_blocklist_on_error(to_provision.cloud, region,
-                                                zones, stdout, stderr)
-                if tpu_name is not None:
-                    logger.info(
-                        'Failed to provision VM. Tearing down TPU resource...')
-                    backend_utils.run(
-                        f'bash {config_dict["tpu-delete-script"]}',
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE)
-            else:
-                if tpu_name is not None:
-                    backend_utils.run(
-                        f'ray exec {cluster_config_file} '
-                        f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
-                cluster_name = config_dict['cluster_name']
-                if task.num_nodes == 1:
-                    logger.info(
-                        f'{style.BRIGHT}Successfully provisioned or found'
-                        f' existing VM. Setup completed.{style.RESET_ALL}')
-                else:
-                    logger.info(
-                        f'{style.BRIGHT}Successfully provisioned or found'
-                        ' existing head VM. Waiting for workers...'
-                        f'{style.RESET_ALL}')
-                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}sky ssh'
-                            f' {cluster_name}{style.RESET_ALL}\n')
-                return config_dict
-        message = ('Failed to acquire resources in all regions/zones'
-                   f' (requested {to_provision}).'
-                   ' Try changing resource requirements or use another cloud.')
-        logger.error(message)
-        raise exceptions.ResourcesUnavailableError()
+        def is_cluster_yaml_identical():
+            if prev_cluster_config is None:
+                return False
+            curr_config = backend_utils.read_yaml(cluster_config_file)
+            curr = json.dumps(curr_config, sort_keys=True)
+            prev = json.dumps(prev_cluster_config, sort_keys=True)
+            return curr == prev
+
+        ray_up_on_full_confg_only = False
+        # Fast paths for "no need to gang schedule":
+        #  (1) task.num_nodes == 1, no need to pre-provision.
+        #  (2) otherwise, if cluster configs have not changed, no need either.
+        #    TODO: can relax further: if (num_nodes x requested_resources) now
+        #    == existing, then skip Step 1.  Requested resources =
+        #    cloud(instance_type, acc, acc_args).  If requested clouds are
+        #    different, we still need to gang schedule on the new cloud.
+        if task.num_nodes == 1:
+            # ray up the full yaml.
+            proc, stdout, stderr = ray_up(
+                start_streaming_at='Shared connection to')
+            return False, proc, stdout, stderr
+        elif is_cluster_yaml_identical():
+            ray_up_on_full_confg_only = True
+            # NOTE: consider the exceptional case where cluster yamls are
+            # identical, but existing cluster has a few nodes killed (e.g.,
+            # spot).  For that case, we ray up once on the full config, instead
+            # of doing gang schedule first.  This seems an ok tradeoff because
+            # (1) checking how many nodes remain maybe slow, a price the common
+            # cases should not pay; (2) setup on the (presumably live) head
+            # node is likely no-op.  We can revisit.
+
+        # Step 1: ray up the emptied config.
+        if not ray_up_on_full_confg_only:
+            config = backend_utils.read_yaml(cluster_config_file)
+            pinned_ray_install = 'pip3 install -U ray==1.7.0'
+            fields_to_empty = {
+                'file_mounts': {},
+                # Need ray for 'ray status' in wait_until_ray_cluster_ready().
+                'setup_commands': [pinned_ray_install],
+            }
+            existing_fields = {k: config[k] for k in fields_to_empty}
+            # Keep both in sync.
+            assert pinned_ray_install in existing_fields['setup_commands'][
+                0], existing_fields['setup_commands']
+            config.update(fields_to_empty)
+            backend_utils.dump_yaml(cluster_config_file, config)
+
+        proc, stdout, stderr = ray_up(start_streaming_at='Shared connection to')
+        if proc.returncode != 0:
+            # Head node provisioning failure.
+            return False, proc, stdout, stderr
+
+        logger.info(f'{style.BRIGHT}Successfully provisioned or found'
+                    f' existing head VM. Waiting for workers.{style.RESET_ALL}')
+
+        # TODO: if requesting a large amount (say 32) of expensive VMs, this
+        # may loop for a long time.  Use timeouts and treat as gang_failed.
+        gang_failed = backend_utils.wait_until_ray_cluster_ready(
+            to_provision_cloud, cluster_config_file, task.num_nodes)
+        if gang_failed or ray_up_on_full_confg_only:
+            # Head OK; gang scheduling failure.
+            return gang_failed, proc, stdout, stderr
+
+        # Step 2: ray up the full config (file mounts, setup).
+        config.update(existing_fields)
+        backend_utils.dump_yaml(cluster_config_file, config)
+        logger.info('Starting to set up the cluster.')
+        proc, stdout, stderr = ray_up(
+            # FIXME: Not ideal. The setup log (pip install) will be streamed
+            # first, before the ray autoscaler's step-by-step output (<1/1>
+            # Setting up head node). Probably some buffering or
+            # stdout-vs-stderr bug?  We want the latter to show first, not
+            # printed in t he end.
+            start_streaming_at='Shared connection to')
+
+        return False, proc, stdout, stderr
 
     def provision_with_retries(self, task: App, to_provision: Resources,
                                dryrun: bool, stream_logs: bool,
@@ -436,7 +549,13 @@ class RetryingVmProvisioner(object):
         assert cluster_name is not None, 'cluster_name must be specified.'
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
-
+        prev_handle = global_user_state.get_handle_from_cluster_name(
+            cluster_name)
+        if prev_handle is None:
+            prev_cluster_config = None
+        else:
+            prev_cluster_config = backend_utils.read_yaml(
+                prev_handle.cluster_yaml)
         style = colorama.Style
         # Retrying launchable resources.
         provision_failed = True
@@ -448,7 +567,8 @@ class RetryingVmProvisioner(object):
                     to_provision,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
-                    cluster_name=cluster_name)
+                    cluster_name=cluster_name,
+                    prev_cluster_config=prev_cluster_config)
                 if dryrun:
                     return
                 config_dict['launched_resources'] = to_provision
@@ -476,9 +596,6 @@ class RetryingVmProvisioner(object):
                 task = self._dag.tasks[task_index]
                 to_provision = task.best_resources
                 assert to_provision is not None, task
-        backend_utils.wait_until_ray_cluster_ready(to_provision.cloud,
-                                                   config_dict['ray'],
-                                                   task.num_nodes)
         return config_dict
 
 
@@ -560,12 +677,13 @@ class CloudVmRayBackend(backends.Backend):
                            f'Existing requested resources: '
                            f'\t{handle.requested_resources}\n'
                            f'Newly requested resources: \t{task.resources}\n')
-        logger.info(f'Creating a new cluster {cluster_name}: '
-                    f'{task.num_nodes}x {to_provision}.\n'
-                    'Tip: to reuse an existing cluster, '
-                    'use the --cluster-name flag or '
-                    'specify sky.execute(..., cluster_name=cluster_name). '
-                    'Use `sky status` to see cluster names.')
+        logger.info(
+            f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
+            f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
+            'Tip: to reuse an existing cluster, '
+            'specify --cluster-name (-c) in the CLI or use '
+            'sky.execute(.., cluster_name=..) in the Python API. '
+            'Run `sky status` to see existing clusters.')
         return cluster_name, to_provision
 
     def provision(self,
@@ -592,9 +710,9 @@ class CloudVmRayBackend(backends.Backend):
             config_dict = provisioner.provision_with_retries(
                 task, to_provision, dryrun, stream_logs, cluster_name)
         except exceptions.ResourcesUnavailableError as e:
-            # TODO: mention what the "requested resources" are.
             raise exceptions.ResourcesUnavailableError(
-                'Failed to provision all possible launchable resources.') from e
+                'Failed to provision all possible launchable resources. '
+                f'Relax the task\'s resource requirements:\n{task}') from e
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
@@ -638,6 +756,7 @@ class CloudVmRayBackend(backends.Backend):
         mounts = cloud_to_remote_file_mounts
         if mounts is None:
             return
+        logger.info('Processing cloud to VM file mounts.')
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
             # (download gsutil on remote, run gsutil on remote).  Consider
@@ -678,6 +797,9 @@ class CloudVmRayBackend(backends.Backend):
             ])
             log_path = os.path.join(self.log_dir,
                                     'file_mounts_cloud_to_remote.log')
+            logger.info(f' Syncing: {src} -> {dst}')
+            # TODO: filter out ray boilerplate: Setting `max_workers` for node
+            # type ... try re-running the command with --no-config-cache.
             proc, unused_stdout, unused_stderr = backend_utils.run_with_log(
                 f'ray exec {handle.cluster_yaml} \'{command}\'',
                 os.path.abspath(log_path),
@@ -742,7 +864,7 @@ class CloudVmRayBackend(backends.Backend):
                 resources_str = f', resources={json.dumps(resources)}'
                 assert len(resources) == 1, \
                     ('There can only be one type of accelerator per instance.'
-                    f' Found: {resources}.')
+                     f' Found: {resources}.')
                 # Passing this ensures that the Ray remote task gets
                 # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
                 # would be force-set to empty by Ray.
@@ -954,7 +1076,7 @@ class CloudVmRayBackend(backends.Backend):
             name = global_user_state.get_cluster_name_from_handle(handle)
             logger.info('\nTo log into the head VM:\t'
                         f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
-                        '\nTo tear down the cluster:'
+                        '\nTo teardown the cluster:'
                         f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n')
             if handle.tpu_delete_script is not None:
                 logger.info(
@@ -986,7 +1108,7 @@ class CloudVmRayBackend(backends.Backend):
             # Add this field to a temp file to get private ips.
             config['provider']['use_internal_ips'] = True
             yaml_handle = cluster_yaml + '.tmp'
-            backend_utils.yaml_dump(yaml_handle, config)
+            backend_utils.dump_yaml(yaml_handle, config)
 
         out = backend_utils.run(f'ray get-head-ip {yaml_handle}',
                                 stdout=subprocess.PIPE).stdout.decode().strip()
