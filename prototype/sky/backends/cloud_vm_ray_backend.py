@@ -677,12 +677,13 @@ class CloudVmRayBackend(backends.Backend):
                            f'Existing requested resources: '
                            f'\t{handle.requested_resources}\n'
                            f'Newly requested resources: \t{task.resources}\n')
-        logger.info(f'Creating a new cluster: {cluster_name} '
-                    f'[{task.num_nodes}x {to_provision}].\n'
-                    'Tip: to reuse an existing cluster, '
-                    'specify --cluster-name (-c) in the CLI or use'
-                    'sky.execute(..., cluster_name=..) in the Python API. '
-                    'Use `sky status` to see cluster names.')
+        logger.info(
+            f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
+            f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
+            'Tip: to reuse an existing cluster, '
+            'specify --cluster-name (-c) in the CLI or use '
+            'sky.execute(.., cluster_name=..) in the Python API. '
+            'Run `sky status` to see existing clusters.')
         return cluster_name, to_provision
 
     def provision(self,

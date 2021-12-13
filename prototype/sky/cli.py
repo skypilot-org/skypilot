@@ -117,7 +117,8 @@ def _create_and_ssh_into_node(
     task = dag.tasks[0]
 
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    if handle is None:
+    if handle is None or handle.head_ip is None:
+        # head_ip would be None if previous provisioning failed.
         handle = backend.provision(task,
                                    task.best_resources,
                                    dryrun=False,
