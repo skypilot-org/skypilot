@@ -23,6 +23,7 @@ with sky.Dag() as dag:
         master_ip = ip_list[0]
         for i, ip in enumerate(ip_list):
             run_dict[ip] = f'cd pytorch-distributed-resnet && \
+            export XLA_FLAGS=\'--xla_gpu_cuda_data_dir=/usr/local/cuda/\' && \
             python3 -m torch.distributed.launch --nproc_per_node=1 \
             --nnodes={num_nodes} --node_rank={i} --master_addr=\"{master_ip}\" \
             --master_port=8008 resnet_ddp.py --num_epochs 20'

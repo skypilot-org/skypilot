@@ -2,16 +2,14 @@ name: resnet-app
 workdir: ~/Downloads/tpu
 
 resources:
-  cloud: aws
-  instance_type: p3.2xlarge
+  # cloud: aws
+  # instance_type: p3.2xlarge
+  cloud: azure
+  accelerators: V100
 
-inputs: {
-  gs://cloud-tpu-test-dataset/fake_imagenet: 70,
-}
+inputs: { gs://cloud-tpu-test-dataset/fake_imagenet: 70 }
 
-outputs: {
-  resnet-model-dir: 0.1,
-}
+outputs: { resnet-model-dir: 0.1 }
 
 # file_mounts: {
 #   /tmp/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet,
@@ -37,6 +35,7 @@ run: |
   . $(conda info --base)/etc/profile.d/conda.sh
   conda activate resnet
 
+  export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
   python -u models/official/resnet/resnet_main.py --use_tpu=False \
       --mode=train --train_batch_size=256 --train_steps=250 \
       --iterations_per_loop=125 \

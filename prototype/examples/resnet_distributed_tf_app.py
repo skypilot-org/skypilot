@@ -55,6 +55,7 @@ with sky.Dag() as dag:
         run = 'source ~/.bashrc && \
             source activate resnet && \
             rm -rf resnet_model-dir && \
+            export XLA_FLAGS=\'--xla_gpu_cuda_data_dir=/usr/local/cuda/\' && \
             python models/official/resnet/resnet_main.py --use_tpu=False \
             --mode=train --train_batch_size=256 --train_steps=500 \
             --iterations_per_loop=125 \

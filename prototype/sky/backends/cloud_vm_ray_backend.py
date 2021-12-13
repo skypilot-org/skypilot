@@ -997,11 +997,10 @@ class CloudVmRayBackend(backends.Backend):
                     storage.delete()
 
     def teardown(self, handle: ResourceHandle) -> None:
-        if self._maybe_azure_teardown(handle):
-            return
-        backend_utils.run(f'ray down -y {handle.cluster_yaml}')
-        if handle.tpu_delete_script is not None:
-            backend_utils.run(f'bash {handle.tpu_delete_script}')
+        if not self._maybe_azure_teardown(handle):
+            backend_utils.run(f'ray down -y {handle.cluster_yaml}')
+            if handle.tpu_delete_script is not None:
+                backend_utils.run(f'bash {handle.tpu_delete_script}')
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name)
 
