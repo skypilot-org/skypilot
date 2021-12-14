@@ -54,6 +54,13 @@ file_mounts: {
 {%- endfor %}
 }
 
+{%- if initialization_commands is not none %}
+initialization_commands:
+{%- for cmd in initialization_commands %}
+  - {{cmd}}
+{%- endfor %}
+{%- endif %}
+
 # Patterns for files to exclude when running rsync up or rsync down
 rsync_exclude:
   - "**/.git"
