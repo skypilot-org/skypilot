@@ -720,14 +720,17 @@ class CloudVmRayBackend(backends.Backend):
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
                        task: App) -> None:
         ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
+        username = self._get_username(handle.cluster_yaml)
         ip_to_command = post_setup_fn(ip_list)
         for ip, cmd in ip_to_command.items():
             if cmd is not None:
                 cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
                        f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
-                backend_utils.run_command_on_ip_via_ssh(ip, cmd,
+                backend_utils.run_command_on_ip_via_ssh(ip,
+                                                        cmd,
                                                         task.private_key,
-                                                        task.container_name)
+                                                        task.container_name,
+                                                        user=username)
 
     def _execute_par_task(self,
                           handle: ResourceHandle,
@@ -1017,6 +1020,12 @@ class CloudVmRayBackend(backends.Backend):
                 check=False)
             return True
         return False
+
+    def _get_username(self, cluster_yaml: str) -> str:
+        yaml_handle = cluster_yaml
+        with open(cluster_yaml, 'r') as f:
+            config = yaml.safe_load(f)
+        return config['auth']['ssh_user'].strip()
 
     def _get_node_ips(self,
                       cluster_yaml: str,
