@@ -309,10 +309,6 @@ class Task(object):
             node from which the task is launched.
         """
         self.file_mounts = file_mounts
-        for remote, unused_source in file_mounts.items():
-            if not os.path.isabs(remote):
-                raise ValueError('File mounts: remote paths should be absolute,'
-                                 f' not relative or "~/...".  Found: {remote}')
         return self
 
     def update_file_mounts(self, file_mounts: Dict[str, str]):
@@ -335,6 +331,7 @@ class Task(object):
         if self.file_mounts is None:
             self.file_mounts = {}
         self.file_mounts.update(file_mounts)
+        return self
 
     def set_blocked_clouds(self, blocked_clouds: Set[clouds.Cloud]):
         """Sets the clouds that this task should not run on."""

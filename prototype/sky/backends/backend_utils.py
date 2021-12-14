@@ -66,22 +66,65 @@ def _fill_template(template_path: str,
         # Need abs path here, otherwise get_rel_path() below fails.
         output_path = os.path.join(os.path.dirname(sky.__root_dir__),
                                    output_path)
-    logger.info(f'Created or updated file {get_rel_path(output_path)}')
     return output_path
 
 
-def wrap_file_mount(path: str) -> str:
-    """Prepends ~/<opaque dir>/ to a path to work around permission issues.
+class FileMountHelper(object):
+    """Helper for handling file mounts."""
 
-    Examples:
-      /root/hello.txt -> ~/<opaque dir>/root/hello.txt
-      local.txt -> ~/<opaque dir>/local.txt
+    @classmethod
+    def wrap_file_mount(cls, path: str) -> str:
+        """Prepends ~/<opaque dir>/ to a path to work around permission issues.
 
-    After the path is synced, we can later create a symlink to this wrapped
-    path from the original path, e.g., in the initialization_commands of the
-    ray autoscaler YAML.
-    """
-    return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, path.lstrip('/'))
+        Examples:
+        /root/hello.txt -> ~/<opaque dir>/root/hello.txt
+        local.txt -> ~/<opaque dir>/local.txt
+
+        After the path is synced, we can later create a symlink to this wrapped
+        path from the original path, e.g., in the initialization_commands of the
+        ray autoscaler YAML.
+        """
+        return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, path.lstrip('/'))
+
+    @classmethod
+    def make_safe_symlink_command(
+            cls,
+            *,
+            source: str,
+            target: str,
+            download_target_commands: Optional[List[str]] = None) -> str:
+        """Returns a command that safely symlinks 'source' to 'target'.
+
+        Needed because 'source' may or may not exist, can have multiple
+        levels (a/b/c), can end with a slash, or may need sudo access, etc.
+        """
+        assert os.path.isabs(source) or source.startswith('~/'), source
+        # Point 'source' (may or may not exist) to 'target'.
+        #
+        # 'source' can have multiple levels:
+        #   - relative paths, a/b/c
+        #   - absolute paths, /a/b/c
+        symlink_to_make = source.rstrip('/')
+        dir_of_symlink = os.path.dirname(symlink_to_make)
+        # Below, use sudo in case the symlink needs sudo access to create.
+        download = []
+        if download_target_commands is not None:
+            download = download_target_commands
+        commands = [
+            # Prepare to create the symlink:
+            #  1. make sure its dir exists.
+            f'sudo mkdir -p {dir_of_symlink}',
+            #  2. remove any existing symlink (ln -f may throw 'cannot
+            #     overwrite directory', if the link exists and points to a
+            #     directory).
+            f'(sudo rm {symlink_to_make} &>/dev/null || true)',
+        ] + download + [
+            # Link.
+            f'sudo ln -s {target.rstrip("/")} {symlink_to_make}',
+            # chown.
+            f'sudo chown $USER {symlink_to_make}',
+        ]
+        return ' && '.join(commands)
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
@@ -141,8 +184,8 @@ def write_cluster_config(run_id: RunId,
             f.write(codegen)
         setup_sh_path = f.name
 
-    # File mounts handling:
-    #  (1) in 'file_mounts' sections, add <prefix> to all target paths.
+    # File mounts handling for remote paths possibly without write access:
+    #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
     #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
     # We need to do these since as of Ray 1.8, this is not supported natively
     # (Docker works though, of course):
@@ -153,30 +196,18 @@ def write_cluster_config(run_id: RunId,
     initialization_commands = []
     if mounts is not None:
         for remote, local in mounts.items():
-            wrapped_remote = wrap_file_mount(remote)
+            if not os.path.isabs(remote) and not remote.startswith('~/'):
+                remote = f'~/{remote}'
+            if remote.startswith('~/') or remote.startswith('/tmp/'):
+                # Skip as these should be writable locations.
+                wrapped_file_mounts[remote] = local
+                continue
+            assert os.path.isabs(remote), (remote, local)
+            wrapped_remote = FileMountHelper.wrap_file_mount(remote)
             wrapped_file_mounts[wrapped_remote] = local
-            # Point 'remote' (may or may not exist) to 'wrapped_remote'
-            # (guaranteed to exist by ray autoscaler's use of rsync).
-            #
-            # 'remote' can have multiple levels:
-            #   - relative paths, a/b/c
-            #   - absolute paths, /a/b/c
-            symlink_to_make = remote.rstrip('/')
-            dir_of_symlink = os.path.dirname(remote)
-            # Below, use sudo in case the symlink needs sudo access to create.
-            command = ' && '.join([
-                # Prepare to create the symlink:
-                #  1. make sure its dir exists.
-                f'sudo mkdir -p {dir_of_symlink}',
-                #  2. remove any existing symlink (ln -f may throw 'cannot
-                #     overwrite directory', if the link exists and points to a
-                #     directory).
-                f'(sudo rm {symlink_to_make} &>/dev/null || true)',
-                # Link.
-                f'sudo ln -s {wrapped_remote} {symlink_to_make}',
-                # chown.
-                f'sudo chown $USER {symlink_to_make}',
-            ])
+            command = FileMountHelper.make_safe_symlink_command(
+                source=remote,
+                target=wrapped_remote)
             initialization_commands.append(command)
 
     yaml_path = _fill_template(

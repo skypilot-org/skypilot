@@ -4,8 +4,6 @@
 # Syncing is done before the Task's execution so that it can access these files.
 # After syncing, the paths can be opened, read, or written as usual.
 #
-# Destination paths must be absolute paths, not relative.
-#
 # Caveat:
 #
 #    Destination paths may be created as *symlinks* under the hood.  Some
@@ -14,16 +12,49 @@
 resources:
   cloud: gcp
 
-# Format:
-#   <destination on VM>: <source, local or cloud>
+# Format for file_mounts:
+#
+#   [ destination on VM ]: [ source, local or cloud ]
+#
 file_mounts:
 
   ###############################################
   #  Sync from local files/directories (rsync)  #
   ###############################################
+
   /setup.py: ./setup.py
   /sky: .
   /more/levels/should/work: .
+
+  ~/tmpfile: ~/tmpfile
+  ~/a/b/c/tmpfile: ~/tmpfile
+
+  # Syncing directories.
+  #
+  # All of the following four mounts have the same effect.
+  #
+  # ~/tmp-workdir/
+  #   a/
+  #     b
+  #   c
+  #
+  # After syncing we will have:
+  #
+  # /tmp/data<n>/
+  #   a/
+  #     b
+  #   c
+  /tmp/data1/: ~/tmp-workdir/
+  /tmp/data2/: ~/tmp-workdir
+  /tmp/data3: ~/tmp-workdir/
+  /tmp/data4: ~/tmp-workdir
+
+  # NOTE: ensure local ~/.ssh/authorized_keys does not exist since it can
+  # override the remote authorized_keys.
+  ~/.ssh/id_rsa.pub: ~/.ssh/id_rsa.pub
+
+  # Relative paths are under ~/ (after sync, ~/relative_dir/ exists).
+  relative_dir/: ~/tmp-workdir/
 
   #############################################
   #  Sync from Google Cloud Storage (gsutil)  #
@@ -32,13 +63,28 @@ file_mounts:
   # Syncing a regular object.
   /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
   /data/: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
+  ~/: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
+  ~/data/: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
 
   # If a source path points to a "directory", its contents will be recursively
   # synced (subdirectories included).
   # Commenting out as this takes a while.
   # /data/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet
 
+setup: 'sudo apt-get install -y tree'
+
 run: |
+  set -x
+
+  ls -lthr ~/tmpfile
+  ls -lthr ~/a/b/c
+
+  echo hi >> /tmp/data1/new_file
+  echo hi >> /tmp/data3/new_file
+  tree /tmp/data*
+
+  ls -lthr ~/.ssh
+
   ls -l /setup.py
 
   cd /sky
@@ -47,5 +93,11 @@ run: |
   ls -l /data/train-00001-of-01024
   du -schL /train-00001-of-01024
   wc -l /train-00001-of-01024
+  ls -l ~/train-00001-of-01024
+  ls -l ~/data/train-00001-of-01024
+
+  ls -lthr ~/
+  ls -lthr ~/relative_dir
+  ls -lthr ~/relative_dir/
 
   # ls -lH /data/fake_imagenet | head -n10
