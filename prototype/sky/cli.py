@@ -78,7 +78,6 @@ def _default_interactive_node_name(node_type: str):
     return f'sky-{node_type}-{getpass.getuser()}'
 
 
-# TODO: --screen; while uploading ~/.screenrc.
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
         node_type: str,
@@ -86,6 +85,7 @@ def _create_and_ssh_into_node(
         cluster_name: str,
         backend: Optional[backend_lib.Backend] = None,
         port_forward: Optional[List[int]] = None,
+        use_screen: bool = False,
 ):
     """Creates and attaches to an interactive node.
 
@@ -109,6 +109,8 @@ def _create_and_ssh_into_node(
             run='',
         )
         task.set_resources(resources)
+        if use_screen:
+            task.set_file_mounts({'~/.screenrc': '~/.screenrc'})
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag)
@@ -131,10 +133,10 @@ def _create_and_ssh_into_node(
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
     # Disable check, since the returncode could be non-zero if the user Ctrl-D.
-    backend_utils.run(backend.ssh_head_command(handle,
-                                               port_forward=port_forward),
-                      shell=False,
-                      check=False)
+    commands = backend.ssh_head_command(handle, port_forward=port_forward)
+    if use_screen:
+        commands += ['screen', '-D', '-R']
+    backend_utils.run(commands, shell=False, check=False)
 
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
     click.echo('The interactive node is still running.')
@@ -422,7 +424,12 @@ def down(
               required=False,
               help=('Port to be forwarded. To forward multiple ports, '
                     'use this option multiple times.'))
-def gpunode(cluster: str, port_forward: Optional[List[int]]):
+@click.option('--screen',
+              default=False,
+              is_flag=True,
+              help=('If true, attach using screen ('
+                    'when provisioning, automatically upload ~/.screenrc).'))
+def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive GPU node.
 
     Automatically syncs the current working directory.
@@ -459,6 +466,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]]):
         sky.Resources(sky.AWS(), accelerators='V100'),
         cluster_name=name,
         port_forward=port_forward,
+        use_screen=screen,
     )
 
 
@@ -476,7 +484,12 @@ def gpunode(cluster: str, port_forward: Optional[List[int]]):
               required=False,
               help=('Port to be forwarded. To forward multiple ports, '
                     'use this option multiple times.'))
-def cpunode(cluster: str, port_forward: Optional[List[int]]):
+@click.option('--screen',
+              default=False,
+              is_flag=True,
+              help=('If true, attach using screen ('
+                    'when provisioning, automatically upload ~/.screenrc).'))
+def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive CPU node.
 
     Automatically syncs the current working directory.
@@ -513,6 +526,7 @@ def cpunode(cluster: str, port_forward: Optional[List[int]]):
         sky.Resources(sky.AWS()),
         cluster_name=name,
         port_forward=port_forward,
+        use_screen=screen,
     )
 
 
