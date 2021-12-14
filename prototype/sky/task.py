@@ -379,7 +379,7 @@ class Task(object):
             run_msg = self.run.replace('\n', '\\n')
         else:
             run_msg = '<fn>'
-        if len(self.run) > 20:
+        if len(run_msg) > 20:
             s = 'Task(run=\'{}...\')'.format(run_msg[:20])
         else:
             s = 'Task(run=\'{}\')'.format(run_msg)
