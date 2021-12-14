@@ -50,6 +50,13 @@ time sky run -c mh "$DIR"/multi_hostname.yaml
 time sky exec -c mh "$DIR"/multi_hostname.yaml
 sky down mh &
 
+# Task(), n nodes with setups.
+# real    4m17.406s
+time python "$DIR"/resnet_distributed_tf_app.py
+# real    0m50.811s
+time python "$DIR"/multi_hostname.yaml
+sky down dtf &
+
 # ParTask.
 # 6:23.58 total
 time python "$DIR"/multi_echo.py

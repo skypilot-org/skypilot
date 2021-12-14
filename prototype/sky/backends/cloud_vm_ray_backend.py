@@ -1144,7 +1144,6 @@ class CloudVmRayBackend(backends.Backend):
         return False
 
     def _get_username(self, cluster_yaml: str) -> str:
-        yaml_handle = cluster_yaml
         with open(cluster_yaml, 'r') as f:
             config = yaml.safe_load(f)
         return config['auth']['ssh_user'].strip()
