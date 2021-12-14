@@ -375,8 +375,11 @@ class Task(object):
     def __repr__(self):
         if self.name:
             return self.name
-        run_msg = self.run.replace('\n', '\\n')
-        if len(self.run) > 20:
+        if isinstance(self.run, str):
+            run_msg = self.run.replace('\n', '\\n')
+        else:
+            run_msg = '<fn>'
+        if len(run_msg) > 20:
             s = 'Task(run=\'{}...\')'.format(run_msg[:20])
         else:
             s = 'Task(run=\'{}\')'.format(run_msg)
