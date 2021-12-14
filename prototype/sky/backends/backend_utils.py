@@ -206,8 +206,7 @@ def write_cluster_config(run_id: RunId,
             wrapped_remote = FileMountHelper.wrap_file_mount(remote)
             wrapped_file_mounts[wrapped_remote] = local
             command = FileMountHelper.make_safe_symlink_command(
-                source=remote,
-                target=wrapped_remote)
+                source=remote, target=wrapped_remote)
             initialization_commands.append(command)
 
     yaml_path = _fill_template(
