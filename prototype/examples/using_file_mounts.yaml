@@ -24,37 +24,35 @@ file_mounts:
 
   /setup.py: ./setup.py
   /sky: .
-  /more/levels/should/work: .
 
   ~/tmpfile: ~/tmpfile
   ~/a/b/c/tmpfile: ~/tmpfile
 
+  # Intermediate dirs are created and chown-ed to $USER if they don't already
+  # exist.  Thus they can be used too, e.g., 'mkdir -p /data/logs'.  See 'run'.
+  /data/checkpoints/best.pt: ~/tmp
+
+  ~/.ssh/id_rsa.pub: ~/.ssh/id_rsa.pub
+
   # Syncing directories.
   #
-  # All of the following four mounts have the same effect.
+  # Suppose the source has:
   #
   # ~/tmp-workdir/
   #   a/
   #     b
   #   c
   #
-  # After syncing we will have:
+  # After syncing the target will be:
   #
-  # /tmp/data<n>/
+  # /tmp/data/
   #   a/
   #     b
   #   c
-  /tmp/data1/: ~/tmp-workdir/
-  /tmp/data2/: ~/tmp-workdir
-  /tmp/data3: ~/tmp-workdir/
-  /tmp/data4: ~/tmp-workdir
-
-  # NOTE: ensure local ~/.ssh/authorized_keys does not exist since it can
-  # override the remote authorized_keys.
-  ~/.ssh/id_rsa.pub: ~/.ssh/id_rsa.pub
+  /tmp/data: ~/tmp-workdir
 
   # Relative paths are under ~/ (after sync, ~/relative_dir/ exists).
-  relative_dir/: ~/tmp-workdir/
+  relative_dir: ~/tmp-workdir
 
   #############################################
   #  Sync from Google Cloud Storage (gsutil)  #
@@ -62,9 +60,8 @@ file_mounts:
 
   # Syncing a regular object.
   /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
-  /data/: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
-  ~/: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
-  ~/data/: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
+  /data/train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
+  ~/data/train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
 
   # If a source path points to a "directory", its contents will be recursively
   # synced (subdirectories included).
@@ -74,14 +71,17 @@ file_mounts:
 setup: 'sudo apt-get install -y tree'
 
 run: |
-  set -x
+  set -ex
 
   ls -lthr ~/tmpfile
   ls -lthr ~/a/b/c
 
-  echo hi >> /tmp/data1/new_file
-  echo hi >> /tmp/data3/new_file
-  tree /tmp/data*
+  mkdir -p /data/logs
+  touch /data/logs/test.log
+  touch /data/checkpoints/last.pt
+
+  echo hi >> /tmp/data/new_file
+  tree /tmp/data
 
   ls -lthr ~/.ssh
 
@@ -90,14 +90,15 @@ run: |
   cd /sky
   pip3 install -e .
 
-  ls -l /data/train-00001-of-01024
-  du -schL /train-00001-of-01024
-  wc -l /train-00001-of-01024
-  ls -l ~/train-00001-of-01024
-  ls -l ~/data/train-00001-of-01024
+  ls -lthr ~/.ssh/
 
   ls -lthr ~/
   ls -lthr ~/relative_dir
   ls -lthr ~/relative_dir/
+
+  du -schL /train-00001-of-01024
+  wc -l /train-00001-of-01024
+  ls -l /data/train-00001-of-01024
+  ls -l ~/data/train-00001-of-01024
 
   # ls -lH /data/fake_imagenet | head -n10

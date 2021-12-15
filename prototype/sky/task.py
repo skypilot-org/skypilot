@@ -308,6 +308,12 @@ class Task(object):
             the VM on which this Task will eventually run on, and local is the
             node from which the task is launched.
         """
+        for target, source in file_mounts.items():
+            if target.endswith('/') or source.endswith('/'):
+                raise ValueError(
+                    'File mount paths cannot end with a slash '
+                    '(try "/mydir: /mydir" or "/myfile: /myfile"). '
+                    f'Found: target={target} source={source}')
         self.file_mounts = file_mounts
         return self
 
@@ -331,7 +337,8 @@ class Task(object):
         if self.file_mounts is None:
             self.file_mounts = {}
         self.file_mounts.update(file_mounts)
-        return self
+        # For validation logic:
+        return self.set_file_mounts(self.file_mounts)
 
     def set_blocked_clouds(self, blocked_clouds: Set[clouds.Cloud]):
         """Sets the clouds that this task should not run on."""

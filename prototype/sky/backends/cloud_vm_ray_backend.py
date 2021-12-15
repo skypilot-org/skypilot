@@ -565,8 +565,11 @@ class RetryingVmProvisioner(object):
         if prev_handle is None:
             prev_cluster_config = None
         else:
-            prev_cluster_config = backend_utils.read_yaml(
-                prev_handle.cluster_yaml)
+            try:
+                prev_cluster_config = backend_utils.read_yaml(
+                    prev_handle.cluster_yaml)
+            except FileNotFoundError:
+                prev_cluster_config = None
         style = colorama.Style
         # Retrying launchable resources.
         provision_failed = True

@@ -95,34 +95,62 @@ class FileMountHelper(object):
             download_target_commands: Optional[List[str]] = None) -> str:
         """Returns a command that safely symlinks 'source' to 'target'.
 
-        Needed because 'source' may or may not exist, can have multiple
-        levels (a/b/c), can end with a slash, or may need sudo access, etc.
+        All intermediate directories of 'source' will be owned by $USER,
+        excluding the root directory (/).
+
+        'source' must be an absolute path; both 'source' and 'target' must not
+        end with a slash (/).
+
+        This function is needed because a simple 'ln -s target source' may
+        fail: 'source' can have multiple levels (/a/b/c), its parent dirs may
+        or may not exist, can end with a slash, or may need sudo access, etc.
+
+        Cases of <target: local> file mounts and their behaviors:
+
+            /existing_dir: ~/local/dir
+              - error out saying this cannot be done as LHS already exists
+            /existing_file: ~/local/file
+              - error out saying this cannot be done as LHS already exists
+            /existing_symlink: ~/local/file
+              - overwrite the existing symlink; this is important because sky
+                run can be run multiple times
+            Paths that start with ~/ and /tmp/ do not have the above
+            restrictions; just delegate to rsync behaviors.
         """
-        assert os.path.isabs(source) or source.startswith('~/'), source
-        # Point 'source' (may or may not exist) to 'target'.
-        #
-        # 'source' can have multiple levels:
-        #   - relative paths, a/b/c
-        #   - absolute paths, /a/b/c
-        symlink_to_make = source.rstrip('/')
-        dir_of_symlink = os.path.dirname(symlink_to_make)
+        assert os.path.isabs(source), source
+        assert not source.endswith('/') and not target.endswith('/'), (source,
+                                                                       target)
         # Below, use sudo in case the symlink needs sudo access to create.
-        download = []
-        if download_target_commands is not None:
-            download = download_target_commands
+        # Prepare to create the symlink:
+        #  1. make sure its dir(s) exist & are owned by $USER.
+        dir_of_symlink = os.path.dirname(source)
         commands = [
-            # Prepare to create the symlink:
-            #  1. make sure its dir exists.
+            # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
+            # chown $USER on it so user can use these intermediate dirs
+            # (excluding /).
             f'sudo mkdir -p {dir_of_symlink}',
-            #  2. remove any existing symlink (ln -f may throw 'cannot
-            #     overwrite directory', if the link exists and points to a
-            #     directory).
-            f'(sudo rm {symlink_to_make} &>/dev/null || true)',
-        ] + download + [
+            # p: path so far
+            ('(p=""; '
+             f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
+             'p=${p}/${w}; sudo chown $USER $p; done)')
+        ]
+        #  2. remove any existing symlink (ln -f may throw 'cannot
+        #     overwrite directory', if the link exists and points to a
+        #     directory).
+        commands += [
+            # Error out if source is an existing, non-symlink directory/file.
+            f'((test -L {source} && sudo rm {source} &>/dev/null) || '
+            f'(test ! -e {source} || '
+            f'(echo "!!! Failed mounting because path exists ({source})"; '
+            'exit 1)))',
+        ]
+        if download_target_commands is not None:
+            commands += download_target_commands
+        commands += [
             # Link.
-            f'sudo ln -s {target.rstrip("/")} {symlink_to_make}',
-            # chown.
-            f'sudo chown $USER {symlink_to_make}',
+            f'sudo ln -s {target} {source}',
+            # chown.  -h to affect symlinks only.
+            f'sudo chown -h $USER {source}',
         ]
         return ' && '.join(commands)
 
