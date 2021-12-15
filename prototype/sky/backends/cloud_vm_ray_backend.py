@@ -419,6 +419,8 @@ class RetryingVmProvisioner(object):
             else:
                 # Success.
                 if tpu_name is not None:
+                    # TODO: refactor to a cleaner design, so that tpu code and
+                    # ray up logic are not mixed up.
                     backend_utils.run(
                         f'ray exec {cluster_config_file} '
                         f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
@@ -533,8 +535,9 @@ class RetryingVmProvisioner(object):
 
         # TODO: if requesting a large amount (say 32) of expensive VMs, this
         # may loop for a long time.  Use timeouts and treat as gang_failed.
-        gang_failed = backend_utils.wait_until_ray_cluster_ready(
+        cluster_ready = backend_utils.wait_until_ray_cluster_ready(
             to_provision_cloud, cluster_config_file, task.num_nodes)
+        gang_failed = not cluster_ready
         if gang_failed or ray_up_on_full_confg_only:
             # Head OK; gang scheduling failure.
             return gang_failed, proc, stdout, stderr

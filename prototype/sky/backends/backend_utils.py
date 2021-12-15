@@ -330,7 +330,7 @@ def get_run_id() -> RunId:
 
 def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
                                  num_nodes: int) -> bool:
-    """Returns whether there's a cluster provisioning failure."""
+    """Returns whether the entire ray cluster is ready."""
     if num_nodes <= 1:
         return
     expected_worker_count = num_nodes - 1
@@ -354,9 +354,9 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
             # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
             # GCP can satisfy only by half, the worker node would be forgotten.
             # The correct behavior should be for it to error out.
-            return True  # failed
+            return False  # failed
         time.sleep(10)
-    return False  # success
+    return True  # success
 
 
 def run_command_on_ip_via_ssh(ip: str,
