@@ -7,9 +7,13 @@ resources:
   cloud: azure
   accelerators: V100
 
-inputs: { gs://cloud-tpu-test-dataset/fake_imagenet: 70 }
+inputs: { 
+  gs://cloud-tpu-test-dataset/fake_imagenet: 70,
+}
 
-outputs: { resnet-model-dir: 0.1 }
+outputs: { 
+  resnet-model-dir: 0.1 
+}
 
 # file_mounts: {
 #   /tmp/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet,

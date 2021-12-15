@@ -1122,26 +1122,25 @@ class CloudVmRayBackend(backends.Backend):
                     storage.delete()
 
     def teardown(self, handle: ResourceHandle) -> None:
-        if not self._maybe_azure_teardown(handle):
+        cloud = handle.launched_resources.cloud
+        if isinstance(cloud, clouds.Azure):
+            # Special handling because `ray down` is buggy with Azure.
+            cluster_name = self._get_cluster_name(handle.cluster_yaml)
+            backend_utils.run(
+                'az vm delete --yes --ids $(az vm list --query '
+                f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
+                check=False)
+        else:
             backend_utils.run(f'ray down -y {handle.cluster_yaml}')
             if handle.tpu_delete_script is not None:
                 backend_utils.run(f'bash {handle.tpu_delete_script}')
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name)
 
-    def _maybe_azure_teardown(self, handle: ResourceHandle) -> bool:
-        """Special handling because `ray down` is buggy with Azure."""
-        with open(handle.cluster_yaml, 'r') as f:
+    def _get_cluster_name(self, cluster_yaml: str) -> str:
+        with open(cluster_yaml, 'r') as f:
             config = yaml.safe_load(f)
-        cloud = config['provider']['type']
-        cluster_name = config['cluster_name']
-        if cloud.lower() == 'azure':
-            backend_utils.run(
-                'az vm delete --yes --ids $(az vm list --query '
-                f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
-                check=False)
-            return True
-        return False
+        return config['cluster_name']
 
     def _get_username(self, cluster_yaml: str) -> str:
         with open(cluster_yaml, 'r') as f:
