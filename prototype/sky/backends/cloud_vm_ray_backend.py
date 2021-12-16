@@ -12,7 +12,6 @@ import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
-import yaml
 
 import colorama
 from ray.autoscaler import sdk
@@ -329,9 +328,7 @@ class RetryingVmProvisioner(object):
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             try:
-                path = handle.cluster_yaml
-                with open(path, 'r') as f:
-                    config = yaml.safe_load(f)
+                config = backend_utils.read_yaml(handle.cluster_yaml)
                 prev_resources = handle.launched_resources
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
@@ -874,7 +871,8 @@ class CloudVmRayBackend(backends.Backend):
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
                        task: App) -> None:
         ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
-        ssh_user = self._get_ssh_user(handle.cluster_yaml)
+        config = backend_utils.read_yaml(handle.cluster_yaml)
+        ssh_user = config['auth']['ssh_user'].strip()
         ip_to_command = post_setup_fn(ip_list)
         for ip, cmd in ip_to_command.items():
             if cmd is not None:
@@ -1155,9 +1153,10 @@ class CloudVmRayBackend(backends.Backend):
 
     def teardown(self, handle: ResourceHandle) -> None:
         cloud = handle.launched_resources.cloud
+        config = backend_utils.read_yaml(handle.cluster_yaml)
         if isinstance(cloud, clouds.Azure):
             # Special handling because `ray down` is buggy with Azure.
-            cluster_name = self._get_cluster_name(handle.cluster_yaml)
+            cluster_name = config['cluster_name']
             backend_utils.run(
                 'az vm delete --yes --ids $(az vm list --query '
                 f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
@@ -1169,16 +1168,6 @@ class CloudVmRayBackend(backends.Backend):
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name)
 
-    def _get_cluster_name(self, cluster_yaml: str) -> str:
-        with open(cluster_yaml, 'r') as f:
-            config = yaml.safe_load(f)
-        return config['cluster_name']
-
-    def _get_ssh_user(self, cluster_yaml: str) -> str:
-        with open(cluster_yaml, 'r') as f:
-            config = yaml.safe_load(f)
-        return config['auth']['ssh_user'].strip()
-
     def _get_node_ips(self,
                       cluster_yaml: str,
                       expected_num_nodes: int,
@@ -1186,8 +1175,7 @@ class CloudVmRayBackend(backends.Backend):
         """Returns the IPs of all nodes in the cluster."""
         yaml_handle = cluster_yaml
         if return_private_ips:
-            with open(cluster_yaml, 'r') as f:
-                config = yaml.safe_load(f)
+            config = backend_utils.read_yaml(yaml_handle)
             # Add this field to a temp file to get private ips.
             config['provider']['use_internal_ips'] = True
             yaml_handle = cluster_yaml + '.tmp'
@@ -1224,8 +1212,7 @@ class CloudVmRayBackend(backends.Backend):
         # going through ray (either 'ray rsync_*' or sdk.rsync()).
         assert handle.head_ip is not None, \
             f'provision() should have cached head ip: {handle}'
-        with open(handle.cluster_yaml, 'r') as f:
-            config = yaml.safe_load(f)
+        config = backend_utils.read_yaml(handle.cluster_yaml)
         auth = config['auth']
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
@@ -1250,8 +1237,7 @@ class CloudVmRayBackend(backends.Backend):
         """Returns a 'ssh' command that logs into a cluster's head node."""
         assert handle.head_ip is not None, \
             f'provision() should have cached head ip: {handle}'
-        with open(handle.cluster_yaml, 'r') as f:
-            config = yaml.safe_load(f)
+        config = backend_utils.read_yaml(handle.cluster_yaml)
         auth = config['auth']
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
