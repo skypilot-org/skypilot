@@ -52,9 +52,9 @@ with sky.Dag() as dag:
     # If a str, run the same command on all nodes.
     # If a function, run per-node command on each node.
     def run_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
-        run = 'source ~/.bashrc && \
-            source activate resnet && \
+        run = 'conda activate resnet && \
             rm -rf resnet_model-dir && \
+            export XLA_FLAGS=\'--xla_gpu_cuda_data_dir=/usr/local/cuda/\' && \
             python models/official/resnet/resnet_main.py --use_tpu=False \
             --mode=train --train_batch_size=256 --train_steps=500 \
             --iterations_per_loop=125 \
@@ -78,7 +78,7 @@ with sky.Dag() as dag:
     train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
                      estimated_size_gigabytes=70)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
-    train.set_resources(sky.Resources(sky.AWS(), 'p3.2xlarge'))
+    train.set_resources(sky.Resources(sky.Azure(), accelerators='V100'))
 
 # sky.execute(dag, dryrun=True)
-sky.execute(dag)
+sky.execute(dag, cluster_name='dtf')
