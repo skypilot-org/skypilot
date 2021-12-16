@@ -180,12 +180,16 @@ def write_cluster_config(run_id: RunId,
         region = cloud.get_default_region()
         zones = region.zones
     else:
-        assert zones is not None, \
-            'Set either both or neither for: region, zones.'
+        assert isinstance(
+            cloud, clouds.Azure
+        ) or zones is not None, 'Set either both or neither for: region, zones.'
     region = region.name
     if isinstance(cloud, clouds.AWS):
         # Only AWS supports multiple zones in the 'availability_zone' field.
         zones = [zone.name for zone in zones]
+    elif isinstance(cloud, clouds.Azure):
+        # Azure does not support specific zones.
+        zones = []
     else:
         zones = [zones[0].name]
 
@@ -331,10 +335,12 @@ def get_run_id() -> RunId:
 def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
                                  num_nodes: int) -> bool:
     """Returns whether the entire ray cluster is ready."""
+    # FIXME: It may takes a while for the cluster to be available for ray,
+    # especially for Azure, causing `ray exec` to fail.
     if num_nodes <= 1:
         return
     expected_worker_count = num_nodes - 1
-    if isinstance(cloud, clouds.AWS):
+    if isinstance(cloud, (clouds.AWS, clouds.Azure)):
         worker_str = 'ray.worker.default'
     elif isinstance(cloud, clouds.GCP):
         worker_str = 'ray_worker_default'
@@ -363,7 +369,7 @@ def run_command_on_ip_via_ssh(ip: str,
                               command: str,
                               private_key: str,
                               container_name: Optional[str],
-                              user: str = 'ubuntu') -> None:
+                              ssh_user: str = 'ubuntu') -> None:
     if container_name is not None:
         command = command.replace('\\', '\\\\').replace('"', '\\"')
         command = f'docker exec {container_name} /bin/bash -c "{command}"'
@@ -373,7 +379,7 @@ def run_command_on_ip_via_ssh(ip: str,
         private_key,
         '-o',
         'StrictHostKeyChecking=no',
-        '{}@{}'.format(user, ip),
+        '{}@{}'.format(ssh_user, ip),
         command  # TODO: shlex.quote() doesn't work.  Is it needed in a list?
     ]
     with subprocess.Popen(cmd,

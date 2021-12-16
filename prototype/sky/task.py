@@ -292,21 +292,26 @@ class Task(object):
     def set_file_mounts(self, file_mounts: Dict[str, str]):
         """Sets the file mounts for this Task.
 
-        File mounts are local files/dirs to be synced to specific paths on the
-        remote VM(s) where this Task will run.  Can be used for syncing
-        datasets, dotfiles, etc.
+        File mounts are a dictionary of { remote_path: local_path/cloud URI }.
+        Local (or cloud) files/directories will be synced to the specified
+        paths on the remote VM(s) where this Task will run.
+
+        Used for syncing datasets, dotfiles, etc.
+
+        Paths cannot end with a slash (for clarity).
 
         Example:
 
             task.set_file_mounts({
                 '~/.dotfile': '/local/.dotfile',
+                # /remote/dir/ will contain the contents of /local/dir/.
                 '/remote/dir': '/local/dir',
             })
 
         Args:
-          file_mounts: a dict of { remote_path: local_path }, where remote is
-            the VM on which this Task will eventually run on, and local is the
-            node from which the task is launched.
+          file_mounts: a dict of { remote_path: local_path/cloud URI }, where
+            remote is the VM on which this Task will eventually run on, and
+            local is the node from which the task is launched.
         """
         for target, source in file_mounts.items():
             if target.endswith('/') or source.endswith('/'):
@@ -318,7 +323,7 @@ class Task(object):
         return self
 
     def update_file_mounts(self, file_mounts: Dict[str, str]):
-        """Updates the file mount for this Task
+        """Updates the file mounts for this Task.
 
         This should be run before provisioning.
 
@@ -379,8 +384,11 @@ class Task(object):
     def __repr__(self):
         if self.name:
             return self.name
-        run_msg = self.run.replace('\n', '\\n')
-        if len(self.run) > 20:
+        if isinstance(self.run, str):
+            run_msg = self.run.replace('\n', '\\n')
+        else:
+            run_msg = '<fn>'
+        if len(run_msg) > 20:
             s = 'Task(run=\'{}...\')'.format(run_msg[:20])
         else:
             s = 'Task(run=\'{}\')'.format(run_msg)

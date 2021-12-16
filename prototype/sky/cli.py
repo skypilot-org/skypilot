@@ -428,8 +428,7 @@ def down(
 @click.option('--screen',
               default=False,
               is_flag=True,
-              help=('If true, attach using screen ('
-                    'when provisioning, automatically upload ~/.screenrc).'))
+              help='If true, attach using screen.')
 def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive GPU node.
 
@@ -488,8 +487,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
 @click.option('--screen',
               default=False,
               is_flag=True,
-              help=('If true, attach using screen ('
-                    'when provisioning, automatically upload ~/.screenrc).'))
+              help='If true, attach using screen.')
 def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive CPU node.
 
