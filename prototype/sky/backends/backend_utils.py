@@ -367,7 +367,7 @@ def run_command_on_ip_via_ssh(ip: str,
                               command: str,
                               private_key: str,
                               container_name: Optional[str],
-                              user: str = 'ubuntu') -> None:
+                              ssh_user: str = 'ubuntu') -> None:
     if container_name is not None:
         command = command.replace('\\', '\\\\').replace('"', '\\"')
         command = f'docker exec {container_name} /bin/bash -c "{command}"'
@@ -377,7 +377,7 @@ def run_command_on_ip_via_ssh(ip: str,
         private_key,
         '-o',
         'StrictHostKeyChecking=no',
-        '{}@{}'.format(user, ip),
+        '{}@{}'.format(ssh_user, ip),
         command  # TODO: shlex.quote() doesn't work.  Is it needed in a list?
     ]
     with subprocess.Popen(cmd,

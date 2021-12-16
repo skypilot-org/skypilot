@@ -874,7 +874,7 @@ class CloudVmRayBackend(backends.Backend):
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
                        task: App) -> None:
         ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
-        username = self._get_username(handle.cluster_yaml)
+        ssh_user = self._get_ssh_user(handle.cluster_yaml)
         ip_to_command = post_setup_fn(ip_list)
         for ip, cmd in ip_to_command.items():
             if cmd is not None:
@@ -884,7 +884,7 @@ class CloudVmRayBackend(backends.Backend):
                                                         cmd,
                                                         task.private_key,
                                                         task.container_name,
-                                                        user=username)
+                                                        ssh_user=ssh_user)
 
     def _execute_par_task(self,
                           handle: ResourceHandle,
@@ -1174,7 +1174,7 @@ class CloudVmRayBackend(backends.Backend):
             config = yaml.safe_load(f)
         return config['cluster_name']
 
-    def _get_username(self, cluster_yaml: str) -> str:
+    def _get_ssh_user(self, cluster_yaml: str) -> str:
         with open(cluster_yaml, 'r') as f:
             config = yaml.safe_load(f)
         return config['auth']['ssh_user'].strip()

@@ -62,31 +62,28 @@ initialization_commands:
 {%- endif %}
 
 # Patterns for files to exclude when running rsync up or rsync down
-rsync_exclude:
-  - "**/.git"
-  - "**/.git/**"
+# rsync_exclude:
+#   - "**/.git"
+#   - "**/.git/**"
 
 rsync_filter:
   - .gitignore
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-  - touch ~/.sudo_as_admin_successful
   # This AMI's system Python is version 2+.
-  - (which conda && echo 'eval "$(conda shell.bash hook)"' >> ~/.bashrc) || true
-  - pip3 install -U ray[default]==1.7.0
-  - mkdir -p /tmp/workdir
+  # - ((which conda && echo 'eval "$(conda shell.bash hook)"' >> ~/.bashrc) || true) && source ~/.bashrc && pip3 install -U ray==1.7.0 && mkdir -p /tmp/workdir && touch ~/.sudo_as_admin_successful
+  - pip3 install -U ray==1.7.0 && mkdir -p /tmp/workdir && touch ~/.sudo_as_admin_successful
+  # - (which conda && echo 'eval "$(conda shell.bash hook)"' >> ~/.bashrc) || true
 {%- if setup_sh_path is not none %}
   - cd /tmp/workdir && bash /tmp/setup.sh
 {%- endif %}
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
-  - ray stop
-  - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
+  - ray stop; ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop
-  - ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
+  - ray stop; ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
 {%- endif %}
