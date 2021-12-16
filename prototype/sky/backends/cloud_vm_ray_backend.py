@@ -225,8 +225,9 @@ class RetryingVmProvisioner(object):
                 logger.info('====== stderr ======')
                 for s in splits:
                     print(s)
-                assert False, \
-                    'Errors occurred during setup command; check logs above.'
+                raise ValueError(
+                    'Errors occurred during file_mounts/setup command; '
+                    'check logs above.')
 
     def _update_blocklist_on_aws_error(self, region, zones, stdout, stderr):
         del zones  # Unused.
@@ -238,7 +239,16 @@ class RetryingVmProvisioner(object):
             for s in stdout_splits + stderr_splits
             if 'An error occurred' in s.strip()
         ]
-        if not errors:
+        # Need to handle boto3 printing error but its retry succeeded:
+        #   error occurred (Unsupported) .. not supported in your requested
+        #   Availability Zone (us-west-2d)...retrying
+        #   --> it automatically succeeded in another zone
+        #   --> failed in [4/7] Running initialization commands due to user cmd
+        # In this case, we should error out.
+        head_node_up = any(
+            line.startswith('<1/1> Setting up head node')
+            for line in stdout_splits + stderr_splits)
+        if not errors or head_node_up:
             # TODO: Got transient 'Failed to create security group' that goes
             # away after a few minutes.  Should we auto retry other regions, or
             # let the user retry.
@@ -248,8 +258,9 @@ class RetryingVmProvisioner(object):
             logger.info('====== stderr ======')
             for s in stderr_splits:
                 print(s)
-            assert False, (
-                'Errors occurred during setup command; check logs above.')
+            raise ValueError(
+                'Errors occurred during file_mounts/setup command; '
+                'check logs above.')
         # The underlying ray autoscaler / boto3 will try all zones of a region
         # at once.
         logger.warning(f'Got error(s) in all zones of {region.name}:')
@@ -437,6 +448,8 @@ class RetryingVmProvisioner(object):
             else:
                 # Success.
                 if tpu_name is not None:
+                    # TODO: refactor to a cleaner design, so that tpu code and
+                    # ray up logic are not mixed up.
                     backend_utils.run(
                         f'ray exec {cluster_config_file} '
                         f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
@@ -551,8 +564,9 @@ class RetryingVmProvisioner(object):
 
         # TODO: if requesting a large amount (say 32) of expensive VMs, this
         # may loop for a long time.  Use timeouts and treat as gang_failed.
-        gang_failed = backend_utils.wait_until_ray_cluster_ready(
+        cluster_ready = backend_utils.wait_until_ray_cluster_ready(
             to_provision_cloud, cluster_config_file, task.num_nodes)
+        gang_failed = not cluster_ready
         if gang_failed or ray_up_on_full_confg_only:
             # Head OK; gang scheduling failure.
             return gang_failed, proc, stdout, stderr
@@ -583,8 +597,11 @@ class RetryingVmProvisioner(object):
         if prev_handle is None:
             prev_cluster_config = None
         else:
-            prev_cluster_config = backend_utils.read_yaml(
-                prev_handle.cluster_yaml)
+            try:
+                prev_cluster_config = backend_utils.read_yaml(
+                    prev_handle.cluster_yaml)
+            except FileNotFoundError:
+                prev_cluster_config = None
         style = colorama.Style
         # Retrying launchable resources.
         provision_failed = True
@@ -783,17 +800,28 @@ class CloudVmRayBackend(backends.Backend):
         # FIXME: if called out-of-band without provision() first, we actually
         # need to handle all_file_mounts again.
         mounts = cloud_to_remote_file_mounts
-        if mounts is None:
+        if mounts is None or not mounts:
             return
-        logger.info('Processing cloud to VM file mounts.')
+        fore = colorama.Fore
+        style = colorama.Style
+        logger.info(
+            f'{fore.CYAN}Processing cloud to VM file mounts.{style.RESET_ALL}')
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
             # (download gsutil on remote, run gsutil on remote).  Consider
             # alternatives (smart_open, each provider's own sdk), a
             # data-transfer container etc.
-            storage = cloud_stores.get_storage_from_path(src)
+            if not os.path.isabs(dst) and not dst.startswith('~/'):
+                dst = f'~/{dst}'
+            use_symlink_trick = True
             # Sync 'src' to 'wrapped_dst', a safe-to-write "wrapped" path.
-            wrapped_dst = backend_utils.wrap_file_mount(dst)
+            if dst.startswith('~/') or dst.startswith('/tmp/'):
+                # Skip as these should be writable locations.
+                wrapped_dst = dst
+                use_symlink_trick = False
+            else:
+                wrapped_dst = backend_utils.FileMountHelper.wrap_file_mount(dst)
+            storage = cloud_stores.get_storage_from_path(src)
             if storage.is_directory(src):
                 sync = storage.make_sync_dir_command(source=src,
                                                      destination=wrapped_dst)
@@ -805,28 +833,25 @@ class CloudVmRayBackend(backends.Backend):
                 # It is a file so make sure *its parent dir* exists.
                 mkdir_for_wrapped_dst = \
                     f'mkdir -p {os.path.dirname(wrapped_dst)}'
-            # Goal: point dst --> wrapped_dst.
-            symlink_to_make = dst.rstrip('/')
-            dir_of_symlink = os.path.dirname(symlink_to_make)
-            # Below, use sudo in case the symlink needs sudo access to create.
-            command = ' && '.join([
-                # Prepare to create the symlink:
-                #  1. make sure its dir exists.
-                f'sudo mkdir -p {dir_of_symlink}',
-                #  2. remove any existing symlink (otherwise, gsutil errors).
-                f'(sudo rm {symlink_to_make} &>/dev/null || true)',
-                # Ensure sync can write to wrapped_dst.
+            download_target_commands = [
+                # Ensure sync can write to wrapped_dst (e.g., '/data/').
                 mkdir_for_wrapped_dst,
                 # Both the wrapped and the symlink dir exist; sync.
                 sync,
-                # Link.
-                f'sudo ln -s {wrapped_dst.rstrip("/")} {symlink_to_make}',
-                # chown.
-                f'sudo chown $USER {dst}',
-            ])
+            ]
+            if not use_symlink_trick:
+                command = ' && '.join(download_target_commands)
+            else:
+                # Goal: point dst --> wrapped_dst.
+                command = (
+                    backend_utils.FileMountHelper.make_safe_symlink_command(
+                        source=dst,
+                        target=wrapped_dst,
+                        download_target_commands=download_target_commands))
             log_path = os.path.join(self.log_dir,
                                     'file_mounts_cloud_to_remote.log')
-            logger.info(f' Syncing: {src} -> {dst}')
+            logger.info(
+                f'{style.BRIGHT} Syncing: {src} -> {dst}{style.RESET_ALL}')
             # TODO: filter out ray boilerplate: Setting `max_workers` for node
             # type ... try re-running the command with --no-config-cache.
             proc, unused_stdout, unused_stderr = backend_utils.run_with_log(
