@@ -2,6 +2,7 @@
 import boto3
 import copy
 import os
+import pathlib
 import time
 
 from cryptography.hazmat.primitives import serialization
@@ -48,9 +49,8 @@ def save_key_pair(private_key_path, public_key_path, private_key, public_key):
 
 
 def get_public_key_path(private_key_path):
-    if '.pem' in private_key_path:
+    if private_key_path.endswith('.pem'):
         private_key_path, _ = private_key_path.rsplit('.', 1)
-
     return private_key_path + '.pub'
 
 
@@ -170,6 +170,12 @@ def setup_gcp_authentication(config):
     return config
 
 
+def _unexpand_user(path):
+    """Inverse of `os.path.expanduser`."""
+    return ('~' /
+            pathlib.Path(path).relative_to(pathlib.Path.home())).as_posix()
+
+
 # Takes in config, a yaml dict and outputs a postprocessed dict
 def setup_azure_authentication(config):
     # Doesn't need special library calls!
@@ -182,5 +188,13 @@ def setup_azure_authentication(config):
 
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = get_public_key_path(private_key_path)
+    # Need to convert /Users/<username> back to ~ because Ray uses the same
+    # path for finding the public key path on both local and head node.
+    public_key_path = _unexpand_user(public_key_path)
     config['auth']['ssh_public_key'] = public_key_path
+
+    file_mounts = config['file_mounts']
+    file_mounts[public_key_path] = public_key_path
+    config['file_mounts'] = file_mounts
+
     return config
