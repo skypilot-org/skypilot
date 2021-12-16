@@ -542,10 +542,17 @@ class RetryingVmProvisioner(object):
         if not ray_up_on_full_confg_only:
             config = backend_utils.read_yaml(cluster_config_file)
             pinned_ray_install = 'pip3 install -U ray==1.7.0'
+
+            file_mounts = {}
+            if 'ssh_public_key' in config['auth']:
+                # For Azure, we need to add the ssh public key to the VM by filemounts.
+                public_key_path = config['auth']['ssh_public_key']
+                file_mounts[public_key_path] = public_key_path
+
             fields_to_empty = {
-                'file_mounts': {},
+                'file_mounts': file_mounts,
                 # Need ray for 'ray status' in wait_until_ray_cluster_ready().
-                'setup_commands': [pinned_ray_install],
+                'setup_commands': [config['setup_commands'][0]],
             }
             existing_fields = {k: config[k] for k in fields_to_empty}
             # Keep both in sync.
