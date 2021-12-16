@@ -10,14 +10,13 @@
 #    commands may require flags to follow symlinks (e.g., ls -H; du -L).
 
 resources:
-  cloud: gcp
+  cloud: azure
 
 # Format for file_mounts:
 #
 #   [ destination on VM ]: [ source, local or cloud ]
 #
 file_mounts:
-
   ###############################################
   #  Sync from local files/directories (rsync)  #
   ###############################################

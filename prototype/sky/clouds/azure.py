@@ -1,38 +1,20 @@
 """Azure."""
 import copy
 import json
-from typing import Dict, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky.clouds.service_catalog import azure_catalog
 
 
 class Azure(clouds.Cloud):
     """Azure."""
 
     _REPR = 'Azure'
-
-    # In general, query this from the cloud.
-    # This pricing is for East US region.
-    # https://azureprice.net/
-    _ON_DEMAND_PRICES = {
-        # V100 GPU series
-        'Standard_NC6s_v3': 3.06,
-        'Standard_NC12s_v3': 6.12,
-        'Standard_NC24s_v3': 12.24,
-    }
-
-    # TODO: add other GPUs
-    _ACCELERATORS_DIRECTORY = {
-        ('V100', 1): 'Standard_NC6s_v3',
-        ('V100', 2): 'Standard_NC12s_v3',
-        ('V100', 4): 'Standard_NC24s_v3',
-    }
+    _regions: List[clouds.Region] = []
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
-        # TODO: use_spot support
-        if use_spot:
-            return clouds.Cloud.UNKNOWN_COST
-        return Azure._ON_DEMAND_PRICES[instance_type]
+        return azure_catalog.get_hourly_cost(instance_type, use_spot=use_spot)
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -67,6 +49,30 @@ class Azure(clouds.Cloud):
     def get_default_instance_type(cls):
         return 'Standard_D2_v4'
 
+    @classmethod
+    def regions(cls) -> List[clouds.Region]:
+        # NOTE on zones: Ray Autoscaler does not support specifying
+        # availability zones, and Azure CLI will try launching VMs in all
+        # zones. Hence for our purposes we do not keep track of zones.
+        if not cls._regions:
+            cls._regions = [
+                clouds.Region('centralus'),
+                clouds.Region('eastus'),
+                clouds.Region('eastus2'),
+                clouds.Region('northcentralus'),
+                clouds.Region('southcentralus'),
+                clouds.Region('westcentralus'),
+                clouds.Region('westus'),
+                clouds.Region('westus2'),
+            ]
+        return cls._regions
+
+    @classmethod
+    def region_zones_provision_loop(
+            cls) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+        for region in cls.regions():
+            yield region, region.zones
+
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
 
@@ -74,12 +80,7 @@ class Azure(clouds.Cloud):
             self,
             instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        """Returns {acc: acc_count} held by 'instance_type', if any."""
-        inverse = {v: k for k, v in Azure._ACCELERATORS_DIRECTORY.items()}
-        res = inverse.get(instance_type)
-        if res is None:
-            return res
-        return {res[0]: res[1]}
+        return azure_catalog.get_accelerators_from_instance_type(instance_type)
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
@@ -120,7 +121,8 @@ class Azure(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        instance_type = Azure._ACCELERATORS_DIRECTORY.get((acc, acc_count))
+        instance_type = azure_catalog.get_instance_type_for_accelerator(
+            acc, acc_count)
         if instance_type is None:
             return []
         return _make(instance_type)

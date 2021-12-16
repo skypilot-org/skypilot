@@ -12,7 +12,6 @@ import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
-import yaml
 
 import colorama
 from ray.autoscaler import sdk
@@ -69,7 +68,7 @@ _TASK_LAUNCH_CODE_GENERATOR += 'run_with_log = ray.remote(run_with_log)'
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
         clouds.AWS: 'config/aws-ray.yml.j2',
-        # clouds.Azure: 'config/azure-ray.yml.j2',
+        clouds.Azure: 'config/azure-ray.yml.j2',
         clouds.GCP: 'config/gcp-ray.yml.j2',
     }
     path = cloud_to_template[type(cloud)]
@@ -162,6 +161,9 @@ class RetryingVmProvisioner(object):
     def _in_blocklist(self, cloud, region, zones):
         if region.name in self._blocked_regions:
             return True
+        # We do not keep track of zones in Azure.
+        if isinstance(cloud, clouds.Azure):
+            return False
         assert zones, (cloud, region, zones)
         for zone in zones:
             if zone.name not in self._blocked_zones:
@@ -265,6 +267,32 @@ class RetryingVmProvisioner(object):
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_regions.add(region.name)
 
+    def _update_blocklist_on_azure_error(self, region, zones, stdout, stderr):
+        del zones  # Unused.
+        # The underlying ray autoscaler will try all zones of a region at once.
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'Exception Details:' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            assert False, \
+                'Errors occurred during setup command; check logs above.'
+
+        logger.warning(f'Got error(s) in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+        self._blocked_regions.add(region.name)
+
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
                                    stderr) -> None:
         """Handles cloud-specific errors and updates the block list.
@@ -288,9 +316,9 @@ class RetryingVmProvisioner(object):
                                                        stderr)
 
         if isinstance(cloud, clouds.Azure):
-            assert False, (stdout, stderr)  # TODO
-        else:
-            assert False, f'Unknown cloud: {cloud}.'
+            return self._update_blocklist_on_azure_error(
+                region, zones, stdout, stderr)
+        assert False, f'Unknown cloud: {cloud}.'
 
     def _yield_region_zones(self, cloud: clouds.Cloud, cluster_name: str):
         region = None
@@ -300,9 +328,7 @@ class RetryingVmProvisioner(object):
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             try:
-                path = handle.cluster_yaml
-                with open(path, 'r') as f:
-                    config = yaml.safe_load(f)
+                config = backend_utils.read_yaml(handle.cluster_yaml)
                 prev_resources = handle.launched_resources
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
@@ -343,10 +369,10 @@ class RetryingVmProvisioner(object):
                                                       cluster_name):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
-            logger.info(
-                f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
-                f'{region.name} '
-                f'({",".join(z.name for z in zones)}).{style.RESET_ALL}')
+            zone_str = ','.join(
+                z.name for z in zones) if zones is not None else 'all zones'
+            logger.info(f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
+                        f'{region.name} ({zone_str}){style.RESET_ALL})')
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
@@ -513,10 +539,17 @@ class RetryingVmProvisioner(object):
         if not ray_up_on_full_confg_only:
             config = backend_utils.read_yaml(cluster_config_file)
             pinned_ray_install = 'pip3 install -U ray==1.7.0'
+
+            file_mounts = {}
+            if 'ssh_public_key' in config['auth']:
+                # For Azure, we need to add ssh public key to VM by filemounts.
+                public_key_path = config['auth']['ssh_public_key']
+                file_mounts[public_key_path] = public_key_path
+
             fields_to_empty = {
-                'file_mounts': {},
+                'file_mounts': file_mounts,
                 # Need ray for 'ray status' in wait_until_ray_cluster_ready().
-                'setup_commands': [pinned_ray_install],
+                'setup_commands': [config['setup_commands'][0]],
             }
             existing_fields = {k: config[k] for k in fields_to_empty}
             # Keep both in sync.
@@ -716,6 +749,8 @@ class CloudVmRayBackend(backends.Backend):
             # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
             cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
         # ray up: the VMs.
+        # FIXME: ray up for Azure with different cluster_names will overwrite
+        # each other.
         provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                             self._optimize_target)
 
@@ -838,14 +873,18 @@ class CloudVmRayBackend(backends.Backend):
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
                        task: App) -> None:
         ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
+        config = backend_utils.read_yaml(handle.cluster_yaml)
+        ssh_user = config['auth']['ssh_user'].strip()
         ip_to_command = post_setup_fn(ip_list)
         for ip, cmd in ip_to_command.items():
             if cmd is not None:
                 cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
                        f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
-                backend_utils.run_command_on_ip_via_ssh(ip, cmd,
+                backend_utils.run_command_on_ip_via_ssh(ip,
+                                                        cmd,
                                                         task.private_key,
-                                                        task.container_name)
+                                                        task.container_name,
+                                                        ssh_user=ssh_user)
 
     def _execute_par_task(self,
                           handle: ResourceHandle,
@@ -1115,9 +1154,19 @@ class CloudVmRayBackend(backends.Backend):
                     storage.delete()
 
     def teardown(self, handle: ResourceHandle) -> None:
-        backend_utils.run(f'ray down -y {handle.cluster_yaml}')
-        if handle.tpu_delete_script is not None:
-            backend_utils.run(f'bash {handle.tpu_delete_script}')
+        cloud = handle.launched_resources.cloud
+        config = backend_utils.read_yaml(handle.cluster_yaml)
+        if isinstance(cloud, clouds.Azure):
+            # Special handling because `ray down` is buggy with Azure.
+            cluster_name = config['cluster_name']
+            backend_utils.run(
+                'az vm delete --yes --ids $(az vm list --query '
+                f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
+                check=False)
+        else:
+            backend_utils.run(f'ray down -y {handle.cluster_yaml}')
+            if handle.tpu_delete_script is not None:
+                backend_utils.run(f'bash {handle.tpu_delete_script}')
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name)
 
@@ -1128,8 +1177,7 @@ class CloudVmRayBackend(backends.Backend):
         """Returns the IPs of all nodes in the cluster."""
         yaml_handle = cluster_yaml
         if return_private_ips:
-            with open(cluster_yaml, 'r') as f:
-                config = yaml.safe_load(f)
+            config = backend_utils.read_yaml(yaml_handle)
             # Add this field to a temp file to get private ips.
             config['provider']['use_internal_ips'] = True
             yaml_handle = cluster_yaml + '.tmp'
@@ -1166,8 +1214,7 @@ class CloudVmRayBackend(backends.Backend):
         # going through ray (either 'ray rsync_*' or sdk.rsync()).
         assert handle.head_ip is not None, \
             f'provision() should have cached head ip: {handle}'
-        with open(handle.cluster_yaml, 'r') as f:
-            config = yaml.safe_load(f)
+        config = backend_utils.read_yaml(handle.cluster_yaml)
         auth = config['auth']
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
@@ -1192,8 +1239,7 @@ class CloudVmRayBackend(backends.Backend):
         """Returns a 'ssh' command that logs into a cluster's head node."""
         assert handle.head_ip is not None, \
             f'provision() should have cached head ip: {handle}'
-        with open(handle.cluster_yaml, 'r') as f:
-            config = yaml.safe_load(f)
+        config = backend_utils.read_yaml(handle.cluster_yaml)
         auth = config['auth']
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
