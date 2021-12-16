@@ -749,6 +749,8 @@ class CloudVmRayBackend(backends.Backend):
             # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
             cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
         # ray up: the VMs.
+        # FIXME: ray up for Azure with different cluster_names will overwrite
+        # each other.
         provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                             self._optimize_target)
 

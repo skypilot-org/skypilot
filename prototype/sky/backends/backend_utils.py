@@ -335,6 +335,8 @@ def get_run_id() -> RunId:
 def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
                                  num_nodes: int) -> bool:
     """Returns whether the entire ray cluster is ready."""
+    # FIXME: It may takes a while for the cluster to be available for ray,
+    # especially for Azure, causing `ray exec` to fail.
     if num_nodes <= 1:
         return
     expected_worker_count = num_nodes - 1
