@@ -372,10 +372,10 @@ class RetryingVmProvisioner(object):
                                                       cluster_name):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
+            zone_str = ','.join(
+                z.name for z in zones) if zones is not None else 'all zones'
             logger.info(f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
-                        f'{region.name} '
-                        f'({",".join(z.name for z in zones) if zones else ""})'
-                        f'.{style.RESET_ALL}')
+                        f'{region.name} ({zone_str}){style.RESET_ALL})')
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
@@ -545,7 +545,7 @@ class RetryingVmProvisioner(object):
 
             file_mounts = {}
             if 'ssh_public_key' in config['auth']:
-                # For Azure, we need to add the ssh public key to the VM by filemounts.
+                # For Azure, we need to add ssh public key to VM by filemounts.
                 public_key_path = config['auth']['ssh_public_key']
                 file_mounts[public_key_path] = public_key_path
 
