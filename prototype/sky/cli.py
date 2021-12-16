@@ -110,8 +110,6 @@ def _create_and_ssh_into_node(
             run='',
         )
         task.set_resources(resources)
-        if use_screen:
-            task.set_file_mounts({'~/.screenrc': '~/.screenrc'})
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag)
@@ -428,8 +426,7 @@ def down(
 @click.option('--screen',
               default=False,
               is_flag=True,
-              help=('If true, attach using screen ('
-                    'when provisioning, automatically upload ~/.screenrc).'))
+              help='If true, attach using screen.')
 def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive GPU node.
 
@@ -488,8 +485,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
 @click.option('--screen',
               default=False,
               is_flag=True,
-              help=('If true, attach using screen ('
-                    'when provisioning, automatically upload ~/.screenrc).'))
+              help='If true, attach using screen.')
 def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive CPU node.
 
