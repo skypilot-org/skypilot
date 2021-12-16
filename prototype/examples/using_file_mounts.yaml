@@ -100,4 +100,4 @@ run: |
   ls -l /data/train-00001-of-01024
   ls -l ~/data/train-00001-of-01024
 
-  # ls -lH /mydata/fake_imagenet | head -n10
+  # ls -lH /data/fake_imagenet | head -n10
