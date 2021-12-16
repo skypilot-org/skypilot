@@ -292,31 +292,38 @@ class Task(object):
     def set_file_mounts(self, file_mounts: Dict[str, str]):
         """Sets the file mounts for this Task.
 
-        File mounts are local files/dirs to be synced to specific paths on the
-        remote VM(s) where this Task will run.  Can be used for syncing
-        datasets, dotfiles, etc.
+        File mounts are a dictionary of { remote_path: local_path/cloud URI }.
+        Local (or cloud) files/directories will be synced to the specified
+        paths on the remote VM(s) where this Task will run.
+
+        Used for syncing datasets, dotfiles, etc.
+
+        Paths cannot end with a slash (for clarity).
 
         Example:
 
             task.set_file_mounts({
                 '~/.dotfile': '/local/.dotfile',
+                # /remote/dir/ will contain the contents of /local/dir/.
                 '/remote/dir': '/local/dir',
             })
 
         Args:
-          file_mounts: a dict of { remote_path: local_path }, where remote is
-            the VM on which this Task will eventually run on, and local is the
-            node from which the task is launched.
+          file_mounts: a dict of { remote_path: local_path/cloud URI }, where
+            remote is the VM on which this Task will eventually run on, and
+            local is the node from which the task is launched.
         """
+        for target, source in file_mounts.items():
+            if target.endswith('/') or source.endswith('/'):
+                raise ValueError(
+                    'File mount paths cannot end with a slash '
+                    '(try "/mydir: /mydir" or "/myfile: /myfile"). '
+                    f'Found: target={target} source={source}')
         self.file_mounts = file_mounts
-        for remote, unused_source in file_mounts.items():
-            if not os.path.isabs(remote):
-                raise ValueError('File mounts: remote paths should be absolute,'
-                                 f' not relative or "~/...".  Found: {remote}')
         return self
 
     def update_file_mounts(self, file_mounts: Dict[str, str]):
-        """Updates the file mount for this Task
+        """Updates the file mounts for this Task.
 
         This should be run before provisioning.
 
@@ -335,6 +342,8 @@ class Task(object):
         if self.file_mounts is None:
             self.file_mounts = {}
         self.file_mounts.update(file_mounts)
+        # For validation logic:
+        return self.set_file_mounts(self.file_mounts)
 
     def set_blocked_clouds(self, blocked_clouds: Set[clouds.Cloud]):
         """Sets the clouds that this task should not run on."""

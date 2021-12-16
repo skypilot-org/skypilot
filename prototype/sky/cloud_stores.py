@@ -99,9 +99,9 @@ class GcsCloudStorage(CloudStorage):
     _GET_GSUTIL = [
         'pushd /tmp &>/dev/null',
         # Skip if /tmp/gsutil already exists.
-        'ls gsutil &>/dev/null || (wget --quiet '
+        '(test -f /tmp/gsutil/gsutil || (wget -c '
         'https://storage.googleapis.com/pub/gsutil.tar.gz && '
-        'tar xzf gsutil.tar.gz)',
+        'tar xzf gsutil.tar.gz))',
         'popd &>/dev/null',
     ]
 
