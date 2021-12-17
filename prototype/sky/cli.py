@@ -110,8 +110,6 @@ def _create_and_ssh_into_node(
             run='',
         )
         task.set_resources(resources)
-        if use_screen:
-            task.set_file_mounts({'~/.screenrc': '~/.screenrc'})
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag)
