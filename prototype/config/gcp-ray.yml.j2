@@ -1,7 +1,7 @@
 # Ref: https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/gcp/example-gpu-docker.yaml
 # FIXME: use variables for project_id, zone.
 
-cluster_name: sky-gcp
+cluster_name: {{cluster_name}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
@@ -93,6 +93,13 @@ file_mounts: {
 {%- endfor %}
 }
 
+{%- if initialization_commands is not none %}
+initialization_commands:
+{%- for cmd in initialization_commands %}
+  - {{cmd}}
+{%- endfor %}
+{%- endif %}
+
 # Patterns for files to exclude when running rsync up or rsync down
 # rsync_exclude:
 #   - "**/.git"
@@ -103,23 +110,18 @@ rsync_filter:
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-  # This AMI's system Python is version 2+.
-  - pip3 install -U ray==1.7.0
+  - pip3 install -U ray==1.7.0 && mkdir -p /tmp/workdir
 {%- if setup_sh_path is not none %}
-  - mkdir -p /tmp/workdir && cd /tmp/workdir && bash /tmp/setup.sh
-{%- else %}
-  - mkdir -p /tmp/workdir && cd /tmp/workdir
+  - cd /tmp/workdir && bash /tmp/setup.sh
 {%- endif %}
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
-  - ray stop
-  - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
+  - ray stop; ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop
-  - ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
+  - ray stop; ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
 {%- endif %}
 
 head_node: {}

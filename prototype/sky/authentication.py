@@ -1,16 +1,19 @@
+"""Module to enable a single Sky key for all Sky VMs in each cloud."""
 import boto3
 import copy
 import os
+import pathlib
 import time
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from functools import partial
-from googleapiclient import discovery, errors
+from googleapiclient import discovery
 # TODO: Should tolerate if gcloud is not installed. Also,
 # https://pypi.org/project/google-api-python-client/ recommends
-# using Cloud Client Libraries for Python, where possible, for new code development.
+# using Cloud Client Libraries for Python, where possible, for new code
+# development.
 
 
 def generate_rsa_key_pair():
@@ -46,13 +49,13 @@ def save_key_pair(private_key_path, public_key_path, private_key, public_key):
 
 
 def get_public_key_path(private_key_path):
-    if '.pem' in private_key_path:
+    if private_key_path.endswith('.pem'):
         private_key_path, _ = private_key_path.rsplit('.', 1)
-
     return private_key_path + '.pub'
 
 
-# Snippets of code inspired from https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
+# Snippets of code inspired from
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
 def setup_aws_authentication(config):
     config = copy.deepcopy(config)
@@ -95,7 +98,8 @@ def setup_aws_authentication(config):
     return config
 
 
-# Snippets of code inspired from https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
+# Snippets of code inspired from
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
 def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
@@ -159,11 +163,17 @@ def setup_gcp_authentication(config):
             ssh_key_index = ssh_key_index[0]
             ssh_dict = metadata[ssh_key_index]
             ssh_dict['value'] += '\n' + new_ssh_key
-            operation = compute.projects().setCommonInstanceMetadata(
+            compute.projects().setCommonInstanceMetadata(
                 project=project['name'],
                 body=project['commonInstanceMetadata']).execute()
             time.sleep(5)
     return config
+
+
+def _unexpand_user(path):
+    """Inverse of `os.path.expanduser`."""
+    return ('~' /
+            pathlib.Path(path).relative_to(pathlib.Path.home())).as_posix()
 
 
 # Takes in config, a yaml dict and outputs a postprocessed dict
@@ -178,5 +188,13 @@ def setup_azure_authentication(config):
 
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = get_public_key_path(private_key_path)
+    # Need to convert /Users/<username> back to ~ because Ray uses the same
+    # path for finding the public key path on both local and head node.
+    public_key_path = _unexpand_user(public_key_path)
     config['auth']['ssh_public_key'] = public_key_path
+
+    file_mounts = config['file_mounts']
+    file_mounts[public_key_path] = public_key_path
+    config['file_mounts'] = file_mounts
+
     return config

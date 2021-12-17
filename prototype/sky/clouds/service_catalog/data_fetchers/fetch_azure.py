@@ -137,15 +137,15 @@ def get_all_regions_instance_types_df():
     def get_additional_columns(row):
         gpu_name, gpu_count = get_gpu_info(row)
         return pd.Series({
-            'PricePerHour': get_price(row),
-            'GpuName': gpu_name,
-            'GpuCount': gpu_count,
+            'Price': get_price(row),
+            'AcceleratorName': gpu_name,
+            'AcceleratorCount': gpu_count,
         })
 
     df_ret = pd.concat(
         [df_sku, df_sku.apply(get_additional_columns, axis='columns')],
         axis='columns',
-    )
+    ).rename(columns={'name': 'InstanceType'})
     return df_ret
 
 

@@ -1,3 +1,4 @@
+"""Google Cloud Platform."""
 import copy
 import json
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -6,6 +7,7 @@ from sky import clouds
 
 
 class GCP(clouds.Cloud):
+    """Google Cloud Platform."""
 
     _REPR = 'GCP'
     _regions: List[clouds.Region] = []
@@ -242,10 +244,12 @@ class GCP(clouds.Cloud):
                                                                         ':'))
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
+                assert r.accelerator_args is not None, r
                 resources_vars['tf_version'] = r.accelerator_args['tf_version']
                 resources_vars['tpu_name'] = r.accelerator_args['tpu_name']
             else:
-                # Convert to GCP names: https://cloud.google.com/compute/docs/gpus
+                # Convert to GCP names:
+                # https://cloud.google.com/compute/docs/gpus
                 resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
                 resources_vars['gpu_count'] = acc_count
 
@@ -255,7 +259,11 @@ class GCP(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return [resources]
-        # TODO: check if accelerators well-formed/available.
+        if resources.accelerators is not None:
+            for acc in resources.accelerators.keys():
+                if acc not in self._ON_DEMAND_PRICES_GPUS \
+                    and acc not in self._ON_DEMAND_PRICES_TPUS:
+                    return []
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
         r = copy.deepcopy(resources)

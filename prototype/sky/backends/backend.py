@@ -15,10 +15,15 @@ class Backend(object):
 
     # Backend-specific handle to the launched resources (e.g., a cluster).
     # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
-    ResourceHandle = Any
+    class ResourceHandle(object):
+        pass
 
-    def provision(self, task: App, to_provision: Resources, dryrun: bool,
-                  stream_logs: bool) -> ResourceHandle:
+    def provision(self,
+                  task: App,
+                  to_provision: Resources,
+                  dryrun: bool,
+                  stream_logs: bool,
+                  cluster_name: Optional[str] = None) -> ResourceHandle:
         raise NotImplementedError
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -30,6 +35,9 @@ class Backend(object):
             all_file_mounts: Dict[Path, Path],
             cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
+        raise NotImplementedError
+
+    def add_storage_objects(self, task: App) -> None:
         raise NotImplementedError
 
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
@@ -44,5 +52,12 @@ class Backend(object):
         """Post execute(): e.g., print helpful inspection messages."""
         raise NotImplementedError
 
+    def teardown_ephemeral_storage(self, task: App) -> None:
+        raise NotImplementedError
+
     def teardown(self, handle: ResourceHandle) -> None:
         raise NotImplementedError
+
+    def register_info(self, **kwargs) -> None:
+        """Register backend-specific information."""
+        pass

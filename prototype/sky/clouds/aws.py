@@ -1,3 +1,4 @@
+"""Amazon Web Services."""
 import copy
 import json
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -7,6 +8,7 @@ from sky.clouds.service_catalog import aws_catalog
 
 
 class AWS(clouds.Cloud):
+    """Amazon Web Services."""
 
     _REPR = 'AWS'
     _regions: List[clouds.Region] = []
