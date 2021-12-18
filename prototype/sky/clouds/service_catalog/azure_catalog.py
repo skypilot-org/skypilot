@@ -16,8 +16,9 @@ def get_hourly_cost(instance_type: str,
                     region: str = _DEFAULT_REGION,
                     use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    assert not use_spot, 'not implemented'
-    return common.get_hourly_cost_impl(_df, instance_type, region, False)
+    # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
+    assert not use_spot, 'Current Azure subscription does not support spot.'
+    return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
 
 def get_accelerators_from_instance_type(instance_type: str

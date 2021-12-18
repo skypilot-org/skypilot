@@ -276,7 +276,8 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if 'Exception Details:' in s.strip()
+            if ('Exception Details:' in s.strip()) or
+            ('InvalidTemplateDeployment' in s.strip())
         ]
         if not errors:
             logger.info('====== stdout ======')
@@ -945,7 +946,7 @@ class CloudVmRayBackend(backends.Backend):
             # to initialize conda, so that 'conda activate ...' works.
             cmd = shlex.quote(
                 f'. $(conda info --base)/etc/profile.d/conda.sh || true && \
-                    cd {SKY_REMOTE_WORKDIR} && source ~/.bashrc && {t.run}')
+                    cd {SKY_REMOTE_WORKDIR} && source ~/.bashrc && {t.run}'                                                                           )
             # We can't access t.best_resources because the inner task doesn't
             # undergo optimization.
             resources = par_task.get_task_resource_demands(i)
@@ -1112,7 +1113,7 @@ class CloudVmRayBackend(backends.Backend):
             # to initialize conda, so that 'conda activate ...' works.
             cmd = shlex.quote(
                 f'. $(conda info --base)/etc/profile.d/conda.sh || true && \
-                    cd {SKY_REMOTE_WORKDIR} && {command_for_ip}')
+                    cd {SKY_REMOTE_WORKDIR} && {command_for_ip}'                                                                )
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
             demand = {f'node:{ip}': 1}
