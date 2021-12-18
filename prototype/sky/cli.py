@@ -410,8 +410,8 @@ def stop(
     _terminate_or_stop(cluster, apply_to_all=all, terminate=False)
 
 
-def _terminate_or_stop(name: Optional[str],
-                       apply_to_all: Optional[bool], terminate: bool) -> None:
+def _terminate_or_stop(name: Optional[str], apply_to_all: Optional[bool],
+                       terminate: bool) -> None:
     """Terminates or stops a cluster (or all clusters)."""
     command = 'down' if terminate else 'stop'
     if name is None and apply_to_all is None:
