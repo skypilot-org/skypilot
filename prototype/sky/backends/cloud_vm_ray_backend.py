@@ -294,31 +294,6 @@ class RetryingVmProvisioner(object):
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_regions.add(region.name)
 
-    def _update_blocklist_on_azure_error(self, region, zones, stdout, stderr):
-        # The underlying ray autoscaler will try all zones of a region at once.
-        Style = colorama.Style
-        stdout_splits = stdout.split('\n')
-        stderr_splits = stderr.split('\n')
-        errors = [
-            s.strip()
-            for s in stdout_splits + stderr_splits
-            if 'An error occurred' in s.strip()
-        ]
-        if not errors:
-            logger.info('====== stdout ======')
-            for s in stdout_splits:
-                print(s)
-            logger.info('====== stderr ======')
-            for s in stderr_splits:
-                print(s)
-            assert False, \
-                'Errors occurred during setup command; check logs above.'
-
-        logger.warn(f'Got error(s) in all zones of {region.name}:')
-        messages = '\n\t'.join(errors)
-        logger.warn(f'{Style.DIM}\t{messages}{Style.RESET_ALL}')
-        self._blocked_regions.add(region.name)
-
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
                                    stderr) -> None:
         """Handles cloud-specific errors and updates the block list.
@@ -946,7 +921,7 @@ class CloudVmRayBackend(backends.Backend):
             # to initialize conda, so that 'conda activate ...' works.
             cmd = shlex.quote(
                 f'. $(conda info --base)/etc/profile.d/conda.sh || true && \
-                    cd {SKY_REMOTE_WORKDIR} && source ~/.bashrc && {t.run}'                                                                           )
+                    cd {SKY_REMOTE_WORKDIR} && source ~/.bashrc && {t.run}')
             # We can't access t.best_resources because the inner task doesn't
             # undergo optimization.
             resources = par_task.get_task_resource_demands(i)
@@ -1113,7 +1088,7 @@ class CloudVmRayBackend(backends.Backend):
             # to initialize conda, so that 'conda activate ...' works.
             cmd = shlex.quote(
                 f'. $(conda info --base)/etc/profile.d/conda.sh || true && \
-                    cd {SKY_REMOTE_WORKDIR} && {command_for_ip}'                                                                )
+                    cd {SKY_REMOTE_WORKDIR} && {command_for_ip}')
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
             demand = {f'node:{ip}': 1}

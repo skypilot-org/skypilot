@@ -132,9 +132,9 @@ def get_all_regions_instance_types_df():
         sku = row['name']
         region = row['Region']
         spot_pricing_rows = df[(df['armSkuName'] == sku) &
-                          (df['armRegionName'] == region) &
-                          (df['unitPrice'] > 0) &
-                          (df['skuName'].str.contains(' Spot'))]
+                               (df['armRegionName'] == region) &
+                               (df['unitPrice'] > 0) &
+                               (df['skuName'].str.contains(' Spot'))]
         assert len(spot_pricing_rows) <= 1, (sku, spot_pricing_rows)
         if len(spot_pricing_rows) == 0:
             return np.nan
