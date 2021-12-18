@@ -67,13 +67,28 @@ def add_or_update_cluster(cluster_name: str,
     _CONN.commit()
 
 
-def remove_cluster(cluster_name: str):
+def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
-    _CURSOR.execute('DELETE FROM clusters WHERE name=(?)', (cluster_name,))
+    if terminate:
+        _CURSOR.execute('DELETE FROM clusters WHERE name=(?)', (cluster_name,))
+    else:
+        handle = get_handle_from_cluster_name(cluster_name)
+        if handle is None:
+            return
+        # Must invalidate head_ip: otherwise 'sky cpunode' on a stopped cpunode
+        # will directly try to ssh, which leads to timeout.
+        handle.head_ip = None
+        _CURSOR.execute(
+            'UPDATE clusters SET handle=(?), status=(?) WHERE name=(?)', (
+                pickle.dumps(handle),
+                'STOPPED',
+                cluster_name,
+            ))
     _CONN.commit()
 
 
-def get_handle_from_cluster_name(cluster_name: str) -> Optional[str]:
+def get_handle_from_cluster_name(cluster_name: str
+                                ) -> Optional[backends.Backend.ResourceHandle]:
     rows = _CURSOR.execute('SELECT handle FROM clusters WHERE name=(?)',
                            (cluster_name,))
     for (handle,) in rows:
