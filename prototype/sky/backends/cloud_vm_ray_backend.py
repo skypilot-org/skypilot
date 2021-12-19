@@ -198,16 +198,18 @@ class RayCodeGen(object):
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')
             resources_str = f', resources={json.dumps(ray_resources_dict)}'
-            if ip_demand_dict is not None:
-                assert len(ip_demand_dict) == 1, \
-                    ('There can only be one ip per task.'
-                     f'Found: {ip_demand_dict}.')
-                resources_str = f', resources={json.dumps(ip_demand_dict)}'
+
             # Passing this ensures that the Ray remote task gets
             # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
             # would be force-set to empty by Ray.
             num_gpus_str = f', num_gpus={list(ray_resources_dict.values())[0]}'
-
+        
+        if ip_demand_dict is not None:
+            assert len(ip_demand_dict) == 1, \
+                ('There can only be one ip per task.'
+                 f'Found: {ip_demand_dict}.')
+            resources_str = f', resources={json.dumps(ip_demand_dict)}'
+        
         # Ray does not support override workdir in runtime_env for remote task.
         # We directly load the bash script from file and execute it on worker.
         self._code += [
@@ -466,7 +468,7 @@ class RetryingVmProvisioner(object):
             zone_str = ','.join(
                 z.name for z in zones) if zones is not None else 'all zones'
             logger.info(f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
-                        f'{region.name} ({zone_str}){style.RESET_ALL})')
+                        f'{region.name} ({zone_str}){style.RESET_ALL}')
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
@@ -1205,7 +1207,6 @@ class CloudVmRayBackend(backends.Backend):
                 log_path=log_path,
                 stream_logs=stream_logs,
                 ip_demand_dict=demand,
-                # TODO: Add script to ray env
             )
 
         codegen.add_epilogue()
