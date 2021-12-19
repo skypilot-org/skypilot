@@ -198,13 +198,19 @@ class RayCodeGen(object):
             # Passing this ensures that the Ray remote task gets
             # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
             # would be force-set to empty by Ray.
-            num_gpus_str = f', num_gpus={list(ray_resources_dict.values())[0]}'
+            # `num_gpus`` should be empty when the accelerator is not GPU.
+            # FIXME: use a set of GPU types.
+            num_gpus_str = ''
+            resources_key = list(ray_resources_dict.keys())[0]
+            if 'tpu' not in resources_key.lower():
+                num_gpus_str = f', num_gpus={list(ray_resources_dict.values())[0]}'
         
         if ip_demand_dict is not None:
             assert len(ip_demand_dict) == 1, \
                 ('There can only be one ip per task.'
                  f'Found: {ip_demand_dict}.')
-            resources_str = f', resources={json.dumps(ip_demand_dict)}'
+            resources = ray_resources_dict.update(ip_demand_dict)
+            resources_str = f', resources={json.dumps(resources)}'
         
         # Ray does not support override workdir in runtime_env for remote task.
         # We directly load the bash script from file and execute it on worker.
