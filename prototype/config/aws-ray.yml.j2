@@ -8,7 +8,9 @@ provider:
   type: aws
   region: {{region}}
   availability_zone: {{zones}}
-  cache_stopped_nodes: False
+  # Keep (otherwise cannot reuse when re-provisioning).
+  # teardown(terminate=True) will override this.
+  cache_stopped_nodes: True
 
 auth:
   ssh_user: ubuntu
