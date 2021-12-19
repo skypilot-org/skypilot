@@ -136,17 +136,18 @@ def _create_and_ssh_into_node(
     if use_screen:
         commands += ['screen', '-D', '-R']
     backend_utils.run(commands, shell=False, check=False)
-
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
-    click.echo('The interactive node is still running.')
-    click.echo('  To attach to it again:  ', nl=False)
+
+    click.echo('To attach it again:  ', nl=False)
     if cluster_name == _default_interactive_node_name(node_type):
         option = ''
     else:
         option = f' -c {cluster_name}'
     click.secho(f'sky {node_type}{option}', bold=True)
-    click.echo('  To tear down the node:  ', nl=False)
+    click.echo('To tear down the node:  ', nl=False)
     click.secho(f'sky down {cluster_name}', bold=True)
+    click.echo('To stop the node:  ', nl=False)
+    click.secho(f'sky stop {cluster_name}', bold=True)
 
 
 class _NaturalOrderGroup(click.Group):
@@ -375,11 +376,47 @@ def down(
       # Tear down all existing clusters.
       sky down -a
     """
-    name = cluster
-    downall = all
-    if name is None and downall is None:
+    _terminate_or_stop(cluster, apply_to_all=all, terminate=True)
+
+
+@cli.command()
+@click.argument('cluster', required=False)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Tear down all existing clusters.')
+def stop(
+        cluster: str,
+        all: Optional[bool],  # pylint: disable=redefined-builtin
+):
+    """Stop cluster(s).
+
+    CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
+    supplied, the latter takes precedence.
+
+    Limitation: this currently only works for AWS clusters.
+
+    Examples:
+
+      \b
+      # Stop a specific cluster.
+      sky stop cluster_name
+
+      \b
+      # Stop all existing clusters.
+      sky stop -a
+    """
+    _terminate_or_stop(cluster, apply_to_all=all, terminate=False)
+
+
+def _terminate_or_stop(name: Optional[str], apply_to_all: Optional[bool],
+                       terminate: bool) -> None:
+    """Terminates or stops a cluster (or all clusters)."""
+    command = 'down' if terminate else 'stop'
+    if name is None and apply_to_all is None:
         raise click.UsageError(
-            'sky down requires either a cluster name (see `sky status`) '
+            f'sky {command} requires either a cluster name (see `sky status`) '
             'or --all.')
 
     to_down = []
@@ -387,10 +424,10 @@ def down(
         handle = global_user_state.get_handle_from_cluster_name(name)
         if handle is not None:
             to_down = [{'name': name, 'handle': handle}]
-    if downall:
+    if apply_to_all:
         to_down = global_user_state.get_clusters()
         if name is not None:
-            print('Both --all and --cluster specified for sky down. '
+            print(f'Both --all and --cluster specified for sky {command}. '
                   'Letting --all take effect.')
             name = None
     if not to_down:
@@ -404,9 +441,14 @@ def down(
     for record in to_down:  # TODO: parallelize.
         name = record['name']
         handle = record['handle']
-        backend.teardown(handle)
-
-        click.secho(f'Tearing down cluster {name}...done.', fg='green')
+        backend.teardown(handle, terminate=terminate)
+        if terminate:
+            click.secho(f'Terminating cluster {name}...done.', fg='green')
+        else:
+            click.secho(f'Stopping cluster {name}...done.', fg='green')
+            click.echo(
+                f'  Tip: to resume the cluster, use "sky run -c {name} <yaml>" '
+                'or "sky cpunode/gpunode".')
 
 
 @cli.command()
