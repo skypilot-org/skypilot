@@ -513,7 +513,10 @@ def is_same_requested_resources(r1: Set[Resources], r2: Set[Resources]):
     r2 = list(r2)[0]
     return r1.is_same_resources(r2)
 
-def run_bash_command_with_log(bash_command: str, log_path: str, stream_logs: bool = False):
+
+def run_bash_command_with_log(bash_command: str,
+                              log_path: str,
+                              stream_logs: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         fp.write(bash_command)
         fp.flush()
@@ -526,6 +529,7 @@ def run_bash_command_with_log(bash_command: str, log_path: str, stream_logs: boo
             shell=True,
             executable='/bin/bash',
         )
+
 
 def load_bash_command_from_file(bash_command_file: str):
     with open(bash_command_file, 'r') as fp:

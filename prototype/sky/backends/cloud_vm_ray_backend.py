@@ -185,7 +185,7 @@ class RayCodeGen(object):
         #   name=...
         #   resources=...
         #   num_gpus=...
-        name_str = f"name='{task_name}'"
+        name_str = f'name=\'{task_name}\''
         if ray_resources_dict is None:
             resources_str = ''
             num_gpus_str = ''
@@ -198,13 +198,13 @@ class RayCodeGen(object):
             # Passing this ensures that the Ray remote task gets
             # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
             # would be force-set to empty by Ray.
-            # `num_gpus`` should be empty when the accelerator is not GPU.
+            num_gpus_str = f', num_gpus={list(ray_resources_dict.values())[0]}'
+            # `num_gpus` should be empty when the accelerator is not GPU.
             # FIXME: use a set of GPU types.
-            num_gpus_str = ''
             resources_key = list(ray_resources_dict.keys())[0]
             if 'tpu' not in resources_key.lower():
-                num_gpus_str = f', num_gpus={list(ray_resources_dict.values())[0]}'
-        
+                num_gpus_str = ''
+
         if ip_demand_dict is not None:
             assert len(ip_demand_dict) == 1, \
                 ('There can only be one ip per task.'
@@ -212,7 +212,7 @@ class RayCodeGen(object):
             resources_dict = ray_resources_dict.copy()
             resources_dict.update(ip_demand_dict)
             resources_str = f', resources={json.dumps(resources_dict)}'
-        
+
         # Ray does not support override workdir in runtime_env for remote task.
         # We directly load the bash script from file and execute it on worker.
         self._code += [
@@ -997,7 +997,8 @@ class CloudVmRayBackend(backends.Backend):
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         for task in par_task.tasks:
             assert task.num_nodes == 1, \
-                f'ParTask does not support inner Tasks with num_nodes > 1: {task}'
+                ('ParTask does not support inner Tasks with '
+                f'num_nodes > 1: {task}')
         # Strategy:
         #  ray.init(..., log_to_driver=False); otherwise too many logs.
         #  for task:
@@ -1022,13 +1023,15 @@ class CloudVmRayBackend(backends.Backend):
         for i, task_i in enumerate(par_task.tasks):
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
             # to initialize conda, so that 'conda activate ...' works.
-            task_i_script = self._generate_head_script(handle, task_i.run, add_bash_header=True)
+            task_i_script = self._generate_head_script(handle,
+                                                       task_i.run,
+                                                       add_bash_header=True)
             task_i_name = f'task-{i}' if task_i.name is None else task_i.name
             codegen.add_ray_task(
                 bash_script_path=task_i_script,
                 task_name=task_i_name,
-                # We can't access t.best_resources because the inner task doesn't
-                # undergo optimization.  Example value: {"V100": 1}.
+                # We can't access t.best_resources because the inner task
+                # doesn't undergo optimization.  Example value: {"V100": 1}.
                 ray_resources_dict=par_task.get_task_resource_demands(i),
                 log_path=os.path.join(log_dir, f'{task_i_name}.log'),
                 stream_logs=stream_logs)
@@ -1151,8 +1154,10 @@ class CloudVmRayBackend(backends.Backend):
         # Launch the command as a Ray task.
         assert isinstance(task.run, str), \
             f'Task(run=...) should be a string (found {type(task.run)}).'
-        script_path = self._generate_head_script(handle, task.run, add_bash_header=True)
-        log_path = os.path.join(self.log_dir, f'run.log')
+        script_path = self._generate_head_script(handle,
+                                                 task.run,
+                                                 add_bash_header=True)
+        log_path = os.path.join(self.log_dir, 'run.log')
 
         codegen = RayCodeGen()
         codegen.add_prologue(stream_logs=stream_logs)
@@ -1195,7 +1200,9 @@ class CloudVmRayBackend(backends.Backend):
             command_for_ip = ips_dict[ip]
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
             # to initialize conda, so that 'conda activate ...' works.
-            script_path = self._generate_head_script(handle, command_for_ip, add_bash_header=True)
+            script_path = self._generate_head_script(handle,
+                                                     command_for_ip,
+                                                     add_bash_header=True)
 
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
