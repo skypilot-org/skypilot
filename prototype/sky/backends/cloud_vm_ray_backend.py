@@ -54,16 +54,12 @@ def _get_cluster_config_template(cloud):
     return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
 
-def _to_accelerator_and_count(resources: Optional[Resources]
-                             ) -> Tuple[Optional[str], int]:
-    acc = None
-    acc_count = 0
+def _get_accelerator_dict(handle) -> Tuple[Optional[str], int]:
+    accelerator_dict = None
+    resources = handle.launched_resources
     if resources is not None:
-        d = resources.get_accelerators()
-        if d is not None:
-            assert len(d) == 1, d
-            acc, acc_count = list(d.items())[0]
-    return acc, acc_count
+        accelerator_dict = resources.get_accelerators()
+    return accelerator_dict
 
 
 def _log_hint_for_redirected_outputs(log_dir: str, cluster_yaml: str) -> None:
@@ -1157,7 +1153,7 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_ray_task(
             bash_script_path=f'{script_path}',
             task_name=task.name,
-            ray_resources_dict=task.best_resources.get_accelerators(),
+            ray_resources_dict=_get_accelerator_dict(handle),
             log_path=log_path,
             stream_logs=stream_logs,
         )
@@ -1203,7 +1199,7 @@ class CloudVmRayBackend(backends.Backend):
             codegen.add_ray_task(
                 bash_script_path=f'{script_path}',
                 task_name=name,
-                ray_resources_dict=task.best_resources.get_accelerators(),
+                ray_resources_dict=_get_accelerator_dict(handle),
                 log_path=log_path,
                 stream_logs=stream_logs,
                 ip_demand_dict=demand,
