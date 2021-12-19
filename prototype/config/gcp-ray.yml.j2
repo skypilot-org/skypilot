@@ -104,7 +104,7 @@ rsync_filter:
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-  - pip3 install -U ray==1.7.0 && mkdir -p /tmp/workdir
+  - pip3 install -U ray==1.7.0 && mkdir -p /tmp/workdir && mkdir -p /tmp/sky_app
 {%- if setup_sh_path is not none %}
   - cd /tmp/workdir && bash /tmp/setup.sh
 {%- endif %}

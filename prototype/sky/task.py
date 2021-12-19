@@ -399,7 +399,6 @@ class Task(object):
         s += '\n  resources: {}'.format(self.resources)
         return s
 
-
 class ParTask(Task):
     """ParTask: a wrapper of independent Tasks to be run in parallel.
 

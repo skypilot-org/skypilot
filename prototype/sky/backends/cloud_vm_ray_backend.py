@@ -38,6 +38,7 @@ OptimizeTarget = optimizer.OptimizeTarget
 Path = str
 PostSetupFn = Callable[[str], Any]
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
+SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
 
 logger = logging.init_logger(__name__)
@@ -147,7 +148,6 @@ class RayCodeGen(object):
     def add_prologue(self, stream_logs: bool) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
-
         self._code = [
             textwrap.dedent(f"""\
             import io
@@ -156,26 +156,31 @@ class RayCodeGen(object):
             import sys
             import selectors
             import subprocess
+            import tempfile
             from typing import Dict, List, Optional, Union
 
             ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
+            
             print('cluster_resources:', ray.cluster_resources())
             print('available_resources:', ray.available_resources())
             print('live nodes:', ray.state.node_ids())
 
             futures = []"""),
+            inspect.getsource(backend_utils.load_bash_command_from_file),
             inspect.getsource(backend_utils.redirect_process_output),
             inspect.getsource(backend_utils.run_with_log),
-            'run_with_log = ray.remote(run_with_log)',
+            inspect.getsource(backend_utils.run_bash_command_with_log),
+            'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
 
     def add_ray_task(
             self,
-            bash_command: str,
+            bash_script_path: Path,
             task_name: str,
             ray_resources_dict: Optional[Dict[str, float]],
             log_path: str,
             stream_logs: bool,
+            ip_demand_dict: Optional[Dict[str, int]] = None,
     ) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
@@ -193,22 +198,29 @@ class RayCodeGen(object):
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')
             resources_str = f', resources={json.dumps(ray_resources_dict)}'
+            if ip_demand_dict is not None:
+                assert len(ip_demand_dict) == 1, \
+                    ('There can only be one ip per task.'
+                     f'Found: {ip_demand_dict}.')
+                resources_str = f', resources={json.dumps(ip_demand_dict)}'
             # Passing this ensures that the Ray remote task gets
             # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
             # would be force-set to empty by Ray.
             num_gpus_str = f', num_gpus={list(ray_resources_dict.values())[0]}'
 
+        # Ray does not support override workdir in runtime_env for remote task.
+        # We directly load the bash script from file and execute it on worker.
         self._code += [
             textwrap.dedent(f"""\
-        futures.append(run_with_log \\
+                script_str = load_bash_command_from_file('{bash_script_path}')
+            """),
+            textwrap.dedent(f"""\
+        futures.append(run_bash_command_with_log \\
                 .options({name_str}{resources_str}{num_gpus_str}) \\
                 .remote(
-                    {bash_command},
+                    script_str,
                     '{log_path}',
                     stream_logs={stream_logs},
-                    return_none=True,
-                    shell=True,
-                    executable='/bin/bash',
                 ))""")
         ]
 
@@ -789,7 +801,7 @@ class CloudVmRayBackend(backends.Backend):
                                            OptimizeTarget.COST)
 
     def _check_existing_cluster(self, task: App, to_provision: Resources,
-                                cluster_name: str) -> (str, Resources):
+                                cluster_name: str) -> Tuple[str, Resources]:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             # Cluster already exists. Check if the  resources are equal
@@ -1005,12 +1017,10 @@ class CloudVmRayBackend(backends.Backend):
         for i, task_i in enumerate(par_task.tasks):
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
             # to initialize conda, so that 'conda activate ...' works.
-            task_i_cmd = shlex.quote(
-                f'. $(conda info --base)/etc/profile.d/conda.sh || true && '
-                f'cd {SKY_REMOTE_WORKDIR} && source ~/.bashrc && {task_i.run}')
+            task_i_script = self._generate_head_script(handle, task_i.run, add_bash_header=True)
             task_i_name = f'task-{i}' if task_i.name is None else task_i.name
             codegen.add_ray_task(
-                bash_command=task_i_cmd,
+                bash_script_path=task_i_script,
                 task_name=task_i_name,
                 # We can't access t.best_resources because the inner task doesn't
                 # undergo optimization.  Example value: {"V100": 1}.
@@ -1054,6 +1064,34 @@ class CloudVmRayBackend(backends.Backend):
                 should_bootstrap=False,
             )
 
+    def _generate_head_script(
+            self,
+            handle: ResourceHandle,
+            codegen: str,
+            add_bash_header=False,
+    ) -> Path:
+        script = codegen
+        if add_bash_header:
+            script = textwrap.dedent(f"""\
+                #!/bin/bash
+                . $(conda info --base)/etc/profile.d/conda.sh || true
+                cd {SKY_REMOTE_WORKDIR}
+                {codegen}
+            """)
+        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+            fp.write(script)
+            fp.flush()
+            basename = os.path.basename(fp.name)
+            script_path = os.path.join(SKY_REMOTE_APP_DIR, basename)
+            # We choose to sync code + exec, because the alternative of 'ray
+            # submit' may not work as it may use system python (python2) to
+            # execute the script.  Happens for AWS.
+            self._run_rsync(handle,
+                            source=fp.name,
+                            target=script_path,
+                            with_outputs=False)
+        return script_path
+
     def _exec_code_on_head(
             self,
             handle: ResourceHandle,
@@ -1062,17 +1100,7 @@ class CloudVmRayBackend(backends.Backend):
             stream_logs: bool = True,
     ) -> None:
         """Executes generated code on the head node."""
-        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-            fp.write(codegen)
-            fp.flush()
-            basename = os.path.basename(fp.name)
-            # We choose to sync code + exec, because the alternative of 'ray
-            # submit' may not work as it may use system python (python2) to
-            # execute the script.  Happens for AWS.
-            self._run_rsync(handle,
-                            source=fp.name,
-                            target=f'/tmp/{basename}',
-                            with_outputs=False)
+        head_script_path = self._generate_head_script(handle, codegen)
 
         log_path = os.path.join(self.log_dir, 'run.log')
         if not stream_logs:
@@ -1084,7 +1112,7 @@ class CloudVmRayBackend(backends.Backend):
         assert executable is not None, executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
         self._run_command_on_head_via_ssh(
-            handle, f'{cd} && {executable} /tmp/{basename}', log_path,
+            handle, f'{cd} && {executable} {head_script_path}', log_path,
             stream_logs)
 
     def execute(self, handle: ResourceHandle, task: App,
@@ -1118,30 +1146,25 @@ class CloudVmRayBackend(backends.Backend):
         # Launch the command as a Ray task.
         assert isinstance(task.run, str), \
             f'Task(run=...) should be a string (found {type(task.run)}).'
+        script_path = self._generate_head_script(handle, task.run, add_bash_header=True)
+        log_path = os.path.join(self.log_dir, f'run.log')
 
-        # FIXME: want a bash script because task.run can be multiple lines (yaml)
-        codegen = textwrap.dedent(f"""\
-            #!/bin/bash
-            . $(conda info --base)/etc/profile.d/conda.sh || true
-            {task.run}
-        """)
         codegen = RayCodeGen()
         codegen.add_prologue(stream_logs=stream_logs)
-        codegen.add_ray_task()
 
         codegen.add_ray_task(
-            task_run_command=task.run,
-            task_name=task_i_name,
-            # We can't access t.best_resources because the inner task doesn't
-            # undergo optimization.  Example value: {"V100": 1}.
-            ray_resources_dict=par_task.get_task_resource_demands(i),
-            log_path=os.path.join(log_dir, f'{task_i_name}.log'),
-            stream_logs=stream_logs)
+            bash_script_path=f'{script_path}',
+            task_name=task.name,
+            ray_resources_dict=task.best_resources.get_accelerators(),
+            log_path=log_path,
+            stream_logs=stream_logs,
+        )
 
-        self._exec_code_on_head(handle,
-                                codegen,
-                                stream_logs,
-                                executable='/bin/bash')
+        codegen.add_epilogue()
+
+        self._exec_code_on_head(handle, codegen.build(), executable='python3')
+        # TODO: Add a hint for log monitoring `sky exec -c name tail -f...`.
+        self._rsync_down_logs(handle, self.log_dir, [handle.head_ip])
 
     def _execute_task_n_nodes(self,
                               handle: ResourceHandle,
@@ -1154,8 +1177,9 @@ class CloudVmRayBackend(backends.Backend):
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
                                'tasks')
-        codegen = [_TASK_LAUNCH_CODE_GENERATOR.format(stream_logs=stream_logs)]
-        unused_acc, acc_count = _to_accelerator_and_count(task.best_resources)
+        codegen = RayCodeGen()
+        codegen.add_prologue(stream_logs=stream_logs)
+
         # Get private ips here as Ray internally uses 'node:private_ip' as
         # per-node custom resources.
         ips = self._get_node_ips(handle.cluster_yaml,
@@ -1166,37 +1190,26 @@ class CloudVmRayBackend(backends.Backend):
             command_for_ip = ips_dict[ip]
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
             # to initialize conda, so that 'conda activate ...' works.
-            cmd = shlex.quote(
-                f'. $(conda info --base)/etc/profile.d/conda.sh || true && \
-                    cd {SKY_REMOTE_WORKDIR} && {command_for_ip}')
+            script_path = self._generate_head_script(handle, command_for_ip, add_bash_header=True)
+
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
             demand = {f'node:{ip}': 1}
-            resources_str = f', resources={json.dumps(demand)}'
-            num_gpus_str = ''
-            if acc_count > 0:
-                # Passing this ensures that the Ray remote task gets
-                # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
-                # would be force-set to empty by Ray.
-                num_gpus_str = f', num_gpus={acc_count}'
             name = f'{ip}'
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
-            codegen.append(
-                textwrap.dedent(f"""\
-        futures.append(run_with_log \\
-                .options(name='{name}'{resources_str}{num_gpus_str}) \\
-                .remote(
-                    {cmd},
-                    '{log_path}',
-                    {stream_logs},
-                    return_none=True,
-                    shell=True,
-                    executable='/bin/bash',
-                ))
-        """))
-        # Block.
-        codegen.append('ray.get(futures)\n')
-        codegen = '\n'.join(codegen)
+
+            codegen.add_ray_task(
+                bash_script_path=f'{script_path}',
+                task_name=name,
+                ray_resources_dict=task.best_resources.get_accelerators(),
+                log_path=log_path,
+                stream_logs=stream_logs,
+                ip_demand_dict=demand,
+                # TODO: Add script to ray env
+            )
+
+        codegen.add_epilogue()
+
         # Logger.
         colorama.init()
         fore = colorama.Fore
@@ -1205,7 +1218,7 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             _log_hint_for_redirected_outputs(log_dir, handle.cluster_yaml)
 
-        self._exec_code_on_head(handle, codegen, executable='python3')
+        self._exec_code_on_head(handle, codegen.build(), executable='python3')
 
         # Get external IPs for the nodes
         external_ips = self._get_node_ips(handle.cluster_yaml,

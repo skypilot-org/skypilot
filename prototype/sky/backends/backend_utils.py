@@ -31,6 +31,7 @@ Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
+SKY_REMOTE_APP_DIR = '/tmp/sky_app'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 
@@ -511,3 +512,22 @@ def is_same_requested_resources(r1: Set[Resources], r2: Set[Resources]):
     r1 = list(r1)[0]
     r2 = list(r2)[0]
     return r1.is_same_resources(r2)
+
+def run_bash_command_with_log(bash_command: str, log_path: str, stream_logs: bool = False):
+    with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+        fp.write(bash_command)
+        fp.flush()
+        script_path = fp.name
+        run_with_log(
+            f'/bin/bash {script_path}',
+            log_path,
+            stream_logs=stream_logs,
+            return_none=True,
+            shell=True,
+            executable='/bin/bash',
+        )
+
+def load_bash_command_from_file(bash_command_file: str):
+    with open(bash_command_file, 'r') as fp:
+        bash_command = fp.read()
+    return bash_command
