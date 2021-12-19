@@ -372,7 +372,7 @@ class RetryingVmProvisioner(object):
             zone_str = ','.join(
                 z.name for z in zones) if zones is not None else 'all zones'
             logger.info(f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
-                        f'{region.name} ({zone_str}){style.RESET_ALL})')
+                        f'{region.name} ({zone_str}){style.RESET_ALL}')
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
@@ -397,6 +397,8 @@ class RetryingVmProvisioner(object):
                 except subprocess.CalledProcessError as e:
                     stderr = e.stderr.decode('ascii')
                     if 'ALREADY_EXISTS' in stderr:
+                        # FIXME: should use 'start' on stopped TPUs, replacing
+                        # 'create'.
                         logger.info(
                             f'TPU {tpu_name} already exists; skipped creation.')
                     elif 'PERMISSION_DENIED' in stderr:
@@ -431,7 +433,7 @@ class RetryingVmProvisioner(object):
                     # There exist partial nodes (e.g., head node) so we must
                     # down before moving on to other regions.
                     # TODO: this signals refactoring opportunities?
-                    CloudVmRayBackend().teardown(handle)
+                    CloudVmRayBackend().teardown(handle, terminate=True)
                     self._update_blocklist_on_error(
                         to_provision.cloud,
                         region,
@@ -1141,10 +1143,11 @@ class CloudVmRayBackend(backends.Backend):
             logger.info('\nTo log into the head VM:\t'
                         f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
                         '\nTo teardown the cluster:'
-                        f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n')
+                        f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n'
+                        '\nTo stop the cluster:'
+                        f'\t{style.BRIGHT}sky stop {name}{style.RESET_ALL}\n')
             if handle.tpu_delete_script is not None:
-                logger.info(
-                    'Tip: `sky down` will delete launched TPU(s) as well.')
+                logger.info('Tip: `sky down` will delete launched TPU(s) too.')
 
     def teardown_ephemeral_storage(self, task: App) -> None:
         storage_mounts = task.storage_mounts
@@ -1153,22 +1156,38 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
-    def teardown(self, handle: ResourceHandle) -> None:
+    def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
+        if not terminate and not isinstance(cloud, clouds.AWS):
+            # FIXME: no mentions of cache_stopped_nodes in
+            # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/_azure/node_provider.py
+            # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/node_provider.py
+            raise ValueError(
+                'Node stopping requested but is not supported on non-AWS '
+                'clusters yet. Try manually stopping or `sky down`. '
+                f'Found: {handle.launched_resources}')
         if isinstance(cloud, clouds.Azure):
             # Special handling because `ray down` is buggy with Azure.
             cluster_name = config['cluster_name']
+            # Set check=False to not error out on not found VMs.
             backend_utils.run(
                 'az vm delete --yes --ids $(az vm list --query '
                 f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
                 check=False)
         else:
-            backend_utils.run(f'ray down -y {handle.cluster_yaml}')
+            config['provider']['cache_stopped_nodes'] = not terminate
+            with tempfile.NamedTemporaryFile('w',
+                                             prefix='sky_',
+                                             delete=False,
+                                             suffix='.yml') as f:
+                backend_utils.dump_yaml(f.name, config)
+                f.flush()
+                backend_utils.run(f'ray down -y {f.name}')
             if handle.tpu_delete_script is not None:
                 backend_utils.run(f'bash {handle.tpu_delete_script}')
         name = global_user_state.get_cluster_name_from_handle(handle)
-        global_user_state.remove_cluster(name)
+        global_user_state.remove_cluster(name, terminate=terminate)
 
     def _get_node_ips(self,
                       cluster_yaml: str,
@@ -1212,9 +1231,12 @@ class CloudVmRayBackend(backends.Backend):
         """Runs rsync from 'source' to the cluster head node's 'target'."""
         # Attempt to use 'rsync user@ip' directly, which is much faster than
         # going through ray (either 'ray rsync_*' or sdk.rsync()).
-        assert handle.head_ip is not None, \
-            f'provision() should have cached head ip: {handle}'
         config = backend_utils.read_yaml(handle.cluster_yaml)
+        if handle.head_ip is None:
+            raise ValueError(
+                f'The cluster "{config["cluster_name"]}" appears to be down. '
+                'Run a re-provisioning command again (e.g., sky run) and retry.'
+            )
         auth = config['auth']
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
