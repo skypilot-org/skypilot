@@ -1170,11 +1170,11 @@ class CloudVmRayBackend(backends.Backend):
         if isinstance(cloud, clouds.Azure):
             # Special handling because `ray down` is buggy with Azure.
             cluster_name = config['cluster_name']
-            # 'stop' will still bill the VM per Azure docs.
+            # Set check=False to not error out on not found VMs.
             backend_utils.run(
                 'az vm delete --yes --ids $(az vm list --query '
                 f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
-                check=True)
+                check=False)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
