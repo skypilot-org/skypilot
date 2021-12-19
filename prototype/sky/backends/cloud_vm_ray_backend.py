@@ -209,8 +209,9 @@ class RayCodeGen(object):
             assert len(ip_demand_dict) == 1, \
                 ('There can only be one ip per task.'
                  f'Found: {ip_demand_dict}.')
-            resources = ray_resources_dict.update(ip_demand_dict)
-            resources_str = f', resources={json.dumps(resources)}'
+            resources_dict = ray_resources_dict.copy()
+            resources_dict.update(ip_demand_dict)
+            resources_str = f', resources={json.dumps(resources_dict)}'
         
         # Ray does not support override workdir in runtime_env for remote task.
         # We directly load the bash script from file and execute it on worker.
