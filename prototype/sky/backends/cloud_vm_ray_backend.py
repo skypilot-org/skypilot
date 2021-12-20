@@ -43,6 +43,8 @@ SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
 
 logger = logging.init_logger(__name__)
 
+_additional_header_lines = []
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -176,7 +178,7 @@ class RayCodeGen(object):
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
         self._code += [
             f'pg = placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')',
-            f'print(\'Waiting for {len(bundles)} nodes.\')',
+            f'print(\'Waiting for {len(bundles)} nodes.\', flush=True)',
             # FIXME: This will print the error message from autoscaler if
             # it is waiting for other task to finish. We should hide the
             # error message.
@@ -559,7 +561,8 @@ class RetryingVmProvisioner(object):
                     # ray up logic are not mixed up.
                     backend_utils.run(
                         f'ray exec {cluster_config_file} '
-                        f'\'echo "export TPU_NAME={tpu_name}" >> ~/.bashrc\'')
+                        f'\'echo "export TPU_NAME={tpu_name}" > '
+                        f'{SKY_REMOTE_APP_DIR}/sky_env_var.sh\'')
                 cluster_name = config_dict['cluster_name']
                 plural = '' if task.num_nodes == 1 else 's'
                 logger.info(
@@ -1093,10 +1096,13 @@ class CloudVmRayBackend(backends.Backend):
         if add_bash_header:
             script = textwrap.dedent(f"""\
                 #!/bin/bash
+                . {SKY_REMOTE_APP_DIR}/sky_env_var.sh || true
                 . $(conda info --base)/etc/profile.d/conda.sh || true
+                echo TPU_NAME $TPU_NAME
                 cd {SKY_REMOTE_WORKDIR}
-                {codegen}
+
             """)
+            script += codegen
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(script)
             fp.flush()
@@ -1206,7 +1212,9 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = _get_accelerator_dict(handle)
         bundles = [
             {
-                'CPU': 1,  # Set CPU to avoid ray hanging.
+                # Set CPU to avoid ray hanging the resources allocation
+                # for remote functions.
+                'CPU': 1,
                 f'node:{ip}': 1
             } for ip in ips
         ]
