@@ -5,6 +5,7 @@ import hashlib
 import os
 import pathlib
 import time
+import uuid
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -84,7 +85,7 @@ def setup_aws_authentication(config):
     ec2 = boto3.client('ec2', config['provider']['region'])
     key_pairs = ec2.describe_key_pairs()['KeyPairs']
     key_found = False
-    name_counter = 0
+    key_names = set()
 
     def _get_fingerprint(public_key_path):
         key = RSA.importKey(open(public_key_path).read())
@@ -101,18 +102,18 @@ def setup_aws_authentication(config):
         # Compute Fingerprint of public key
         aws_fingerprint = key['KeyFingerprint']
         local_fingerprint = _get_fingerprint(public_key_path)
-        # If fingerprints dont match, delete bad key
         if aws_fingerprint == local_fingerprint:
             key_found = True
-        # Check if name exists
-        if key_name in key['KeyName']:
-            name_counter += 1
+        # Add key name to key name list
+        key_names.add(key['KeyName'])
+
     if not key_found:
-        if name_counter == 0:
-            ec2.import_key_pair(KeyName=key_name, PublicKeyMaterial=public_key)
-        else:
-            ec2.import_key_pair(KeyName=key_name + f'_{name_counter}',
-                                PublicKeyMaterial=public_key)
+        while True:
+            key_name = uuid.uuid4().hex
+            if key_name not in key_names:
+                ec2.import_key_pair(KeyName=key_name,
+                                    PublicKeyMaterial=public_key)
+                break
 
     node_types = config['available_node_types']
 
