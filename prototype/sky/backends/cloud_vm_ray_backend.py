@@ -177,8 +177,8 @@ class RayCodeGen(object):
         self._code += [
             f'pg = placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')',
             f'print(\'Waiting for {len(bundles)} nodes.\')',
-            # FIXME: This will print the error message from autoscaler if 
-            # it is waiting for other task to finish. We should hide the 
+            # FIXME: This will print the error message from autoscaler if
+            # it is waiting for other task to finish. We should hide the
             # error message.
             'ray.get(pg.ready())',
             'print(\'All nodes are ready.\')',
