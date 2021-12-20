@@ -1093,15 +1093,16 @@ class CloudVmRayBackend(backends.Backend):
     ) -> Path:
         script = codegen
         if add_bash_header:
-            script = textwrap.dedent(f"""\
-                #!/bin/bash
-                . {SKY_REMOTE_APP_DIR}/sky_env_var.sh || true
-                . $(conda info --base)/etc/profile.d/conda.sh || true
-                echo TPU_NAME $TPU_NAME
-                cd {SKY_REMOTE_WORKDIR}
-
-            """)
-            script += codegen
+            script = [
+                textwrap.dedent(f"""\
+                    #!/bin/bash
+                    . {SKY_REMOTE_APP_DIR}/sky_env_var.sh || true
+                    . $(conda info --base)/etc/profile.d/conda.sh || true
+                    cd {SKY_REMOTE_WORKDIR}
+                """),
+                codegen,
+            ]
+            script = '\n'.join(script)
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(script)
             fp.flush()
