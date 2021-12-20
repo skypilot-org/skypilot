@@ -43,6 +43,9 @@ available_node_types:
           - key: install-nvidia-driver
             value: "True"
       scheduling:
+{%- if use_spot %}
+        - preemptible: true
+{%- endif %}
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
 {%- endif %}
 {% if num_nodes > 1 %}
@@ -71,6 +74,9 @@ available_node_types:
           - key: install-nvidia-driver
             value: "True"
       scheduling:
+{%- if use_spot %}
+        - preemptible: true
+{%- endif %}
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
 {%- endif %}
 {%- endif %}
