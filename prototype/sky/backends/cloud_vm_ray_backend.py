@@ -559,10 +559,9 @@ class RetryingVmProvisioner(object):
                 if tpu_name is not None:
                     # TODO: refactor to a cleaner design, so that tpu code and
                     # ray up logic are not mixed up.
-                    backend_utils.run(
-                        f'ray exec {cluster_config_file} '
-                        f'\'echo "export TPU_NAME={tpu_name}" > '
-                        f'{SKY_REMOTE_APP_DIR}/sky_env_var.sh\'')
+                    backend_utils.run(f'ray exec {cluster_config_file} '
+                                      f'\'echo "export TPU_NAME={tpu_name}" > '
+                                      f'{SKY_REMOTE_APP_DIR}/sky_env_var.sh\'')
                 cluster_name = config_dict['cluster_name']
                 plural = '' if task.num_nodes == 1 else 's'
                 logger.info(
