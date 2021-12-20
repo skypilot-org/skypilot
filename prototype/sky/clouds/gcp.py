@@ -72,6 +72,64 @@ class GCP(clouds.Cloud):
     _ON_DEMAND_PRICES.update(_ON_DEMAND_PRICES_GPUS)
     _ON_DEMAND_PRICES.update(_ON_DEMAND_PRICES_TPUS)
 
+    _SPOT_PRICES = {
+        # VMs: https://cloud.google.com/compute/all-pricing.
+        # N1 standard
+        'n1-standard-1': 0.01,
+        'n1-standard-2': 0.02,
+        'n1-standard-4': 0.04,
+        'n1-standard-8': 0.08,
+        'n1-standard-16': 0.16,
+        'n1-standard-32': 0.32,
+        'n1-standard-64': 0.64,
+        'n1-standard-96': 0.96,
+        # N1 highmem
+        'n1-highmem-2': 0.024906,
+        'n1-highmem-4': 0.049812,
+        'n1-highmem-8': 0.099624,
+        'n1-highmem-16': 0.199248,
+        'n1-highmem-32': 0.398496,
+        'n1-highmem-64': 0.796992,
+        'n1-highmem-96': 1.195488,
+    }
+    # GPUs: https://cloud.google.com/compute/gpus-pricing.
+    _SPOT_PRICES_GPUS = {
+        # T4
+        'T4': 0.11,
+        '1x T4': 0.11,
+        '2x T4': 0.11 * 2,
+        '4x T4': 0.11 * 4,
+        # P4
+        'P4': 0.216,
+        '1x P4': 0.216,
+        '2x P4': 0.216 * 2,
+        '4x P4': 0.216 * 4,
+        # V100
+        'V100': 0.74,
+        '1x V100': 0.74,
+        '2x V100': 0.74 * 2,
+        '4x V100': 0.74 * 4,
+        '8x V100': 0.74 * 8,
+        # P100
+        'P100': 0.43,
+        '1x P100': 0.43,
+        '2x P100': 0.43 * 2,
+        '4x P100': 0.43 * 4,
+        # K80
+        'K80': 0.0375,
+        '1x K80': 0.0375,
+        '2x K80': 0.0375 * 2,
+        '4x K80': 0.0375 * 4,
+        '8x K80': 0.0375 * 8,
+    }
+    # TPUs: https://cloud.google.com/tpu/pricing.
+    _SPOT_PRICES_TPUS = {
+        'tpu-v2-8': 1.35,
+        'tpu-v3-8': 2.40,
+    }
+    _SPOT_PRICES.update(_SPOT_PRICES_GPUS)
+    _SPOT_PRICES.update(_SPOT_PRICES_TPUS)
+
     #### Regions/Zones ####
 
     @classmethod
@@ -125,9 +183,8 @@ class GCP(clouds.Cloud):
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
-        # TODO: use_spot support
         if use_spot:
-            return clouds.Cloud.UNKNOWN_COST
+            return GCP._SPOT_PRICES[instance_type]
         return GCP._ON_DEMAND_PRICES[instance_type]
 
     def accelerators_to_hourly_cost(self, accelerators):
@@ -168,8 +225,6 @@ class GCP(clouds.Cloud):
 
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
-        assert not r.use_spot, \
-            'We currently do not support spot instances for GCP'
         # Find GPU spec, if any.
         resources_vars = {
             'instance_type': r.instance_type,
@@ -177,6 +232,7 @@ class GCP(clouds.Cloud):
             'gpu_count': None,
             'tpu': None,
             'custom_resources': None,
+            'use_spot': r.use_spot,
         }
         accelerators = r.get_accelerators()
         if accelerators is not None:
@@ -202,7 +258,11 @@ class GCP(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return [resources]
-        # TODO: check if accelerators well-formed/available.
+        if resources.accelerators is not None:
+            for acc in resources.accelerators.keys():
+                if acc not in self._ON_DEMAND_PRICES_GPUS \
+                    and acc not in self._ON_DEMAND_PRICES_TPUS:
+                    return []
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
         r = copy.deepcopy(resources)

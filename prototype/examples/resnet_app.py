@@ -2,8 +2,6 @@ import subprocess
 
 import sky
 
-import time_estimators
-
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
@@ -22,6 +20,7 @@ with sky.Dag() as dag:
 
     # The command to run.  Will be run under the working directory.
     run = 'conda activate resnet && \
+        export XLA_FLAGS=\'--xla_gpu_cuda_data_dir=/usr/local/cuda/\' && \
         python -u models/official/resnet/resnet_main.py --use_tpu=False \
         --mode=train --train_batch_size=256 --train_steps=250 \
         --iterations_per_loop=125 \

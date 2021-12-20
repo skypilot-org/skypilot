@@ -5,11 +5,11 @@ import os
 import pathlib
 import selectors
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
-from typing import Dict, List, Optional, Union
-import uuid
+from typing import Dict, List, Optional, Union, Set
 import yaml
 import zlib
 
@@ -19,6 +19,7 @@ import sky
 from sky import authentication as auth
 from sky import clouds
 from sky import logging
+from sky import resources
 from sky import task as task_lib
 
 logger = logging.init_logger(__name__)
@@ -26,10 +27,15 @@ logger = logging.init_logger(__name__)
 # An application.  These are the task types to support.
 App = Union[task_lib.Task, task_lib.ParTask]
 RunId = str
+Resources = resources.Resources
+
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
+
+# Do not use /tmp because it gets cleared on VM restart.
+_SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
 
 def get_rel_path(path: str) -> str:
@@ -60,23 +66,110 @@ def _fill_template(template_path: str,
         # Need abs path here, otherwise get_rel_path() below fails.
         output_path = os.path.join(os.path.dirname(sky.__root_dir__),
                                    output_path)
-    logger.info(f'Created or updated file {get_rel_path(output_path)}')
     return output_path
 
 
+class FileMountHelper(object):
+    """Helper for handling file mounts."""
+
+    @classmethod
+    def wrap_file_mount(cls, path: str) -> str:
+        """Prepends ~/<opaque dir>/ to a path to work around permission issues.
+
+        Examples:
+        /root/hello.txt -> ~/<opaque dir>/root/hello.txt
+        local.txt -> ~/<opaque dir>/local.txt
+
+        After the path is synced, we can later create a symlink to this wrapped
+        path from the original path, e.g., in the initialization_commands of the
+        ray autoscaler YAML.
+        """
+        return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, path.lstrip('/'))
+
+    @classmethod
+    def make_safe_symlink_command(
+            cls,
+            *,
+            source: str,
+            target: str,
+            download_target_commands: Optional[List[str]] = None) -> str:
+        """Returns a command that safely symlinks 'source' to 'target'.
+
+        All intermediate directories of 'source' will be owned by $USER,
+        excluding the root directory (/).
+
+        'source' must be an absolute path; both 'source' and 'target' must not
+        end with a slash (/).
+
+        This function is needed because a simple 'ln -s target source' may
+        fail: 'source' can have multiple levels (/a/b/c), its parent dirs may
+        or may not exist, can end with a slash, or may need sudo access, etc.
+
+        Cases of <target: local> file mounts and their behaviors:
+
+            /existing_dir: ~/local/dir
+              - error out saying this cannot be done as LHS already exists
+            /existing_file: ~/local/file
+              - error out saying this cannot be done as LHS already exists
+            /existing_symlink: ~/local/file
+              - overwrite the existing symlink; this is important because sky
+                run can be run multiple times
+            Paths that start with ~/ and /tmp/ do not have the above
+            restrictions; just delegate to rsync behaviors.
+        """
+        assert os.path.isabs(source), source
+        assert not source.endswith('/') and not target.endswith('/'), (source,
+                                                                       target)
+        # Below, use sudo in case the symlink needs sudo access to create.
+        # Prepare to create the symlink:
+        #  1. make sure its dir(s) exist & are owned by $USER.
+        dir_of_symlink = os.path.dirname(source)
+        commands = [
+            # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
+            # chown $USER on it so user can use these intermediate dirs
+            # (excluding /).
+            f'sudo mkdir -p {dir_of_symlink}',
+            # p: path so far
+            ('(p=""; '
+             f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
+             'p=${p}/${w}; sudo chown $USER $p; done)')
+        ]
+        #  2. remove any existing symlink (ln -f may throw 'cannot
+        #     overwrite directory', if the link exists and points to a
+        #     directory).
+        commands += [
+            # Error out if source is an existing, non-symlink directory/file.
+            f'((test -L {source} && sudo rm {source} &>/dev/null) || '
+            f'(test ! -e {source} || '
+            f'(echo "!!! Failed mounting because path exists ({source})"; '
+            'exit 1)))',
+        ]
+        if download_target_commands is not None:
+            commands += download_target_commands
+        commands += [
+            # Link.
+            f'sudo ln -s {target} {source}',
+            # chown.  -h to affect symlinks only.
+            f'sudo chown -h $USER {source}',
+        ]
+        return ' && '.join(commands)
+
+
+# TODO: too many things happening here - leaky abstraction. Refactor.
 def write_cluster_config(run_id: RunId,
                          task: task_lib.Task,
                          cluster_config_template: str,
+                         cluster_name: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False,
-                         cluster_name: Optional[str] = None):
+                         dryrun: bool = False):
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
       'provisioner' can be
         - 'ray'
-        - 'gcloud' (if TPU is requested)
+        - 'tpu-create-script' (if TPU is requested)
+        - 'tpu-delete-script' (if TPU is requested)
     """
     cloud = task.best_resources.cloud
     resources_vars = cloud.make_deploy_resources_variables(task)
@@ -87,12 +180,16 @@ def write_cluster_config(run_id: RunId,
         region = cloud.get_default_region()
         zones = region.zones
     else:
-        assert zones is not None, \
-            'Set either both or neither for: region, zones.'
+        assert isinstance(
+            cloud, clouds.Azure
+        ) or zones is not None, 'Set either both or neither for: region, zones.'
     region = region.name
     if isinstance(cloud, clouds.AWS):
         # Only AWS supports multiple zones in the 'availability_zone' field.
         zones = [zone.name for zone in zones]
+    elif isinstance(cloud, clouds.Azure):
+        # Azure does not support specific zones.
+        zones = []
     else:
         zones = [zones[0].name]
 
@@ -100,9 +197,7 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
-    if cluster_name is None:
-        # TODO: change this ID formatting to something more pleasant.
-        cluster_name = f'sky-{uuid.uuid4().hex[:6]}'
+    assert cluster_name is not None
 
     setup_sh_path = None
     if task.setup is not None:
@@ -121,6 +216,31 @@ def write_cluster_config(run_id: RunId,
             f.write(codegen)
         setup_sh_path = f.name
 
+    # File mounts handling for remote paths possibly without write access:
+    #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
+    #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
+    # We need to do these since as of Ray 1.8, this is not supported natively
+    # (Docker works though, of course):
+    #  https://github.com/ray-project/ray/pull/9332
+    #  https://github.com/ray-project/ray/issues/9326
+    mounts = task.get_local_to_remote_file_mounts()
+    wrapped_file_mounts = {}
+    initialization_commands = []
+    if mounts is not None:
+        for remote, local in mounts.items():
+            if not os.path.isabs(remote) and not remote.startswith('~/'):
+                remote = f'~/{remote}'
+            if remote.startswith('~/') or remote.startswith('/tmp/'):
+                # Skip as these should be writable locations.
+                wrapped_file_mounts[remote] = local
+                continue
+            assert os.path.isabs(remote), (remote, local)
+            wrapped_remote = FileMountHelper.wrap_file_mount(remote)
+            wrapped_file_mounts[wrapped_remote] = local
+            command = FileMountHelper.make_safe_symlink_command(
+                source=remote, target=wrapped_remote)
+            initialization_commands.append(command)
+
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
@@ -133,19 +253,22 @@ def write_cluster_config(run_id: RunId,
                 'docker_image': task.docker_image,
                 'container_name': task.container_name,
                 'num_nodes': task.num_nodes,
-                'file_mounts': task.get_local_to_remote_file_mounts() or {},
+                # File mounts handling.
+                'file_mounts': wrapped_file_mounts,
+                'initialization_commands': initialization_commands or None,
                 # Region/zones.
                 'region': region,
                 'zones': ','.join(zones),
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
             }))
+    config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
     _add_ssh_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
-        config_dict['gcloud'] = tuple(
+        scripts = tuple(
             _fill_template(
                 path,
                 dict(resources_vars, **{
@@ -158,6 +281,8 @@ def write_cluster_config(run_id: RunId,
                 replace('config/', 'config/user/'),
             ) for path in
             ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
+        config_dict['tpu-create-script'] = scripts[0]
+        config_dict['tpu-delete-script'] = scripts[1]
     return config_dict
 
 
@@ -177,10 +302,16 @@ def _add_ssh_to_cluster_config(cloud_type, cluster_config_file):
         config = auth.setup_azure_authentication(config)
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
-    yaml_dump(cluster_config_file, config)
+    dump_yaml(cluster_config_file, config)
 
 
-def yaml_dump(path, config):
+def read_yaml(path):
+    with open(path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def dump_yaml(path, config):
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
 
@@ -202,11 +333,14 @@ def get_run_id() -> RunId:
 
 
 def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
-                                 num_nodes: int):
+                                 num_nodes: int) -> bool:
+    """Returns whether the entire ray cluster is ready."""
+    # FIXME: It may takes a while for the cluster to be available for ray,
+    # especially for Azure, causing `ray exec` to fail.
     if num_nodes <= 1:
         return
     expected_worker_count = num_nodes - 1
-    if isinstance(cloud, clouds.AWS):
+    if isinstance(cloud, (clouds.AWS, clouds.Azure)):
         worker_str = 'ray.worker.default'
     elif isinstance(cloud, clouds.GCP):
         worker_str = 'ray_worker_default'
@@ -222,14 +356,20 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
         logger.info(output)
         if f'{expected_worker_count} {worker_str}' in output:
             break
+        if '(no pending nodes)' in output and '(no failures)' in output:
+            # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
+            # GCP can satisfy only by half, the worker node would be forgotten.
+            # The correct behavior should be for it to error out.
+            return False  # failed
         time.sleep(10)
+    return True  # success
 
 
 def run_command_on_ip_via_ssh(ip: str,
                               command: str,
                               private_key: str,
                               container_name: Optional[str],
-                              user: str = 'ubuntu') -> None:
+                              ssh_user: str = 'ubuntu') -> None:
     if container_name is not None:
         command = command.replace('\\', '\\\\').replace('"', '\\"')
         command = f'docker exec {container_name} /bin/bash -c "{command}"'
@@ -239,7 +379,7 @@ def run_command_on_ip_via_ssh(ip: str,
         private_key,
         '-o',
         'StrictHostKeyChecking=no',
-        '{}@{}'.format(user, ip),
+        '{}@{}'.format(ssh_user, ip),
         command  # TODO: shlex.quote() doesn't work.  Is it needed in a list?
     ]
     with subprocess.Popen(cmd,
@@ -260,8 +400,14 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
 
-    out_io = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='')
-    err_io = io.TextIOWrapper(proc.stderr, encoding='utf-8', newline='')
+    out_io = io.TextIOWrapper(proc.stdout,
+                              encoding='utf-8',
+                              newline='',
+                              errors='replace')
+    err_io = io.TextIOWrapper(proc.stderr,
+                              encoding='utf-8',
+                              newline='',
+                              errors='replace')
     sel = selectors.DefaultSelector()
     sel.register(out_io, selectors.EVENT_READ)
     sel.register(err_io, selectors.EVENT_READ)
@@ -272,21 +418,96 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
     start_streaming_flag = False
     with open(log_path, 'a') as fout:
         while len(sel.get_map()) > 0:
-            for key, _ in sel.select():
+            events = sel.select()
+            for key, _ in events:
                 line = key.fileobj.readline()
                 if not line:
+                    # Unregister the io when EOF reached
                     sel.unregister(key.fileobj)
-                    break
+                    continue
+                # Remove special characters to avoid cursor hidding
+                line = line.replace('\x1b[?25l', '')
                 if start_streaming_at in line:
                     start_streaming_flag = True
                 if key.fileobj is out_io:
                     stdout += line
-                    fout.write(line)
-                    fout.flush()
+                    out_stream = sys.stdout
                 else:
                     stderr += line
-                    fout.write(line)
-                    fout.flush()
+                    out_stream = sys.stderr
                 if stream_logs and start_streaming_flag:
-                    print(line, end='')
+                    out_stream.write(line)
+                    out_stream.flush()
+                fout.write(line)
     return stdout, stderr
+
+
+def run(cmd, **kwargs):
+    shell = kwargs.pop('shell', True)
+    check = kwargs.pop('check', True)
+    executable = kwargs.pop('executable', '/bin/bash')
+    if not shell:
+        executable = None
+    return subprocess.run(cmd,
+                          shell=shell,
+                          check=check,
+                          executable=executable,
+                          **kwargs)
+
+
+def run_no_outputs(cmd, **kwargs):
+    return run(cmd,
+               stdout=subprocess.DEVNULL,
+               stderr=subprocess.DEVNULL,
+               **kwargs)
+
+
+def run_with_log(cmd: List[str],
+                 log_path: str,
+                 stream_logs: bool = False,
+                 start_streaming_at: str = '',
+                 return_none: bool = False,
+                 **kwargs):
+    """Runs a command and logs its output to a file.
+
+    Retruns the process, stdout and stderr of the command.
+      Note that the stdout and stderr is already decoded.
+    """
+    with subprocess.Popen(cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          **kwargs) as proc:
+        stdout, stderr = redirect_process_output(
+            proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
+        proc.wait()
+        if return_none:
+            return None
+        return proc, stdout, stderr
+
+
+def check_local_gpus() -> bool:
+    """Returns whether GPUs are available on the local machine by checking
+    if nvidia-smi is installed.
+
+    Returns True if nvidia-smi is installed, false if not.
+    """
+    p = subprocess.run(['which', 'nvidia-smi'],
+                       capture_output=True,
+                       check=False)
+    return p.returncode == 0
+
+
+def is_same_requested_resources(r1: Set[Resources], r2: Set[Resources]):
+    """Returns whether the requested resources are the same.
+
+    Args:
+        r1: Set of Resources requested previously.
+        r2: Set of Resources newly requested.
+
+    Returns:
+        True if the resources are the same, false otherwise.
+    """
+    assert len(r1) == 1 and len(r2) == 1
+    r1 = list(r1)[0]
+    r2 = list(r2)[0]
+    return r1.is_same_resources(r2)

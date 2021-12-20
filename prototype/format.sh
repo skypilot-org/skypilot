@@ -7,7 +7,7 @@
 #    # Format files that differ from origin/master.
 #    bash format.sh
 
-#    # Commit changed files with message 'Run yapf.'
+#    # Commit changed files with message 'Run yapf and pylint'
 #
 #
 # YAPF + Clang formatter (if installed). This script formats all changed files from the last mergebase.
@@ -16,36 +16,26 @@
 # Cause the script to exit if a single command fails
 set -eo pipefail
 
-ver=$(yapf --version)
-if ! echo $ver | grep -q 0.27.0; then
-    echo "Wrong YAPF version installed: 0.27.0 is required, not $ver"
-    exit 1
-fi
-
 # this stops git rev-parse from failing if we run this from the .git directory
 builtin cd "$(dirname "${BASH_SOURCE:-$0}")"
-
 ROOT="$(git rev-parse --show-toplevel)"
 builtin cd "$ROOT" || exit 1
 
-# # Add the upstream remote if it doesn't exist
-# if ! git remote -v | grep -q upstream; then
-#     git remote add 'upstream' 'https://github.com/ray-project/ray.git'
-# fi
-
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
+PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
+PYLINT_QUOTES_VERSION=$(pip list | grep pylint-quotes | awk '{print $2}')
 
 # # params: tool name, tool version, required version
 tool_version_check() {
     if [[ $2 != $3 ]]; then
-        echo "WARNING: We use $1 $3, You currently are using $2. This might generate different results."
+        echo "Wrong $1 version installed: $3 is required, not $2."
+        exit 1
     fi
 }
 
 tool_version_check "yapf" $YAPF_VERSION "0.27.0"
-
-# Only fetch master since that's the branch we're diffing against.
-# git fetch upstream master || true
+tool_version_check "pylint" $PYLINT_VERSION "2.8.2"
+tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "0.2.3"
 
 YAPF_FLAGS=(
     '--style' "$ROOT/.style.yapf"
@@ -85,8 +75,6 @@ format_all() {
     yapf --diff "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" test python
 }
 
-# format **/*.py
-
 ## This flag formats individual files. --files *must* be the first command line
 ## arg to use this option.
 if [[ "$1" == '--files' ]]; then
@@ -100,11 +88,13 @@ else
    format_changed
 fi
 
+# Run Pylint
+pylint --load-plugins pylint_quotes sky
+
 if ! git diff --quiet &>/dev/null; then
     echo 'Reformatted files. Please review and stage the changes.'
     echo 'Changes not staged for commit:'
     echo
-
     git --no-pager diff --name-only
 
     exit 1
