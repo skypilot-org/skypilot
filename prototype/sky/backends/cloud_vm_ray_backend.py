@@ -276,8 +276,8 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if ('Exception Details:' in s.strip()) or
-            ('InvalidTemplateDeployment' in s.strip())
+            if ('Exception Details:' in s.strip() or
+                'InvalidTemplateDeployment' in s.strip())
         ]
         if not errors:
             logger.info('====== stdout ======')
