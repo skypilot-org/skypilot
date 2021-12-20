@@ -30,6 +30,13 @@ available_node_types:
             imageOffer: ubuntu-1804
             imageSku: 1804-gen2
             imageVersion: 21.09.13
+            # optionally set priority to use Spot instances
+            {%- if use_spot %}
+            priority: Spot
+            # set a maximum price for spot instances if desired
+            # billingProfile:
+            #     maxPrice: -1
+            {%- endif %}
         # TODO: attach disk
 {% if num_nodes > 1 %}
     ray.worker.default:
@@ -44,6 +51,12 @@ available_node_types:
             imageOffer: ubuntu-1804
             imageSku: 1804-gen2
             imageVersion: 21.09.13
+          {%- if use_spot %}
+            priority: Spot
+            # set a maximum price for spot instances if desired
+            # billingProfile:
+            #     maxPrice: -1
+          {%- endif %}
 {%- endif %}
 
 head_node_type: ray.head.default

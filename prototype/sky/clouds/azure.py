@@ -85,7 +85,7 @@ class Azure(clouds.Cloud):
     def make_deploy_resources_variables(self, task):
         r = task.best_resources
         assert not r.use_spot, \
-            'We currently do not support spot instances for Azure.'
+            'Our subscription offer ID does not support spot instances.'
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
@@ -95,6 +95,7 @@ class Azure(clouds.Cloud):
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
+            'use_spot': r.use_spot,
         }
 
     def get_feasible_launchable_resources(self, resources):

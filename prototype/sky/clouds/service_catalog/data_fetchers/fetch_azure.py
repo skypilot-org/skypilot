@@ -63,7 +63,7 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
     df = pd.DataFrame(all_items)
     return df[(~df['productName'].str.contains(' Windows')) &
               (~df['skuName'].str.contains(' Low Priority')) &
-              (~df['skuName'].str.contains(' Spot')) & (df['unitPrice'] > 0)]
+              (df['unitPrice'] > 0)]
 
 
 @ray.remote
@@ -121,11 +121,24 @@ def get_all_regions_instance_types_df():
         region = row['Region']
         pricing_rows = df[(df['armSkuName'] == sku) &
                           (df['armRegionName'] == region) &
-                          (df['unitPrice'] > 0)]
+                          (df['unitPrice'] > 0) &
+                          (~df['skuName'].str.contains(' Spot'))]
         assert len(pricing_rows) <= 1, (sku, pricing_rows)
         if len(pricing_rows) == 0:
             return np.nan
         return pricing_rows.iloc[0]['unitPrice']
+
+    def get_spot_price(row):
+        sku = row['name']
+        region = row['Region']
+        spot_pricing_rows = df[(df['armSkuName'] == sku) &
+                               (df['armRegionName'] == region) &
+                               (df['unitPrice'] > 0) &
+                               (df['skuName'].str.contains(' Spot'))]
+        assert len(spot_pricing_rows) <= 1, (sku, spot_pricing_rows)
+        if len(spot_pricing_rows) == 0:
+            return np.nan
+        return spot_pricing_rows.iloc[0]['unitPrice']
 
     def get_gpu_info(row) -> Tuple[str, float]:
         caps = row['capabilities']
@@ -138,6 +151,7 @@ def get_all_regions_instance_types_df():
         gpu_name, gpu_count = get_gpu_info(row)
         return pd.Series({
             'Price': get_price(row),
+            'SpotPrice': get_spot_price(row),
             'AcceleratorName': gpu_name,
             'AcceleratorCount': gpu_count,
         })
