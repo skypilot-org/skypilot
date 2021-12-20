@@ -1271,7 +1271,7 @@ class CloudVmRayBackend(backends.Backend):
         if port_forward is not None:
             for port in port_forward:
                 local = remote = port
-                logger.debug(
+                logger.info(
                     f'Forwarding port {local} to port {remote} on localhost.')
                 ssh += ['-L', '{}:localhost:{}'.format(remote, local)]
         return ssh + _ssh_options_list(
