@@ -535,3 +535,17 @@ def load_bash_command_from_file(bash_command_file: str):
     with open(bash_command_file, 'r') as fp:
         bash_command = fp.read()
     return bash_command
+
+
+def add_script_header(codegen: str) -> str:
+    script = [
+        textwrap.dedent(f"""\
+                #!/bin/bash
+                . {SKY_REMOTE_APP_DIR}/sky_env_var.sh 2> /dev/null || true
+                . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
+                cd {SKY_REMOTE_WORKDIR}
+            """),
+        codegen,
+    ]
+    script = '\n'.join(script)
+    return script
