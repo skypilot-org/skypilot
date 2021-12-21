@@ -5,6 +5,7 @@ jinja2
 networkx
 oauth2client
 pandas
+pycryptodome
 pendulum
 PrettyTable
 pytest
