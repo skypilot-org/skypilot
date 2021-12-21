@@ -526,25 +526,18 @@ def run_bash_command_with_log(bash_command: str,
             log_path,
             stream_logs=stream_logs,
             return_none=True,
-            shell=True,
-            executable='/bin/bash',
         )
 
 
-def load_bash_command_from_file(bash_command_file: str):
-    with open(bash_command_file, 'r') as fp:
-        bash_command = fp.read()
-    return bash_command
 
-
-def add_script_header(codegen: str) -> str:
+def make_task_bash_script(codegen: str) -> str:
     script = [
         textwrap.dedent(f"""\
                 #!/bin/bash
                 . {SKY_REMOTE_APP_DIR}/sky_env_var.sh 2> /dev/null || true
                 . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
-                cd {SKY_REMOTE_WORKDIR}
-            """),
+                cd {SKY_REMOTE_WORKDIR}"""
+        ),
         codegen,
     ]
     script = '\n'.join(script)

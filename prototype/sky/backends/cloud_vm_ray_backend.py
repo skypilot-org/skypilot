@@ -158,7 +158,7 @@ class RayCodeGen(object):
             from typing import Dict, List, Optional, Union
 
             import ray
-            from ray.util.placement_group import placement_group
+            from ray.util import placement_group as pg_lib
 
             ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
             
@@ -167,7 +167,6 @@ class RayCodeGen(object):
             print('live nodes:', ray.state.node_ids())
 
             futures = []"""),
-            inspect.getsource(backend_utils.load_bash_command_from_file),
             inspect.getsource(backend_utils.redirect_process_output),
             inspect.getsource(backend_utils.run_with_log),
             inspect.getsource(backend_utils.run_bash_command_with_log),
@@ -184,9 +183,10 @@ class RayCodeGen(object):
         bundles = [
             {
                 # Set CPU to avoid ray hanging the resources allocation
-                # for remote functions.
+                # for remote functions, since the task will request 1 CPU
+                # by default.
                 'CPU': 1,
-                f'node:{ip}': 1
+                f'node:{ip}': 0.01
             } for ip in ip_list
         ]
         if accelerator_dict is not None:
@@ -194,18 +194,21 @@ class RayCodeGen(object):
             for bundle in bundles:
                 bundle.update({
                     **accelerator_dict,
+                    # Set the GPU to avoid ray hanging the resources allocation
                     **gpu_dict,
                 })
         self._ip_to_bundle_index = {ip: i for i, ip in enumerate(ip_list)}
 
         self._code += [
-            f'pg = placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')',
-            f'print(\'Waiting for {len(bundles)} nodes.\', flush=True)',
-            # FIXME: This will print the error message from autoscaler if
-            # it is waiting for other task to finish. We should hide the
-            # error message.
-            'ray.get(pg.ready())',
-            'print(\'All nodes are ready.\')',
+            textwrap.dedent(f"""\
+                pg = pg_lib.placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')
+                print(\'Reserving task slots on {len(bundles)} nodes.\', flush=True)
+                # FIXME: This will print the error message from autoscaler if
+                # it is waiting for other task to finish. We should hide the
+                # error message.
+                ray.get(pg.ready())
+                print(\'All task slots reserved.\')"""
+            )
         ]
 
     def add_ray_task(
@@ -215,11 +218,11 @@ class RayCodeGen(object):
             ray_resources_dict: Optional[Dict[str, float]],
             log_path: str,
             stream_logs: bool,
-            demand_ip: str = None,
+            gang_scheduling_ip: str = None,
     ) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
-        assert demand_ip is None or self._ip_to_bundle_index is not None, \
+        assert gang_scheduling_ip is None or self._ip_to_bundle_index is not None, \
             'Call add_gang_scheduling_placement_group() before add_ray_task().'
 
         # Build remote_task.options(...)
@@ -246,13 +249,11 @@ class RayCodeGen(object):
             if 'tpu' in resources_key.lower():
                 num_gpus_str = ''
 
-        if demand_ip is not None:
-            bundle_index = self._ip_to_bundle_index[demand_ip]
+        if gang_scheduling_ip is not None:
+            bundle_index = self._ip_to_bundle_index[gang_scheduling_ip]
             resources_str = ', placement_group=pg'
             resources_str += f', placement_group_bundle_index={bundle_index}'
 
-        # Ray does not support override workdir in runtime_env for remote task.
-        # We directly load the bash script from file and execute it on worker.
         self._code += [
             textwrap.dedent(f"""\
         futures.append(run_bash_command_with_log \\
@@ -1058,7 +1059,7 @@ class CloudVmRayBackend(backends.Backend):
         for i, task_i in enumerate(par_task.tasks):
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
             # to initialize conda, so that 'conda activate ...' works.
-            task_i_script = backend_utils.add_script_header(task_i.run)
+            task_i_script = backend_utils.make_task_bash_script(task_i.run)
             task_i_name = f'task-{i}' if task_i.name is None else task_i.name
             codegen.add_ray_task(
                 bash_script=task_i_script,
@@ -1170,7 +1171,7 @@ class CloudVmRayBackend(backends.Backend):
         # Launch the command as a Ray task.
         assert isinstance(task.run, str), \
             f'Task(run=...) should be a string (found {type(task.run)}).'
-        script = backend_utils.add_script_header(task.run)
+        script = backend_utils.make_task_bash_script(task.run)
 
         log_path = os.path.join(self.log_dir, 'run.log')
 
@@ -1179,7 +1180,7 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen.add_ray_task(
             bash_script=script,
-            task_name=task.name if task.name is not None else 'task',
+            task_name=task.name if task.name is not None else '',
             ray_resources_dict=_get_accelerator_dict(task),
             log_path=log_path,
             stream_logs=stream_logs,
@@ -1216,7 +1217,7 @@ class CloudVmRayBackend(backends.Backend):
         ips_dict = task.run(ips)
         for ip in ips_dict:
             command_for_ip = ips_dict[ip]
-            script = backend_utils.add_script_header(command_for_ip)
+            script = backend_utils.make_task_bash_script(command_for_ip)
 
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
@@ -1229,7 +1230,7 @@ class CloudVmRayBackend(backends.Backend):
                 ray_resources_dict=accelerator_dict,
                 log_path=log_path,
                 stream_logs=stream_logs,
-                demand_ip=ip,
+                gang_scheduling_ip=ip,
             )
 
         codegen.add_epilogue()
