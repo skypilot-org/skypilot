@@ -1,19 +1,24 @@
 """Module to enable a single Sky key for all Sky VMs in each cloud."""
 import boto3
 import copy
+import hashlib
 import os
 import pathlib
 import time
+import uuid
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
+from Crypto.PublicKey import RSA
 from functools import partial
 from googleapiclient import discovery
 # TODO: Should tolerate if gcloud is not installed. Also,
 # https://pypi.org/project/google-api-python-client/ recommends
 # using Cloud Client Libraries for Python, where possible, for new code
 # development.
+
+MAX_TRIALS = 64
 
 
 def generate_rsa_key_pair():
@@ -67,7 +72,6 @@ def setup_aws_authentication(config):
 
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = get_public_key_path(private_key_path)
-    key_name = private_key_path.split('/')[-1]
 
     # Generating ssh key if it does not exist
     if private_key_path is None or not os.path.exists(private_key_path):
@@ -79,17 +83,41 @@ def setup_aws_authentication(config):
         public_key = open(public_key_path, 'rb').read().decode('utf-8')
         private_key = None
 
-    ec2 = boto3.resource('ec2', config['provider']['region'])
-    key_found = False
-    for key in ec2.key_pairs.filter(Filters=[{
-            'Name': 'key-name',
-            'Values': [key_name]
-    }]):
-        if key.name == key_name:
-            key_found = True
+    ec2 = boto3.client('ec2', config['provider']['region'])
+    key_pairs = ec2.describe_key_pairs()['KeyPairs']
+    key_name = None
+    all_key_names = set()
 
-    if not key_found:
-        ec2.import_key_pair(KeyName=key_name, PublicKeyMaterial=public_key)
+    def _get_fingerprint(public_key_path):
+        key = RSA.importKey(open(public_key_path).read())
+
+        def insert_char_every_n_chars(string, char='\n', every=2):
+            return char.join(
+                string[i:i + every] for i in range(0, len(string), every))
+
+        md5digest = hashlib.md5(key.exportKey('DER', pkcs=8)).hexdigest()
+        fingerprint = insert_char_every_n_chars(md5digest, ':', 2)
+        return fingerprint
+
+    for key in key_pairs:
+        # Compute Fingerprint of public key
+        aws_fingerprint = key['KeyFingerprint']
+        local_fingerprint = _get_fingerprint(public_key_path)
+        if aws_fingerprint == local_fingerprint:
+            key_name = key['KeyName']
+        # Add key name to key name list
+        all_key_names.add(key['KeyName'])
+
+    if key_name is None:
+        for fail_counter in range(MAX_TRIALS):
+            key_name = 'sky-key-' + uuid.uuid4().hex[:6]
+            if key_name not in all_key_names:
+                ec2.import_key_pair(KeyName=key_name,
+                                    PublicKeyMaterial=public_key)
+                break
+        if fail_counter == MAX_TRIALS - 1:
+            raise RuntimeError(
+                'Failed to generate a unique key pair ID for AWS')
 
     node_types = config['available_node_types']
 
