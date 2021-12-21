@@ -1,6 +1,5 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
-import codecs
 import getpass
 import hashlib
 import inspect
@@ -55,9 +54,9 @@ def _get_cluster_config_template(cloud):
     return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
 
-def _get_accelerator_dict(handle) -> Tuple[Optional[str], int]:
+def _get_accelerator_dict(task: App) -> Tuple[Optional[str], int]:
     accelerator_dict = None
-    resources = handle.launched_resources
+    resources = task.best_resources
     if resources is not None:
         accelerator_dict = resources.get_accelerators()
     return accelerator_dict
@@ -141,6 +140,8 @@ class RayCodeGen(object):
         # Guard method calling order.
         self._has_prologue = False
         self._has_epilogue = False
+        
+        self._ip_to_bundle_index = None
 
     def add_prologue(self, stream_logs: bool) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
@@ -172,9 +173,30 @@ class RayCodeGen(object):
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
 
-    def add_resource_bundles(self, bundles: List[Dict[str, int]]):
+    def add_gang_scheduling_placement_group(
+            self,
+            ip_list: List[str],
+            accelerator_dict: Dict[str, int],
+    ) -> List[Dict[str, int]]:
         """Create the resource_handle for gang scheduling for n_tasks."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
+        bundles = [
+            {
+                # Set CPU to avoid ray hanging the resources allocation
+                # for remote functions.
+                'CPU': 1,
+                f'node:{ip}': 1
+            } for ip in ip_list
+        ]
+        if accelerator_dict is not None:
+            gpu_dict = {'GPU': list(accelerator_dict.values())[0]}
+            for bundle in bundles:
+                bundle.update({
+                    **accelerator_dict,
+                    **gpu_dict,
+                })
+        self._ip_to_bundle_index = {ip: i for i, ip in enumerate(ip_list)}
+
         self._code += [
             f'pg = placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')',
             f'print(\'Waiting for {len(bundles)} nodes.\', flush=True)',
@@ -192,10 +214,12 @@ class RayCodeGen(object):
             ray_resources_dict: Optional[Dict[str, float]],
             log_path: str,
             stream_logs: bool,
-            bundle_index: int = None,
+            demand_ip: str = None,
     ) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
+        assert demand_ip is None or self._ip_to_bundle_index is not None, \
+            'Call add_gang_scheduling_placement_group() before add_ray_task().'
 
         # Build remote_task.options(...)
         #   name=...
@@ -221,10 +245,11 @@ class RayCodeGen(object):
             if 'tpu' in resources_key.lower():
                 num_gpus_str = ''
 
-        if bundle_index is not None:
+        if demand_ip is not None:
+            bundle_index = self._ip_to_bundle_index[demand_ip]
             resources_str = ', placement_group=pg'
             resources_str += f', placement_group_bundle_index={bundle_index}'
-            
+
         # Ray does not support override workdir in runtime_env for remote task.
         # We directly load the bash script from file and execute it on worker.
         self._code += [
@@ -1145,7 +1170,7 @@ class CloudVmRayBackend(backends.Backend):
         assert isinstance(task.run, str), \
             f'Task(run=...) should be a string (found {type(task.run)}).'
         script = backend_utils.add_script_header(task.run)
-                                              
+
         log_path = os.path.join(self.log_dir, 'run.log')
 
         codegen = RayCodeGen()
@@ -1154,7 +1179,7 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_ray_task(
             bash_script=script,
             task_name=task.name if task.name is not None else 'task',
-            ray_resources_dict=_get_accelerator_dict(handle),
+            ray_resources_dict=_get_accelerator_dict(task),
             log_path=log_path,
             stream_logs=stream_logs,
         )
@@ -1163,7 +1188,8 @@ class CloudVmRayBackend(backends.Backend):
 
         self._exec_code_on_head(handle, codegen.build(), executable='python3')
         # TODO: Add a hint for log monitoring `sky exec -c name tail -f...`.
-        self._rsync_down_logs(handle, self.log_dir, [handle.head_ip])
+        if not stream_logs:
+            self._rsync_down_logs(handle, self.log_dir, [handle.head_ip])
 
     def _execute_task_n_nodes(self,
                               handle: ResourceHandle,
@@ -1181,28 +1207,11 @@ class CloudVmRayBackend(backends.Backend):
         ips = self._get_node_ips(handle.cluster_yaml,
                                  task.num_nodes,
                                  return_private_ips=True)
-        accelerator_dict = _get_accelerator_dict(handle)
-        bundles = [
-            {
-                # Set CPU to avoid ray hanging the resources allocation
-                # for remote functions.
-                'CPU': 1,
-                f'node:{ip}': 1
-            } for ip in ips
-        ]
-        if accelerator_dict is not None:
-            gpu_dict = {'GPU': list(accelerator_dict.values())[0]}
-            for bundle in bundles:
-                bundle.update({
-                    **accelerator_dict,
-                    **gpu_dict,
-                })
-
-        ip_to_bundle_index = {ip: i for i, ip in enumerate(ips)}
+        accelerator_dict = _get_accelerator_dict(task)
 
         codegen = RayCodeGen()
         codegen.add_prologue(stream_logs=stream_logs)
-        codegen.add_resource_bundles(bundles)
+        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict)
 
         ips_dict = task.run(ips)
         for ip in ips_dict:
@@ -1220,7 +1229,7 @@ class CloudVmRayBackend(backends.Backend):
                 ray_resources_dict=accelerator_dict,
                 log_path=log_path,
                 stream_logs=stream_logs,
-                bundle_index=ip_to_bundle_index[ip],
+                demand_ip=ip,
             )
 
         codegen.add_epilogue()
