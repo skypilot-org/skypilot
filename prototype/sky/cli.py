@@ -30,7 +30,7 @@ each other.
 import getpass
 import os
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import click
 import pendulum
@@ -349,14 +349,14 @@ def ssh(cluster: str, port_forward: Optional[List[int]]):
 
 
 @cli.command()
-@click.argument('cluster', required=False)
+@click.argument('clusters', nargs=-1, required=False)
 @click.option('--all',
               '-a',
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
 def down(
-        cluster: str,
+        clusters: Tuple[str],
         all: Optional[bool],  # pylint: disable=redefined-builtin
 ):
     """Tear down cluster(s).
@@ -380,18 +380,18 @@ def down(
       # Tear down all existing clusters.
       sky down -a
     """
-    _terminate_or_stop(cluster, apply_to_all=all, terminate=True)
+    _terminate_or_stop(clusters, apply_to_all=all, terminate=True)
 
 
 @cli.command()
-@click.argument('cluster', required=False)
+@click.argument('clusters', nargs=-1, required=False)
 @click.option('--all',
               '-a',
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
 def stop(
-        cluster: str,
+        clusters: Tuple[str],
         all: Optional[bool],  # pylint: disable=redefined-builtin
 ):
     """Stop cluster(s).
@@ -408,36 +408,43 @@ def stop(
       sky stop cluster_name
 
       \b
+      # Stop multiple clusters.
+      sky stop cluster1 cluster2
+
+      \b
       # Stop all existing clusters.
       sky stop -a
     """
-    _terminate_or_stop(cluster, apply_to_all=all, terminate=False)
+    _terminate_or_stop(clusters, apply_to_all=all, terminate=False)
 
 
-def _terminate_or_stop(name: Optional[str], apply_to_all: Optional[bool],
+def _terminate_or_stop(names: Tuple[str], apply_to_all: Optional[bool],
                        terminate: bool) -> None:
     """Terminates or stops a cluster (or all clusters)."""
     command = 'down' if terminate else 'stop'
-    if name is None and apply_to_all is None:
+    if len(names) == 0 and apply_to_all is None:
         raise click.UsageError(
             f'sky {command} requires either a cluster name (see `sky status`) '
             'or --all.')
 
     to_down = []
-    if name is not None:
-        handle = global_user_state.get_handle_from_cluster_name(name)
-        if handle is not None:
-            to_down = [{'name': name, 'handle': handle}]
+    if len(names) > 0:
+        for name in names:
+            handle = global_user_state.get_handle_from_cluster_name(name)
+            if handle is not None:
+                to_down.append({'name': name, 'handle': handle})
+            else:
+                print(f'Cluster {name} was not found (see `sky status`). Skipping.')
     if apply_to_all:
         to_down = global_user_state.get_clusters()
-        if name is not None:
-            print(f'Both --all and --cluster specified for sky {command}. '
+        if len(names) > 0:
+            print(f'Both --all and cluster(s) specified for sky {command}. '
                   'Letting --all take effect.')
-            name = None
+            names = []
     if not to_down:
         if len(names) > 0:
             cluster_list = ', '.join(names)
-            print(f'Cluster(s) {cluster_list} not found (see `sky status`).')
+            print(f'Clusters {cluster_list} not found (see `sky status`).')
         else:
             print('No existing clusters found (see `sky status`).')
 
