@@ -813,8 +813,10 @@ class CloudVmRayBackend(backends.Backend):
             return
         fore = colorama.Fore
         style = colorama.Style
-        logger.info(
-            f'{fore.CYAN}Processing cloud to VM file mounts.{style.RESET_ALL}')
+        cyan = fore.CYAN
+        reset = style.RESET_ALL
+        bright = style.BRIGHT
+        logger.info(f'{cyan}Processing cloud to VM file mounts.{reset}')
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
             # (download gsutil on remote, run gsutil on remote).  Consider
@@ -860,7 +862,7 @@ class CloudVmRayBackend(backends.Backend):
             log_path = os.path.join(self.log_dir,
                                     'file_mounts_cloud_to_remote.log')
             logger.info(
-                f'{style.BRIGHT} Syncing: {src} -> {dst}{style.RESET_ALL}')
+                f'{cyan} Syncing: {bright}{src} -> {dst}{reset}')
             # TODO: filter out ray boilerplate: Setting `max_workers` for node
             # type ... try re-running the command with --no-config-cache.
             proc, unused_stdout, unused_stderr = backend_utils.run_with_log(
@@ -1138,15 +1140,19 @@ class CloudVmRayBackend(backends.Backend):
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
+        fore = colorama.Fore
         style = colorama.Style
         if not teardown:
             name = global_user_state.get_cluster_name_from_handle(handle)
-            logger.info('\nTo log into the head VM:\t'
-                        f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
-                        '\nTo teardown the cluster:'
-                        f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n'
-                        '\nTo stop the cluster:'
-                        f'\t{style.BRIGHT}sky stop {name}{style.RESET_ALL}\n')
+            logger.info(
+                f'\n{fore.CYAN}Cluster name: '
+                f'{style.BRIGHT}{name}{style.RESET_ALL}'
+                '\nTo log into the head VM:\t'
+                f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
+                '\nTo teardown the cluster:'
+                f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n'
+                '\nTo stop the cluster:'
+                f'\t{style.BRIGHT}sky stop {name}{style.RESET_ALL}\n')
             if handle.tpu_delete_script is not None:
                 logger.info('Tip: `sky down` will delete launched TPU(s) too.')
 

@@ -273,7 +273,7 @@ class Optimizer(object):
             }
             metric = 'cost' if minimize_cost else 'time'
             logger.info(f'Details: task -> {{resources -> {metric}}}')
-            logger.info(pprint.pformat(dp_best_cost) + '\n')
+            logger.info('%s\n', pprint.pformat(dp_best_cost))
 
         return dag, best_plan
 
