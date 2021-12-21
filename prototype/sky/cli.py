@@ -422,7 +422,7 @@ def _terminate_or_stop(names: Tuple[str], apply_to_all: Optional[bool],
                        terminate: bool) -> None:
     """Terminates or stops a cluster (or all clusters)."""
     command = 'down' if terminate else 'stop'
-    if len(names) == 0 and apply_to_all is None:
+    if not names and apply_to_all is None:
         raise click.UsageError(
             f'sky {command} requires either a cluster name (see `sky status`) '
             'or --all.')
@@ -434,7 +434,7 @@ def _terminate_or_stop(names: Tuple[str], apply_to_all: Optional[bool],
             if handle is not None:
                 to_down.append({'name': name, 'handle': handle})
             else:
-                print(f'Cluster {name} was not found (see `sky status`). Skipping.')
+                print(f'Cluster {name} was not found. Skipping.')
     if apply_to_all:
         to_down = global_user_state.get_clusters()
         if len(names) > 0:
