@@ -70,7 +70,6 @@ def setup_aws_authentication(config):
 
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = get_public_key_path(private_key_path)
-    key_name = private_key_path.split('/')[-1]
 
     # Generating ssh key if it does not exist
     if private_key_path is None or not os.path.exists(private_key_path):
@@ -84,8 +83,8 @@ def setup_aws_authentication(config):
 
     ec2 = boto3.client('ec2', config['provider']['region'])
     key_pairs = ec2.describe_key_pairs()['KeyPairs']
-    key_found = False
-    key_names = set()
+    key_name = None
+    all_key_names = set()
 
     def _get_fingerprint(public_key_path):
         key = RSA.importKey(open(public_key_path).read())
@@ -103,14 +102,14 @@ def setup_aws_authentication(config):
         aws_fingerprint = key['KeyFingerprint']
         local_fingerprint = _get_fingerprint(public_key_path)
         if aws_fingerprint == local_fingerprint:
-            key_found = True
+            key_name = key['KeyName']
         # Add key name to key name list
-        key_names.add(key['KeyName'])
+        all_key_names.add(key['KeyName'])
 
-    if not key_found:
+    if key_name is None:
         while True:
-            key_name = uuid.uuid4().hex
-            if key_name not in key_names:
+            key_name = 'sky-key-' + uuid.uuid4().hex[:6]
+            if key_name not in all_key_names:
                 ec2.import_key_pair(KeyName=key_name,
                                     PublicKeyMaterial=public_key)
                 break
