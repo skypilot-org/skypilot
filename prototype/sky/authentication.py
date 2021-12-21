@@ -18,6 +18,8 @@ from googleapiclient import discovery
 # using Cloud Client Libraries for Python, where possible, for new code
 # development.
 
+MAX_TRIALS = 64
+
 
 def generate_rsa_key_pair():
     key = rsa.generate_private_key(backend=default_backend(),
@@ -107,12 +109,15 @@ def setup_aws_authentication(config):
         all_key_names.add(key['KeyName'])
 
     if key_name is None:
-        while True:
+        for fail_counter in range(MAX_TRIALS):
             key_name = 'sky-key-' + uuid.uuid4().hex[:6]
             if key_name not in all_key_names:
                 ec2.import_key_pair(KeyName=key_name,
                                     PublicKeyMaterial=public_key)
                 break
+        if fail_counter == MAX_TRIALS - 1:
+            raise RuntimeError(
+                'Failed to generate a unique key pair ID for AWS')
 
     node_types = config['available_node_types']
 
