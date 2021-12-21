@@ -1187,7 +1187,6 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_epilogue()
 
         self._exec_code_on_head(handle, codegen.build(), executable='python3')
-        # TODO: Add a hint for log monitoring `sky exec -c name tail -f...`.
         if not stream_logs:
             self._rsync_down_logs(handle, self.log_dir, [handle.head_ip])
 
