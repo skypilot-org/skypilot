@@ -140,7 +140,8 @@ class RayCodeGen(object):
         # Guard method calling order.
         self._has_prologue = False
         self._has_epilogue = False
-        
+
+        # For n nodes gang scheduling.
         self._ip_to_bundle_index = None
 
     def add_prologue(self, stream_logs: bool) -> None:
