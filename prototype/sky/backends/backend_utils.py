@@ -526,6 +526,8 @@ def run_bash_command_with_log(bash_command: str,
             log_path,
             stream_logs=stream_logs,
             return_none=True,
+            # The script will be not found without this
+            shell=True,
         )
 
 

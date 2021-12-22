@@ -54,7 +54,7 @@ def _get_cluster_config_template(cloud):
     return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
 
-def _get_accelerator_dict(task: App) -> Tuple[Optional[str], int]:
+def _get_task_demands_dict(task: App) -> Optional[Tuple[Optional[str], int]]:
     accelerator_dict = None
     resources = task.best_resources
     if resources is not None:
@@ -158,7 +158,7 @@ class RayCodeGen(object):
             from typing import Dict, List, Optional, Union
 
             import ray
-            from ray.util import placement_group as pg_lib
+            import ray.util as ray_util
 
             ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
             
@@ -201,7 +201,7 @@ class RayCodeGen(object):
 
         self._code += [
             textwrap.dedent(f"""\
-                pg = pg_lib.placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')
+                pg = ray_util.placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')
                 print(\'Reserving task slots on {len(bundles)} nodes.\', flush=True)
                 # FIXME: This will print the error message from autoscaler if
                 # it is waiting for other task to finish. We should hide the
@@ -1180,8 +1180,8 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen.add_ray_task(
             bash_script=script,
-            task_name=task.name if task.name is not None else '',
-            ray_resources_dict=_get_accelerator_dict(task),
+            task_name=task.name,
+            ray_resources_dict=_get_task_demands_dict(task),
             log_path=log_path,
             stream_logs=stream_logs,
         )
@@ -1208,7 +1208,7 @@ class CloudVmRayBackend(backends.Backend):
         ips = self._get_node_ips(handle.cluster_yaml,
                                  task.num_nodes,
                                  return_private_ips=True)
-        accelerator_dict = _get_accelerator_dict(task)
+        accelerator_dict = _get_task_demands_dict(task)
 
         codegen = RayCodeGen()
         codegen.add_prologue(stream_logs=stream_logs)
