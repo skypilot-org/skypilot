@@ -119,6 +119,7 @@ class Task(object):
     def from_yaml(yaml_path):
         with open(os.path.expanduser(yaml_path), 'r') as f:
             config = yaml.safe_load(f)
+
         # TODO: perform more checks on yaml and raise meaningful errors.
         if 'run' not in config:
             raise ValueError('The YAML spec should include a \'run\' field.')
@@ -134,6 +135,49 @@ class Task(object):
         file_mounts = config.get('file_mounts')
         if file_mounts is not None:
             task.set_file_mounts(file_mounts)
+
+        storages = config.get('storage')
+        task_storages = {}
+        if storages is not None:
+            task_storages = {}
+            if isinstance(storages, dict):
+                storages = [storages]
+            for storage in storages:
+                name = storage.get('name')
+                source = storage.get('source')
+                force_stores = storage.get('force_stores')
+                assert name and source, \
+                       'Storage Object needs name and source path specified.'
+                persistent = True if storage.get(
+                    'persistent') is None else storage['persistent']
+                task_storages[name] = storage_lib.Storage(name=name,
+                                                          source=source,
+                                                          persistent=persistent)
+                if force_stores is not None:
+                    assert set(force_stores) <= {'s3', 'gcs', 'azure_blob'}
+                    for cloud_type in force_stores:
+                        if cloud_type == 's3':
+                            task_storages[name].get_or_copy_to_s3()
+                        elif cloud_type == 'gcs':
+                            task_storages[name].get_or_copy_to_gcs()
+                        elif cloud_type == 'azure_blob':
+                            task_storages[name].get_or_copy_to_azure_blob()
+
+        storage_mounts = config.get('storage_mounts')
+        if storage_mounts is not None:
+            task_storage_mounts = {}
+            if isinstance(storage_mounts, dict):
+                storage_mounts = [storage_mounts]
+            for storage_mount in storage_mounts:
+                name = storage_mount.get('storage')
+                storage_mount_path = storage_mount.get('mount_path')
+                assert name, \
+                    'Storage mount must have name reference to Storage object.'
+                assert storage_mount_path, \
+                    'Storage mount path cannot be empty.'
+                storage = task_storages[name]
+                task_storage_mounts[storage] = storage_mount_path
+            task.set_storage_mounts(task_storage_mounts)
 
         if config.get('inputs') is not None:
             inputs_dict = config['inputs']
@@ -266,8 +310,8 @@ class Task(object):
                 self.storage_plans[store] = storage_lib.StorageType.S3
                 store.get_or_copy_to_s3()
             else:
-                assert storage_lib.StorageType.S3 in store.stores
-
+                # Sky will download the first store that is added to remote
+                self.storage_plans[store] = list(store.stores.keys())[0]
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for store, mnt_path in storage_mounts.items():
@@ -276,11 +320,11 @@ class Task(object):
                 # TODO: allow for Storage mounting of different clouds
                 self.update_file_mounts({'~/.aws': '~/.aws'})
                 self.update_file_mounts({
-                    mnt_path: 's3://' + store.name + '/',
+                    mnt_path: 's3://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.GCS:
                 self.update_file_mounts({
-                    mnt_path: 'gs://' + store.name + '/',
+                    mnt_path: 'gs://' + store.name,
                 })
                 assert False, 'TODO: GCS Authentication not done'
             elif storage_type is storage_lib.StorageType.AZURE:
