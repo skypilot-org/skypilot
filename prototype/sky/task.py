@@ -139,6 +139,7 @@ class Task(object):
         storages = config.get('storage')
         task_storages = {}
         if storages is not None:
+            task_storages = {}
             if isinstance(storages, dict):
                 storages = [storages]
             for storage in storages:
@@ -163,12 +164,14 @@ class Task(object):
 
         storage_mounts = config.get('storage_mounts')
         if storage_mounts is not None:
+            task_storage_mounts = {}
             if isinstance(storage_mounts, dict):
                 storage_mounts = [storage_mounts]
             for storage_mount in storage_mounts:
                 name = storage_mount['storage']
-                task.set_storage_mounts(
-                    {task_storages[name]: storage_mount['mount_path']})
+                storage = task_storages[name]
+                task_storage_mounts[storage] = storage_mount['mount_path']
+            task.set_storage_mounts(task_storage_mounts)
 
         if config.get('inputs') is not None:
             inputs_dict = config['inputs']
