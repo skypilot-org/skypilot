@@ -120,6 +120,11 @@ class AbstractStore:
         """
         raise NotImplementedError
 
+    def __deepcopy__(self, memo):
+        # S3 Client and GCS Client cannot be deep copied, hence the
+        # original Store object is returned
+        return self
+
 
 class Storage(object):
     """Storage objects handle persistent and large volume storage in the sky.

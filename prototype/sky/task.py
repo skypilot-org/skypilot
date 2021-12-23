@@ -304,8 +304,8 @@ class Task(object):
                 self.storage_plans[store] = storage_lib.StorageType.S3
                 store.get_or_copy_to_s3()
             else:
-                assert storage_lib.StorageType.S3 in store.stores
-
+                # Sky will download the first store that is added to remote
+                self.storage_plans[store] = list(store.stores.keys())[0]
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for store, mnt_path in storage_mounts.items():

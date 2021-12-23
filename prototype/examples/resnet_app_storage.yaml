@@ -16,8 +16,7 @@ outputs: {
 storage:
   - name: imagenet-bucket
     source: s3://imagenet-bucket
-    # Uncommenting this will force Imagenet transfer to GCS bucket
-    #force_stores: [gcs] # Could be [s3, gcs], [s3] default: None
+    #force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
     persistent: True
 
 storage_mounts:
