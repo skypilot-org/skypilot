@@ -13,15 +13,46 @@ outputs: {
   resnet-model-dir: 0.1,
 }
 
+# storage: List[sky.Storage]
+#
+# Storage represents an abstract data store containing large data files
+# required by the task. Compared to file_mounts, storage is faster and
+# can persist across runs, requiring fewer uploads from your local machine.
+# A storage object is used by "mounting" it to a task. On mounting, the data
+# specified in the source becomes available at the destination mount_path.
+#
+# Behind the scenes, storage automatically uploads all data in the source
+# to a backing object store in a particular cloud (S3/GCS/Azure Blob).
+#
+# Fields:
+#   sky.Storage.source: str
+#     The source attribute specifies the local path that must be made available
+#     in the storage object. It can either be a local path, in which case data
+#     is uploaded to the cloud to an appropriate object store (s3 or gcs), or it
+#     can be a remote path (s3://, gs://), in which case it is mounted directly.
+#
+#   sky.Storage.force_stores: List[str]
+#     If you wish to force sky.Storage to be backed by specific cloud object
+#     stores, you can specify them here. If the Storage object does not already
+#     exist there, it will be replicated onto those clouds.
+#
+#   sky.Storage.persistent: str
+#     Whether the remote backing stores in the cloud should be deleted after
+#     execution of this task or not. Set to True to avoid uploading files again
+#     in subsequent runs (at the cost of storing your data in the cloud).
 storage:
   - name: imagenet-bucket
     source: s3://imagenet-bucket
     #force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
     persistent: True
 
+# storage_mounts: List[sky.storage_mounts]
+#
+# Storage mounts specify where the storage objects defined above should be
+# mounted when the task is run.
 storage_mounts:
-  - storage: imagenet-bucket
-    mount_path: /tmp/imagenet 
+  - storage: imagenet-bucket # Name of the storage defined above
+    mount_path: /tmp/imagenet # Path to mount the storage at
 
 setup: |
   . $(conda info --base)/etc/profile.d/conda.sh

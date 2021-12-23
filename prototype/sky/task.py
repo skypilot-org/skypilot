@@ -143,16 +143,16 @@ class Task(object):
             if isinstance(storages, dict):
                 storages = [storages]
             for storage in storages:
-                assert storage.get('name') is not None and \
-                       storage.get('source') is not None, \
+                name = storage.get('name')
+                source = storage.get('source')
+                force_stores = storage.get('force_stores')
+                assert name and source, \
                        'Storage Object needs name and source path specified.'
-                name = storage['name']
                 persistent = True if storage.get(
                     'persistent') is None else storage['persistent']
                 task_storages[name] = storage_lib.Storage(
-                    name=name, source=storage['source'], persistent=persistent)
-                if storage.get('force_stores') is not None:
-                    force_stores = storage['force_stores']
+                    name=name, source=source, persistent=persistent)
+                if force_stores is not None:
                     assert set(force_stores) <= {'s3', 'gcs', 'azure_blob'}
                     for cloud_type in force_stores:
                         if cloud_type == 's3':
@@ -168,9 +168,14 @@ class Task(object):
             if isinstance(storage_mounts, dict):
                 storage_mounts = [storage_mounts]
             for storage_mount in storage_mounts:
-                name = storage_mount['storage']
+                name = storage_mount.get('storage')
+                storage_mount_path = storage_mount.get('mount_path')
+                assert name, \
+                    'Storage mount must have name reference to Storage object.'
+                assert storage_mount_path, \
+                    'Storage mount path cannot be empty.'
                 storage = task_storages[name]
-                task_storage_mounts[storage] = storage_mount['mount_path']
+                task_storage_mounts[storage] = storage_mount_path
             task.set_storage_mounts(task_storage_mounts)
 
         if config.get('inputs') is not None:
