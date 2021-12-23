@@ -69,6 +69,29 @@ def _truncate_long_string(s: str, max_length: int = 50) -> str:
     return ' '.join(splits[:i]) + ' ...'
 
 
+def _interactive_node_cli_command(cli_func):
+    cmd = cli.command()    
+    cluster_option = click.option('--cluster',
+                '-c',
+                default=None,
+                type=str,
+                help=_CLUSTER_FLAG_HELP)
+    port_forward_option = click.option('--port-forward',
+                '-p',
+                multiple=True,
+                default=[],
+                type=int,
+                required=False,
+                help=('Port to be forwarded. To forward multiple ports, '
+                        'use this option multiple times.'))
+    screen_option = click.option('--screen',
+                default=False,
+                is_flag=True,
+                help='If true, attach using screen.')  
+      
+    return cmd(cluster_option(port_forward_option(screen_option(cli_func))))
+
+
 def _default_interactive_node_name(node_type: str):
     """Returns a deterministic name to refer to the same node."""
     # FIXME: this technically can collide in Azure/GCP with another
@@ -463,24 +486,7 @@ def _terminate_or_stop(names: Tuple[str], apply_to_all: Optional[bool],
                 'or "sky cpunode/gpunode".')
 
 
-@cli.command()
-@click.option('--cluster',
-              '-c',
-              default=None,
-              type=str,
-              help=_CLUSTER_FLAG_HELP)
-@click.option('--port-forward',
-              '-p',
-              multiple=True,
-              default=[],
-              type=int,
-              required=False,
-              help=('Port to be forwarded. To forward multiple ports, '
-                    'use this option multiple times.'))
-@click.option('--screen',
-              default=False,
-              is_flag=True,
-              help='If true, attach using screen.')
+@_interactive_node_cli_command
 def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive GPU node.
 
@@ -522,24 +528,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
     )
 
 
-@cli.command()
-@click.option('--cluster',
-              '-c',
-              default=None,
-              type=str,
-              help=_CLUSTER_FLAG_HELP)
-@click.option('--port-forward',
-              '-p',
-              multiple=True,
-              default=[],
-              type=int,
-              required=False,
-              help=('Port to be forwarded. To forward multiple ports, '
-                    'use this option multiple times.'))
-@click.option('--screen',
-              default=False,
-              is_flag=True,
-              help='If true, attach using screen.')
+@_interactive_node_cli_command
 def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive CPU node.
 
@@ -581,24 +570,7 @@ def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
     )
 
 
-@cli.command()
-@click.option('--cluster',
-              '-c',
-              default=None,
-              type=str,
-              help=_CLUSTER_FLAG_HELP)
-@click.option('--port-forward',
-              '-p',
-              multiple=True,
-              default=[],
-              type=int,
-              required=False,
-              help=('Port to be forwarded. To forward multiple ports, '
-                    'use this option multiple times.'))
-@click.option('--screen',
-              default=False,
-              is_flag=True,
-              help='If true, attach using screen.')
+@_interactive_node_cli_command
 def tpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive TPU node.
 
