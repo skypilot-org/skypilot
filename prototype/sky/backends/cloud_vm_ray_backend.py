@@ -207,8 +207,8 @@ class RayCodeGen(object):
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
-                print(\'All task slots reserved.\')"""
-            )
+                print(\'All task slots reserved.\')
+                """),
         ]
 
     def add_ray_task(
@@ -222,7 +222,8 @@ class RayCodeGen(object):
     ) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
-        assert gang_scheduling_ip is None or self._ip_to_bundle_index is not None, \
+        assert gang_scheduling_ip is None or \
+            self._ip_to_bundle_index is not None, \
             'Call add_gang_scheduling_placement_group() before add_ray_task().'
 
         # Build remote_task.options(...)

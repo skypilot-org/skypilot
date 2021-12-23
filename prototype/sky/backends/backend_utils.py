@@ -531,15 +531,13 @@ def run_bash_command_with_log(bash_command: str,
         )
 
 
-
 def make_task_bash_script(codegen: str) -> str:
     script = [
         textwrap.dedent(f"""\
                 #!/bin/bash
                 . {SKY_REMOTE_APP_DIR}/sky_env_var.sh 2> /dev/null || true
                 . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
-                cd {SKY_REMOTE_WORKDIR}"""
-        ),
+                cd {SKY_REMOTE_WORKDIR}"""),
         codegen,
     ]
     script = '\n'.join(script)
