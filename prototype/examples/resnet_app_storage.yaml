@@ -53,9 +53,16 @@ storage:
 #
 # Storage mounts specify where the storage objects defined above should be
 # mounted when the task is run.
+#
+# Fields:
+#   sky.storage_mounts.storage: str
+#     Name of the storage object to be mounted
+#
+#   sky.storage_mounts.mount_path: str
+#     Path to mount the storage at. Do not include trailing slashes!
 storage_mounts:
-  - storage: imagenet-bucket # Name of the storage defined above
-    mount_path: /tmp/imagenet # Path to mount the storage at
+  - storage: imagenet-bucket
+    mount_path: /tmp/imagenet
 
 setup: |
   . $(conda info --base)/etc/profile.d/conda.sh
