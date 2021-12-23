@@ -27,6 +27,7 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import functools
 import getpass
 import os
 import time
@@ -70,7 +71,7 @@ def _truncate_long_string(s: str, max_length: int = 50) -> str:
 
 
 def _interactive_node_cli_command(cli_func):
-    cmd = cli.command()    
+    """Click command decorator for interactive node commands."""
     cluster_option = click.option('--cluster',
                 '-c',
                 default=None,
@@ -88,8 +89,24 @@ def _interactive_node_cli_command(cli_func):
                 default=False,
                 is_flag=True,
                 help='If true, attach using screen.')  
-      
-    return cmd(cluster_option(port_forward_option(screen_option(cli_func))))
+    tmux_option = click.option('--tmux', 
+                default=False, 
+                is_flag=True, 
+                help='If true, attach using tmux.')  
+    
+    click_decorators = [
+        cli.command(),
+        cluster_option,
+        port_forward_option,
+        screen_option,
+        tmux_option,
+    ]
+    decorator = functools.reduce(
+                lambda res, f: f(res), 
+                reversed(click_decorators), 
+                cli_func)
+    
+    return decorator
 
 
 def _default_interactive_node_name(node_type: str):
@@ -109,7 +126,7 @@ def _create_and_ssh_into_node(
         cluster_name: str,
         backend: Optional[backend_lib.Backend] = None,
         port_forward: Optional[List[int]] = None,
-        use_screen: bool = False,
+        screen_manager: Optional[str] = None,
 ):
     """Creates and attaches to an interactive node.
 
@@ -119,8 +136,10 @@ def _create_and_ssh_into_node(
         cluster_name: a cluster name to identify the interactive node.
         backend: the Backend to use (currently only CloudVmRayBackend).
         port_forward: List of ports to forward.
+        screen_manager: If specified, attach screen manager: { 'screen', 'tmux' }.
     """
     assert node_type in ('cpunode', 'gpunode', 'tpunode'), node_type
+    assert screen_manager in (None, 'screen', 'tmux'), screen_manager
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
         # should be setup =
@@ -156,8 +175,10 @@ def _create_and_ssh_into_node(
     # connection, and for allowing adding 'cd workdir' in the future.
     # Disable check, since the returncode could be non-zero if the user Ctrl-D.
     commands = backend.ssh_head_command(handle, port_forward=port_forward)
-    if use_screen:
+    if screen_manager == 'screen':
         commands += ['screen', '-D', '-R']
+    if screen_manager == 'tmux':
+        commands += ['tmux']
     backend_utils.run(commands, shell=False, check=False)
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
 
@@ -487,7 +508,7 @@ def _terminate_or_stop(names: Tuple[str], apply_to_all: Optional[bool],
 
 
 @_interactive_node_cli_command
-def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
+def gpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
     """Launch or attach to an interactive GPU node.
 
     Automatically syncs the current working directory.
@@ -516,6 +537,10 @@ def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
       sky gpunode --port-forward 8080 --port-forward 4650 -c cluster_name
       sky gpunode -p 8080 -p 4650 -c cluster_name
     """
+    assert not (screen and tmux), 'Cannot use both screen and tmux.'
+    screen_manager = None
+    if screen or tmux:
+        screen_manager = 'tmux' if tmux else 'screen'
     name = cluster
     if name is None:
         name = _default_interactive_node_name('gpunode')
@@ -524,12 +549,12 @@ def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
         sky.Resources(sky.AWS(), accelerators='V100'),
         cluster_name=name,
         port_forward=port_forward,
-        use_screen=screen,
+        screen_manager=screen_manager,
     )
 
 
 @_interactive_node_cli_command
-def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
+def cpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
     """Launch or attach to an interactive CPU node.
 
     Automatically syncs the current working directory.
@@ -558,6 +583,10 @@ def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
       sky cpunode --port-forward 8080 --port-forward 4650 -c cluster_name
       sky cpunode -p 8080 -p 4650 -c cluster_name
     """
+    assert not (screen and tmux), 'Cannot use both screen and tmux.'
+    screen_manager = None
+    if screen or tmux:
+        screen_manager = 'tmux' if tmux else 'screen'
     name = cluster
     if name is None:
         name = _default_interactive_node_name('cpunode')
@@ -566,12 +595,12 @@ def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
         sky.Resources(sky.AWS()),
         cluster_name=name,
         port_forward=port_forward,
-        use_screen=screen,
+        screen_manager=screen_manager,
     )
 
 
 @_interactive_node_cli_command
-def tpunode(cluster: str, port_forward: Optional[List[int]], screen):
+def tpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
     """Launch or attach to an interactive TPU node.
 
     Automatically syncs the current working directory.
@@ -600,6 +629,10 @@ def tpunode(cluster: str, port_forward: Optional[List[int]], screen):
       sky tpunode --port-forward 8080 --port-forward 4650 -c cluster_name
       sky tpunode -p 8080 -p 4650 -c cluster_name
     """
+    assert not (screen and tmux), 'Cannot use both screen and tmux.'
+    screen_manager = None
+    if screen or tmux:
+        screen_manager = 'tmux' if tmux else 'screen'
     name = cluster
     if name is None:
         name = _default_interactive_node_name('tpunode')
@@ -608,7 +641,7 @@ def tpunode(cluster: str, port_forward: Optional[List[int]], screen):
         sky.Resources(sky.GCP(), accelerators='tpu-v3-8'),
         cluster_name=name,
         port_forward=port_forward,
-        use_screen=screen,
+        screen_manager=screen_manager,
     )
 
 
