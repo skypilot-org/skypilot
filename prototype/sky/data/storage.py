@@ -197,6 +197,10 @@ class Storage(object):
         """
         store = None
 
+        if cloud_type in self.stores:
+            logger.info(f'Storage type {cloud_type} already exists!')
+            return self.stores[cloud_type]
+
         if cloud_type == StorageType.S3:
             store = S3Store(name=self.name, source=self.source)
         elif cloud_type == StorageType.GCS:
@@ -208,12 +212,6 @@ class Storage(object):
         self._perform_bucket_transfer(store)
 
         assert store.is_initialized
-        assert cloud_type not in self.stores, f'Storage type \
-                                                    {cloud_type} \
-                                                    already exists, \
-                                                    why do you want to \
-                                                    add another of \
-                                                    the same type? '
 
         self.stores[cloud_type] = store
         return store
@@ -426,7 +424,7 @@ class GcsStore(AbstractStore):
           remote_path: str; Remote path on GCS bucket
         """
         blob = self.bucket.blob(remote_path)
-        blob.upload_from_filename(local_file)
+        blob.upload_from_filename(local_file, timeout=None)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -436,7 +434,7 @@ class GcsStore(AbstractStore):
           local_path: str; Local path on user's device
         """
         blob = self.bucket.blob(remote_path)
-        blob.download_to_filename(local_path)
+        blob.download_to_filename(local_path, timeout=None)
 
     def _remote_filepath_iterator(self) -> str:
         """Generator that yields the remote file paths from the S3 bucket

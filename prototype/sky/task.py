@@ -119,6 +119,7 @@ class Task(object):
     def from_yaml(yaml_path):
         with open(os.path.expanduser(yaml_path), 'r') as f:
             config = yaml.safe_load(f)
+
         # TODO: perform more checks on yaml and raise meaningful errors.
         if 'run' not in config:
             raise ValueError('The YAML spec should include a \'run\' field.')
@@ -134,6 +135,40 @@ class Task(object):
         file_mounts = config.get('file_mounts')
         if file_mounts is not None:
             task.set_file_mounts(file_mounts)
+
+        storages = config.get('storage')
+        task_storages = {}
+        if storages is not None:
+            if isinstance(storages, dict):
+                storages = [storages]
+            for storage in storages:
+                assert storage.get('name') is not None and \
+                       storage.get('source') is not None, \
+                       'Storage Object needs name and source path specified.'
+                name = storage['name']
+                persistent = True if storage.get(
+                    'persistent') is None else storage['persistent']
+                task_storages[name] = storage_lib.Storage(
+                    name=name, source=storage['source'], persistent=persistent)
+                if storage.get('force_stores') is not None:
+                    force_stores = storage['force_stores']
+                    assert set(force_stores) <= {'s3', 'gcs', 'azure_blob'}
+                    for cloud_type in force_stores:
+                        if cloud_type == 's3':
+                            task_storages[name].get_or_copy_to_s3()
+                        elif cloud_type == 'gcs':
+                            task_storages[name].get_or_copy_to_gcs()
+                        elif cloud_type == 'azure_blob':
+                            task_storages[name].get_or_copy_to_azure_blob()
+
+        storage_mounts = config.get('storage_mounts')
+        if storage_mounts is not None:
+            if isinstance(storage_mounts, dict):
+                storage_mounts = [storage_mounts]
+            for storage_mount in storage_mounts:
+                name = storage_mount['storage']
+                task.set_storage_mounts(
+                    {task_storages[name]: storage_mount['mount_path']})
 
         if config.get('inputs') is not None:
             inputs_dict = config['inputs']
@@ -276,11 +311,11 @@ class Task(object):
                 # TODO: allow for Storage mounting of different clouds
                 self.update_file_mounts({'~/.aws': '~/.aws'})
                 self.update_file_mounts({
-                    mnt_path: 's3://' + store.name + '/',
+                    mnt_path: 's3://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.GCS:
                 self.update_file_mounts({
-                    mnt_path: 'gs://' + store.name + '/',
+                    mnt_path: 'gs://' + store.name,
                 })
                 assert False, 'TODO: GCS Authentication not done'
             elif storage_type is storage_lib.StorageType.AZURE:
