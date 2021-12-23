@@ -40,6 +40,7 @@ import prettytable
 import sky
 from sky import backends
 from sky import global_user_state
+from sky import task as task_lib
 from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
@@ -93,11 +94,44 @@ def _interactive_node_cli_command(cli_func):
                 default=False, 
                 is_flag=True, 
                 help='If true, attach using tmux.')  
-    
+    cloud_option = click.option('--cloud',
+                '-q',  # TODO: make this less confusing
+                default=None,
+                type=str,
+                help='Cloud provider to use.')
+    instance_type_option = click.option('--instance-type',
+                '-t',
+                default=None,
+                type=str,
+                help='Instance type to use.')
+    num_accelerators_option = click.option('--num-accelerators',
+                '-n',
+                default=None,
+                type=int,
+                help='Number of accelerators (GPU/TPU) to use.')
+    accelerator_type_option = click.option('--accelerator-type',
+                '-g',
+                default=None,
+                type=str,
+                help='Accelerator type to use.')
+    spot_option = click.option('--spot',
+                default=False,
+                is_flag=True,
+                help='If true, use spot instances.')
+
     click_decorators = [
         cli.command(),
         cluster_option,
         port_forward_option,
+        
+        # Resource options
+        cloud_option,
+        instance_type_option,
+        accelerator_type_option,
+        num_accelerators_option,
+        spot_option,
+
+        # Attach options
         screen_option,
         tmux_option,
     ]
@@ -508,7 +542,15 @@ def _terminate_or_stop(names: Tuple[str], apply_to_all: Optional[bool],
 
 
 @_interactive_node_cli_command
-def gpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
+def gpunode(cluster: str, 
+            port_forward: Optional[List[int]], 
+            cloud: Optional[str],
+            instance_type: Optional[str],
+            num_accelerators: Optional[int],
+            accelerator_type: Optional[str],
+            spot: Optional[bool],
+            screen: Optional[bool], 
+            tmux: Optional[bool]):
     """Launch or attach to an interactive GPU node.
 
     Automatically syncs the current working directory.
@@ -544,9 +586,22 @@ def gpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
     name = cluster
     if name is None:
         name = _default_interactive_node_name('gpunode')
+
+    cloud_provider = task_lib.CLOUD_REGISTRY.get(cloud, sky.AWS())    
+    if cloud is not None and cloud not in task_lib.CLOUD_REGISTRY:
+        print(f'Cloud provider {cloud} not found. Defaulting to AWS.')
+    if num_accelerators is None:
+        num_accelerators = 1
+    if accelerator_type is None:
+        accelerator_type = 'V100'
+    resources = sky.Resources(cloud=cloud_provider, 
+                              instance_type=instance_type, 
+                              accelerators={accelerator_type: num_accelerators},
+                              use_spot=spot)
+
     _create_and_ssh_into_node(
         'gpunode',
-        sky.Resources(sky.AWS(), accelerators='V100'),
+        resources,
         cluster_name=name,
         port_forward=port_forward,
         screen_manager=screen_manager,
@@ -554,7 +609,15 @@ def gpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
 
 
 @_interactive_node_cli_command
-def cpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
+def cpunode(cluster: str, 
+            port_forward: Optional[List[int]], 
+            cloud: Optional[str],
+            instance_type: Optional[str],
+            num_accelerators: Optional[int],
+            accelerator_type: Optional[str],
+            spot: Optional[bool],
+            screen: Optional[bool], 
+            tmux: Optional[bool]):
     """Launch or attach to an interactive CPU node.
 
     Automatically syncs the current working directory.
@@ -590,9 +653,17 @@ def cpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
     name = cluster
     if name is None:
         name = _default_interactive_node_name('cpunode')
+
+    cloud_provider = task_lib.CLOUD_REGISTRY.get(cloud, sky.AWS())    
+    if cloud is not None and cloud not in task_lib.CLOUD_REGISTRY:
+        print(f'Cloud provider {cloud} not found. Defaulting to AWS.')
+    resources = sky.Resources(cloud=cloud_provider, 
+                              instance_type=instance_type, 
+                              use_spot=spot)
+
     _create_and_ssh_into_node(
         'cpunode',
-        sky.Resources(sky.AWS()),
+        resources,
         cluster_name=name,
         port_forward=port_forward,
         screen_manager=screen_manager,
@@ -600,7 +671,15 @@ def cpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
 
 
 @_interactive_node_cli_command
-def tpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
+def tpunode(cluster: str, 
+            port_forward: Optional[List[int]], 
+            cloud: Optional[str],
+            instance_type: Optional[str],
+            num_accelerators: Optional[int],
+            accelerator_type: Optional[str],
+            spot: Optional[bool],
+            screen: Optional[bool], 
+            tmux: Optional[bool]):
     """Launch or attach to an interactive TPU node.
 
     Automatically syncs the current working directory.
@@ -636,9 +715,21 @@ def tpunode(cluster: str, port_forward: Optional[List[int]], screen, tmux):
     name = cluster
     if name is None:
         name = _default_interactive_node_name('tpunode')
+    
+    assert cloud is None or cloud == 'gcp', 'Cloud must be GCP to use tpunode.'
+    cloud_provider = sky.GCP()
+
+    if num_accelerators is None:
+        num_accelerators = 1
+    accelerator_type = 'tpu-v3-8'
+    resources = sky.Resources(cloud=cloud_provider, 
+                              instance_type=instance_type, 
+                              accelerators={accelerator_type: num_accelerators},
+                              use_spot=spot)
+    
     _create_and_ssh_into_node(
         'tpunode',
-        sky.Resources(sky.GCP(), accelerators='tpu-v3-8'),
+        resources,
         cluster_name=name,
         port_forward=port_forward,
         screen_manager=screen_manager,
