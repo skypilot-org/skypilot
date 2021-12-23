@@ -36,9 +36,9 @@ outputs: {
 #
 #     If it is a local path, the data is uploaded to the cloud to an
 #     appropriate object store (s3 or gcs). This upload is a one-way
-#     non-destructive sync, i.e. unmodified files which already exist on
+#     destructive sync, i.e. unmodified files which already exist on
 #     the remote cloud store are not uploaded again, and any local
-#     deletes are not replicated on the remote store.
+#     deletes are replicated on the remote store.
 #
 #     If it is a remote path (s3://, gs://), it is mounted directly when the
 #     task is run.
