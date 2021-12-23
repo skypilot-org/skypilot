@@ -562,7 +562,7 @@ def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
         name = _default_interactive_node_name('cpunode')
     _create_and_ssh_into_node(
         'cpunode',
-        sky.Resources(sky.GCP()),
+        sky.Resources(sky.AWS()),
         cluster_name=name,
         port_forward=port_forward,
         use_screen=screen,
