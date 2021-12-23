@@ -144,6 +144,12 @@ def _ssh_options_list(ssh_private_key: Optional[str],
     ]
 
 
+def _add_cluster_to_ssh_config(handle):
+    pass
+
+def _remove_cluster_from_ssh_config(handle):
+    pass
+
 class RetryingVmProvisioner(object):
     """A provisioner that retries different cloud/regions/zones."""
 
@@ -782,6 +788,10 @@ class CloudVmRayBackend(backends.Backend):
             launched_resources=provisioned_resources,
             # TPU.
             tpu_delete_script=config_dict.get('tpu-delete-script'))
+
+        # Generate SSH handle
+
+
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True)
