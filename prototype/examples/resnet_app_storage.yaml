@@ -25,6 +25,9 @@ outputs: {
 # to a backing object store in a particular cloud (S3/GCS/Azure Blob).
 #
 # Fields:
+#   sky.Storage.name: str
+#     Identifier for the storage object, used as reference in storage_mount
+#
 #   sky.Storage.source: str
 #     The source attribute specifies the local path that must be made available
 #     in the storage object. It can either be a local path, in which case data
