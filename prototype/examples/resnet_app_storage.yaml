@@ -20,6 +20,8 @@ outputs: {
 # can persist across runs, requiring fewer uploads from your local machine.
 # A storage object is used by "mounting" it to a task. On mounting, the data
 # specified in the source becomes available at the destination mount_path.
+# Please note that sky.Storage does not guarantee preservation of file
+# permissions - you may need to set file permissions during task execution.
 #
 # Behind the scenes, storage automatically uploads all data in the source
 # to a backing object store in a particular cloud (S3/GCS/Azure Blob).
