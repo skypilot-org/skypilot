@@ -287,7 +287,7 @@ class S3Store(AbstractStore):
         To increase parallelism, modify max_concurrent_requests in your
         aws config file (Default path: ~/.aws/config).
         """
-        sync_command = f'aws s3 sync {self.source} s3://{self.name}/'
+        sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'
         os.system(sync_command)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
@@ -398,7 +398,7 @@ class GcsStore(AbstractStore):
         """Syncs Local folder with GCS Bucket. This method is called after
         the folder is already uploaded onto the GCS bucket.
         """
-        sync_command = f'gsutil -m rsync -r {self.source} gs://{self.name}/'
+        sync_command = f'gsutil -m rsync -d -r {self.source} gs://{self.name}/'
         os.system(sync_command)
 
     def transfer_to_gcs(self, s3_store: AbstractStore) -> None:
