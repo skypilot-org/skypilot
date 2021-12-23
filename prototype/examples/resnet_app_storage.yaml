@@ -29,10 +29,17 @@ outputs: {
 #     Identifier for the storage object, used as reference in storage_mount
 #
 #   sky.Storage.source: str
-#     The source attribute specifies the local path that must be made available
-#     in the storage object. It can either be a local path, in which case data
-#     is uploaded to the cloud to an appropriate object store (s3 or gcs), or it
-#     can be a remote path (s3://, gs://), in which case it is mounted directly.
+#     The source attribute specifies the local path or existing remote storage
+#     that must be made available in the storage object.
+#
+#     If it is a local path, the data is uploaded to the cloud to an
+#     appropriate object store (s3 or gcs). This upload is a one-way
+#     non-destructive sync, i.e. unmodified files which already exist on
+#     the remote cloud store are not uploaded again, and any local
+#     deletes are not replicated on the remote store.
+#
+#     If it is a remote path (s3://, gs://), it is mounted directly when the
+#     task is run.
 #
 #   sky.Storage.force_stores: List[str]
 #     If you wish to force sky.Storage to be backed by specific cloud object
