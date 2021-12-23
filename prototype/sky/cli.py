@@ -637,6 +637,7 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
       sky cpunode --port-forward 8080 --port-forward 4650 -c cluster_name
       sky cpunode -p 8080 -p 4650 -c cluster_name
     """
+    del num_accelerators, accelerator_type  # unused
     assert not (screen and tmux), 'Cannot use both screen and tmux.'
     screen_manager = None
     if screen or tmux:
