@@ -59,7 +59,6 @@ def _get_task_demands_dict(task: App) -> Optional[Tuple[Optional[str], int]]:
     # TODO: CPU and other memory resources are not supported yet.
     accelerator_dict = None
     resources = task.best_resources
-    import pdb; pdb.set_trace()
     if resources is not None:
         accelerator_dict = resources.get_accelerators()
     return accelerator_dict
@@ -260,7 +259,8 @@ class RayCodeGen(object):
             bundle_index = self._ip_to_bundle_index[gang_scheduling_ip]
             resources_str = ', placement_group=pg'
             resources_str += f', placement_group_bundle_index={bundle_index}'
-        logger.debug(f'Added Task with options: {name_str}{resources_str}{num_gpus_str}')
+        logger.debug(
+            f'Added Task with options: {name_str}{resources_str}{num_gpus_str}')
         self._code += [
             textwrap.dedent(f"""\
         futures.append(run_bash_command_with_log \\
