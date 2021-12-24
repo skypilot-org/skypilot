@@ -86,7 +86,7 @@ class GcsCloudStorage(CloudStorage):
         # Skip if gsutil already exists.
         'pushd /tmp &>/dev/null',
         '(test -f ~/google-cloud-sdk/bin/gsutil || (wget -c '
-        'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
+        'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '  # noqa: E501
         'tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
         'mv google-cloud-sdk ~/ && '
         '~/google-cloud-sdk/install.sh -q ))',

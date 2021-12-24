@@ -124,6 +124,7 @@ def get_clusters() -> List[Dict[str, Any]]:
         })
     return records
 
+
 def get_enabled_clouds() -> List[str]:
     rows = _CURSOR.execute('SELECT value FROM config WHERE key = ?',
                            (_ENABLED_CLOUDS_KEY,))
