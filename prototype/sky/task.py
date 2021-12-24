@@ -80,7 +80,6 @@ class Task(object):
           private_key: Unused?
         """
         self.name = name
-        self.best_resources = None
         self.run = run
         self.storage_mounts = {}
         self.storage_plans = {}
@@ -524,7 +523,7 @@ class ParTask(Task):
         self.tasks = tasks
 
     def get_task_resource_demands(self,
-                                  task_i: int) -> Optional[Dict[str, int]]:
+                                  task_i: int) -> Optional[Dict[str, float]]:
         """Gets inner Task i's resource demands, useful for scheduling."""
         task = self.tasks[task_i]
         r = task.resources
