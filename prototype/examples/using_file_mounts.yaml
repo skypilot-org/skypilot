@@ -4,26 +4,54 @@
 # Syncing is done before the Task's execution so that it can access these files.
 # After syncing, the paths can be opened, read, or written as usual.
 #
-# Destination paths must be absolute paths, not relative.
-#
 # Caveat:
 #
 #    Destination paths may be created as *symlinks* under the hood.  Some
 #    commands may require flags to follow symlinks (e.g., ls -H; du -L).
 
 resources:
-  cloud: gcp
+  cloud: azure
 
-# Format:
-#   <destination on VM>: <source, local or cloud>
+# Format for file_mounts:
+#
+#   [ destination on VM ]: [ source, local or cloud ]
+#
 file_mounts:
-
   ###############################################
   #  Sync from local files/directories (rsync)  #
   ###############################################
+
   /setup.py: ./setup.py
   /sky: .
-  /more/levels/should/work: .
+
+  ~/tmpfile: ~/tmpfile
+  ~/a/b/c/tmpfile: ~/tmpfile
+
+  # Intermediate dirs are created and chown-ed to $USER if they don't already
+  # exist.  Thus they can be used too, e.g., 'mkdir -p /data/logs'.  See 'run'.
+  /data/checkpoints/best.pt: ~/tmp
+
+  ~/.ssh/id_rsa.pub: ~/.ssh/id_rsa.pub
+
+  # Syncing directories.
+  #
+  # Suppose the source has:
+  #
+  # ~/tmp-workdir/
+  #   a/
+  #     b
+  #   c
+  #
+  # After syncing the target will be:
+  #
+  # /tmp/data/
+  #   a/
+  #     b
+  #   c
+  /tmp/data: ~/tmp-workdir
+
+  # Relative paths are under ~/ (after sync, ~/relative_dir/ exists).
+  relative_dir: ~/tmp-workdir
 
   #############################################
   #  Sync from Google Cloud Storage (gsutil)  #
@@ -31,21 +59,45 @@ file_mounts:
 
   # Syncing a regular object.
   /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
-  /data/: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
+  /data/train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
+  ~/data/train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
 
   # If a source path points to a "directory", its contents will be recursively
   # synced (subdirectories included).
   # Commenting out as this takes a while.
   # /data/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet
 
+setup: 'sudo apt-get install -y tree'
+
 run: |
+  set -ex
+
+  ls -lthr ~/tmpfile
+  ls -lthr ~/a/b/c
+
+  mkdir -p /data/logs
+  touch /data/logs/test.log
+  touch /data/checkpoints/last.pt
+
+  echo hi >> /tmp/data/new_file
+  tree /tmp/data
+
+  ls -lthr ~/.ssh
+
   ls -l /setup.py
 
   cd /sky
   pip3 install -e .
 
-  ls -l /data/train-00001-of-01024
+  ls -lthr ~/.ssh/
+
+  ls -lthr ~/
+  ls -lthr ~/relative_dir
+  ls -lthr ~/relative_dir/
+
   du -schL /train-00001-of-01024
-  head /train-00001-of-01024
+  wc -l /train-00001-of-01024
+  ls -l /data/train-00001-of-01024
+  ls -l ~/data/train-00001-of-01024
 
   # ls -lH /data/fake_imagenet | head -n10

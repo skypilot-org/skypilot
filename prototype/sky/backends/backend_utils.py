@@ -1,6 +1,5 @@
 """Util constants/functions for the backends."""
 import datetime
-import getpass
 import io
 import os
 import pathlib
@@ -10,8 +9,7 @@ import sys
 import tempfile
 import textwrap
 import time
-from typing import Dict, List, Optional, Union
-import uuid
+from typing import Dict, List, Optional, Union, Set
 import yaml
 import zlib
 
@@ -21,6 +19,7 @@ import sky
 from sky import authentication as auth
 from sky import clouds
 from sky import logging
+from sky import resources
 from sky import task as task_lib
 
 logger = logging.init_logger(__name__)
@@ -28,6 +27,8 @@ logger = logging.init_logger(__name__)
 # An application.  These are the task types to support.
 App = Union[task_lib.Task, task_lib.ParTask]
 RunId = str
+Resources = resources.Resources
+
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = '/tmp/workdir'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
@@ -65,32 +66,103 @@ def _fill_template(template_path: str,
         # Need abs path here, otherwise get_rel_path() below fails.
         output_path = os.path.join(os.path.dirname(sky.__root_dir__),
                                    output_path)
-    logger.info(f'Created or updated file {get_rel_path(output_path)}')
     return output_path
 
 
-def wrap_file_mount(path: str) -> str:
-    """Prepends ~/<opaque dir>/ to a path to work around permission issues.
+class FileMountHelper(object):
+    """Helper for handling file mounts."""
 
-    Examples:
-      /root/hello.txt -> ~/<opaque dir>/root/hello.txt
-      local.txt -> ~/<opaque dir>/local.txt
+    @classmethod
+    def wrap_file_mount(cls, path: str) -> str:
+        """Prepends ~/<opaque dir>/ to a path to work around permission issues.
 
-    After the path is synced, we can later create a symlink to this wrapped
-    path from the original path, e.g., in the initialization_commands of the
-    ray autoscaler YAML.
-    """
-    return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, path.lstrip('/'))
+        Examples:
+        /root/hello.txt -> ~/<opaque dir>/root/hello.txt
+        local.txt -> ~/<opaque dir>/local.txt
+
+        After the path is synced, we can later create a symlink to this wrapped
+        path from the original path, e.g., in the initialization_commands of the
+        ray autoscaler YAML.
+        """
+        return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, path.lstrip('/'))
+
+    @classmethod
+    def make_safe_symlink_command(
+            cls,
+            *,
+            source: str,
+            target: str,
+            download_target_commands: Optional[List[str]] = None) -> str:
+        """Returns a command that safely symlinks 'source' to 'target'.
+
+        All intermediate directories of 'source' will be owned by $USER,
+        excluding the root directory (/).
+
+        'source' must be an absolute path; both 'source' and 'target' must not
+        end with a slash (/).
+
+        This function is needed because a simple 'ln -s target source' may
+        fail: 'source' can have multiple levels (/a/b/c), its parent dirs may
+        or may not exist, can end with a slash, or may need sudo access, etc.
+
+        Cases of <target: local> file mounts and their behaviors:
+
+            /existing_dir: ~/local/dir
+              - error out saying this cannot be done as LHS already exists
+            /existing_file: ~/local/file
+              - error out saying this cannot be done as LHS already exists
+            /existing_symlink: ~/local/file
+              - overwrite the existing symlink; this is important because sky
+                run can be run multiple times
+            Paths that start with ~/ and /tmp/ do not have the above
+            restrictions; just delegate to rsync behaviors.
+        """
+        assert os.path.isabs(source), source
+        assert not source.endswith('/') and not target.endswith('/'), (source,
+                                                                       target)
+        # Below, use sudo in case the symlink needs sudo access to create.
+        # Prepare to create the symlink:
+        #  1. make sure its dir(s) exist & are owned by $USER.
+        dir_of_symlink = os.path.dirname(source)
+        commands = [
+            # mkdir, then loop over '/a/b/c' as /a, /a/b, /a/b/c.  For each,
+            # chown $USER on it so user can use these intermediate dirs
+            # (excluding /).
+            f'sudo mkdir -p {dir_of_symlink}',
+            # p: path so far
+            ('(p=""; '
+             f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
+             'p=${p}/${w}; sudo chown $USER $p; done)')
+        ]
+        #  2. remove any existing symlink (ln -f may throw 'cannot
+        #     overwrite directory', if the link exists and points to a
+        #     directory).
+        commands += [
+            # Error out if source is an existing, non-symlink directory/file.
+            f'((test -L {source} && sudo rm {source} &>/dev/null) || '
+            f'(test ! -e {source} || '
+            f'(echo "!!! Failed mounting because path exists ({source})"; '
+            'exit 1)))',
+        ]
+        if download_target_commands is not None:
+            commands += download_target_commands
+        commands += [
+            # Link.
+            f'sudo ln -s {target} {source}',
+            # chown.  -h to affect symlinks only.
+            f'sudo chown -h $USER {source}',
+        ]
+        return ' && '.join(commands)
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
 def write_cluster_config(run_id: RunId,
                          task: task_lib.Task,
                          cluster_config_template: str,
+                         cluster_name: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False,
-                         cluster_name: Optional[str] = None):
+                         dryrun: bool = False):
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -108,12 +180,16 @@ def write_cluster_config(run_id: RunId,
         region = cloud.get_default_region()
         zones = region.zones
     else:
-        assert zones is not None, \
-            'Set either both or neither for: region, zones.'
+        assert isinstance(
+            cloud, clouds.Azure
+        ) or zones is not None, 'Set either both or neither for: region, zones.'
     region = region.name
     if isinstance(cloud, clouds.AWS):
         # Only AWS supports multiple zones in the 'availability_zone' field.
         zones = [zone.name for zone in zones]
+    elif isinstance(cloud, clouds.Azure):
+        # Azure does not support specific zones.
+        zones = []
     else:
         zones = [zones[0].name]
 
@@ -121,10 +197,7 @@ def write_cluster_config(run_id: RunId,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
-    if cluster_name is None:
-        # TODO: change this ID formatting to something more pleasant.
-        # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-        cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+    assert cluster_name is not None
 
     setup_sh_path = None
     if task.setup is not None:
@@ -143,8 +216,8 @@ def write_cluster_config(run_id: RunId,
             f.write(codegen)
         setup_sh_path = f.name
 
-    # File mounts handling:
-    #  (1) in 'file_mounts' sections, add <prefix> to all target paths.
+    # File mounts handling for remote paths possibly without write access:
+    #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
     #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
     # We need to do these since as of Ray 1.8, this is not supported natively
     # (Docker works though, of course):
@@ -155,30 +228,17 @@ def write_cluster_config(run_id: RunId,
     initialization_commands = []
     if mounts is not None:
         for remote, local in mounts.items():
-            wrapped_remote = wrap_file_mount(remote)
+            if not os.path.isabs(remote) and not remote.startswith('~/'):
+                remote = f'~/{remote}'
+            if remote.startswith('~/') or remote.startswith('/tmp/'):
+                # Skip as these should be writable locations.
+                wrapped_file_mounts[remote] = local
+                continue
+            assert os.path.isabs(remote), (remote, local)
+            wrapped_remote = FileMountHelper.wrap_file_mount(remote)
             wrapped_file_mounts[wrapped_remote] = local
-            # Point 'remote' (may or may not exist) to 'wrapped_remote'
-            # (guaranteed to exist by ray autoscaler's use of rsync).
-            #
-            # 'remote' can have multiple levels:
-            #   - relative paths, a/b/c
-            #   - absolute paths, /a/b/c
-            symlink_to_make = remote.rstrip('/')
-            dir_of_symlink = os.path.dirname(remote)
-            # Below, use sudo in case the symlink needs sudo access to create.
-            command = ' && '.join([
-                # Prepare to create the symlink:
-                #  1. make sure its dir exists.
-                f'sudo mkdir -p {dir_of_symlink}',
-                #  2. remove any existing symlink (ln -f may throw 'cannot
-                #     overwrite directory', if the link exists and points to a
-                #     directory).
-                f'(sudo rm {symlink_to_make} &>/dev/null || true)',
-                # Link.
-                f'sudo ln -s {wrapped_remote} {symlink_to_make}',
-                # chown.
-                f'sudo chown $USER {symlink_to_make}',
-            ])
+            command = FileMountHelper.make_safe_symlink_command(
+                source=remote, target=wrapped_remote)
             initialization_commands.append(command)
 
     yaml_path = _fill_template(
@@ -242,10 +302,16 @@ def _add_ssh_to_cluster_config(cloud_type, cluster_config_file):
         config = auth.setup_azure_authentication(config)
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
-    yaml_dump(cluster_config_file, config)
+    dump_yaml(cluster_config_file, config)
 
 
-def yaml_dump(path, config):
+def read_yaml(path):
+    with open(path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def dump_yaml(path, config):
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
 
@@ -267,11 +333,14 @@ def get_run_id() -> RunId:
 
 
 def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
-                                 num_nodes: int):
+                                 num_nodes: int) -> bool:
+    """Returns whether the entire ray cluster is ready."""
+    # FIXME: It may takes a while for the cluster to be available for ray,
+    # especially for Azure, causing `ray exec` to fail.
     if num_nodes <= 1:
         return
     expected_worker_count = num_nodes - 1
-    if isinstance(cloud, clouds.AWS):
+    if isinstance(cloud, (clouds.AWS, clouds.Azure)):
         worker_str = 'ray.worker.default'
     elif isinstance(cloud, clouds.GCP):
         worker_str = 'ray_worker_default'
@@ -287,14 +356,20 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
         logger.info(output)
         if f'{expected_worker_count} {worker_str}' in output:
             break
+        if '(no pending nodes)' in output and '(no failures)' in output:
+            # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
+            # GCP can satisfy only by half, the worker node would be forgotten.
+            # The correct behavior should be for it to error out.
+            return False  # failed
         time.sleep(10)
+    return True  # success
 
 
 def run_command_on_ip_via_ssh(ip: str,
                               command: str,
                               private_key: str,
                               container_name: Optional[str],
-                              user: str = 'ubuntu') -> None:
+                              ssh_user: str = 'ubuntu') -> None:
     if container_name is not None:
         command = command.replace('\\', '\\\\').replace('"', '\\"')
         command = f'docker exec {container_name} /bin/bash -c "{command}"'
@@ -304,7 +379,7 @@ def run_command_on_ip_via_ssh(ip: str,
         private_key,
         '-o',
         'StrictHostKeyChecking=no',
-        '{}@{}'.format(user, ip),
+        '{}@{}'.format(ssh_user, ip),
         command  # TODO: shlex.quote() doesn't work.  Is it needed in a list?
     ]
     with subprocess.Popen(cmd,
@@ -420,3 +495,19 @@ def check_local_gpus() -> bool:
                        capture_output=True,
                        check=False)
     return p.returncode == 0
+
+
+def is_same_requested_resources(r1: Set[Resources], r2: Set[Resources]):
+    """Returns whether the requested resources are the same.
+
+    Args:
+        r1: Set of Resources requested previously.
+        r2: Set of Resources newly requested.
+
+    Returns:
+        True if the resources are the same, false otherwise.
+    """
+    assert len(r1) == 1 and len(r2) == 1
+    r1 = list(r1)[0]
+    r2 = list(r2)[0]
+    return r1.is_same_resources(r2)

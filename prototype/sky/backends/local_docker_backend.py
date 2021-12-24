@@ -200,6 +200,10 @@ class LocalDockerBackend(backends.Backend):
             f'task run command, run {style.BRIGHT}docker run -it '
             f'{container.image.tags[0]} /bin/bash{style.RESET_ALL}')
 
-    def teardown(self, handle: ResourceHandle) -> None:
-        """ Teardown kills the container"""
+    def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+        """Teardown kills the container."""
+        if not terminate:
+            logger.warning(
+                'LocalDockerBackend.teardown() will terminate '
+                'containers for now, despite receiving termiante=False.')
         self.containers[handle].remove(force=True)

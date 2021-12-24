@@ -119,6 +119,7 @@ class Task(object):
     def from_yaml(yaml_path):
         with open(os.path.expanduser(yaml_path), 'r') as f:
             config = yaml.safe_load(f)
+
         # TODO: perform more checks on yaml and raise meaningful errors.
         if 'run' not in config:
             raise ValueError('The YAML spec should include a \'run\' field.')
@@ -134,6 +135,49 @@ class Task(object):
         file_mounts = config.get('file_mounts')
         if file_mounts is not None:
             task.set_file_mounts(file_mounts)
+
+        storages = config.get('storage')
+        task_storages = {}
+        if storages is not None:
+            task_storages = {}
+            if isinstance(storages, dict):
+                storages = [storages]
+            for storage in storages:
+                name = storage.get('name')
+                source = storage.get('source')
+                force_stores = storage.get('force_stores')
+                assert name and source, \
+                       'Storage Object needs name and source path specified.'
+                persistent = True if storage.get(
+                    'persistent') is None else storage['persistent']
+                task_storages[name] = storage_lib.Storage(name=name,
+                                                          source=source,
+                                                          persistent=persistent)
+                if force_stores is not None:
+                    assert set(force_stores) <= {'s3', 'gcs', 'azure_blob'}
+                    for cloud_type in force_stores:
+                        if cloud_type == 's3':
+                            task_storages[name].get_or_copy_to_s3()
+                        elif cloud_type == 'gcs':
+                            task_storages[name].get_or_copy_to_gcs()
+                        elif cloud_type == 'azure_blob':
+                            task_storages[name].get_or_copy_to_azure_blob()
+
+        storage_mounts = config.get('storage_mounts')
+        if storage_mounts is not None:
+            task_storage_mounts = {}
+            if isinstance(storage_mounts, dict):
+                storage_mounts = [storage_mounts]
+            for storage_mount in storage_mounts:
+                name = storage_mount.get('storage')
+                storage_mount_path = storage_mount.get('mount_path')
+                assert name, \
+                    'Storage mount must have name reference to Storage object.'
+                assert storage_mount_path, \
+                    'Storage mount path cannot be empty.'
+                storage = task_storages[name]
+                task_storage_mounts[storage] = storage_mount_path
+            task.set_storage_mounts(task_storage_mounts)
 
         if config.get('inputs') is not None:
             inputs_dict = config['inputs']
@@ -266,8 +310,8 @@ class Task(object):
                 self.storage_plans[store] = storage_lib.StorageType.S3
                 store.get_or_copy_to_s3()
             else:
-                assert storage_lib.StorageType.S3 in store.stores
-
+                # Sky will download the first store that is added to remote
+                self.storage_plans[store] = list(store.stores.keys())[0]
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for store, mnt_path in storage_mounts.items():
@@ -276,11 +320,11 @@ class Task(object):
                 # TODO: allow for Storage mounting of different clouds
                 self.update_file_mounts({'~/.aws': '~/.aws'})
                 self.update_file_mounts({
-                    mnt_path: 's3://' + store.name + '/',
+                    mnt_path: 's3://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.GCS:
                 self.update_file_mounts({
-                    mnt_path: 'gs://' + store.name + '/',
+                    mnt_path: 'gs://' + store.name,
                 })
                 assert False, 'TODO: GCS Authentication not done'
             elif storage_type is storage_lib.StorageType.AZURE:
@@ -292,27 +336,34 @@ class Task(object):
     def set_file_mounts(self, file_mounts: Dict[str, str]):
         """Sets the file mounts for this Task.
 
-        File mounts are local files/dirs to be synced to specific paths on the
-        remote VM(s) where this Task will run.  Can be used for syncing
-        datasets, dotfiles, etc.
+        File mounts are a dictionary of { remote_path: local_path/cloud URI }.
+        Local (or cloud) files/directories will be synced to the specified
+        paths on the remote VM(s) where this Task will run.
+
+        Used for syncing datasets, dotfiles, etc.
+
+        Paths cannot end with a slash (for clarity).
 
         Example:
 
             task.set_file_mounts({
                 '~/.dotfile': '/local/.dotfile',
+                # /remote/dir/ will contain the contents of /local/dir/.
                 '/remote/dir': '/local/dir',
             })
 
         Args:
-          file_mounts: a dict of { remote_path: local_path }, where remote is
-            the VM on which this Task will eventually run on, and local is the
-            node from which the task is launched.
+          file_mounts: a dict of { remote_path: local_path/cloud URI }, where
+            remote is the VM on which this Task will eventually run on, and
+            local is the node from which the task is launched.
         """
+        for target, source in file_mounts.items():
+            if target.endswith('/') or source.endswith('/'):
+                raise ValueError(
+                    'File mount paths cannot end with a slash '
+                    '(try "/mydir: /mydir" or "/myfile: /myfile"). '
+                    f'Found: target={target} source={source}')
         self.file_mounts = file_mounts
-        for remote, unused_source in file_mounts.items():
-            if not os.path.isabs(remote):
-                raise ValueError('File mounts: remote paths should be absolute,'
-                                 f' not relative or "~/...".  Found: {remote}')
         return self
 
     def set_enabled_clouds(self, enabled_clouds: List[clouds.Cloud]):
@@ -321,7 +372,7 @@ class Task(object):
         return self
 
     def update_file_mounts(self, file_mounts: Dict[str, str]):
-        """Updates the file mount for this Task
+        """Updates the file mounts for this Task.
 
         This should be run before provisioning.
 
@@ -340,6 +391,8 @@ class Task(object):
         if self.file_mounts is None:
             self.file_mounts = {}
         self.file_mounts.update(file_mounts)
+        # For validation logic:
+        return self.set_file_mounts(self.file_mounts)
 
     def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=local path).
@@ -375,10 +428,14 @@ class Task(object):
     def __repr__(self):
         if self.name:
             return self.name
-        if len(self.run) > 20:
-            s = 'Task(run=\'{}...\')'.format(self.run[:20])
+        if isinstance(self.run, str):
+            run_msg = self.run.replace('\n', '\\n')
         else:
-            s = 'Task(run=\'{}\')'.format(self.run)
+            run_msg = '<fn>'
+        if len(run_msg) > 20:
+            s = 'Task(run=\'{}...\')'.format(run_msg[:20])
+        else:
+            s = 'Task(run=\'{}\')'.format(run_msg)
         if self.inputs is not None:
             s += '\n  inputs: {}'.format(self.inputs)
         if self.outputs is not None:

@@ -74,7 +74,7 @@ class S3CloudStorage(CloudStorage):
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
         download_via_awscli = f'mkdir -p {destination} && \
-                                aws s3 sync {source} {destination}'
+                                aws s3 sync {source} {destination} --delete'
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
@@ -99,9 +99,9 @@ class GcsCloudStorage(CloudStorage):
     _GET_GSUTIL = [
         'pushd /tmp &>/dev/null',
         # Skip if /tmp/gsutil already exists.
-        'ls gsutil &>/dev/null || (wget --quiet '
+        '(test -f /tmp/gsutil/gsutil || (wget -c '
         'https://storage.googleapis.com/pub/gsutil.tar.gz && '
-        'tar xzf gsutil.tar.gz)',
+        'tar xzf gsutil.tar.gz))',
         'popd &>/dev/null',
     ]
 
@@ -135,7 +135,7 @@ class GcsCloudStorage(CloudStorage):
         publicly accessible bucket.
         """
         download_via_gsutil = (
-            f'{self._GSUTIL} -m rsync -r {source} {destination}')
+            f'{self._GSUTIL} -m rsync -d -r {source} {destination}')
         all_commands = list(self._GET_GSUTIL)
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)

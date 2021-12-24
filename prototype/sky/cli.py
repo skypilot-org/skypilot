@@ -53,7 +53,7 @@ Path = str
 Backend = backends.Backend
 
 
-def _truncate_long_string(s: str, max_length: int = 30) -> str:
+def _truncate_long_string(s: str, max_length: int = 50) -> str:
     if len(s) <= max_length:
         return s
     splits = s.split(' ')
@@ -66,16 +66,19 @@ def _truncate_long_string(s: str, max_length: int = 30) -> str:
         total += len(part)
         if total >= max_length:
             break
-    return ' '.join(splits[:i]) + '...'
+    return ' '.join(splits[:i]) + ' ...'
 
 
 def _default_interactive_node_name(node_type: str):
     """Returns a deterministic name to refer to the same node."""
-    assert node_type in ('cpunode', 'gpunode'), node_type
+    # FIXME: this technically can collide in Azure/GCP with another
+    # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
+    # which is the current cloud for interactive nodes.
+    assert node_type in ('cpunode', 'gpunode', 'tpunode'), node_type
     return f'sky-{node_type}-{getpass.getuser()}'
 
 
-# TODO: --screen; while uploading ~/.screenrc.
+# TODO: add support for --tmux.
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
         node_type: str,
@@ -83,6 +86,7 @@ def _create_and_ssh_into_node(
         cluster_name: str,
         backend: Optional[backend_lib.Backend] = None,
         port_forward: Optional[List[int]] = None,
+        use_screen: bool = False,
 ):
     """Creates and attaches to an interactive node.
 
@@ -93,7 +97,7 @@ def _create_and_ssh_into_node(
         backend: the Backend to use (currently only CloudVmRayBackend).
         port_forward: List of ports to forward.
     """
-    assert node_type in ('cpunode', 'gpunode'), node_type
+    assert node_type in ('cpunode', 'gpunode', 'tpunode'), node_type
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
         # should be setup =
@@ -114,7 +118,8 @@ def _create_and_ssh_into_node(
     task = dag.tasks[0]
 
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    if handle is None:
+    if handle is None or handle.head_ip is None:
+        # head_ip would be None if previous provisioning failed.
         handle = backend.provision(task,
                                    task.best_resources,
                                    dryrun=False,
@@ -126,20 +131,23 @@ def _create_and_ssh_into_node(
     # re-use it)
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
-    backend_utils.run(backend.ssh_head_command(handle,
-                                               port_forward=port_forward),
-                      shell=False)
-
+    # Disable check, since the returncode could be non-zero if the user Ctrl-D.
+    commands = backend.ssh_head_command(handle, port_forward=port_forward)
+    if use_screen:
+        commands += ['screen', '-D', '-R']
+    backend_utils.run(commands, shell=False, check=False)
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
-    click.echo('The interactive node is still running.')
-    click.echo('  To attach to it again:  ', nl=False)
+
+    click.echo('To attach it again:  ', nl=False)
     if cluster_name == _default_interactive_node_name(node_type):
         option = ''
     else:
         option = f' -c {cluster_name}'
     click.secho(f'sky {node_type}{option}', bold=True)
-    click.echo('  To tear down the node:  ', nl=False)
+    click.echo('To tear down the node:  ', nl=False)
     click.secho(f'sky down {cluster_name}', bold=True)
+    click.echo('To stop the node:  ', nl=False)
+    click.secho(f'sky stop {cluster_name}', bold=True)
 
 
 class _NaturalOrderGroup(click.Group):
@@ -167,7 +175,7 @@ def cli():
 @click.option('--dryrun',
               '-n',
               default=False,
-              type=bool,
+              is_flag=True,
               help='If True, do not actually run the job.')
 def run(yaml_path: Path, cluster: str, dryrun: bool):
     """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
@@ -243,20 +251,54 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
-def status():
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+def status(all):  # pylint: disable=redefined-builtin
     """Show launched clusters."""
+    show_all = all
     clusters_status = global_user_state.get_clusters()
     cluster_table = prettytable.PrettyTable()
-    cluster_table.field_names = ['CLUSTER NAME', 'LAUNCHED', 'LAST USE']
+    cluster_table.field_names = [
+        'NAME',
+        'LAUNCHED',
+        'RESOURCES',
+        'COMMAND',
+        'STATUS',
+    ]
+    cluster_table.align['COMMAND'] = 'l'
+
+    def shorten_duration_diff_string(diff):
+        diff = diff.replace('second', 'sec')
+        diff = diff.replace('minute', 'min')
+        diff = diff.replace('hour', 'hr')
+        return diff
+
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
+        handle = cluster_status['handle']
         duration = pendulum.now().subtract(seconds=time.time() - launched_at)
+        resources_str = '<initializing>'
+        if (handle.requested_nodes is not None and
+                handle.launched_resources is not None):
+            resources_str = (f'{handle.requested_nodes}x '
+                             f'{handle.launched_resources}')
         cluster_table.add_row([
+            # NAME
             cluster_status['name'],
-            duration.diff_for_humans(),
-            _truncate_long_string(cluster_status['last_use']),
+            # LAUNCHED
+            shorten_duration_diff_string(duration.diff_for_humans()),
+            # RESOURCES
+            resources_str,
+            # COMMAND
+            cluster_status['last_use']
+            if show_all else _truncate_long_string(cluster_status['last_use']),
+            # STATUS
+            cluster_status['status'],
         ])
-    cluster_table.align['LAST USE'] = 'l'
     click.echo(f'Clusters\n{cluster_table}')
 
 
@@ -334,11 +376,47 @@ def down(
       # Tear down all existing clusters.
       sky down -a
     """
-    name = cluster
-    downall = all
-    if name is None and downall is None:
+    _terminate_or_stop(cluster, apply_to_all=all, terminate=True)
+
+
+@cli.command()
+@click.argument('cluster', required=False)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Tear down all existing clusters.')
+def stop(
+        cluster: str,
+        all: Optional[bool],  # pylint: disable=redefined-builtin
+):
+    """Stop cluster(s).
+
+    CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
+    supplied, the latter takes precedence.
+
+    Limitation: this currently only works for AWS clusters.
+
+    Examples:
+
+      \b
+      # Stop a specific cluster.
+      sky stop cluster_name
+
+      \b
+      # Stop all existing clusters.
+      sky stop -a
+    """
+    _terminate_or_stop(cluster, apply_to_all=all, terminate=False)
+
+
+def _terminate_or_stop(name: Optional[str], apply_to_all: Optional[bool],
+                       terminate: bool) -> None:
+    """Terminates or stops a cluster (or all clusters)."""
+    command = 'down' if terminate else 'stop'
+    if name is None and apply_to_all is None:
         raise click.UsageError(
-            'sky down requires either a cluster name (see `sky status`) '
+            f'sky {command} requires either a cluster name (see `sky status`) '
             'or --all.')
 
     to_down = []
@@ -346,10 +424,10 @@ def down(
         handle = global_user_state.get_handle_from_cluster_name(name)
         if handle is not None:
             to_down = [{'name': name, 'handle': handle}]
-    if downall:
+    if apply_to_all:
         to_down = global_user_state.get_clusters()
         if name is not None:
-            print('Both --all and --cluster specified for sky down. '
+            print(f'Both --all and --cluster specified for sky {command}. '
                   'Letting --all take effect.')
             name = None
     if not to_down:
@@ -363,9 +441,14 @@ def down(
     for record in to_down:  # TODO: parallelize.
         name = record['name']
         handle = record['handle']
-        backend.teardown(handle)
-        global_user_state.remove_cluster(name)
-        click.secho(f'Tearing down cluster {name}...done.', fg='green')
+        backend.teardown(handle, terminate=terminate)
+        if terminate:
+            click.secho(f'Terminating cluster {name}...done.', fg='green')
+        else:
+            click.secho(f'Stopping cluster {name}...done.', fg='green')
+            click.echo(
+                f'  Tip: to resume the cluster, use "sky run -c {name} <yaml>" '
+                'or "sky cpunode/gpunode".')
 
 
 @cli.command()
@@ -382,7 +465,11 @@ def down(
               required=False,
               help=('Port to be forwarded. To forward multiple ports, '
                     'use this option multiple times.'))
-def gpunode(cluster: str, port_forward: Optional[List[int]]):
+@click.option('--screen',
+              default=False,
+              is_flag=True,
+              help='If true, attach using screen.')
+def gpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive GPU node.
 
     Automatically syncs the current working directory.
@@ -419,6 +506,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]]):
         sky.Resources(sky.AWS(), accelerators='V100'),
         cluster_name=name,
         port_forward=port_forward,
+        use_screen=screen,
     )
 
 
@@ -436,7 +524,11 @@ def gpunode(cluster: str, port_forward: Optional[List[int]]):
               required=False,
               help=('Port to be forwarded. To forward multiple ports, '
                     'use this option multiple times.'))
-def cpunode(cluster: str, port_forward: Optional[List[int]]):
+@click.option('--screen',
+              default=False,
+              is_flag=True,
+              help='If true, attach using screen.')
+def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
     """Launch or attach to an interactive CPU node.
 
     Automatically syncs the current working directory.
@@ -473,6 +565,66 @@ def cpunode(cluster: str, port_forward: Optional[List[int]]):
         sky.Resources(sky.AWS()),
         cluster_name=name,
         port_forward=port_forward,
+        use_screen=screen,
+    )
+
+
+@cli.command()
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              help=_CLUSTER_FLAG_HELP)
+@click.option('--port-forward',
+              '-p',
+              multiple=True,
+              default=[],
+              type=int,
+              required=False,
+              help=('Port to be forwarded. To forward multiple ports, '
+                    'use this option multiple times.'))
+@click.option('--screen',
+              default=False,
+              is_flag=True,
+              help='If true, attach using screen.')
+def tpunode(cluster: str, port_forward: Optional[List[int]], screen):
+    """Launch or attach to an interactive TPU node.
+
+    Automatically syncs the current working directory.
+
+    Example:
+
+      \b
+      # Launch a default tpunode.
+      $ sky tpunode
+
+      \b
+      # Do work, then log out.  The node is kept running.
+
+      \b
+      # Attach back to the same node and do more work.
+      $ sky tpunode
+
+      \b
+      # Alternatively, create multiple interactive nodes by specifying names
+      # via --cluster (-c).
+      $ sky tpunode -c node0
+      $ sky tpunode -c node1
+
+      \b
+      # Port forward.
+      sky tpunode --port-forward 8080 --port-forward 4650 -c cluster_name
+      sky tpunode -p 8080 -p 4650 -c cluster_name
+    """
+    name = cluster
+    if name is None:
+        name = _default_interactive_node_name('tpunode')
+    _create_and_ssh_into_node(
+        'tpunode',
+        sky.Resources(sky.GCP(), accelerators='tpu-v3-8'),
+        cluster_name=name,
+        port_forward=port_forward,
+        use_screen=screen,
     )
 
 

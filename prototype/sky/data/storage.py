@@ -120,6 +120,11 @@ class AbstractStore:
         """
         raise NotImplementedError
 
+    def __deepcopy__(self, memo):
+        # S3 Client and GCS Client cannot be deep copied, hence the
+        # original Store object is returned
+        return self
+
 
 class Storage(object):
     """Storage objects handle persistent and large volume storage in the sky.
@@ -197,6 +202,10 @@ class Storage(object):
         """
         store = None
 
+        if cloud_type in self.stores:
+            logger.info(f'Storage type {cloud_type} already exists!')
+            return self.stores[cloud_type]
+
         if cloud_type == StorageType.S3:
             store = S3Store(name=self.name, source=self.source)
         elif cloud_type == StorageType.GCS:
@@ -208,12 +217,6 @@ class Storage(object):
         self._perform_bucket_transfer(store)
 
         assert store.is_initialized
-        assert cloud_type not in self.stores, f'Storage type \
-                                                    {cloud_type} \
-                                                    already exists, \
-                                                    why do you want to \
-                                                    add another of \
-                                                    the same type? '
 
         self.stores[cloud_type] = store
         return store
@@ -284,7 +287,7 @@ class S3Store(AbstractStore):
         To increase parallelism, modify max_concurrent_requests in your
         aws config file (Default path: ~/.aws/config).
         """
-        sync_command = f'aws s3 sync {self.source} s3://{self.name}/'
+        sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'
         os.system(sync_command)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
@@ -395,7 +398,7 @@ class GcsStore(AbstractStore):
         """Syncs Local folder with GCS Bucket. This method is called after
         the folder is already uploaded onto the GCS bucket.
         """
-        sync_command = f'gsutil -m rsync -r {self.source} gs://{self.name}/'
+        sync_command = f'gsutil -m rsync -d -r {self.source} gs://{self.name}/'
         os.system(sync_command)
 
     def transfer_to_gcs(self, s3_store: AbstractStore) -> None:
@@ -426,7 +429,7 @@ class GcsStore(AbstractStore):
           remote_path: str; Remote path on GCS bucket
         """
         blob = self.bucket.blob(remote_path)
-        blob.upload_from_filename(local_file)
+        blob.upload_from_filename(local_file, timeout=None)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -436,7 +439,7 @@ class GcsStore(AbstractStore):
           local_path: str; Local path on user's device
         """
         blob = self.bucket.blob(remote_path)
-        blob.download_to_filename(local_path)
+        blob.download_to_filename(local_path, timeout=None)
 
     def _remote_filepath_iterator(self) -> str:
         """Generator that yields the remote file paths from the S3 bucket
