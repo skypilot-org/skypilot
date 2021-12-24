@@ -13,6 +13,7 @@ import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
+import yaml
 
 import colorama
 import sshconf
@@ -147,21 +148,17 @@ def _ssh_options_list(ssh_private_key: Optional[str],
 
 
 def _add_cluster_to_ssh_config(handle):
-    out = backend_utils.run(
-        f'ray exec {handle.cluster_yaml} "echo \'CLUSTER_USER: $(whoami)\'"',
-        capture_output=True)
-    stdout = str(out.stdout)
-
-    username = stdout.split("CLUSTER_USER: ")[-1].split('\\r')[0]
+    with open(handle.cluster_yaml, 'r') as f:
+        config = yaml.safe_load(f)
+    username = config['auth']['ssh_user']
     ip = handle.head_ip
-    key_path = os.path.expanduser('~/.ssh/sky-key')
+    key_path = os.path.expanduser(config['auth']['ssh_private_key'])
     cluster_name = pathlib.Path(handle.cluster_yaml).stem
 
     config_path = os.path.expanduser('~/.ssh/config')
     config = sshconf.empty_ssh_config_file()
     if not os.path.exists(config_path):
         config.write(config_path)  # create empty ssh config file
-
     config = sshconf.read_ssh_config(config_path)
     config.add(cluster_name,
                Hostname=ip,
