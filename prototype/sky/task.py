@@ -302,13 +302,15 @@ class Task(object):
     def add_storage_mounts(self) -> None:
         """Adds storage mounts to the Storage object
         """
-        # Hack: Hardcode storage_plans to AWS for optimal plan
-        # Optimizer is supposed to choose storage plan but we
-        # move this here temporarily
         for store in self.storage_mounts.keys():
             if len(store.stores) == 0:
-                self.storage_plans[store] = storage_lib.StorageType.S3
-                store.get_or_copy_to_s3()
+                if isinstance(self.best_resources.cloud, clouds.GCP):
+                    self.storage_plans[store] = storage_lib.StorageType.GCS
+                    store.get_or_copy_to_gcs()
+                else:
+                    # Unless we are running on GCP, default to using S3.
+                    self.storage_plans[store] = storage_lib.StorageType.S3
+                    store.get_or_copy_to_s3()
             else:
                 # Sky will download the first store that is added to remote
                 self.storage_plans[store] = list(store.stores.keys())[0]

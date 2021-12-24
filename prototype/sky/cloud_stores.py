@@ -6,13 +6,11 @@ offer file-level calls (e.g., open, reading, writing).
 TODO:
 * Better interface.
 * Better implementation (e.g., fsspec, smart_open, using each cloud's SDK).
-  The full-blown impl should handle authentication so each user's private
-  datasets can be accessed.
 """
-import subprocess
 import urllib.parse
 
 import boto3
+import botocore
 
 from sky.backends import backend_utils
 from sky.data import data_utils
@@ -21,11 +19,11 @@ from sky.data import data_utils
 class CloudStorage(object):
     """Interface for a cloud object store."""
 
-    def is_directory(self, url: str) -> bool:
-        """Returns whether 'url' is a directory.
+    def is_file(self, url: str) -> bool:
+        """Returns whether 'url' is a regular file.
 
-        In cloud object stores, a "directory" refers to a regular object whose
-        name is a prefix of other objects.
+        Returning false means <url> is a directory, or does not exist. Useful
+        for deciding whether to use cp or sync/rsync to download.
         """
         raise NotImplementedError
 
@@ -46,27 +44,15 @@ class S3CloudStorage(CloudStorage):
         'pip install awscli',
     ]
 
-    def is_directory(self, url: str) -> bool:
-        """Returns whether S3 'url' is a directory.
-
-        In cloud object stores, a "directory" refers to a regular object whose
-        name is a prefix of other objects.
-        """
-        s3 = boto3.resource('s3')
+    def is_file(self, url: str) -> bool:
+        """Returns whether 'url' is a regular file."""
         bucket_name, path = data_utils.split_s3_path(url)
-        bucket = s3.Bucket(bucket_name)
-
-        num_objects = 0
-        for obj in bucket.objects.filter(Prefix=path):
-            num_objects += 1
-            if obj.key == path:
-                return False
-            # If there are more than 1 object in filter, then it is a directory
-            if num_objects == 3:
-                return True
-
-        # A directory with few or no items
-        return True
+        s3 = boto3.resource('s3')
+        try:
+            s3.head_object(Bucket=bucket_name, Key=path)
+            return True
+        except botocore.errorfactory.ClientError:
+            return False
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads using AWS CLI."""
@@ -96,46 +82,33 @@ class GcsCloudStorage(CloudStorage):
     # We use gsutil as a basic implementation.  One pro is that its -m
     # multi-threaded download is nice, which frees us from implementing
     # parellel workers on our end.
-    _GET_GCLOUD_SDK = [
+    _GET_GSUTIL = [
+        # Skip if gsutil already exists.
         'pushd /tmp &>/dev/null',
-        # Skip if ~/google-cloud-sdk already exists.
-        f'(test -f ~/google-cloud-sdk || (wget -c '
+        '(test -f ~/google-cloud-sdk/bin/gsutil || (wget -c '
         'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
-        'tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz'
-        'mv google-cloud-sdk ~/',
-        '~/google-cloud-sdk/install.sh -q',
-        ')) popd &>/dev/null',
+        'tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
+        'mv google-cloud-sdk ~/ && '
+        '~/google-cloud-sdk/install.sh -q ))',
+        'popd &>/dev/null',
     ]
 
     _GSUTIL = '~/google-cloud-sdk/bin/gsutil'
 
-    def is_directory(self, url: str) -> bool:
-        """Returns whether 'url' is a directory.
+    def is_file(self, url: str) -> bool:
+        """Returns whether 'url' is a regular file."""
+        command = ' && '.join(self._GET_GSUTIL)
+        backend_utils.run(command)
 
-        In cloud object stores, a "directory" refers to a regular object whose
-        name is a prefix of other objects.
-        """
-        commands = list(self._GET_GSUTIL)
-        commands.append(f'{self._GSUTIL} ls -d {url}')
-        command = ' && '.join(commands)
-        p = backend_utils.run(command, stdout=subprocess.PIPE)
-        out = p.stdout.decode().strip()
-        # gsutil ls -d url
-        #   --> url.rstrip('/')          if url is not a directory
-        #   --> url with an ending '/'   if url is a directory
-        if not out.endswith('/'):
-            assert out == url.rstrip('/'), (out, url)
-            return False
-        url = url if url.endswith('/') else (url + '/')
-        assert out == url, (out, url)
-        return True
+        # https://cloud.google.com/storage/docs/gsutil/commands/stat
+        gsutil_cmd = f'{self._GSUTIL} -q stat {url}'
+        p = backend_utils.run(gsutil_cmd, check=False)
+        rc = p.returncode
+        assert rc in [0, 1], command
+        return rc == 0
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Downloads a directory using gsutil.
-
-        Limitation: no authentication support; 'source' is assumed to in a
-        publicly accessible bucket.
-        """
+        """Downloads a directory using gsutil."""
         download_via_gsutil = (
             f'{self._GSUTIL} -m rsync -d -r {source} {destination}')
         all_commands = list(self._GET_GSUTIL)
@@ -143,11 +116,7 @@ class GcsCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
-        """Downloads a file using gsutil.
-
-        Limitation: no authentication support; 'source' is assumed to in a
-        publicly accessible bucket.
-        """
+        """Downloads a file using gsutil."""
         download_via_gsutil = f'{self._GSUTIL} -m cp {source} {destination}'
         all_commands = list(self._GET_GSUTIL)
         all_commands.append(download_via_gsutil)
