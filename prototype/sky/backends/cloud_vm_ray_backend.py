@@ -59,6 +59,7 @@ def _get_task_demands_dict(task: App) -> Optional[Tuple[Optional[str], int]]:
     # TODO: CPU and other memory resources are not supported yet.
     accelerator_dict = None
     resources = task.best_resources
+    import pdb; pdb.set_trace()
     if resources is not None:
         accelerator_dict = resources.get_accelerators()
     return accelerator_dict
@@ -216,7 +217,7 @@ class RayCodeGen(object):
     def add_ray_task(
             self,
             bash_script: str,
-            task_name: str,
+            task_name: Optional[str],
             ray_resources_dict: Optional[Dict[str, float]],
             log_path: str,
             stream_logs: bool,
@@ -235,7 +236,7 @@ class RayCodeGen(object):
         name_str = f'name=\'{task_name}\''
         if task_name is None:
             name_str = 'name=None'
-            
+
         if ray_resources_dict is None:
             resources_str = ''
             num_gpus_str = ''
@@ -259,7 +260,7 @@ class RayCodeGen(object):
             bundle_index = self._ip_to_bundle_index[gang_scheduling_ip]
             resources_str = ', placement_group=pg'
             resources_str += f', placement_group_bundle_index={bundle_index}'
-
+        logger.debug(f'Added Task with options: {name_str}{resources_str}{num_gpus_str}')
         self._code += [
             textwrap.dedent(f"""\
         futures.append(run_bash_command_with_log \\
@@ -784,7 +785,9 @@ class RetryingVmProvisioner(object):
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.
                                          _blocked_launchable_resources)
-                task = self._dag.tasks[task_index]
+                # Update task itself, instead of create a new one, so that the
+                # caller can get the updated task.
+                task.__dict__.update(self._dag.tasks[task_index].__dict__)
                 to_provision = task.best_resources
                 assert to_provision is not None, task
         return config_dict

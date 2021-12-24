@@ -80,7 +80,6 @@ class Task(object):
           private_key: Unused?
         """
         self.name = name
-        self.best_resources = None
         self.run = run
         self.storage_mounts = {}
         self.storage_plans = {}
