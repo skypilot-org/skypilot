@@ -168,6 +168,7 @@ def _add_cluster_to_ssh_config(handle):
                User=username,
                IdentityFile=key_path,
                IdentitiesOnly='yes',
+               ForwardAgent='yes',
                Port=22)
     config.save()
 
