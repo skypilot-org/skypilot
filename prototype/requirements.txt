@@ -10,6 +10,7 @@ pendulum
 PrettyTable
 pytest
 ray[default]
+sshconf
 tabulate
 docker
 

@@ -5,6 +5,7 @@ import hashlib
 import inspect
 import json
 import os
+import pathlib
 import re
 import shlex
 import subprocess
@@ -14,6 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
 
 import colorama
+import sshconf
 from ray.autoscaler import sdk
 
 import sky
@@ -145,10 +147,38 @@ def _ssh_options_list(ssh_private_key: Optional[str],
 
 
 def _add_cluster_to_ssh_config(handle):
-    pass
+    out = backend_utils.run(
+        f'ray exec {handle.cluster_yaml} "echo \'CLUSTER_USER: $(whoami)\'"',
+        capture_output=True)
+    stdout = str(out.stdout)
+
+    username = stdout.split("CLUSTER_USER: ")[-1].split('\\r')[0]
+    ip = handle.head_ip
+    key_path = os.path.expanduser('~/.ssh/sky-key')
+    cluster_name = pathlib.Path(handle.cluster_yaml).stem
+
+    config_path = os.path.expanduser('~/.ssh/config')
+    config = sshconf.empty_ssh_config_file()
+    if not os.path.exists(config_path):
+        config.write(config_path)  # create empty ssh config file
+
+    config = sshconf.read_ssh_config(config_path)
+    config.add(cluster_name,
+               Hostname=ip,
+               User=username,
+               IdentityFile=key_path,
+               IdentitiesOnly='yes',
+               Port=22)
+    config.save()
+
 
 def _remove_cluster_from_ssh_config(handle):
-    pass
+    cluster_name = pathlib.Path(handle.cluster_yaml).stem
+    config_path = os.path.expanduser('~/.ssh/config')
+    config = sshconf.read_ssh_config(config_path)
+    config.remove(cluster_name)
+    config.save()
+
 
 class RetryingVmProvisioner(object):
     """A provisioner that retries different cloud/regions/zones."""
@@ -789,9 +819,7 @@ class CloudVmRayBackend(backends.Backend):
             # TPU.
             tpu_delete_script=config_dict.get('tpu-delete-script'))
 
-        # Generate SSH handle
-
-
+        _add_cluster_to_ssh_config(handle)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True)
@@ -1198,6 +1226,7 @@ class CloudVmRayBackend(backends.Backend):
             if handle.tpu_delete_script is not None:
                 backend_utils.run(f'bash {handle.tpu_delete_script}')
         name = global_user_state.get_cluster_name_from_handle(handle)
+        _remove_cluster_from_ssh_config(handle)
         global_user_state.remove_cluster(name, terminate=terminate)
 
     def _get_node_ips(self,
