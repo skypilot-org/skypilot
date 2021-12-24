@@ -55,6 +55,8 @@ def _get_cluster_config_template(cloud):
 
 
 def _get_task_demands_dict(task: App) -> Optional[Tuple[Optional[str], int]]:
+    """Returns the accelerator dict of the task"""
+    # TODO: CPU and other memory resources are not supported yet.
     accelerator_dict = None
     resources = task.best_resources
     if resources is not None:
@@ -231,6 +233,9 @@ class RayCodeGen(object):
         #   resources=...
         #   num_gpus=...
         name_str = f'name=\'{task_name}\''
+        if task_name is None:
+            name_str = 'name=None'
+            
         if ray_resources_dict is None:
             resources_str = ''
             num_gpus_str = ''
