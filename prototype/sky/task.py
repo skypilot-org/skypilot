@@ -263,6 +263,11 @@ class Task(object):
     def get_resources(self):
         return self.resources
 
+    def set_post_setup_fn(self, post_setup_fn):
+        """Sets the post setup function, which maps IPs to setup cmds"""
+        self.post_setup_fn = post_setup_fn
+        return self
+
     def set_time_estimator(self, func):
         """Sets a func mapping resources to estimated time (secs)."""
         self.time_estimator_func = func
@@ -369,7 +374,7 @@ class Task(object):
     def update_file_mounts(self, file_mounts: Dict[str, str]):
         """Updates the file mounts for this Task.
 
-        This should be run before provisioning.
+        This is ran before provisioning the Cloud VM.
 
         Example:
 
