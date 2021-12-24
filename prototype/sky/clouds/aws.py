@@ -1,6 +1,7 @@
 """Amazon Web Services."""
 import copy
 import json
+import os
 import subprocess
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -116,8 +117,8 @@ class AWS(clouds.Cloud):
     # between Azure and AWS.
 
     def get_accelerators_from_instance_type(
-            self,
-            instance_type: str,
+        self,
+        instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return aws_catalog.get_accelerators_from_instance_type(instance_type)
 
@@ -169,8 +170,9 @@ class AWS(clouds.Cloud):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
+            assert os.path.isfile(os.path.expanduser('~/.aws/credentials'))
             output = _run_output('aws configure list')
-        except subprocess.CalledProcessError:
+        except (AssertionError, subprocess.CalledProcessError):
             return False, 'AWS CLI not installed properly.'
         lines = output.split('\n')
         if len(lines) < 2:

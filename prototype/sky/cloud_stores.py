@@ -96,16 +96,18 @@ class GcsCloudStorage(CloudStorage):
     # We use gsutil as a basic implementation.  One pro is that its -m
     # multi-threaded download is nice, which frees us from implementing
     # parellel workers on our end.
-    _GET_GSUTIL = [
+    _GET_GCLOUD_SDK = [
         'pushd /tmp &>/dev/null',
-        # Skip if /tmp/gsutil already exists.
-        '(test -f /tmp/gsutil/gsutil || (wget -c '
-        'https://storage.googleapis.com/pub/gsutil.tar.gz && '
-        'tar xzf gsutil.tar.gz))',
-        'popd &>/dev/null',
+        # Skip if ~/google-cloud-sdk already exists.
+        f'(test -f ~/google-cloud-sdk || (wget -c '
+        'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
+        'tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz'
+        'mv google-cloud-sdk ~/',
+        '~/google-cloud-sdk/install.sh -q',
+        ')) popd &>/dev/null',
     ]
 
-    _GSUTIL = '/tmp/gsutil/gsutil'
+    _GSUTIL = '~/google-cloud-sdk/bin/gsutil'
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.

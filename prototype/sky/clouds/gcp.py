@@ -1,6 +1,7 @@
 """Google Cloud Platform."""
 import copy
 import json
+import os
 from typing import Dict, Iterator, List, Optional, Tuple
 
 import google.auth
@@ -273,16 +274,21 @@ class GCP(clouds.Cloud):
         return [r]
 
     def get_accelerators_from_instance_type(
-            self,
-            instance_type: str,
+        self,
+        instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return None
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
+            for file in [
+                    '~/.config/gcloud/access_tokens.db',
+                    '~/.config/gcloud/credentials.db'
+            ]:
+                assert os.path.isfile(os.path.expanduser(file))
             google.auth.default()
-        except google.auth.exceptions.DefaultCredentialsError:
-            return False, ('GCP credentials not set.' +
+        except (AssertionError, google.auth.exceptions.DefaultCredentialsError):
+            return False, ('GCP credentials not set.'
                            ' Run `gcloud auth application-default login`.')
         return True, None
