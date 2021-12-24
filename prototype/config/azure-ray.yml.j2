@@ -92,7 +92,7 @@ rsync_filter:
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.
-  - pip3 install -U ray==1.7.0 && mkdir -p /tmp/workdir && touch ~/.sudo_as_admin_successful
+  - pip3 install -U ray==1.7.0 && mkdir -p /tmp/workdir && mkdir -p /tmp/sky_app && touch ~/.sudo_as_admin_successful
 {%- if setup_sh_path is not none %}
   - cd /tmp/workdir && bash /tmp/setup.sh
 {%- endif %}
