@@ -76,7 +76,7 @@ def _default_interactive_node_name(node_type: str):
     # FIXME: this technically can collide in Azure/GCP with another
     # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
     # which is the current cloud for interactive nodes.
-    assert node_type in ('cpunode', 'gpunode'), node_type
+    assert node_type in ('cpunode', 'gpunode', 'tpunode'), node_type
     return f'sky-{node_type}-{getpass.getuser()}'
 
 
@@ -99,7 +99,7 @@ def _create_and_ssh_into_node(
         backend: the Backend to use (currently only CloudVmRayBackend).
         port_forward: List of ports to forward.
     """
-    assert node_type in ('cpunode', 'gpunode'), node_type
+    assert node_type in ('cpunode', 'gpunode', 'tpunode'), node_type
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
         # should be setup =
@@ -645,6 +645,65 @@ def cpunode(cluster: str, port_forward: Optional[List[int]], screen):
     _create_and_ssh_into_node(
         'cpunode',
         sky.Resources(sky.AWS()),
+        cluster_name=name,
+        port_forward=port_forward,
+        use_screen=screen,
+    )
+
+
+@cli.command()
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              help=_CLUSTER_FLAG_HELP)
+@click.option('--port-forward',
+              '-p',
+              multiple=True,
+              default=[],
+              type=int,
+              required=False,
+              help=('Port to be forwarded. To forward multiple ports, '
+                    'use this option multiple times.'))
+@click.option('--screen',
+              default=False,
+              is_flag=True,
+              help='If true, attach using screen.')
+def tpunode(cluster: str, port_forward: Optional[List[int]], screen):
+    """Launch or attach to an interactive TPU node.
+
+    Automatically syncs the current working directory.
+
+    Example:
+
+      \b
+      # Launch a default tpunode.
+      $ sky tpunode
+
+      \b
+      # Do work, then log out.  The node is kept running.
+
+      \b
+      # Attach back to the same node and do more work.
+      $ sky tpunode
+
+      \b
+      # Alternatively, create multiple interactive nodes by specifying names
+      # via --cluster (-c).
+      $ sky tpunode -c node0
+      $ sky tpunode -c node1
+
+      \b
+      # Port forward.
+      sky tpunode --port-forward 8080 --port-forward 4650 -c cluster_name
+      sky tpunode -p 8080 -p 4650 -c cluster_name
+    """
+    name = cluster
+    if name is None:
+        name = _default_interactive_node_name('tpunode')
+    _create_and_ssh_into_node(
+        'tpunode',
+        sky.Resources(sky.GCP(), accelerators='tpu-v3-8'),
         cluster_name=name,
         port_forward=port_forward,
         use_screen=screen,
