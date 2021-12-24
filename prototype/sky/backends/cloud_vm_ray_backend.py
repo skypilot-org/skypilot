@@ -154,7 +154,7 @@ def _remove_cluster_from_ssh_config(handle):
     config.remove(cluster_name)
     config.save()
 
-    
+
 class RayCodeGen(object):
     """Code generator of a Ray program that executes a sky.Task.
 
