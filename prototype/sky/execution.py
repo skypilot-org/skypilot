@@ -72,7 +72,6 @@ def execute(dag: sky.Dag,
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
     """
-    # TODO: Azure.
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]
 
