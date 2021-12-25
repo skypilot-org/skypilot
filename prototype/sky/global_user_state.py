@@ -31,7 +31,8 @@ except sqlite3.OperationalError:
         name TEXT PRIMARY KEY,
         lauched_at INTEGER,
         handle BLOB,
-        last_use TEXT)""")
+        last_use TEXT,
+        status TEXT)""")
 _CONN.commit()
 
 
@@ -54,23 +55,40 @@ def _get_pretty_entry_point() -> str:
 
 
 def add_or_update_cluster(cluster_name: str,
-                          cluster_handle: backends.Backend.ResourceHandle):
+                          cluster_handle: backends.Backend.ResourceHandle,
+                          ready: bool):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
     last_use = _get_pretty_entry_point()
-    _CURSOR.execute('INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?)',
-                    (cluster_name, cluster_launched_at, handle, last_use))
+    _CURSOR.execute('INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?, ?)',
+                    (cluster_name, cluster_launched_at, handle, last_use,
+                     'UP' if ready else 'INIT'))
     _CONN.commit()
 
 
-def remove_cluster(cluster_name: str):
+def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
-    _CURSOR.execute('DELETE FROM clusters WHERE name=(?)', (cluster_name,))
+    if terminate:
+        _CURSOR.execute('DELETE FROM clusters WHERE name=(?)', (cluster_name,))
+    else:
+        handle = get_handle_from_cluster_name(cluster_name)
+        if handle is None:
+            return
+        # Must invalidate head_ip: otherwise 'sky cpunode' on a stopped cpunode
+        # will directly try to ssh, which leads to timeout.
+        handle.head_ip = None
+        _CURSOR.execute(
+            'UPDATE clusters SET handle=(?), status=(?) WHERE name=(?)', (
+                pickle.dumps(handle),
+                'STOPPED',
+                cluster_name,
+            ))
     _CONN.commit()
 
 
-def get_handle_from_cluster_name(cluster_name: str) -> Optional[str]:
+def get_handle_from_cluster_name(cluster_name: str
+                                ) -> Optional[backends.Backend.ResourceHandle]:
     rows = _CURSOR.execute('SELECT handle FROM clusters WHERE name=(?)',
                            (cluster_name,))
     for (handle,) in rows:
@@ -89,11 +107,12 @@ def get_cluster_name_from_handle(
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')
     records = []
-    for name, launched_at, handle, last_use in rows:
+    for name, launched_at, handle, last_use, status in rows:
         records.append({
             'name': name,
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
+            'status': status,
         })
     return records

@@ -13,6 +13,8 @@ Current task launcher:
   - ray exec + each task's commands
 """
 import enum
+import sys
+import traceback
 from typing import Any, List, Optional
 
 import sky
@@ -72,7 +74,6 @@ def execute(dag: sky.Dag,
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
     """
-    # TODO: Azure.
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]
 
@@ -85,46 +86,65 @@ def execute(dag: sky.Dag,
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
-    if stages is None or Stage.PROVISION in stages:
-        if handle is None:
-            # **Dangerous**.  If passing a handle, changes to (1) setup commands
-            # (2) file_mounts list/content (3) other state about the cluster are
-            # IGNORED.  Careful.
-            #
-            # Mitigations: introduce backend.run_setup_commands() as a
-            # standalone stage; fix CloudVmRayBackend.sync_file_mounts() to
-            # sync all files.  They are mitigations because if one manually
-            # changes the cluster AND passing in a handle, the cluster still
-            # would not be updated correctly.
-            handle = backend.provision(task,
-                                       task.best_resources,
-                                       dryrun=dryrun,
-                                       stream_logs=stream_logs,
-                                       cluster_name=cluster_name)
+    if task.storage_mounts is not None:
+        # Optimizer should eventually choose where to store bucket
+        task.add_storage_mounts()
 
-    if dryrun:
-        logger.info('Dry run finished.')
-        return
+    status_printed = False
+    try:
+        if stages is None or Stage.PROVISION in stages:
+            if handle is None:
+                # **Dangerous**.  If passing a handle, changes to (1) setup
+                # commands (2) file_mounts list/content (3) other state about
+                # the cluster are IGNORED.  Careful.
+                #
+                # Mitigations: introduce backend.run_setup_commands() as a
+                # standalone stage; fix CloudVmRayBackend.sync_file_mounts() to
+                # sync all files.  They are mitigations because if one manually
+                # changes the cluster AND passing in a handle, the cluster still
+                # would not be updated correctly.
+                handle = backend.provision(task,
+                                           task.best_resources,
+                                           dryrun=dryrun,
+                                           stream_logs=stream_logs,
+                                           cluster_name=cluster_name)
 
-    if stages is None or Stage.SYNC_WORKDIR in stages:
-        if task.workdir is not None:
-            backend.sync_workdir(handle, task.workdir)
+        if dryrun:
+            logger.info('Dry run finished.')
+            return
 
-    if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
-        backend.sync_file_mounts(handle, task.file_mounts,
-                                 task.get_cloud_to_remote_file_mounts())
+        if stages is None or Stage.SYNC_WORKDIR in stages:
+            if task.workdir is not None:
+                backend.sync_workdir(handle, task.workdir)
 
-    if stages is None or Stage.PRE_EXEC in stages:
-        if task.post_setup_fn is not None:
-            backend.run_post_setup(handle, task.post_setup_fn, task)
+        if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
+            backend.sync_file_mounts(handle, task.file_mounts,
+                                     task.get_cloud_to_remote_file_mounts())
 
-    if stages is None or Stage.EXEC in stages:
-        try:
-            backend.execute(handle, task, stream_logs)
-        finally:
-            # Enables post_execute() to be run after KeyboardInterrupt.
-            backend.post_execute(handle, teardown)
+        if stages is None or Stage.PRE_EXEC in stages:
+            if task.post_setup_fn is not None:
+                backend.run_post_setup(handle, task.post_setup_fn, task)
 
-    if stages is None or Stage.TEARDOWN in stages:
-        if teardown:
-            backend.teardown(handle)
+        if stages is None or Stage.EXEC in stages:
+            try:
+                backend.execute(handle, task, stream_logs)
+            finally:
+                # Enables post_execute() to be run after KeyboardInterrupt.
+                backend.post_execute(handle, teardown)
+
+        if stages is None or Stage.TEARDOWN in stages:
+            if teardown:
+                backend.teardown_ephemeral_storage(task)
+                backend.teardown(handle)
+    except Exception:  # pylint: disable=broad-except
+        # UX: print live clusters to make users aware (to save costs).
+        # Shorter stacktrace than raise e (e.g., no cli stuff).
+        traceback.print_exc()
+        print()
+        backends.backend_utils.run('sky status')
+        status_printed = True
+        sys.exit(1)
+    finally:
+        if not status_printed:
+            # Needed because this finally doesn't always get executed on errors.
+            backends.backend_utils.run('sky status')

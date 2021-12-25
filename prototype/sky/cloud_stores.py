@@ -12,7 +12,10 @@ TODO:
 import subprocess
 import urllib.parse
 
+import boto3
+
 from sky.backends import backend_utils
+from sky.data import data_utils
 
 
 class CloudStorage(object):
@@ -35,6 +38,58 @@ class CloudStorage(object):
         raise NotImplementedError
 
 
+class S3CloudStorage(CloudStorage):
+    """AWS Cloud Storage."""
+
+    # List of commands to install AWS CLI
+    _GET_AWSCLI = [
+        'pip install awscli',
+    ]
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether S3 'url' is a directory.
+
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        s3 = boto3.resource('s3')
+        bucket_name, path = data_utils.split_s3_path(url)
+        bucket = s3.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            # If there are more than 1 object in filter, then it is a directory
+            if num_objects == 3:
+                return True
+
+        # A directory with few or no items
+        return True
+
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using AWS CLI."""
+        # AWS Sync by default uses 10 threads to upload files to the bucket.
+        # To increase parallelism, modify max_concurrent_requests in your
+        # aws config file (Default path: ~/.aws/config).
+        download_via_awscli = f'mkdir -p {destination} && \
+                                aws s3 sync {source} {destination} --delete'
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using AWS CLI."""
+        download_via_awscli = f'mkdir -p {destination} && \
+                                aws s3 cp {source} {destination}'
+
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
+
+
 class GcsCloudStorage(CloudStorage):
     """Google Cloud Storage."""
 
@@ -44,9 +99,9 @@ class GcsCloudStorage(CloudStorage):
     _GET_GSUTIL = [
         'pushd /tmp &>/dev/null',
         # Skip if /tmp/gsutil already exists.
-        'ls gsutil &>/dev/null || (wget --quiet '
+        '(test -f /tmp/gsutil/gsutil || (wget --quiet '
         'https://storage.googleapis.com/pub/gsutil.tar.gz && '
-        'tar xzf gsutil.tar.gz)',
+        'tar xzf gsutil.tar.gz))',
         'popd &>/dev/null',
     ]
 
@@ -80,7 +135,7 @@ class GcsCloudStorage(CloudStorage):
         publicly accessible bucket.
         """
         download_via_gsutil = (
-            f'{self._GSUTIL} -m rsync -r {source} {destination}')
+            f'{self._GSUTIL} -m rsync -d -r {source} {destination}')
         all_commands = list(self._GET_GSUTIL)
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
@@ -100,6 +155,7 @@ class GcsCloudStorage(CloudStorage):
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
+
     if result.scheme not in _REGISTRY:
         assert False, ('Scheme {} not found in'
                        ' supported storage ({}); path {}'.format(
@@ -109,4 +165,5 @@ def get_storage_from_path(url: str) -> CloudStorage:
 
 _REGISTRY = {
     'gs': GcsCloudStorage(),
+    's3': S3CloudStorage(),
 }

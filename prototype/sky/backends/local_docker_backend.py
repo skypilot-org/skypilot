@@ -1,5 +1,5 @@
 """Local docker backend for sky"""
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 import colorama
 import docker
@@ -22,7 +22,7 @@ logger = logging.init_logger(__name__)
 class LocalDockerBackend(backends.Backend):
     """Local docker backend for debugging.
 
-    Ignores resource demands when allocating.
+    Ignores resource demands when allocating. Optionally uses GPU if required.
     """
 
     class ResourceHandle(str):
@@ -37,7 +37,17 @@ class LocalDockerBackend(backends.Backend):
         }
     }
 
-    def __init__(self):
+    def __init__(self, use_gpu: Union[bool, str] = 'auto'):
+        """
+        Args:
+            use_gpu: Whether to use GPUs. Either of True, False or 'auto'.
+              Sets container runtime to 'nvidia' if set to True, else uses the
+              default runtime. If set to 'auto', it detects if GPUs are present
+              and automatically sets the container runtime.
+
+        """
+        self._use_gpu = backend_utils.check_local_gpus() if use_gpu == 'auto' \
+            else use_gpu
         self.volume_mounts = {}  # Stores the ResourceHandle->volume mounts map
         self.images = {}  # Stores the ResourceHandle->images map
         self.containers = {}
@@ -57,9 +67,11 @@ class LocalDockerBackend(backends.Backend):
         del cluster_name  # Unused.
         if stream_logs:
             logger.info(
-                'Streaming logs is not supported in LocalDockerBackend. '
-                'Logs will be shown on build failure.')
+                'Streaming build logs is not supported in LocalDockerBackend. '
+                'Build logs will be shown on failure.')
         handle = task.name
+        assert handle is not None, 'Task should have a name to be run with ' \
+                                   'LocalDockerBackend.'
         logger.info(f'Building docker image for task {task.name}. '
                     'This might take some time.')
         image_tag = docker_utils.build_dockerimage_from_task(task)
@@ -137,13 +149,23 @@ class LocalDockerBackend(backends.Backend):
         assert handle in self.images[handle], \
             f'No image found for {handle}, have you run Backend.provision()?'
         image_tag = self.images[handle]
-        logger.info(f'Image {image_tag} found. Running container now.')
         volumes = self.volume_mounts[handle]
-        container = self.client.containers.run(image_tag,
-                                               remove=True,
-                                               detach=True,
-                                               privileged=True,
-                                               volumes=volumes)
+        runtime = 'nvidia' if self._use_gpu else None
+        logger.info(f'Image {image_tag} found. Running container now. use_gpu '
+                    f'is {self._use_gpu}')
+        try:
+            container = self.client.containers.run(image_tag,
+                                                   remove=True,
+                                                   detach=True,
+                                                   privileged=True,
+                                                   volumes=volumes,
+                                                   runtime=runtime)
+        except docker.errors.APIError as e:
+            if 'Unknown runtime specified nvidia' in e.explanation:
+                logger.error(
+                    'Unable to run container - nvidia runtime for docker not '
+                    'found. Have you installed nvidia-docker on your machine?')
+            raise e
         self.containers[handle] = container
         logger.info(
             f'Your container is now running with name {container.name}.\n'
@@ -178,6 +200,10 @@ class LocalDockerBackend(backends.Backend):
             f'task run command, run {style.BRIGHT}docker run -it '
             f'{container.image.tags[0]} /bin/bash{style.RESET_ALL}')
 
-    def teardown(self, handle: ResourceHandle) -> None:
-        """ Teardown kills the container"""
+    def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+        """Teardown kills the container."""
+        if not terminate:
+            logger.warning(
+                'LocalDockerBackend.teardown() will terminate '
+                'containers for now, despite receiving termiante=False.')
         self.containers[handle].remove(force=True)
