@@ -217,6 +217,7 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls):
+        # 8 vCpus, 52 GB RAM.  First-gen general purpose.
         return 'n1-highmem-8'
 
     @classmethod
