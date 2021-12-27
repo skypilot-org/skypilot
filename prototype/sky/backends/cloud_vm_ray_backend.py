@@ -34,6 +34,7 @@ App = backend_utils.App
 Resources = resources_lib.Resources
 Dag = dag_lib.Dag
 OptimizeTarget = optimizer.OptimizeTarget
+ResourceHandle = backends.Backend.ResourceHandle
 
 Path = str
 PostSetupFn = Callable[[str], Any]
@@ -100,6 +101,14 @@ def _log_hint_for_redirected_outputs(log_dir: str, cluster_yaml: str) -> None:
                 f'"ls {log_dir}/")')
 
 
+def _ssh_control_path(handle: ResourceHandle) -> str:
+    """Returns a temporary path to be used as the ssh control path."""
+    path = '/tmp/sky_ssh/{}'.format(
+        hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10])
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 def _ssh_options_list(ssh_private_key: Optional[str],
                       ssh_control_path: str,
                       *,
@@ -142,6 +151,37 @@ def _ssh_options_list(ssh_private_key: Optional[str],
                     for k, v in arg_dict.items()
                     if v is not None) for x in y
     ]
+
+
+def run_rsync(handle: ResourceHandle,
+              source: str,
+              target: str,
+              with_outputs: bool = True) -> None:
+    """Runs rsync from 'source' to the cluster head node's 'target'."""
+    # Attempt to use 'rsync user@ip' directly, which is much faster than
+    # going through ray (either 'ray rsync_*' or sdk.rsync()).
+    config = backend_utils.read_yaml(handle.cluster_yaml)
+    if handle.head_ip is None:
+        raise ValueError(
+            f'The cluster "{config["cluster_name"]}" appears to be down. '
+            'Run a re-provisioning command again (e.g., sky run) and retry.')
+    auth = config['auth']
+    ssh_user = auth['ssh_user']
+    ssh_private_key = auth.get('ssh_private_key')
+    # Build command.
+    rsync_command = ['rsync', '-a']
+    ssh_options = ' '.join(
+        _ssh_options_list(ssh_private_key, _ssh_control_path(handle)))
+    rsync_command.append(f'-e "ssh {ssh_options}"')
+    rsync_command.extend([
+        source,
+        f'{ssh_user}@{handle.head_ip}:{target}',
+    ])
+    command = ' '.join(rsync_command)
+    if with_outputs:
+        backend_utils.run(command)
+    else:
+        backend_utils.run_no_outputs(command)
 
 
 class RetryingVmProvisioner(object):
@@ -792,10 +832,10 @@ class CloudVmRayBackend(backends.Backend):
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
         # TODO: this only syncs to head.
-        self._run_rsync(handle,
-                        source=f'{workdir}/',
-                        target=SKY_REMOTE_WORKDIR,
-                        with_outputs=True)
+        run_rsync(handle,
+                  source=f'{workdir}/',
+                  target=SKY_REMOTE_WORKDIR,
+                  with_outputs=True)
 
     def sync_file_mounts(
             self,
@@ -1005,10 +1045,10 @@ class CloudVmRayBackend(backends.Backend):
             # We choose to sync code + exec, because the alternative of 'ray
             # submit' may not work as it may use system python (python2) to
             # execute the script.  Happens for AWS.
-            self._run_rsync(handle,
-                            source=fp.name,
-                            target=f'/tmp/{basename}',
-                            with_outputs=False)
+            run_rsync(handle,
+                      source=fp.name,
+                      target=f'/tmp/{basename}',
+                      with_outputs=False)
 
         log_path = os.path.join(self.log_dir, 'run.log')
         if not stream_logs:
@@ -1217,45 +1257,6 @@ class CloudVmRayBackend(backends.Backend):
             os.remove(yaml_handle)
         return head_ip + worker_ips
 
-    def _ssh_control_path(self, handle: ResourceHandle) -> str:
-        """Returns a temporary path to be used as the ssh control path."""
-        path = '/tmp/sky_ssh/{}'.format(
-            hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10])
-        os.makedirs(path, exist_ok=True)
-        return path
-
-    def _run_rsync(self,
-                   handle: ResourceHandle,
-                   source: str,
-                   target: str,
-                   with_outputs: bool = True) -> None:
-        """Runs rsync from 'source' to the cluster head node's 'target'."""
-        # Attempt to use 'rsync user@ip' directly, which is much faster than
-        # going through ray (either 'ray rsync_*' or sdk.rsync()).
-        config = backend_utils.read_yaml(handle.cluster_yaml)
-        if handle.head_ip is None:
-            raise ValueError(
-                f'The cluster "{config["cluster_name"]}" appears to be down. '
-                'Run a re-provisioning command again (e.g., sky run) and retry.'
-            )
-        auth = config['auth']
-        ssh_user = auth['ssh_user']
-        ssh_private_key = auth.get('ssh_private_key')
-        # Build command.
-        rsync_command = ['rsync', '-a']
-        ssh_options = ' '.join(
-            _ssh_options_list(ssh_private_key, self._ssh_control_path(handle)))
-        rsync_command.append(f'-e "ssh {ssh_options}"')
-        rsync_command.extend([
-            source,
-            f'{ssh_user}@{handle.head_ip}:{target}',
-        ])
-        command = ' '.join(rsync_command)
-        if with_outputs:
-            backend_utils.run(command)
-        else:
-            backend_utils.run_no_outputs(command)
-
     def ssh_head_command(self,
                          handle: ResourceHandle,
                          port_forward: Optional[List[int]] = None) -> List[str]:
@@ -1276,7 +1277,7 @@ class CloudVmRayBackend(backends.Backend):
                 ssh += ['-L', '{}:localhost:{}'.format(remote, local)]
         return ssh + _ssh_options_list(
             ssh_private_key,
-            self._ssh_control_path(handle)) + [f'{ssh_user}@{handle.head_ip}']
+            _ssh_control_path(handle)) + [f'{ssh_user}@{handle.head_ip}']
 
     def _run_command_on_head_via_ssh(self, handle, cmd, log_path, stream_logs):
         """Uses 'ssh' to run 'cmd' on a cluster's head node."""

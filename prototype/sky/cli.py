@@ -152,34 +152,6 @@ def _create_and_ssh_into_node(
     click.secho(f'sky stop {cluster_name}', bold=True)
 
 
-def _rsync_setup(handle: ResourceHandle,
-                 source: str,
-                 target: str,
-                 with_outputs: bool = True) -> None:
-    """Runs rsync from 'source' to the cluster head node's 'target'."""
-    config = backend_utils.read_yaml(handle.cluster_yaml)
-    if handle.head_ip is None:
-        raise ValueError(
-            f'The cluster "{config["cluster_name"]}" appears to be down. '
-            'Run a re-provisioning command again (e.g., sky run) and retry.')
-    auth = config['auth']
-    ssh_user = auth['ssh_user']
-    ssh_private_key = auth.get('ssh_private_key')
-    # Build command.
-    rsync_command = ['rsync', '-a']
-    rsync_command.extend([
-        source,
-        f'{ssh_user}@{handle.head_ip}:{target}',
-    ])
-    ssh_options = f'-i {ssh_private_key}'
-    rsync_command.append(f'-e "ssh {ssh_options}"')
-    command = ' '.join(rsync_command)
-    if with_outputs:
-        backend_utils.run(command)
-    else:
-        backend_utils.run_no_outputs(command)
-
-
 class _NaturalOrderGroup(click.Group):
     """Lists commands in the order they are defined in this script.
 
@@ -294,9 +266,11 @@ def exec(entrypoint: Union[Path, str], cluster: str, setup: Union[Path, str]):  
 
     def _setup_remote_shell_script(script_path: str) -> str:
         # Uploads bash script, runs, and deletes bash script on remote workdir
-        target = backend_utils.SKY_REMOTE_WORKDIR + '/' + str(
-            uuid.uuid4()) + '.sh'
-        _rsync_setup(handle=handle, source=script_path, target=target)
+        target = os.path.join(backend_utils.SKY_REMOTE_WORKDIR,
+                              str(uuid.uuid4()) + '.sh')
+        backend_lib.CloudVmRayBackend.rsync_setup(handle=handle,
+                                                  source=script_path,
+                                                  target=target)
         return f'chmod +x {target}; bash {target}; rm {target}'
 
     stages = [
