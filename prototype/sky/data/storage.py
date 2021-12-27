@@ -174,6 +174,11 @@ class Storage(object):
         # from existing ones
         self.stores = {} if stores is None else stores
 
+        if 's3://' in self.source:
+            self.get_or_copy_to_s3()
+        elif 'gs://' in self.source:
+            self.get_or_copy_to_gcs()
+
     def get_or_copy_to_s3(self):
         """Adds AWS S3 Store to Storage
         """
@@ -243,7 +248,10 @@ class Storage(object):
                 cur_store.transfer_to_gcs(s3_store)
         elif self.source.startswith('gs://'):
             if isinstance(cur_store, S3Store):
-                assert False, 'GCS -> S3 Data Transfer not implemented yet'
+                logger.info('Initating Data Transfer from GCS->S3')
+                assert StorageType.GCS in self.stores
+                gcs_store = self.stores[StorageType.GCS]
+                cur_store.transfer_to_s3(gcs_store)
 
 
 class S3Store(AbstractStore):
@@ -289,6 +297,15 @@ class S3Store(AbstractStore):
         """
         sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'
         os.system(sync_command)
+
+    def transfer_to_s3(self, gcs_store: AbstractStore) -> None:
+        """Transfer data from S3 to GCS bucket using Google's Data Transfer
+        service
+
+        Args:
+          s3_store: Object; S3 Backend, see S3Store
+        """
+        data_transfer.gcs_to_s3(gcs_store, self)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the S3 bucket. If the S3 bucket does not exist, this

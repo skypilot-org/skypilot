@@ -97,6 +97,21 @@ def s3_to_gcs(s3_store: S3Store, gs_store: GcsStore) -> None:
     logger.info(f'AWS -> GCS Transfer Job: {json.dumps(result, indent=4)}')
 
 
+def gcs_to_s3(gs_store: GcsStore, s3_store: S3Store) -> None:
+    """Creates a one-time transfer from Google Cloud Storage to Amazon S3.
+
+    Args:
+      gs_store: GcsStore; GCP Gs Store that contains a
+      corresponding GCS bucket
+      s3_store: S3Store; AWS S3 Store that contains a
+      corresponding S3 bucket
+    """
+    sync_command = f'gsutil -m rsync -rd gs://{gs_store.name} \
+        s3://{s3_store.name}'
+
+    os.system(sync_command)
+
+
 def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)

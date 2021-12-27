@@ -311,6 +311,7 @@ class Task(object):
             else:
                 # Sky will download the first store that is added to remote
                 self.storage_plans[store] = list(store.stores.keys())[0]
+
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for store, mnt_path in storage_mounts.items():
@@ -325,7 +326,6 @@ class Task(object):
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
-                assert False, 'TODO: GCS Authentication not done'
             elif storage_type is storage_lib.StorageType.AZURE:
                 assert False, 'TODO: Azure Blob not mountable yet'
             else:
