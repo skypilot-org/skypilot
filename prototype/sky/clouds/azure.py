@@ -47,7 +47,8 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls):
-        return 'Standard_D2_v4'
+        # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
+        return 'Standard_D8_v4'
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
