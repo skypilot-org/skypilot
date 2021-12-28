@@ -127,6 +127,7 @@ def _add_cluster_to_ssh_config(handle):
     ip = handle.head_ip
     key_path = os.path.expanduser(config['auth']['ssh_private_key'])
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
+    host_name = cluster_name
 
     config_path = os.path.expanduser('~/.ssh/config')
     if os.path.exists(config_path):
@@ -137,14 +138,14 @@ def _add_cluster_to_ssh_config(handle):
         for line in config:
             if line.strip() == f'Host {cluster_name}':
                 logger.warning(f'SSH config already contains a host named {cluster_name}.')
-                cluster_name = ip
-                logger.warning(f'Using {ip} as host instead.')
+                host_name = ip
+                logger.warning(f'Using {ip} to identify host instead.')
 
     # Add the new config.
     # NOTE: Logic in _remove_cluster_from_ssh_config assumes same config structure below.
     with open(config_path, 'a') as f:
         f.write(f'\n# Added by sky (use `sky stop/down {cluster_name}` to remove)\n')
-        f.write(f'Host {cluster_name}\n')
+        f.write(f'Host {host_name}\n')
         f.write(f'  HostName {ip}\n')
         f.write(f'  User {username}\n')
         f.write(f'  IdentityFile {key_path}\n')
@@ -167,7 +168,6 @@ def _remove_cluster_from_ssh_config(handle):
     for i, line in enumerate(config):
         next_line = config[i + 1] if i + 1 < len(config) else ''
         if line.strip() == f'HostName {ip}' and next_line.strip() == f'User {username}':
-            import pdb; pdb.set_trace()
             start_line_idx = i - 1
             break
 
@@ -179,7 +179,7 @@ def _remove_cluster_from_ssh_config(handle):
     cursor = start_line_idx + 1
     start_line_idx -= 1  # remove auto-generated comment
     while cursor < len(config):
-        if config[cursor].strip().startswith('Host'):
+        if config[cursor].strip().startswith('Host '):
             end_line_idx = cursor
             break
         cursor += 1
