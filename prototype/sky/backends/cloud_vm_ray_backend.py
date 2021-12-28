@@ -163,7 +163,7 @@ class RayCodeGen(object):
             import ray.util as ray_util
 
             ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
-            
+
             print('cluster_resources:', ray.cluster_resources())
             print('available_resources:', ray.available_resources())
             print('live nodes:', ray.state.node_ids())
@@ -495,6 +495,47 @@ class RetryingVmProvisioner(object):
         for region, zones in cloud.region_zones_provision_loop():
             yield (region, zones)
 
+    def _try_provision_tpu(self, to_provision: Resources, acc_args,
+                           config_dict) -> bool:
+        """Returns whether the provision is successful."""
+        tpu_name = acc_args['tpu_name']
+        assert 'tpu-create-script' in config_dict, \
+            'Expect TPU provisioning with gcloud.'
+        try:
+            backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+            return True
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode('ascii')
+            logger.error(stderr)
+            if 'ALREADY_EXISTS' in stderr:
+                # FIXME: should use 'start' on stopped TPUs, replacing
+                # 'create'. Or it can be in a "deleting" state. Investigate the
+                # right thing to do (force kill + re-provision?).
+                logger.info(f'TPU {tpu_name} already exists; skipped creation.')
+                return True
+
+            if 'PERMISSION_DENIED' in stderr:
+                logger.info('TPU resource is not available in this zone.')
+                return False
+
+            if 'no more capacity in the zone' in stderr:
+                logger.info('No capacity in this zone.')
+                return False
+
+            if 'CloudTpu received an invalid AcceleratorType' in stderr:
+                # INVALID_ARGUMENT: CloudTpu received an invalid
+                # AcceleratorType, "v3-8" for zone "us-central1-c". Valid
+                # values are "v2-8, ".
+                tpu_type = list(to_provision.accelerators.keys())[0]
+                logger.info(
+                    f'TPU type {tpu_type} is not avaialble in this zone.')
+                return False
+
+            logger.error(stderr)
+            raise e
+
     def _retry_region_zones(self, task: App, to_provision: Resources,
                             dryrun: bool, stream_logs: bool, cluster_name: str,
                             prev_cluster_config: Optional[Dict[str, Any]]):
@@ -529,28 +570,11 @@ class RetryingVmProvisioner(object):
             acc_args = to_provision.accelerator_args
             tpu_name = None
             if acc_args is not None and acc_args.get('tpu_name') is not None:
+                success = self._try_provision_tpu(to_provision, acc_args,
+                                                  config_dict)
+                if not success:
+                    continue
                 tpu_name = acc_args['tpu_name']
-                assert 'tpu-create-script' in config_dict, \
-                    'Expect TPU provisioning with gcloud.'
-                try:
-                    backend_utils.run(
-                        f'bash {config_dict["tpu-create-script"]}',
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE)
-                except subprocess.CalledProcessError as e:
-                    stderr = e.stderr.decode('ascii')
-                    if 'ALREADY_EXISTS' in stderr:
-                        # FIXME: should use 'start' on stopped TPUs, replacing
-                        # 'create'.
-                        logger.info(
-                            f'TPU {tpu_name} already exists; skipped creation.')
-                    elif 'PERMISSION_DENIED' in stderr:
-                        logger.info(
-                            'TPU resource is not available in this zone.')
-                        continue
-                    else:
-                        logger.error(stderr)
-                        raise e
             cluster_config_file = config_dict['ray']
 
             # Record early, so if anything goes wrong, 'sky status' will show
@@ -778,10 +802,12 @@ class RetryingVmProvisioner(object):
                 provision_failed = True
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {to_provision}. '
-                    f'Retrying other launchable resources...{style.RESET_ALL}')
+                    'Trying other launchable resources (if any)...'
+                    f'{style.RESET_ALL}')
                 # Add failed resources to the blocklist.
                 self._blocked_launchable_resources.add(to_provision)
                 # TODO: set all remaining tasks' best_resources to None.
+                assert task in self._dag.tasks, 'Internal logic error.'
                 task_index = self._dag.tasks.index(task)
                 task.best_resources = None
                 self._dag = sky.optimize(self._dag,
@@ -791,6 +817,9 @@ class RetryingVmProvisioner(object):
                 # Update task itself, instead of create a new one, so that the
                 # caller can get the updated task.
                 task.__dict__.update(self._dag.tasks[task_index].__dict__)
+                # TODO: what if this launchable resource failed again and hit
+                # this codepath?  Adding an assert in case we need to fix it.
+                assert task in self._dag.tasks, 'Internal logic error.'
                 to_provision = task.best_resources
                 assert to_provision is not None, task
         return config_dict
@@ -915,7 +944,8 @@ class CloudVmRayBackend(backends.Backend):
         except exceptions.ResourcesUnavailableError as e:
             raise exceptions.ResourcesUnavailableError(
                 'Failed to provision all possible launchable resources. '
-                f'Relax the task\'s resource requirements:\n{task}') from e
+                f'Relax the task\'s resource requirements:\n{task.resources}'
+            ) from e
         if dryrun:
             return
         cluster_config_file = config_dict['ray']

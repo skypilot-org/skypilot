@@ -112,10 +112,12 @@ def _create_and_ssh_into_node(
         task.set_resources(resources)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
-    backend.register_info(dag=dag)
-
     dag = sky.optimize(dag)
     task = dag.tasks[0]
+    # Since optimize() returns a deep copy, must register the optimized dag
+    # object.  Otherwise the original dag doesn't contain 'task' and
+    # cross-cloud retry may fail (_dag.index(task)).
+    backend.register_info(dag=dag)
 
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None or handle.head_ip is None:
@@ -138,7 +140,7 @@ def _create_and_ssh_into_node(
     backend_utils.run(commands, shell=False, check=False)
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
 
-    click.echo('To attach it again:  ', nl=False)
+    click.echo('To attach to it again:  ', nl=False)
     if cluster_name == _default_interactive_node_name(node_type):
         option = ''
     else:
