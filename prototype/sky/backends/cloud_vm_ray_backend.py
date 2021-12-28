@@ -143,7 +143,7 @@ def _add_cluster_to_ssh_config(handle):
                 logger.warning(f'Using {ip} to identify host instead.')
 
     # Add the new config.
-    # NOTE: Logic in _remove_cluster_from_ssh_config assumes same config structure below.
+    # NOTE: _remove_cluster_from_ssh_config logic assumes same structure below.
     with open(config_path, 'a') as f:
         f.write(
             f'\n# Added by sky (use `sky stop/down {cluster_name}` to remove)\n'
