@@ -463,7 +463,8 @@ class RetryingVmProvisioner(object):
                 region, zones, stdout, stderr)
         assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, cloud: clouds.Cloud, cluster_name: str):
+    def _yield_region_zones(self, to_provision: Resources, cluster_name: str):
+        cloud = to_provision.cloud
         region = None
         zones = None
         # Try loading previously launched region/zones and try them first,
@@ -492,7 +493,7 @@ class RetryingVmProvisioner(object):
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
                 region.set_zones(zones)
             yield (region, zones)  # Ok to yield again in the next loop.
-        for region, zones in cloud.region_zones_provision_loop():
+        for region, zones in cloud.region_zones_provision_loop(to_provision):
             yield (region, zones)
 
     def _retry_region_zones(self, task: App, to_provision: Resources,
@@ -508,7 +509,7 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         self._clear_blocklist()
-        for region, zones in self._yield_region_zones(to_provision.cloud,
+        for region, zones in self._yield_region_zones(to_provision,
                                                       cluster_name):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue

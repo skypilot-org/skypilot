@@ -5,6 +5,7 @@ instance types and pricing information for AWS.
 """
 from typing import Dict, List, Optional
 
+from sky.clouds import cloud
 from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('aws.csv')
@@ -32,9 +33,12 @@ def get_instance_type_for_accelerator(
     return common.get_instance_type_for_accelerator_impl(
         _df, acc_name, acc_count)
 
+def get_region_zones_for_instance_type(instance_type: str, use_spot: bool) -> List[cloud.Region]:
+    return common.get_region_zones_for_instance_type(_df, instance_type, use_spot)
 
 def list_accelerators(gpus_only: bool) -> Dict[str, List[int]]:
     """Returns a mapping from the canonical names of accelerators to a list of
     counts, each representing an instance type offered by this cloud.
     """
     return common.list_accelerators_impl(_df, gpus_only)
+

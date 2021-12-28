@@ -4,6 +4,7 @@ import json
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import resources
 from sky.clouds.service_catalog import aws_catalog
 
 
@@ -17,6 +18,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def regions(cls):
+        # Deprecated.
         if not cls._regions:
             # https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/
             cls._regions = [
@@ -49,10 +51,13 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def region_zones_provision_loop(
-            cls) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+            cls,
+            to_provision: resources.Resources,
+    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
-        for region in cls.regions():
+        regions = aws_catalog.get_region_zones_provision_loop(to_provision.instance_type, to_provision.use_spot)
+        for region in regions:
             yield region, region.zones
 
     @classmethod

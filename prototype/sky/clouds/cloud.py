@@ -2,6 +2,8 @@
 import collections
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from sky import resources
+
 
 class Region(collections.namedtuple('Region', ['name'])):
     """A region."""
@@ -33,17 +35,23 @@ class Cloud(object):
         raise NotImplementedError
 
     @classmethod
-    def region_zones_provision_loop(cls) -> Iterator[Tuple[Region, List[Zone]]]:
+    def region_zones_provision_loop(
+            cls,
+            to_provision: resources.Resources,
+    ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
         Certain clouds' provisioners may handle batched requests, retrying for
         itself a list of zones under a region.  Others may need a specific zone
         per provision request (in that case, yields (region, a one-element list
         for each zone)).
+        
+        Args:
+            to_provision: The sky.resources to provision.
 
         Typical usage:
 
-            for region, zones in cloud.region_zones_provision_loop():
+            for region, zones in cloud.region_zones_provision_loop(to_provision):
                 success = try_provision(region, zones, resources)
                 if success:
                     break

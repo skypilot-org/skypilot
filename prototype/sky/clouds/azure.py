@@ -4,6 +4,7 @@ import json
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import resources
 from sky.clouds.service_catalog import azure_catalog
 
 
@@ -51,6 +52,7 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
+        # Deprecated.
         # NOTE on zones: Ray Autoscaler does not support specifying
         # availability zones, and Azure CLI will try launching VMs in all
         # zones. Hence for our purposes we do not keep track of zones.
@@ -69,8 +71,11 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def region_zones_provision_loop(
-            cls) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        for region in cls.regions():
+            cls,
+            to_provision: resources.Resources,
+    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+        regions = azure_catalog.get_region_zones_for_instance_type(to_provision.instance_type, to_provision.use_spot)
+        for region in regions:
             yield region, region.zones
 
     # TODO: factor the following three methods, as they are the same logic
