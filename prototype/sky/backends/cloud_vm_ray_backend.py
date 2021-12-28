@@ -137,14 +137,17 @@ def _add_cluster_to_ssh_config(handle):
         # If an existing config with `cluster_name` exists, raise a warning.
         for line in config:
             if line.strip() == f'Host {cluster_name}':
-                logger.warning(f'SSH config already contains a host named {cluster_name}.')
+                logger.warning(
+                    f'SSH config already contains a host named {cluster_name}.')
                 host_name = ip
                 logger.warning(f'Using {ip} to identify host instead.')
 
     # Add the new config.
     # NOTE: Logic in _remove_cluster_from_ssh_config assumes same config structure below.
     with open(config_path, 'a') as f:
-        f.write(f'\n# Added by sky (use `sky stop/down {cluster_name}` to remove)\n')
+        f.write(
+            f'\n# Added by sky (use `sky stop/down {cluster_name}` to remove)\n'
+        )
         f.write(f'Host {host_name}\n')
         f.write(f'  HostName {ip}\n')
         f.write(f'  User {username}\n')
@@ -167,7 +170,8 @@ def _remove_cluster_from_ssh_config(handle):
     start_line_idx = None
     for i, line in enumerate(config):
         next_line = config[i + 1] if i + 1 < len(config) else ''
-        if line.strip() == f'HostName {ip}' and next_line.strip() == f'User {username}':
+        if line.strip() == f'HostName {ip}' and next_line.strip(
+        ) == f'User {username}':
             start_line_idx = i - 1
             break
 
@@ -185,7 +189,8 @@ def _remove_cluster_from_ssh_config(handle):
         cursor += 1
 
     # Remove sky-generated config and update the file.
-    config[start_line_idx:end_line_idx] = ['\n'] if end_line_idx is not None else []
+    config[start_line_idx:end_line_idx] = ['\n'
+                                          ] if end_line_idx is not None else []
     with open(config_path, 'w') as f:
         f.writelines(config)
 
