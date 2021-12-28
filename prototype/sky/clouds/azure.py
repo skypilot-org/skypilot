@@ -77,7 +77,7 @@ class Azure(clouds.Cloud):
             accelerators: Optional[Dict[str, int]] = None,
             use_spot: bool,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        assert instance_type is None, instance_type
+        assert instance_type is not None, instance_type
         unused = accelerators
         
         regions = azure_catalog.get_region_zones_for_instance_type(
