@@ -647,7 +647,7 @@ def tpunode(cluster: str, port_forward: Optional[List[int]], screen):
               '-f',
               default=None,
               type=str,
-              help='Filter GPU names by this regex')
+              help='Filter GPU names by this regex.')
 def list_gpus(name_filter: Optional[str]):
     """List all GPU offerings that Sky supports."""
     print('This table lists the GPU resources that you can specify in your '
@@ -667,11 +667,15 @@ def list_gpus(name_filter: Optional[str]):
         tab.field_names = ['GPU', 'Cloud', 'Instance Type', 'RAM']
         for item in items:
             instance_type_str = item.instance_type if not pd.isna(
-                item.instance_type) else 'n/a'
-            ram_str = f'{item.ram:.0f}GB' if item.ram > 0 else 'n/a'
+                item.instance_type) else '(*)'
+            ram_str = f'{item.ram:.0f}GB' if item.ram > 0 else '(*)'
             gpu_str = f'{item.accelerator_name}: {item.accelerator_count}'
             tab.add_row([gpu_str, item.cloud, instance_type_str, ram_str])
         print(tab)
+    
+    print('(*) AWS and Azure offer special VM types with accelerators and '
+          'memory sizes. GCP supports attaching accelerators to regular VMs, '
+          'so they do not have predefined instance types or memory sizes.\n')
 
 
 def main():
