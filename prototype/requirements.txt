@@ -5,7 +5,7 @@ jinja2
 networkx
 oauth2client
 pandas
-pycryptodome
+pycryptodome==3.4.3
 pendulum
 PrettyTable
 pytest
