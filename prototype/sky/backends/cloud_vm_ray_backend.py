@@ -5,7 +5,6 @@ import hashlib
 import inspect
 import json
 import os
-import pathlib
 import re
 import shlex
 import subprocess
@@ -13,10 +12,8 @@ import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
-import yaml
 
 import colorama
-import sshconf
 from ray.autoscaler import sdk
 
 import sky
@@ -125,34 +122,72 @@ def _ssh_options_list(ssh_private_key: Optional[str],
 
 
 def _add_cluster_to_ssh_config(handle):
-    with open(handle.cluster_yaml, 'r') as f:
-        config = yaml.safe_load(f)
+    config = backend_utils.read_yaml(handle.cluster_yaml)
     username = config['auth']['ssh_user']
     ip = handle.head_ip
     key_path = os.path.expanduser(config['auth']['ssh_private_key'])
-    cluster_name = pathlib.Path(handle.cluster_yaml).stem
+    cluster_name = global_user_state.get_cluster_name_from_handle(handle)
 
     config_path = os.path.expanduser('~/.ssh/config')
-    config = sshconf.empty_ssh_config_file()
-    if not os.path.exists(config_path):
-        config.write(config_path)  # create empty ssh config file
-    config = sshconf.read_ssh_config(config_path)
-    config.add(cluster_name,
-               Hostname=ip,
-               User=username,
-               IdentityFile=key_path,
-               IdentitiesOnly='yes',
-               ForwardAgent='yes',
-               Port=22)
-    config.save()
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            config = f.readlines()
+
+        # If an existing config with `cluster_name` exists, raise a warning.
+        for line in config:
+            if line.strip() == f'Host {cluster_name}':
+                logger.warning(f'SSH config already contains a host named {cluster_name}.')
+                cluster_name = ip
+                logger.warning(f'Using {ip} as host instead.')
+
+    # Add the new config.
+    # NOTE: Logic in _remove_cluster_from_ssh_config assumes same config structure below.
+    with open(config_path, 'a') as f:
+        f.write(f'\n# Added by sky (use `sky stop/down {cluster_name}` to remove)\n')
+        f.write(f'Host {cluster_name}\n')
+        f.write(f'  HostName {ip}\n')
+        f.write(f'  User {username}\n')
+        f.write(f'  IdentityFile {key_path}\n')
+        f.write('  IdentitiesOnly yes\n')
+        f.write('  ForwardAgent yes\n')
+        f.write('  Port 22\n')
 
 
 def _remove_cluster_from_ssh_config(handle):
-    cluster_name = pathlib.Path(handle.cluster_yaml).stem
+    config = backend_utils.read_yaml(handle.cluster_yaml)
+    username = config['auth']['ssh_user']
+    ip = handle.head_ip
+
     config_path = os.path.expanduser('~/.ssh/config')
-    config = sshconf.read_ssh_config(config_path)
-    config.remove(cluster_name)
-    config.save()
+    with open(config_path) as f:
+        config = f.readlines()
+
+    # Scan the config for the cluster name.
+    start_line_idx = None
+    for i, line in enumerate(config):
+        next_line = config[i + 1] if i + 1 < len(config) else ''
+        if line.strip() == f'HostName {ip}' and next_line.strip() == f'User {username}':
+            import pdb; pdb.set_trace()
+            start_line_idx = i - 1
+            break
+
+    if start_line_idx is None:  # No config to remove.
+        return
+
+    # Scan for end of the cluster config.
+    end_line_idx = None
+    cursor = start_line_idx + 1
+    start_line_idx -= 1  # remove auto-generated comment
+    while cursor < len(config):
+        if config[cursor].strip().startswith('Host'):
+            end_line_idx = cursor
+            break
+        cursor += 1
+
+    # Remove sky-generated config and update the file.
+    config[start_line_idx:end_line_idx] = ['\n'] if end_line_idx is not None else []
+    with open(config_path, 'w') as f:
+        f.writelines(config)
 
 
 class RayCodeGen(object):
@@ -964,10 +999,10 @@ class CloudVmRayBackend(backends.Backend):
             launched_resources=provisioned_resources,
             # TPU.
             tpu_delete_script=config_dict.get('tpu-delete-script'))
-        _add_cluster_to_ssh_config(handle)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True)
+        _add_cluster_to_ssh_config(handle)
         return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
