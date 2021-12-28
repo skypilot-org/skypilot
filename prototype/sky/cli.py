@@ -188,7 +188,7 @@ def _create_and_ssh_into_node(
         cluster_name: a cluster name to identify the interactive node.
         backend: the Backend to use (currently only CloudVmRayBackend).
         port_forward: List of ports to forward.
-        screen_manager: If specified, attach screen manager: { 'screen', 'tmux' }.
+        screen_manager: Attach screen manager: { 'screen', 'tmux' }.
     """
     assert node_type in ('cpunode', 'gpunode', 'tpunode'), node_type
     assert screen_manager in (None, 'screen', 'tmux'), screen_manager
