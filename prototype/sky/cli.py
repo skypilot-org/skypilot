@@ -583,13 +583,13 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
-    cloud_provider = task_lib.CLOUD_REGISTRY.get(cloud, sky.AWS())
+    cloud_provider = task_lib.CLOUD_REGISTRY.get(cloud, None)
     if cloud is not None and cloud not in task_lib.CLOUD_REGISTRY:
-        print(f'Cloud provider {cloud} not found. Defaulting to AWS.')
+        print(f'Cloud provider {cloud} not found.')
     if num_accelerators is None:
         num_accelerators = 1
     if accelerator_type is None:
-        accelerator_type = 'V100'
+        accelerator_type = 'K80'
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
                               accelerators={accelerator_type: num_accelerators},
