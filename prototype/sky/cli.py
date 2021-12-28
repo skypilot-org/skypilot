@@ -659,13 +659,15 @@ def list_gpus(name_filter: Optional[str]):
           '    resources:\n'
           '      cloud: aws\n'
           '      instance_type: p3.16xlarge\n')
-    result = service_catalog.list_accelerators(gpus_only=True, name_filter=name_filter)
+    result = service_catalog.list_accelerators(gpus_only=True,
+                                               name_filter=name_filter)
     for gpu, items in result.items():
         tab = prettytable.PrettyTable()
         tab.title = gpu
         tab.field_names = ['GPU', 'Cloud', 'Instance Type', 'RAM']
         for item in items:
-            instance_type_str = item.instance_type if not pd.isna(item.instance_type) else 'n/a'
+            instance_type_str = item.instance_type if not pd.isna(
+                item.instance_type) else 'n/a'
             ram_str = f'{item.ram:.0f}GB' if item.ram > 0 else 'n/a'
             gpu_str = f'{item.accelerator_name}: {item.accelerator_count}'
             tab.add_row([gpu_str, item.cloud, instance_type_str, ram_str])

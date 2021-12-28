@@ -7,7 +7,7 @@ import pandas as pd
 
 class InstanceTypeInfo(NamedTuple):
     """Instance type information.
-    
+
     - cloud: Cloud name.
     - instance_type: String that can be used in YAML to specify this instance
       type. E.g. `p3.2xlarge`.
