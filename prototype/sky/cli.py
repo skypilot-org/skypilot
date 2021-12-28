@@ -33,6 +33,7 @@ import time
 from typing import List, Optional, Tuple
 
 import click
+import pandas as pd
 import pendulum
 import prettytable
 
@@ -42,6 +43,7 @@ from sky import global_user_state
 from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.clouds import service_catalog
 
 _CLUSTER_FLAG_HELP = """
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -638,6 +640,36 @@ def tpunode(cluster: str, port_forward: Optional[List[int]], screen):
         port_forward=port_forward,
         use_screen=screen,
     )
+
+
+@cli.command()
+@click.option('--name_filter',
+              '-f',
+              default=None,
+              type=str,
+              help='Filter GPU names by this regex')
+def list_gpus(name_filter: Optional[str]):
+    """List all GPU offerings that Sky supports."""
+    print('This table lists the GPU resources that you can specify in your '
+          'task specifications. You can either specify a GPU resource:\n'
+          '    resources:\n'
+          '      accelerators:\n'
+          '        V100: 8\n\n'
+          'or a specific cloud and instance type:\n'
+          '    resources:\n'
+          '      cloud: aws\n'
+          '      instance_type: p3.16xlarge\n')
+    result = service_catalog.list_accelerators(gpus_only=True, name_filter=name_filter)
+    for gpu, items in result.items():
+        tab = prettytable.PrettyTable()
+        tab.title = gpu
+        tab.field_names = ['GPU', 'Cloud', 'Instance Type', 'RAM']
+        for item in items:
+            instance_type_str = item.instance_type if not pd.isna(item.instance_type) else 'n/a'
+            ram_str = f'{item.ram:.0f}GB' if item.ram > 0 else 'n/a'
+            gpu_str = f'{item.accelerator_name}: {item.accelerator_count}'
+            tab.add_row([gpu_str, item.cloud, instance_type_str, ram_str])
+        print(tab)
 
 
 def main():

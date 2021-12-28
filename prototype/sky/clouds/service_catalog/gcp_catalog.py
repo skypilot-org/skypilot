@@ -4,25 +4,15 @@ For now this service catalog is manually coded. In the future it should be
 queried from GCP API.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
+
+from sky.clouds.service_catalog import common
+
+_df = common.read_catalog('gcp.csv')
 
 
-def list_accelerators(gpus_only: bool) -> Dict[str, List[int]]:
-    """Returns a mapping from the canonical names of accelerators to a list of
-    counts, each representing an instance type offered by this cloud.
+def list_accelerators(gpus_only: bool,
+                      name_filter: Optional[str]) -> Dict[str, List[int]]:
+    """Returns TODO.
     """
-    gpu_data = {
-        'T4': [1, 2, 4],
-        'P4': [1, 2, 4],
-        'V100': [1, 2, 4, 8],
-        'P100': [1, 2, 4],
-        'K80': [1, 2, 4, 8],
-    }
-    tpu_data = {
-        'tpu-v2-8': [1],
-        'tpu-v3-8': [1],
-    }
-    if gpus_only:
-        return gpu_data
-    gpu_data.update(**tpu_data)
-    return gpu_data
+    return common.list_accelerators_impl('GCP', _df, gpus_only, name_filter)

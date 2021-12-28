@@ -1,8 +1,26 @@
 """Common utilities for service catalog."""
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, NamedTuple, Optional
 
 import pandas as pd
+
+
+class InstanceTypeInfo(NamedTuple):
+    """Instance type information.
+    
+    - cloud: Cloud name.
+    - instance_type: String that can be used in YAML to specify this instance
+      type. E.g. `p3.2xlarge`.
+    - accelerator_name: TODO
+    - accelerator_count: TODO
+    - ram: Instance memory in GiB.
+    - price: Regular instance price per hour.
+    """
+    cloud: str
+    instance_type: str
+    accelerator_name: str
+    accelerator_count: int
+    ram: float
 
 
 def get_data_path(filename: str) -> str:
@@ -94,8 +112,12 @@ def get_instance_type_for_accelerator_impl(
     return result.iloc[0]['InstanceType']
 
 
-def list_accelerators_impl(df: pd.DataFrame,
-                           gpus_only: bool) -> Dict[str, List[int]]:
+def list_accelerators_impl(
+        cloud: str,
+        df: pd.DataFrame,
+        gpus_only: bool,
+        name_filter: Optional[str],
+) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
     Returns a mapping from the canonical names of accelerators to a list of
@@ -103,8 +125,26 @@ def list_accelerators_impl(df: pd.DataFrame,
     """
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
-    df = df[['AcceleratorName', 'AcceleratorCount']].dropna().drop_duplicates()
+    df = df[[
+        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB'
+    ]].dropna(subset=['AcceleratorName']).drop_duplicates()
+    if name_filter is not None:
+        df = df[df['AcceleratorName'].str.contains(name_filter, regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
-    groupby = df.groupby('AcceleratorName')
-    return groupby['AcceleratorCount'].apply(lambda xs: sorted(list(xs))
-                                            ).to_dict()
+    grouped = df.groupby('AcceleratorName')
+
+    def make_list_from_df(rows):
+        ret = rows.apply(
+            lambda row: InstanceTypeInfo(
+                cloud,
+                row['InstanceType'],
+                row['AcceleratorName'],
+                row['AcceleratorCount'],
+                row['MemoryGiB'],
+            ),
+            axis='columns',
+        ).tolist()
+        ret.sort(key=lambda info: (info.accelerator_count, info.ram))
+        return ret
+
+    return {k: make_list_from_df(v) for k, v in grouped}
