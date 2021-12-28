@@ -31,7 +31,7 @@ import functools
 import getpass
 import os
 import time
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import click
 import pendulum
@@ -71,6 +71,23 @@ def _truncate_long_string(s: str, max_length: int = 50) -> str:
     return ' '.join(splits[:i]) + ' ...'
 
 
+def _parse_accelerator_options(accelerator_options: str
+                              ) -> Union[str, Dict[str, int]]:
+    """Parses accelerator options. e.g. V100:8 into {'V100': 8}."""
+    accelerators = {}
+    accelerator_options = accelerator_options.split(':')
+    if len(accelerator_options) == 1:
+        accelerator_type = accelerator_options[0]
+        accelerators[accelerator_type] = 1
+    elif len(accelerator_options) == 2:
+        accelerator_type = accelerator_options[0]
+        accelerator_count = int(accelerator_options[1])
+        accelerators[accelerator_type] = accelerator_count
+    else:
+        raise ValueError(f'Invalid accelerator option: {accelerator_options}')
+    return accelerators
+
+
 def _interactive_node_cli_command(cli_func):
     """Click command decorator for interactive node commands."""
     cluster_option = click.option('--cluster',
@@ -106,17 +123,17 @@ def _interactive_node_cli_command(cli_func):
                                         default=None,
                                         type=str,
                                         help='Instance type to use.')
-    num_accelerators_option = click.option(
-        '--num-accelerators',
-        '-n',
+    gpus = click.option(
+        '--gpus',
         default=None,
-        type=int,
-        help='Number of accelerators (GPU/TPU) to use.')
-    accelerator_type_option = click.option('--accelerator-type',
-                                           '-g',
-                                           default=None,
-                                           type=str,
-                                           help='Accelerator type to use.')
+        type=str,
+        help='Type and number of GPUs to use (e.g. V100:8 or V100).')
+    tpus = click.option(
+        '--tpus',
+        default=None,
+        type=str,
+        help='Type and number of TPUs to use (e.g. tpu-v3-8:4 or tpu-v3-8).')
+
     spot_option = click.option('--spot',
                                default=False,
                                is_flag=True,
@@ -130,8 +147,8 @@ def _interactive_node_cli_command(cli_func):
         # Resource options
         cloud_option,
         instance_type_option,
-        accelerator_type_option,
-        num_accelerators_option,
+        gpus,
+        tpus,
         spot_option,
 
         # Attach options
@@ -545,8 +562,8 @@ def _terminate_or_stop(names: Tuple[str], apply_to_all: Optional[bool],
 @_interactive_node_cli_command
 def gpunode(cluster: str, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
-            num_accelerators: Optional[int], accelerator_type: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
+            gpus: Optional[str], tpus: Optional[str], spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool]):
     """Launch or attach to an interactive GPU node.
 
     Automatically syncs the current working directory.
@@ -575,7 +592,11 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
       sky gpunode --port-forward 8080 --port-forward 4650 -c cluster_name
       sky gpunode -p 8080 -p 4650 -c cluster_name
     """
-    assert not (screen and tmux), 'Cannot use both screen and tmux.'
+    if tpus is not None:
+        raise click.UsageError('--tpus is not supported for cpunode.')
+    if screen and tmux:
+        raise click.UsageError('Cannot use both screen and tmux.')
+
     screen_manager = None
     if screen or tmux:
         screen_manager = 'tmux' if tmux else 'screen'
@@ -586,13 +607,13 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
     cloud_provider = task_lib.CLOUD_REGISTRY.get(cloud, None)
     if cloud is not None and cloud not in task_lib.CLOUD_REGISTRY:
         print(f'Cloud provider {cloud} not found.')
-    if num_accelerators is None:
-        num_accelerators = 1
-    if accelerator_type is None:
-        accelerator_type = 'K80'
+    if gpus is None:
+        gpus = {'K80': 1}
+    else:
+        gpus = _parse_accelerator_options(gpus)
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
-                              accelerators={accelerator_type: num_accelerators},
+                              accelerators=gpus,
                               use_spot=spot)
 
     _create_and_ssh_into_node(
@@ -607,8 +628,8 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
 @_interactive_node_cli_command
 def cpunode(cluster: str, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
-            num_accelerators: Optional[int], accelerator_type: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
+            gpus: Optional[str], tpus: Optional[str], spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool]):
     """Launch or attach to an interactive CPU node.
 
     Automatically syncs the current working directory.
@@ -637,8 +658,13 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
       sky cpunode --port-forward 8080 --port-forward 4650 -c cluster_name
       sky cpunode -p 8080 -p 4650 -c cluster_name
     """
-    del num_accelerators, accelerator_type  # unused
-    assert not (screen and tmux), 'Cannot use both screen and tmux.'
+    if gpus is not None:
+        raise click.UsageError('--gpus is not supported for cpunode.')
+    if tpus is not None:
+        raise click.UsageError('--tpus is not supported for cpunode.')
+    if screen and tmux:
+        raise click.UsageError('Cannot use both screen and tmux.')
+
     screen_manager = None
     if screen or tmux:
         screen_manager = 'tmux' if tmux else 'screen'
@@ -665,8 +691,8 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
 @_interactive_node_cli_command
 def tpunode(cluster: str, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
-            num_accelerators: Optional[int], accelerator_type: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
+            gpus: Optional[str], tpus: Optional[str], spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool]):
     """Launch or attach to an interactive TPU node.
 
     Automatically syncs the current working directory.
@@ -695,7 +721,11 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
       sky tpunode --port-forward 8080 --port-forward 4650 -c cluster_name
       sky tpunode -p 8080 -p 4650 -c cluster_name
     """
-    assert not (screen and tmux), 'Cannot use both screen and tmux.'
+    if gpus is not None:
+        raise click.UsageError('--gpus is not supported for cpunode.')
+    if screen and tmux:
+        raise click.UsageError('Cannot use both screen and tmux.')
+
     screen_manager = None
     if screen or tmux:
         screen_manager = 'tmux' if tmux else 'screen'
@@ -706,12 +736,13 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
     assert cloud is None or cloud == 'gcp', 'Cloud must be GCP to use tpunode.'
     cloud_provider = sky.GCP()
 
-    if num_accelerators is None:
-        num_accelerators = 1
-    accelerator_type = 'tpu-v3-8'
+    if tpus is None:
+        tpus = {'tpu-v3-8': 1}
+    else:
+        tpus = _parse_accelerator_options(tpus)
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
-                              accelerators={accelerator_type: num_accelerators},
+                              accelerators=tpus,
                               use_spot=spot)
 
     _create_and_ssh_into_node(
