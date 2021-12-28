@@ -672,7 +672,7 @@ def list_gpus(name_filter: Optional[str]):
             gpu_str = f'{item.accelerator_name}: {item.accelerator_count}'
             tab.add_row([gpu_str, item.cloud, instance_type_str, ram_str])
         print(tab)
-    
+
     print('(*) AWS and Azure offer special VM types with accelerators and '
           'memory sizes. GCP supports attaching accelerators to regular VMs, '
           'so they do not have predefined instance types or memory sizes.\n')
