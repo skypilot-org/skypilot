@@ -2,8 +2,6 @@
 import collections
 from typing import Dict, Iterator, List, Optional, Tuple
 
-from sky import resources
-
 
 class Region(collections.namedtuple('Region', ['name'])):
     """A region."""
@@ -26,8 +24,6 @@ class Zone(collections.namedtuple('Zone', ['name'])):
 class Cloud(object):
     """A cloud provider."""
 
-    UNKNOWN_COST = int(1e9)
-
     #### Regions/Zones ####
 
     @classmethod
@@ -37,7 +33,10 @@ class Cloud(object):
     @classmethod
     def region_zones_provision_loop(
             cls,
-            to_provision: resources.Resources,
+            *,
+            instance_type: Optional[str] = None,
+            accelerators: Optional[Dict[str, int]] = None,
+            use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
@@ -45,13 +44,19 @@ class Cloud(object):
         itself a list of zones under a region.  Others may need a specific zone
         per provision request (in that case, yields (region, a one-element list
         for each zone)).
-        
+
         Args:
-            to_provision: The sky.resources to provision.
+            instance_type: The instance type to provision.
+            accelerators: The accelerators to provision.
+            use_spot: Whether to use spot instances.
 
         Typical usage:
 
-            for region, zones in cloud.region_zones_provision_loop(to_provision):
+            for region, zones in cloud.region_zones_provision_loop(
+                instance_type,
+                accelerators,
+                use_spot
+            ):
                 success = try_provision(region, zones, resources)
                 if success:
                     break

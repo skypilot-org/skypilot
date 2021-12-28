@@ -4,7 +4,6 @@ import json
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import resources
 
 
 class GCP(clouds.Cloud):
@@ -176,10 +175,14 @@ class GCP(clouds.Cloud):
     @classmethod
     def region_zones_provision_loop(
             cls,
-            to_provision: resources.Resource,
+            *,
+            unused_instance_type: Optional[str] = None,
+            unused_accelerators: Optional[Dict[str, int]] = None,
+            unused_use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
-        # TODO: return gcp_catalog.get_region_zones_for_accelerators(to_provision.accelerators)
+        # TODO: enable this after GCP catalog completes.
+        # regions = gcp_catalog.get_region_zones_for_accelerators(accelerators)
 
         for region in cls.regions():
             for zone in region.zones:

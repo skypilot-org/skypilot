@@ -4,7 +4,6 @@ import json
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import resources
 from sky.clouds.service_catalog import aws_catalog
 
 
@@ -52,11 +51,16 @@ class AWS(clouds.Cloud):
     @classmethod
     def region_zones_provision_loop(
             cls,
-            to_provision: resources.Resources,
+            *,
+            instance_type: Optional[str] = None,
+            unused_accelerators: Optional[Dict[str, int]] = None,
+            use_spot: bool,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
-        regions = aws_catalog.get_region_zones_provision_loop(to_provision.instance_type, to_provision.use_spot)
+        assert instance_type is not None, instance_type
+        regions = aws_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot)
         for region in regions:
             yield region, region.zones
 

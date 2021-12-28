@@ -4,7 +4,6 @@ import json
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import resources
 from sky.clouds.service_catalog import azure_catalog
 
 
@@ -72,9 +71,14 @@ class Azure(clouds.Cloud):
     @classmethod
     def region_zones_provision_loop(
             cls,
-            to_provision: resources.Resources,
+            *,
+            instance_type: Optional[str] = None,
+            unused_accelerators: Optional[Dict[str, int]] = None,
+            use_spot: bool,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        regions = azure_catalog.get_region_zones_for_instance_type(to_provision.instance_type, to_provision.use_spot)
+        assert instance_type is None, instance_type
+        regions = azure_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot)
         for region in regions:
             yield region, region.zones
 

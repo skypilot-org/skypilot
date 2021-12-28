@@ -493,7 +493,11 @@ class RetryingVmProvisioner(object):
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
                 region.set_zones(zones)
             yield (region, zones)  # Ok to yield again in the next loop.
-        for region, zones in cloud.region_zones_provision_loop(to_provision):
+        for region, zones in cloud.region_zones_provision_loop(
+                instance_type=to_provision.instance_type,
+                accelerators=to_provision.accelerators,
+                use_spot=to_provision.use_spot,
+        ):
             yield (region, zones)
 
     def _retry_region_zones(self, task: App, to_provision: Resources,
