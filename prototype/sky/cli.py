@@ -649,7 +649,7 @@ def init():
     cloud, rerun `sky init` to reflect the changes.
     """
     click.echo('Sky will use the following clouds to run jobs. '
-               'To change this, configure\ncloud access credentials,'
+               'To change this, configure cloud access credentials,'
                ' and rerun ' + click.style('sky init', bold=True) + '.\n')
 
     enabled_clouds = []

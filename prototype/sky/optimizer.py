@@ -201,9 +201,10 @@ class Optimizer(object):
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     raise exceptions.ResourcesUnavailableError(
-                        f'No launchable resource found for task\n{node}. '
-                        'To fix: relax its Resources() requirements,'
-                        'and run `sky init` to check your access to clouds.')
+                        f'No launchable resource found for task {node}. '
+                         'Try relaxing its resource requirements, and run '
+                         'sky init to make sure the cloud you specified '
+                         '(if any) is enabled.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.info('Defaulting estimated time to 1 hr. '
                                 '(Task.set_time_estimator() not called.)')
