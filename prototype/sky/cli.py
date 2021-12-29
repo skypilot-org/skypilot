@@ -230,7 +230,7 @@ def _create_and_ssh_into_node(
     if session_manager == 'screen':
         commands += ['screen', '-D', '-R']
     if session_manager == 'tmux':
-        commands += ['tmux']
+        commands += ['tmux', 'attach', '||', 'tmux', 'new']
     backend_utils.run(commands, shell=False, check=False)
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
 
