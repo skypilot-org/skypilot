@@ -331,7 +331,7 @@ class Task(object):
                     mnt_path: 'gs://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.AZURE:
-                # TODO: sync ~/.azure
+                # TODO when Azure Blob is done: sync ~/.azure
                 assert False, 'TODO: Azure Blob not mountable yet'
             else:
                 raise ValueError(f'Storage Type {storage_type} \
