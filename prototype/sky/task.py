@@ -304,13 +304,13 @@ class Task(object):
         """
         for store in self.storage_mounts.keys():
             if len(store.stores) == 0:
-                if isinstance(self.best_resources.cloud, clouds.GCP):
-                    self.storage_plans[store] = storage_lib.StorageType.GCS
-                    store.get_or_copy_to_gcs()
-                else:
-                    # Unless we are running on GCP, default to using S3.
+                if isinstance(self.best_resources.cloud, clouds.AWS):
                     self.storage_plans[store] = storage_lib.StorageType.S3
                     store.get_or_copy_to_s3()
+                else:
+                    # Use GCS for Azure and GCP.
+                    self.storage_plans[store] = storage_lib.StorageType.GCS
+                    store.get_or_copy_to_gcs()
             else:
                 # Sky will download the first store that is added to remote
                 self.storage_plans[store] = list(store.stores.keys())[0]
@@ -320,15 +320,19 @@ class Task(object):
             storage_type = storage_plans[store]
             if storage_type is storage_lib.StorageType.S3:
                 # TODO: allow for Storage mounting of different clouds
+                # TODO(lsf): check for existence
                 self.update_file_mounts({'~/.aws': '~/.aws'})
                 self.update_file_mounts({
                     mnt_path: 's3://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.GCS:
+                self.update_file_mounts(
+                    {'~/.config/gcloud': '~/.config/gcloud'})
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.AZURE:
+                # TODO: sync ~/.azure
                 assert False, 'TODO: Azure Blob not mountable yet'
             else:
                 raise ValueError(f'Storage Type {storage_type} \

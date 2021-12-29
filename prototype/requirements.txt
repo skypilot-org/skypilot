@@ -14,6 +14,6 @@ tabulate
 docker
 
 awscli==1.22.17
-azure-cli
+azure-cli==2.22.0
 google-api-python-client
 google-cloud-storage

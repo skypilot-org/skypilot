@@ -47,7 +47,9 @@ class S3CloudStorage(CloudStorage):
     def is_file(self, url: str) -> bool:
         """Returns whether 'url' is a regular file."""
         bucket_name, path = data_utils.split_s3_path(url)
-        s3 = boto3.resource('s3')
+        if len(path) == 0:
+            return False
+        s3 = boto3.client('s3')
         try:
             s3.head_object(Bucket=bucket_name, Key=path)
             return True
