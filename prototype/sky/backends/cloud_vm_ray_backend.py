@@ -128,6 +128,9 @@ def _add_cluster_to_ssh_config(handle):
     key_path = os.path.expanduser(config['auth']['ssh_private_key'])
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
     host_name = cluster_name
+    sky_autogen_comment = f'# Added by sky (use `sky stop/down {cluster_name}` to remove)'
+    overwrite = False
+    overwrite_begin_idx = None
 
     config_path = os.path.expanduser('~/.ssh/config')
     if os.path.exists(config_path):
@@ -137,33 +140,41 @@ def _add_cluster_to_ssh_config(handle):
         # If an existing config with `cluster_name` exists, raise a warning.
         for i, line in enumerate(config):
             if line.strip() == f'Host {cluster_name}':
-                hostname_line = config[i + 1] if i + 1 < len(config) else ''
-                user_line = config[i + 2] if i + 2 < len(config) else ''
-                if hostname_line.strip(
-                ) == f'HostName {ip}' and user_line.strip(
-                ) == f'User {username}':
+                prev_line = config[i - 1] if i - 1 > 0 else ''
+                if prev_line.strip().startswith(sky_autogen_comment):
+                    overwrite = True
+                    overwrite_begin_idx = i - 1
+                else:
                     logger.warning(
-                        f'{host_name} already exists in {config_path}')
-                    return
+                        f'SSH config already contains a host named {cluster_name}.'
+                    )
+                    host_name = ip
+                    logger.warning(f'Using {ip} to identify host instead.')
+                break
 
-                logger.warning(
-                    f'SSH config already contains a host named {cluster_name}.')
-                host_name = ip
-                logger.warning(f'Using {ip} to identify host instead.')
-
-    # Add the new config.
+    # Add (or overwrite) the new config.
     # NOTE: _remove_cluster_from_ssh_config logic assumes same structure below.
-    with open(config_path, 'a') as f:
-        f.write(
-            f'\n# Added by sky (use `sky stop/down {cluster_name}` to remove)\n'
-        )
-        f.write(f'Host {host_name}\n')
-        f.write(f'  HostName {ip}\n')
-        f.write(f'  User {username}\n')
-        f.write(f'  IdentityFile {key_path}\n')
-        f.write('  IdentitiesOnly yes\n')
-        f.write('  ForwardAgent yes\n')
-        f.write('  Port 22\n')
+    codegen = textwrap.dedent(f"""
+        {sky_autogen_comment}
+        Host {host_name}
+          HostName {ip}
+          User {username}
+          IdentityFile {key_path}
+          IdentitiesOnly yes
+          ForwardAgent yes
+          Port 22
+        """)
+
+    if overwrite:
+        assert overwrite_begin_idx is not None
+        updated_lines = codegen.splitlines(keepends=True)
+        config[overwrite_begin_idx:overwrite_begin_idx +
+               len(updated_lines)] = updated_lines
+        with open(config_path, 'w') as f:
+            f.writelines(config)
+    else:
+        with open(config_path, 'a') as f:
+            f.write(codegen)
 
 
 def _remove_cluster_from_ssh_config(handle):
@@ -192,7 +203,8 @@ def _remove_cluster_from_ssh_config(handle):
     cursor = start_line_idx + 1
     start_line_idx -= 1  # remove auto-generated comment
     while cursor < len(config):
-        if config[cursor].strip().startswith('Host '):
+        if config[cursor].strip().startswith(
+                '# ') or config[cursor].strip().startswith('Host '):
             end_line_idx = cursor
             break
         cursor += 1
