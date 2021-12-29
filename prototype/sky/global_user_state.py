@@ -132,7 +132,7 @@ def get_enabled_clouds() -> List[str]:
     for (value,) in rows:
         ret = json.loads(value)
         break
-    return [clouds.cloud_factory(cloud)() for cloud in ret]
+    return [clouds.from_str(cloud)() for cloud in ret]
 
 
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:

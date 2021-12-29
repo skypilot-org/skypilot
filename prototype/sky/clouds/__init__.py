@@ -22,5 +22,5 @@ __CLOUD_DICT__ = {
 }
 
 
-def cloud_factory(name):
+def from_str(name):
     return __CLOUD_DICT__[name]

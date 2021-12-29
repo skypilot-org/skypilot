@@ -644,16 +644,16 @@ def tpunode(cluster: str, port_forward: Optional[List[int]], screen):
 def init():
     """Determines a set of clouds that Sky will use.
 
-    It checks access credentials for AWS, Azure and GCP. Sky jobs will only
+    It checks access credentials for AWS, Azure and GCP. Sky tasks will only
     run in clouds that you have access to. After configuring access for a
     cloud, rerun `sky init` to reflect the changes.
     """
-    click.echo('Sky will use the following clouds to run jobs. '
+    click.echo('Sky will use the following clouds to run tasks. '
                'To change this, configure cloud access credentials,'
                ' and rerun ' + click.style('sky init', bold=True) + '.\n')
 
     enabled_clouds = []
-    for cloud in [sky.AWS(), sky.Azure(), sky.GCP()]:
+    for cloud in sky.registry.ALL_CLOUDS:
         click.echo(f'  Checking {cloud}...', nl=False)
         ok, reason = cloud.check_credentials()
         click.echo('\r', nl=False)

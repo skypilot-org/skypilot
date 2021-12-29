@@ -20,10 +20,11 @@ class CloudStorage(object):
     """Interface for a cloud object store."""
 
     def is_file(self, url: str) -> bool:
-        """Returns whether 'url' is a regular file.
+        """Returns whether <url> is a regular file.
 
-        Returning false means <url> is a directory, or does not exist. Useful
-        for deciding whether to use cp or sync/rsync to download.
+        True means <url> is a regular file. False false means <url> is a
+        directory, or does not exist. Useful for deciding whether to use
+        cp or sync/rsync to download.
         """
         raise NotImplementedError
 
@@ -45,7 +46,7 @@ class S3CloudStorage(CloudStorage):
     ]
 
     def is_file(self, url: str) -> bool:
-        """Returns whether 'url' is a regular file."""
+        """Returns whether <url> is a regular file."""
         bucket_name, path = data_utils.split_s3_path(url)
         if len(path) == 0:
             return False
@@ -99,7 +100,7 @@ class GcsCloudStorage(CloudStorage):
     _GSUTIL = '~/google-cloud-sdk/bin/gsutil'
 
     def is_file(self, url: str) -> bool:
-        """Returns whether 'url' is a regular file."""
+        """Returns whether <url> is a regular file."""
         command = ' && '.join(self._GET_GSUTIL)
         backend_utils.run(command)
 
