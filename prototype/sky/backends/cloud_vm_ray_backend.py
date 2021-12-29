@@ -884,6 +884,9 @@ class CloudVmRayBackend(backends.Backend):
                            f'Existing requested resources: '
                            f'\t{handle.requested_resources}\n'
                            f'Newly requested resources: \t{task.resources}\n')
+            # FIXME: Consider if we should automatically delete the cluster if the
+            # requested resources are different or if we should just fail.
+            self.teardown(handle, terminate=True)
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
