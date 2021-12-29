@@ -234,7 +234,8 @@ class RayCodeGen(object):
         #   num_gpus=...
         name_str = f'name=\'{task_name}\''
         if task_name is None:
-            name_str = 'name=None'
+            # Make the task name more meaningful in ray log.
+            name_str = 'name=\'run\''
 
         if ray_resources_dict is None:
             resources_str = ''
