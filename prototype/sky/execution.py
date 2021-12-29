@@ -40,18 +40,15 @@ class Stage(enum.Enum):
     TEARDOWN = 6
 
 
-def execute(
-        dag: sky.Dag,
-        dryrun: bool = False,
-        teardown: bool = False,
-        stream_logs: bool = True,
-        handle: Any = None,
-        backend: Optional[backends.Backend] = None,
-        optimize_target: OptimizeTarget = OptimizeTarget.COST,
-        stages: Optional[List[Stage]] = None,
-        cluster_name: Optional[str] = None,
-        enable_all_clouds: bool = False,
-) -> None:
+def execute(dag: sky.Dag,
+            dryrun: bool = False,
+            teardown: bool = False,
+            stream_logs: bool = True,
+            handle: Any = None,
+            backend: Optional[backends.Backend] = None,
+            optimize_target: OptimizeTarget = OptimizeTarget.COST,
+            stages: Optional[List[Stage]] = None,
+            cluster_name: Optional[str] = None) -> None:
     """Runs a DAG.
 
     If the DAG has not been optimized yet, this will call sky.optimize() for
@@ -77,15 +74,10 @@ def execute(
         setup.
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
-      enable_all_clouds: If set, will not check for cloud credentials and
-        generate plans that may run on all clouds.
     """
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]
-    if enable_all_clouds:
-        task.set_enabled_clouds(sky.registry.ALL_CLOUDS)
-    else:
-        task.set_enabled_clouds(global_user_state.get_enabled_clouds())
+    task.set_enabled_clouds(global_user_state.get_enabled_clouds())
 
     if stages is None or Stage.OPTIMIZE in stages:
         if task.best_resources is None:
