@@ -139,7 +139,6 @@ def _add_cluster_to_ssh_config(handle):
             if line.strip() == f'Host {cluster_name}':
                 hostname_line = config[i + 1] if i + 1 < len(config) else ''
                 user_line = config[i + 2] if i + 2 < len(config) else ''
-
                 if hostname_line.strip(
                 ) == f'HostName {ip}' and user_line.strip(
                 ) == f'User {username}':
