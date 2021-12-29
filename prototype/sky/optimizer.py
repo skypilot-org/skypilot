@@ -182,7 +182,7 @@ class Optimizer(object):
             # Don't print for the last node, Sink.
             do_print = node_i != len(topo_order) - 1
             if do_print:
-                logger.info('#### {} ####'.format(node))
+                logger.debug('#### {} ####'.format(node))
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = \
@@ -205,9 +205,8 @@ class Optimizer(object):
                         'To fix: relax its Resources() requirements,'
                         'and run `sky init` to check your access to clouds.')
                 if num_resources == 1 and node.time_estimator_func is None:
-                    logger.warning(
-                        'Time estimator not set and only one possible '
-                        'resource choice; defaulting estimated time to 1 hr.')
+                    logger.info('Defaulting estimated time to 1 hr. '
+                                '(Task.set_time_estimator() not called.)')
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource
@@ -226,7 +225,7 @@ class Optimizer(object):
                     # where p in Parents(node).
                     assert resources not in dp_best_cost[node]
                     if do_print:
-                        logger.info(f'resources: {resources}')
+                        logger.debug(f'resources: {resources}')
 
                     if minimize_cost:
                         estimated_cost = resources.get_cost(estimated_runtime)
@@ -234,11 +233,11 @@ class Optimizer(object):
                         # Minimize run time; overload the term 'cost'.
                         estimated_cost = estimated_runtime
                     if do_print:
-                        logger.info(
+                        logger.debug(
                             '  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
                                 estimated_runtime, estimated_runtime / 3600))
                         if minimize_cost:
-                            logger.info(
+                            logger.debug(
                                 '  estimated_cost (not incl. egress): ${:.1f}'.
                                 format(estimated_cost))
 
@@ -261,12 +260,22 @@ class Optimizer(object):
                     dp_best_cost[node][
                         resources] = estimated_cost + sum_parent_cost_and_egress
 
-        logger.info('\nOptimizer - dp_best_cost:')
-        logger.info(pprint.pformat(dict(dp_best_cost)))
-
         # Dict: node -> (resources, cost).
         best_plan = Optimizer.read_optimized_plan(dp_best_cost, topo_order,
                                                   dp_point_backs, minimize_cost)
+
+        # If it's 1 resource choice, the info is already printed.
+        should_print = any(len(v) > 1 for v in dp_best_cost.values())
+        if should_print:
+            dp_best_cost = {
+                k: v
+                for k, v in dp_best_cost.items()
+                if k.name not in ('__source__', '__sink__')
+            }
+            metric = 'cost' if minimize_cost else 'time'
+            logger.info(f'Details: task -> {{resources -> {metric}}}')
+            logger.info('%s\n', pprint.pformat(dp_best_cost))
+
         return dag, best_plan
 
     @staticmethod
@@ -296,11 +305,11 @@ class Optimizer(object):
         _walk(node, h, overall_best)
 
         if minimize_cost:
-            logger.info('\nOptimizer - plan minimizing cost (~${:.1f}):'.format(
+            logger.info('Optimizer - plan minimizing cost (~${:.1f}):'.format(
                 overall_best))
         else:
             logger.info(
-                '\nOptimizer - plan minimizing run time (~{:.1f} hr):'.format(
+                'Optimizer - plan minimizing run time (~{:.1f} hr):'.format(
                     overall_best / 3600))
         # Do not print Source or Sink.
         message_data = [

@@ -111,6 +111,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls):
+        # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
         return 'm4.2xlarge'
 
     # TODO: factor the following three methods, as they are the same logic
