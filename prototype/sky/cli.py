@@ -178,7 +178,7 @@ def _create_and_ssh_into_node(
         cluster_name: str,
         backend: Optional[backend_lib.Backend] = None,
         port_forward: Optional[List[int]] = None,
-        screen_manager: Optional[str] = None,
+        session_manager: Optional[str] = None,
 ):
     """Creates and attaches to an interactive node.
 
@@ -188,10 +188,10 @@ def _create_and_ssh_into_node(
         cluster_name: a cluster name to identify the interactive node.
         backend: the Backend to use (currently only CloudVmRayBackend).
         port_forward: List of ports to forward.
-        screen_manager: Attach screen manager: { 'screen', 'tmux' }.
+        session_manager: Attach session manager: { 'screen', 'tmux' }.
     """
     assert node_type in ('cpunode', 'gpunode', 'tpunode'), node_type
-    assert screen_manager in (None, 'screen', 'tmux'), screen_manager
+    assert session_manager in (None, 'screen', 'tmux'), session_manager
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
         # should be setup =
@@ -227,9 +227,9 @@ def _create_and_ssh_into_node(
     # connection, and for allowing adding 'cd workdir' in the future.
     # Disable check, since the returncode could be non-zero if the user Ctrl-D.
     commands = backend.ssh_head_command(handle, port_forward=port_forward)
-    if screen_manager == 'screen':
+    if session_manager == 'screen':
         commands += ['screen', '-D', '-R']
-    if screen_manager == 'tmux':
+    if session_manager == 'tmux':
         commands += ['tmux']
     backend_utils.run(commands, shell=False, check=False)
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
@@ -597,9 +597,9 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
     if screen and tmux:
         raise click.UsageError('Cannot use both screen and tmux.')
 
-    screen_manager = None
+    session_manager = None
     if screen or tmux:
-        screen_manager = 'tmux' if tmux else 'screen'
+        session_manager = 'tmux' if tmux else 'screen'
     name = cluster
     if name is None:
         name = _default_interactive_node_name('gpunode')
@@ -621,7 +621,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
         resources,
         cluster_name=name,
         port_forward=port_forward,
-        screen_manager=screen_manager,
+        session_manager=session_manager,
     )
 
 
@@ -665,9 +665,9 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
     if screen and tmux:
         raise click.UsageError('Cannot use both screen and tmux.')
 
-    screen_manager = None
+    session_manager = None
     if screen or tmux:
-        screen_manager = 'tmux' if tmux else 'screen'
+        session_manager = 'tmux' if tmux else 'screen'
     name = cluster
     if name is None:
         name = _default_interactive_node_name('cpunode')
@@ -684,7 +684,7 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
         resources,
         cluster_name=name,
         port_forward=port_forward,
-        screen_manager=screen_manager,
+        session_manager=session_manager,
     )
 
 
@@ -726,9 +726,9 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
     if screen and tmux:
         raise click.UsageError('Cannot use both screen and tmux.')
 
-    screen_manager = None
+    session_manager = None
     if screen or tmux:
-        screen_manager = 'tmux' if tmux else 'screen'
+        session_manager = 'tmux' if tmux else 'screen'
     name = cluster
     if name is None:
         name = _default_interactive_node_name('tpunode')
@@ -750,7 +750,7 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
         resources,
         cluster_name=name,
         port_forward=port_forward,
-        screen_manager=screen_manager,
+        session_manager=session_manager,
     )
 
 
