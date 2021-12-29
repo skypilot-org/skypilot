@@ -135,8 +135,18 @@ def _add_cluster_to_ssh_config(handle):
             config = f.readlines()
 
         # If an existing config with `cluster_name` exists, raise a warning.
-        for line in config:
+        for i, line in enumerate(config):
             if line.strip() == f'Host {cluster_name}':
+                hostname_line = config[i + 1] if i + 1 < len(config) else ''
+                user_line = config[i + 2] if i + 2 < len(config) else ''
+
+                if hostname_line.strip(
+                ) == f'HostName {ip}' and user_line.strip(
+                ) == f'User {username}':
+                    logger.warning(
+                        f'{host_name} already exists in {config_path}')
+                    return
+
                 logger.warning(
                     f'SSH config already contains a host named {cluster_name}.')
                 host_name = ip
