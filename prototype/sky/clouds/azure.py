@@ -141,6 +141,10 @@ class Azure(clouds.Cloud):
             output = _run_output('az account show --output=json')
         except subprocess.CalledProcessError:
             return False, 'Azure CLI returned error.'
+        # If Azure is properly logged in, this will return something like:
+        #   {"id": ..., "user": ...}
+        # and if not, it will return:
+        #   Please run 'az login' to setup account.
         if output.startswith('{'):
             return True, None
         return False, 'Azure credentials not set. Run `az login`.'

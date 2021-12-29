@@ -170,11 +170,21 @@ class AWS(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+        # There are other ways to authenticate AWS. This is the simplest way
+        # for Sky because we can sync this file to a remote cluster and it
+        # will also be authenticated so that it can access private storage
+        # buckets, etc.
         try:
             assert os.path.isfile(os.path.expanduser('~/.aws/credentials'))
             output = _run_output('aws configure list')
         except (AssertionError, subprocess.CalledProcessError):
             return False, 'AWS CLI not installed properly.'
+        # Configured correctly, the AWS output should look like this:
+        #   ...
+        #   access_key     ******************** shared-credentials-file
+        #   secret_key     ******************** shared-credentials-file
+        #   ...
+        # Otherwise, one or both keys will show as '<not set>'.
         lines = output.split('\n')
         if len(lines) < 2:
             return False, 'AWS CLI output invalid.'

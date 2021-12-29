@@ -282,6 +282,10 @@ class GCP(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+        # There are other ways to authenticate GCP. This is the simplest way
+        # for Sky because we can sync these files to a remote cluster and it
+        # will also be authenticated so that it can access private storage
+        # buckets, etc.
         try:
             for file in [
                     '~/.config/gcloud/access_tokens.db',

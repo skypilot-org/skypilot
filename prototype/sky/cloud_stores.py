@@ -105,6 +105,9 @@ class GcsCloudStorage(CloudStorage):
         backend_utils.run(command)
 
         # https://cloud.google.com/storage/docs/gsutil/commands/stat
+        # gsutil stat returns 0 iff <url> is a regular file. If it is a
+        # directory, or does not exist, it will return 1. Any other return
+        # code means something else is wrong.
         gsutil_cmd = f'{self._GSUTIL} -q stat {url}'
         p = backend_utils.run(gsutil_cmd, check=False)
         rc = p.returncode

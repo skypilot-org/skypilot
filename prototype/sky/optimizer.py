@@ -13,6 +13,7 @@ import sky
 from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
+from sky import global_user_state
 from sky import logging
 from sky import resources as resources_lib
 from sky import task
@@ -200,11 +201,18 @@ class Optimizer(object):
             parents = list(graph.predecessors(node))
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
+                    cloud = orig_resources.cloud
+                    if cloud is not None and not global_user_state.is_cloud_enabled(
+                            cloud):
+                        raise exceptions.ResourcesUnavailableError(
+                            f'Task {node} requires {cloud} which is not '
+                            'enabled. Run `sky init` to enable access to it, '
+                            'or relax the resource requirements.')
                     raise exceptions.ResourcesUnavailableError(
                         f'No launchable resource found for task {node}. '
-                        'Try relaxing its resource requirements, and run '
-                        'sky init to make sure the cloud you specified '
-                        '(if any) is enabled.')
+                        'Try relaxing its resource requirements. Also run '
+                        '`sky init` to make sure at least one cloud is '
+                        'enabled.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.info('Defaulting estimated time to 1 hr. '
                                 '(Task.set_time_estimator() not called.)')

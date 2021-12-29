@@ -125,7 +125,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     return records
 
 
-def get_enabled_clouds() -> List[str]:
+def get_enabled_clouds() -> List[clouds.Cloud]:
     rows = _CURSOR.execute('SELECT value FROM config WHERE key = ?',
                            (_ENABLED_CLOUDS_KEY,))
     ret = []
@@ -133,6 +133,10 @@ def get_enabled_clouds() -> List[str]:
         ret = json.loads(value)
         break
     return [clouds.from_str(cloud)() for cloud in ret]
+
+
+def is_cloud_enabled(cloud: clouds.Cloud) -> bool:
+    return any(cloud.is_same_cloud(c) for c in get_enabled_clouds())
 
 
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:
