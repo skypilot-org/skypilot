@@ -172,6 +172,7 @@ def _add_cluster_to_ssh_config(handle):
                len(updated_lines)] = updated_lines
         with open(config_path, 'w') as f:
             f.writelines(config)
+            f.write('\n')
     else:
         with open(config_path, 'a') as f:
             f.write(codegen)
@@ -210,8 +211,7 @@ def _remove_cluster_from_ssh_config(handle):
         cursor += 1
 
     # Remove sky-generated config and update the file.
-    config[start_line_idx:end_line_idx] = ['\n'
-                                          ] if end_line_idx is not None else []
+    config[start_line_idx:end_line_idx] = []
     with open(config_path, 'w') as f:
         f.writelines(config)
 
