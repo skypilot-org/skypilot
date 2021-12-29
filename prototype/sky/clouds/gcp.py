@@ -4,7 +4,7 @@ import json
 import os
 from typing import Dict, Iterator, List, Optional, Tuple
 
-import google.auth
+from google import auth
 
 from sky import clouds
 
@@ -288,8 +288,8 @@ class GCP(clouds.Cloud):
                     '~/.config/gcloud/credentials.db'
             ]:
                 assert os.path.isfile(os.path.expanduser(file))
-            google.auth.default()
-        except (AssertionError, google.auth.exceptions.DefaultCredentialsError):
+            auth.default()
+        except (AssertionError, auth.exceptions.DefaultCredentialsError):
             return False, ('GCP credentials not set.'
                            ' Run `gcloud auth application-default login`.')
         return True, None
