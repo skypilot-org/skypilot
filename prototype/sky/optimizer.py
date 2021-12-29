@@ -205,7 +205,7 @@ class Optimizer(object):
                         f'To fix: relax its Resources() requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.info('Defaulting estimated time to 1 hr. '
-                                '(Task.set_time_estimator() not called.)')
+                                'Call Task.set_time_estimator() to override.')
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource

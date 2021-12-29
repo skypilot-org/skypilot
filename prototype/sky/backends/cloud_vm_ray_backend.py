@@ -508,7 +508,6 @@ class RetryingVmProvisioner(object):
             return True
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
-            logger.error(stderr)
             if 'ALREADY_EXISTS' in stderr:
                 # FIXME: should use 'start' on stopped TPUs, replacing
                 # 'create'. Or it can be in a "deleting" state. Investigate the
@@ -517,11 +516,11 @@ class RetryingVmProvisioner(object):
                 return True
 
             if 'PERMISSION_DENIED' in stderr:
-                logger.info('TPU resource is not available in this zone.')
+                logger.info('TPUs are not available in this zone.')
                 return False
 
             if 'no more capacity in the zone' in stderr:
-                logger.info('No capacity in this zone.')
+                logger.info('No more capacity in this zone.')
                 return False
 
             if 'CloudTpu received an invalid AcceleratorType' in stderr:
@@ -530,7 +529,7 @@ class RetryingVmProvisioner(object):
                 # values are "v2-8, ".
                 tpu_type = list(to_provision.accelerators.keys())[0]
                 logger.info(
-                    f'TPU type {tpu_type} is not avaialble in this zone.')
+                    f'TPU type {tpu_type} is not available in this zone.')
                 return False
 
             logger.error(stderr)
