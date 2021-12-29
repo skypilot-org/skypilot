@@ -128,7 +128,7 @@ def _add_cluster_to_ssh_config(handle):
     key_path = os.path.expanduser(config['auth']['ssh_private_key'])
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
     host_name = cluster_name
-    sky_autogen_comment = f'# Added by sky (use `sky stop/down ' + \
+    sky_autogen_comment = '# Added by sky (use `sky stop/down ' + \
                           f'{cluster_name}` to remove)'
     overwrite = False
     overwrite_begin_idx = None
