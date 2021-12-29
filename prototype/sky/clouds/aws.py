@@ -59,7 +59,8 @@ class AWS(clouds.Cloud):
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         assert instance_type is not None, instance_type
-        unused = accelerators
+        _ = accelerators
+
         regions = aws_catalog.get_region_zones_for_instance_type(
             instance_type, use_spot)
         for region in regions:
