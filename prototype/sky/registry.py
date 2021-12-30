@@ -1,6 +1,6 @@
 """Service registry."""
 import collections
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import sky
 from sky import clouds
@@ -28,12 +28,15 @@ def _filter_out_blocked_launchable_resources(
 
 def fill_in_launchable_resources(
         task: sky.Task,
-        blocked_launchable_resources: List[Resources] = [],
+        blocked_launchable_resources: Optional[List[Resources]],
 ) -> Dict[Resources, List[Resources]]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     launchable = collections.defaultdict(list)
+    if blocked_launchable_resources is None:
+        blocked_launchable_resources = []
     for resources in task.get_resources():
-        if resources.cloud is not None and not resources.cloud.in_list(enabled_clouds):
+        if resources.cloud is not None and not resources.cloud.in_list(
+                enabled_clouds):
             launchable[resources] = []
         elif resources.is_launchable():
             launchable[resources] = [resources]

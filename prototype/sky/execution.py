@@ -19,7 +19,6 @@ from typing import Any, List, Optional
 
 import sky
 from sky import backends
-from sky import global_user_state
 from sky import logging
 from sky import optimizer
 

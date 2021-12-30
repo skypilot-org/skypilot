@@ -202,7 +202,8 @@ class Optimizer(object):
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     cloud = orig_resources.cloud
-                    if cloud is not None and not cloud.in_list(global_user_state.get_enabled_clouds()):
+                    if cloud is not None and not cloud.in_list(
+                            global_user_state.get_enabled_clouds()):
                         raise exceptions.ResourcesUnavailableError(
                             f'Task {node} requires {cloud} which is not '
                             'enabled. Run `sky init` to enable access to it, '
