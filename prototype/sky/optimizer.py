@@ -366,10 +366,7 @@ def fill_in_launchable_resources(
 ) -> Dict[Resources, List[Resources]]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_init:
-        enabled_clouds = init.init()
-        if len(enabled_clouds) == 0:
-            # init() already printed an error message.
-            raise SystemExit()
+        init.init()
         return fill_in_launchable_resources(task, blocked_launchable_resources,
                                             False)
     launchable = collections.defaultdict(list)
@@ -378,6 +375,10 @@ def fill_in_launchable_resources(
     for resources in task.get_resources():
         if resources.cloud is not None and not _cloud_in_list(
                 resources.cloud, enabled_clouds):
+            if try_fix_with_sky_init:
+                init.init()
+                return fill_in_launchable_resources(task, blocked_launchable_resources,
+                                                    False)
             raise exceptions.ResourcesUnavailableError(
                 f'Task {task} requires {resources.cloud} which is not '
                 'enabled. Run `sky init` to enable access to it, '

@@ -308,6 +308,7 @@ class GCP(clouds.Cloud):
                 'GCP credentials not set. Run the following commands:\n    '
                 # This authenticates the CLI to make `gsutil` work:
                 '$ gcloud auth login\n    '
+                '$ gcloud config set project <proj>\n    '
                 # These two commands setup the client library to make
                 # Ray Autoscaler work:
                 '$ gcloud auth application-default login\n    '

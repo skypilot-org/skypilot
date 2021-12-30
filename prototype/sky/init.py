@@ -32,6 +32,7 @@ def init():
                 'Please setup access to a cloud, and rerun `sky init`.',
                 fg='red',
                 bold=True))
+        raise SystemExit()
     else:
         click.echo('\nSky will use only the enabled clouds to run tasks. '
                    'To change this, configure cloud credentials, '
