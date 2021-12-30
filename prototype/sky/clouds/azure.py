@@ -78,7 +78,7 @@ class Azure(clouds.Cloud):
             use_spot: bool,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         del accelerators  # unused
-        
+
         if instance_type is None:
             # fallback to manually specified region/zones
             regions = cls.regions()
