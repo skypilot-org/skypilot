@@ -113,15 +113,17 @@ class GcsCloudStorage(CloudStorage):
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        _, key = data_utils.split_gcs_path(url)
-        if len(key) == 0:
-            return True  # <url> is a bucket.
         commands = list(self._GET_GSUTIL)
         commands.append(f'{self._GSUTIL} ls -d {url}')
         command = ' && '.join(commands)
         p = backend_utils.run(command, stdout=subprocess.PIPE)
         out = p.stdout.decode().strip()
-        # gsutil ls -d url
+        # If <url> is a bucket root, then we only need `gsutil` to succeed
+        # to make sure the bucket exists. It is already a directory.
+        _, key = data_utils.split_gcs_path(url)
+        if len(key) == 0:
+            return True
+        # Otherwise, gsutil ls -d url will return:
         #   --> url.rstrip('/')          if url is not a directory
         #   --> url with an ending '/'   if url is a directory
         if not out.endswith('/'):
