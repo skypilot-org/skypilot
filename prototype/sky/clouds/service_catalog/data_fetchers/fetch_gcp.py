@@ -69,8 +69,8 @@ def get_gpu_tpu_df():
         for region, price, spot_price in regions:
             for cnt in counts:
                 rows.append([
-                    None, acc_name, cnt, 0, acc_name, price * cnt, spot_price * cnt,
-                    region
+                    None, acc_name, cnt, 0, acc_name, price * cnt,
+                    spot_price * cnt, region
                 ])
     df = pd.DataFrame(
         data=rows,
