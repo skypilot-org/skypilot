@@ -9,7 +9,6 @@ import networkx as nx
 import numpy as np
 import tabulate
 
-import sky
 from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
@@ -17,12 +16,13 @@ from sky import global_user_state
 from sky import init
 from sky import logging
 from sky import resources as resources_lib
-from sky import task
+from sky import task as task_lib
 
 logger = logging.init_logger(__name__)
 
 Dag = dag_lib.Dag
 Resources = resources_lib.Resources
+Task = task_lib.Task
 
 
 # Constants: minimize what target?
@@ -110,7 +110,7 @@ class Optimizer(object):
                 zero_outdegree_nodes.append(node)
 
         def make_dummy(name):
-            dummy = task.Task(name)
+            dummy = Task(name)
             dummy.set_resources({DummyResources(DummyCloud(), None)})
             dummy.set_time_estimator(lambda _: 0)
             return dummy
@@ -135,8 +135,8 @@ class Optimizer(object):
         return dag
 
     @staticmethod
-    def _egress_cost_or_time(minimize_cost: bool, parent: task.Task,
-                             parent_resources: Resources, node: task.Task,
+    def _egress_cost_or_time(minimize_cost: bool, parent: Task,
+                             parent_resources: Resources, node: Task,
                              resources: Resources):
         """Computes the egress cost or time depending on 'minimize_cost'."""
         if isinstance(parent_resources.cloud, DummyCloud):
@@ -204,7 +204,7 @@ class Optimizer(object):
                 if not launchable_list:
                     raise exceptions.ResourcesUnavailableError(
                         f'No launchable resource found for task {node}. '
-                        'Try relaxing its resource requirements.')
+                        'To fix: relax its resource requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.info('Defaulting estimated time to 1 hr. '
                                 '(Task.set_time_estimator() not called.)')
@@ -341,9 +341,8 @@ class DummyCloud(clouds.Cloud):
     pass
 
 
-
-def _cloud_in_list(cloud: clouds.Cloud, clouds: List[clouds.Cloud]) -> bool:
-    return any(cloud.is_same_cloud(c) for c in clouds)
+def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
+    return any(cloud.is_same_cloud(c) for c in lst)
 
 
 def _filter_out_blocked_launchable_resources(
@@ -361,7 +360,7 @@ def _filter_out_blocked_launchable_resources(
 
 
 def fill_in_launchable_resources(
-        task: task.Task,
+        task: Task,
         blocked_launchable_resources: Optional[List[Resources]],
         try_fix_with_sky_init: bool = True,
 ) -> Dict[Resources, List[Resources]]:
@@ -371,8 +370,7 @@ def fill_in_launchable_resources(
         if len(enabled_clouds) == 0:
             # init() already printed an error message.
             raise SystemExit()
-        return fill_in_launchable_resources(task,
-                                            blocked_launchable_resources,
+        return fill_in_launchable_resources(task, blocked_launchable_resources,
                                             False)
     launchable = collections.defaultdict(list)
     if blocked_launchable_resources is None:

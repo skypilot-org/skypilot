@@ -113,7 +113,7 @@ class GcsCloudStorage(CloudStorage):
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        _unused_bucket, key = data_utils.split_gcs_path(url)
+        _, key = data_utils.split_gcs_path(url)
         if len(key) == 0:
             return True  # <url> is a bucket.
         commands = list(self._GET_GSUTIL)
