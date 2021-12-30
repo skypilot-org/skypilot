@@ -2,12 +2,15 @@ import pytest
 
 import sky
 from sky import clouds
+from sky import exceptions
 
 
-def _test_resources(monkeypatch, resources):
+def _test_resources(monkeypatch,
+                    resources,
+                    enabled_clouds=sky.registry.ALL_CLOUDS):
     monkeypatch.setattr(
         'sky.global_user_state.get_enabled_clouds',
-        lambda: sky.registry.ALL_CLOUDS,
+        lambda: enabled_clouds,
     )
     with sky.Dag() as dag:
         task = sky.Task('test_task')
@@ -59,3 +62,19 @@ def test_partial_v100(monkeypatch):
         sky.Resources(clouds.AWS(), accelerators='V100', use_spot=True))
     _test_resources(monkeypatch,
                     sky.Resources(clouds.AWS(), accelerators={'V100': 8}))
+
+
+def test_clouds_not_enabled(monkeypatch):
+    with pytest.raises(exceptions.ResourcesUnavailableError):
+        _test_resources(monkeypatch,
+                        sky.Resources(clouds.AWS()),
+                        enabled_clouds=[
+                            clouds.Azure(),
+                            clouds.GCP(),
+                        ])
+        _test_resources(monkeypatch,
+                        sky.Resources(clouds.Azure()),
+                        enabled_clouds=[clouds.AWS()])
+        _test_resources(monkeypatch,
+                        sky.Resources(clouds.GCP()),
+                        enabled_clouds=[clouds.AWS()])

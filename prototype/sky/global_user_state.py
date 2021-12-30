@@ -135,10 +135,6 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
     return [clouds.from_str(cloud)() for cloud in ret]
 
 
-def is_cloud_enabled(cloud: clouds.Cloud) -> bool:
-    return any(cloud.is_same_cloud(c) for c in get_enabled_clouds())
-
-
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:
     _CURSOR.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
                     (_ENABLED_CLOUDS_KEY, json.dumps(enabled_clouds)))

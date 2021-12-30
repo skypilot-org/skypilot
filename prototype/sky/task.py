@@ -102,9 +102,6 @@ class Task(object):
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
 
-        # Task will only run on a cloud listed here.
-        self.enabled_clouds = []
-
         # Semantics.
         if num_nodes is not None and num_nodes > 1 and isinstance(
                 self.run, str):
@@ -364,11 +361,6 @@ class Task(object):
                     '(try "/mydir: /mydir" or "/myfile: /myfile"). '
                     f'Found: target={target} source={source}')
         self.file_mounts = file_mounts
-        return self
-
-    def set_enabled_clouds(self, enabled_clouds: List[clouds.Cloud]):
-        """Sets the clouds where this task can run."""
-        self.enabled_clouds = enabled_clouds
         return self
 
     def update_file_mounts(self, file_mounts: Dict[str, str]):

@@ -1,21 +1,15 @@
 """Service registry."""
 import collections
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import sky
 from sky import clouds
+from sky import global_user_state
 from sky import resources as resources_lib
 
 Resources = resources_lib.Resources
 
 ALL_CLOUDS = [clouds.AWS(), clouds.Azure(), clouds.GCP()]
-
-
-def _is_cloud_in_list(cloud: clouds.Cloud, enabled_clouds: List[clouds.Cloud]):
-    for c in enabled_clouds:
-        if cloud.is_same_cloud(c):
-            return True
-    return False
 
 
 def _filter_out_blocked_launchable_resources(
@@ -34,14 +28,12 @@ def _filter_out_blocked_launchable_resources(
 
 def fill_in_launchable_resources(
         task: sky.Task,
-        blocked_launchable_resources: Optional[List[Resources]],
+        blocked_launchable_resources: List[Resources] = [],
 ) -> Dict[Resources, List[Resources]]:
-    if blocked_launchable_resources is None:
-        blocked_launchable_resources = []
+    enabled_clouds = global_user_state.get_enabled_clouds()
     launchable = collections.defaultdict(list)
     for resources in task.get_resources():
-        if resources.cloud is not None and not _is_cloud_in_list(
-                resources.cloud, task.enabled_clouds):
+        if resources.cloud is not None and not resources.cloud.in_list(enabled_clouds):
             launchable[resources] = []
         elif resources.is_launchable():
             launchable[resources] = [resources]
@@ -50,7 +42,7 @@ def fill_in_launchable_resources(
                 resources] = resources.cloud.get_feasible_launchable_resources(
                     resources)
         else:
-            for cloud in task.enabled_clouds:
+            for cloud in enabled_clouds:
                 feasible_resources = cloud.get_feasible_launchable_resources(
                     resources)
                 launchable[resources].extend(feasible_resources)
