@@ -24,8 +24,6 @@ class Zone(collections.namedtuple('Zone', ['name'])):
 class Cloud(object):
     """A cloud provider."""
 
-    UNKNOWN_COST = int(1e9)
-
     #### Regions/Zones ####
 
     @classmethod
@@ -33,17 +31,34 @@ class Cloud(object):
         raise NotImplementedError
 
     @classmethod
-    def region_zones_provision_loop(cls) -> Iterator[Tuple[Region, List[Zone]]]:
+    def region_zones_provision_loop(
+            cls,
+            *,
+            instance_type: Optional[str] = None,
+            accelerators: Optional[Dict[str, int]] = None,
+            use_spot: Optional[bool] = False,
+    ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
         Certain clouds' provisioners may handle batched requests, retrying for
         itself a list of zones under a region.  Others may need a specific zone
         per provision request (in that case, yields (region, a one-element list
         for each zone)).
+        Optionally, caller can filter the yielded region/zones by specifying the
+        instance_type, accelerators, and use_spot.
+
+        Args:
+            instance_type: The instance type to provision.
+            accelerators: The accelerators to provision.
+            use_spot: Whether to use spot instances.
 
         Typical usage:
 
-            for region, zones in cloud.region_zones_provision_loop():
+            for region, zones in cloud.region_zones_provision_loop(
+                instance_type,
+                accelerators,
+                use_spot
+            ):
                 success = try_provision(region, zones, resources)
                 if success:
                     break
