@@ -202,17 +202,18 @@ class Optimizer(object):
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     cloud = orig_resources.cloud
-                    if cloud is not None and not cloud.in_list(
-                            global_user_state.get_enabled_clouds()):
+                    enabled_clouds = global_user_state.get_enabled_clouds()
+                    if len(enabled_clouds) == 0:
+                        raise exceptions.ResourcesUnavailableError(
+                            'No cloud is enabled. Please run `sky init`.')
+                    if cloud is not None and not clouds.cloud_in_list(cloud, enabled_clouds):
                         raise exceptions.ResourcesUnavailableError(
                             f'Task {node} requires {cloud} which is not '
                             'enabled. Run `sky init` to enable access to it, '
                             'or relax the resource requirements.')
                     raise exceptions.ResourcesUnavailableError(
                         f'No launchable resource found for task {node}. '
-                        'Try relaxing its resource requirements. Also run '
-                        '`sky init` to make sure at least one cloud is '
-                        'enabled.')
+                        'Try relaxing its resource requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.info('Defaulting estimated time to 1 hr. '
                                 '(Task.set_time_estimator() not called.)')

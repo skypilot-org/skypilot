@@ -5,6 +5,11 @@ from sky import clouds
 from sky import exceptions
 
 
+# Monkey-patching is required because in the test environment, no cloud is
+# enabled. The optimizer checks the environment to find enabled clouds, and
+# only generates plans within these clouds. The tests assume that all three
+# clouds are enabled, so we monkeypatch the `sky.global_user_state` module
+# to force it return all three clouds.
 def _test_resources(monkeypatch,
                     resources,
                     enabled_clouds=sky.registry.ALL_CLOUDS):
@@ -72,9 +77,13 @@ def test_clouds_not_enabled(monkeypatch):
                             clouds.Azure(),
                             clouds.GCP(),
                         ])
+
+    with pytest.raises(exceptions.ResourcesUnavailableError):
         _test_resources(monkeypatch,
                         sky.Resources(clouds.Azure()),
                         enabled_clouds=[clouds.AWS()])
+
+    with pytest.raises(exceptions.ResourcesUnavailableError):
         _test_resources(monkeypatch,
                         sky.Resources(clouds.GCP()),
                         enabled_clouds=[clouds.AWS()])

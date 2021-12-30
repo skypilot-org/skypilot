@@ -1,4 +1,6 @@
 """Clouds in Sky."""
+from typing import List
+
 from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import Region
 from sky.clouds.cloud import Zone
@@ -13,6 +15,8 @@ __all__ = [
     'GCP',
     'Region',
     'Zone',
+    'from_str',
+    'cloud_in_list',
 ]
 
 __CLOUD_DICT__ = {
@@ -22,5 +26,9 @@ __CLOUD_DICT__ = {
 }
 
 
-def from_str(name):
+def from_str(name: str) -> 'Cloud':
     return __CLOUD_DICT__[name]
+
+
+def in_list(cloud: 'Cloud', clouds: List['Cloud']) -> bool:
+    return any(cloud.is_same_cloud(c) for c in clouds)

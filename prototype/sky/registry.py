@@ -35,7 +35,7 @@ def fill_in_launchable_resources(
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
     for resources in task.get_resources():
-        if resources.cloud is not None and not resources.cloud.in_list(
+        if resources.cloud is not None and not clouds.cloud_in_list(resources.cloud,
                 enabled_clouds):
             launchable[resources] = []
         elif resources.is_launchable():

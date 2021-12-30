@@ -170,11 +170,10 @@ class AWS(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
-        # There are other ways to authenticate AWS. This is the simplest way
-        # for Sky because we can sync this file to a remote cluster and it
-        # will also be authenticated so that it can access private storage
-        # buckets, etc.
         try:
+            # This file is required because it will be synced to remote
+            # VMs for `aws` to access private storage buckets.
+            # `aws configure list` does not guarantee this file exists.
             assert os.path.isfile(os.path.expanduser('~/.aws/credentials'))
             output = _run_output('aws configure list')
         except (AssertionError, subprocess.CalledProcessError):

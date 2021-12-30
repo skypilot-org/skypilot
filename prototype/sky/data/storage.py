@@ -174,11 +174,6 @@ class Storage(object):
         # from existing ones
         self.stores = {} if stores is None else stores
 
-        if 's3://' in self.source:
-            self.get_or_copy_to_s3()
-        elif 'gs://' in self.source:
-            self.get_or_copy_to_gcs()
-
     def get_or_copy_to_s3(self):
         """Adds AWS S3 Store to Storage
         """

@@ -114,6 +114,3 @@ class Cloud(object):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         raise NotImplementedError
-
-    def in_list(self, clouds: List['Cloud']) -> bool:
-        return any(self.is_same_cloud(c) for c in clouds)
