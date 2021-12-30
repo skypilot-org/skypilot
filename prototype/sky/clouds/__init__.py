@@ -30,5 +30,5 @@ def from_str(name: str) -> 'Cloud':
     return __CLOUD_DICT__[name]
 
 
-def in_list(cloud: 'Cloud', clouds: List['Cloud']) -> bool:
+def cloud_in_list(cloud: 'Cloud', clouds: List['Cloud']) -> bool:
     return any(cloud.is_same_cloud(c) for c in clouds)

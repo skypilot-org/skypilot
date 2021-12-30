@@ -206,7 +206,8 @@ class Optimizer(object):
                     if len(enabled_clouds) == 0:
                         raise exceptions.ResourcesUnavailableError(
                             'No cloud is enabled. Please run `sky init`.')
-                    if cloud is not None and not clouds.cloud_in_list(cloud, enabled_clouds):
+                    if cloud is not None and not clouds.cloud_in_list(
+                            cloud, enabled_clouds):
                         raise exceptions.ResourcesUnavailableError(
                             f'Task {node} requires {cloud} which is not '
                             'enabled. Run `sky init` to enable access to it, '
