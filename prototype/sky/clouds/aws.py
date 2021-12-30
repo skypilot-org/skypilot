@@ -61,6 +61,7 @@ class AWS(clouds.Cloud):
         del accelerators  # unused
 
         if instance_type is None:
+            # fallback to manually specified region/zones
             regions = cls.regions()
         else:
             regions = aws_catalog.get_region_zones_for_instance_type(
