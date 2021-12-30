@@ -7,10 +7,10 @@ TODO:
 * Better interface.
 * Better implementation (e.g., fsspec, smart_open, using each cloud's SDK).
 """
+import subprocess
 import urllib.parse
 
 import boto3
-import botocore
 
 from sky.backends import backend_utils
 from sky.data import data_utils
@@ -19,12 +19,11 @@ from sky.data import data_utils
 class CloudStorage(object):
     """Interface for a cloud object store."""
 
-    def is_file(self, url: str) -> bool:
-        """Returns whether <url> is a regular file.
+    def is_directory(self, url: str) -> bool:
+        """Returns whether 'url' is a directory.
 
-        True means <url> is a regular file. False false means <url> is a
-        directory, or does not exist. Useful for deciding whether to use
-        cp or sync/rsync to download.
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
         """
         raise NotImplementedError
 
@@ -45,17 +44,26 @@ class S3CloudStorage(CloudStorage):
         'pip install awscli',
     ]
 
-    def is_file(self, url: str) -> bool:
-        """Returns whether <url> is a regular file."""
+    def is_directory(self, url: str) -> bool:
+        """Returns whether S3 'url' is a directory.
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        s3 = boto3.resource('s3')
         bucket_name, path = data_utils.split_s3_path(url)
-        if len(path) == 0:
-            return False
-        s3 = boto3.client('s3')
-        try:
-            s3.head_object(Bucket=bucket_name, Key=path)
-            return True
-        except botocore.errorfactory.ClientError:
-            return False
+        bucket = s3.Bucket(bucket_name)
+
+        num_objects = 0
+        for obj in bucket.objects.filter(Prefix=path):
+            num_objects += 1
+            if obj.key == path:
+                return False
+            # If there are more than 1 object in filter, then it is a directory
+            if num_objects == 3:
+                return True
+
+        # A directory with few or no items
+        return True
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads using AWS CLI."""
@@ -99,20 +107,29 @@ class GcsCloudStorage(CloudStorage):
 
     _GSUTIL = '~/google-cloud-sdk/bin/gsutil'
 
-    def is_file(self, url: str) -> bool:
-        """Returns whether <url> is a regular file."""
-        command = ' && '.join(self._GET_GSUTIL)
-        backend_utils.run(command)
+    def is_directory(self, url: str) -> bool:
+        """Returns whether 'url' is a directory.
 
-        # https://cloud.google.com/storage/docs/gsutil/commands/stat
-        # gsutil stat returns 0 iff <url> is a regular file. If it is a
-        # directory, or does not exist, it will return 1. Any other return
-        # code means something else is wrong.
-        gsutil_cmd = f'{self._GSUTIL} -q stat {url}'
-        p = backend_utils.run(gsutil_cmd, check=False)
-        rc = p.returncode
-        assert rc in [0, 1], command
-        return rc == 0
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        _unused_bucket, key = data_utils.split_gcs_path(url)
+        if len(key) == 0:
+            return True  # <url> is a bucket.
+        commands = list(self._GET_GSUTIL)
+        commands.append(f'{self._GSUTIL} ls -d {url}')
+        command = ' && '.join(commands)
+        p = backend_utils.run(command, stdout=subprocess.PIPE)
+        out = p.stdout.decode().strip()
+        # gsutil ls -d url
+        #   --> url.rstrip('/')          if url is not a directory
+        #   --> url with an ending '/'   if url is a directory
+        if not out.endswith('/'):
+            assert out == url.rstrip('/'), (out, url)
+            return False
+        url = url if url.endswith('/') else (url + '/')
+        assert out == url, (out, url)
+        return True
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil."""

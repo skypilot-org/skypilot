@@ -163,7 +163,7 @@ class RayCodeGen(object):
             import ray.util as ray_util
 
             ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
-            
+
             print('cluster_resources:', ray.cluster_resources())
             print('available_resources:', ray.available_resources())
             print('live nodes:', ray.state.node_ids())
@@ -993,17 +993,17 @@ class CloudVmRayBackend(backends.Backend):
             else:
                 wrapped_dst = backend_utils.FileMountHelper.wrap_file_mount(dst)
             storage = cloud_stores.get_storage_from_path(src)
-            if storage.is_file(src):
+            if storage.is_directory(src):
+                sync = storage.make_sync_dir_command(source=src,
+                                                     destination=wrapped_dst)
+                # It is a directory so make sure it exists.
+                mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+            else:
                 sync = storage.make_sync_file_command(source=src,
                                                       destination=wrapped_dst)
                 # It is a file so make sure *its parent dir* exists.
                 mkdir_for_wrapped_dst = \
                     f'mkdir -p {os.path.dirname(wrapped_dst)}'
-            else:
-                sync = storage.make_sync_dir_command(source=src,
-                                                     destination=wrapped_dst)
-                # It is a directory so make sure it exists.
-                mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
             download_target_commands = [
                 # Ensure sync can write to wrapped_dst (e.g., '/data/').
                 mkdir_for_wrapped_dst,
