@@ -662,7 +662,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
             ordered = [('Common Nvidia GPUs\n------------------', [])]
             for gpu in service_catalog.get_common_gpus():
                 ordered.append((gpu, result.pop(gpu)))
-            ordered.append(('----\nTPUs\n----', []))
+            ordered.append(('-----------\nGoogle TPUs\n-----------', []))
             for tpu in service_catalog.get_tpus():
                 ordered.append((tpu, result.pop(tpu)))
             if show_all:
@@ -729,7 +729,6 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         for out in _output():
             click.echo(out, nl=False)
         click.echo()
-
 
 
 def main():
