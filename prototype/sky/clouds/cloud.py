@@ -44,6 +44,8 @@ class Cloud(object):
         itself a list of zones under a region.  Others may need a specific zone
         per provision request (in that case, yields (region, a one-element list
         for each zone)).
+        Optionally, caller can filter the yielded region/zones by specifying the
+        instance_type, accelerators, and use_spot.
 
         Args:
             instance_type: The instance type to provision.

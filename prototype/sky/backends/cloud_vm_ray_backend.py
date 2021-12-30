@@ -884,7 +884,7 @@ class CloudVmRayBackend(backends.Backend):
                            f'Existing requested resources: '
                            f'\t{handle.requested_resources}\n'
                            f'Newly requested resources: \t{task.resources}\n')
-            # FIXME: Consider if we should automatically delete the cluster if 
+            # FIXME: Consider if we should automatically delete the cluster if
             # the requested resources are different or if we should just fail.
             self.teardown(handle, terminate=True)
         logger.info(
