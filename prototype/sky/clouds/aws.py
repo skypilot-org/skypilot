@@ -58,7 +58,7 @@ class AWS(clouds.Cloud):
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
-        del accelerators # unused
+        del accelerators  # unused
 
         if instance_type is None:
             regions = cls.regions()

@@ -183,7 +183,7 @@ class GCP(clouds.Cloud):
         # GCP provisioner currently takes 1 zone per request.
         # TODO: enable this after GCP catalog completes.
         # regions = gcp_catalog.get_region_zones_for_accelerators(accelerators)
-        del instance_type, accelerators, use_spot # unused
+        del instance_type, accelerators, use_spot  # unused
 
         for region in cls.regions():
             for zone in region.zones:
