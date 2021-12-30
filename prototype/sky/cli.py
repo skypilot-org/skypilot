@@ -36,6 +36,7 @@ import click
 import pandas as pd
 import pendulum
 import prettytable
+import tabulate
 
 import sky
 from sky import backends
@@ -643,41 +644,92 @@ def tpunode(cluster: str, port_forward: Optional[List[int]], screen):
 
 
 @cli.command()
-@click.option('--name_filter',
-              '-f',
-              default=None,
-              type=str,
-              help='Filter GPU names by this regex.')
-def list_gpus(name_filter: Optional[str]):
+@click.argument('gpu_name', required=False)
+@click.option('--all',
+              '-a',
+              is_flag=True,
+              default=False,
+              help='Show detailed information of all GPU/TPU offerings.')
+def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-builtin
     """List all GPU offerings that Sky supports."""
-    print('This table lists the GPU resources that you can specify in your '
-          'task specifications. You can either specify a GPU resource:\n'
-          '    resources:\n'
-          '      accelerators:\n'
-          '        V100: 8\n\n'
-          'or a specific cloud and instance type:\n'
-          '    resources:\n'
-          '      cloud: aws\n'
-          '      instance_type: p3.16xlarge\n')
-    result = service_catalog.list_accelerators(gpus_only=True,
-                                               name_filter=name_filter)
-    for gpu, items in result.items():
-        tab = prettytable.PrettyTable()
-        tab.title = gpu
-        tab.field_names = ['GPU', 'Cloud', 'Instance Type', 'RAM']
-        for item in items:
-            instance_type_str = item.instance_type if not pd.isna(
-                item.instance_type) else '(*)'
-            ram_str = f'{item.ram:.0f}GB' if item.ram > 0 else '(*)'
-            gpu_str = f'{item.accelerator_name}: {item.accelerator_count}'
-            tab.add_row([gpu_str, item.cloud, instance_type_str, ram_str])
-        print(tab)
+    show_all = all
+    assert not (show_all and gpu_name is not None
+               ), '--all is only allowed without a GPU name.'
 
-    print('(*) By default Sky uses GCP n1-highmem-8 (52GB RAM) and attaches '
-          'GPU/TPUs to it. If you need more memory, specify an '
-          'instance type according to '
-          'https://cloud.google.com/compute/docs/'
-          'general-purpose-machines#n1_machines')
+    def _output():
+        if gpu_name is None:
+            result = service_catalog.list_accelerator_counts(gpus_only=True)
+            ordered = [('Common Nvidia GPUs\n------------------', [])]
+            for gpu in service_catalog.get_common_gpus():
+                ordered.append((gpu, result.pop(gpu)))
+            ordered.append(('----\nTPUs\n----', []))
+            for tpu in service_catalog.get_tpus():
+                ordered.append((tpu, result.pop(tpu)))
+            if show_all:
+                ordered.append(('----------\nOther GPUs\n----------', []))
+                ordered.extend(sorted(result.items()))
+
+            data = [(gpu, str(counts)[1:-1]) for gpu, counts in ordered]
+            yield tabulate.tabulate(data, ['GPU', 'Available Quantities'])
+            yield '\n' + '-' * 42 + '\n'
+            if not show_all:
+                yield ('To specify a GPU/TPU in your task YAML, '
+                       'use `<gpu>: <qty>`. Example:\n'
+                       '    resources:\n'
+                       '      accelerators:\n'
+                       '        V100: 8\n\n'
+                       'To show what cloud offers a GPU/TPU type, use '
+                       '`sky show-gpus <gpu>`. To show all GPUs, including '
+                       'less common ones, and their detailed information, '
+                       'use `sky show-gpus --all`.')
+                return
+            yield ('Each table below shows the detailed offerings '
+                   'of a GPU/TPU.\n\n')
+
+        result = service_catalog.list_accelerators(gpus_only=True,
+                                                   name_filter=gpu_name)
+        show_gcp_msg = False
+        for gpu, items in result.items():
+            headers = ['GPU', 'Qty', 'Cloud', 'Instance Type', 'RAM']
+            data = []
+            for item in items:
+                if item.cloud == 'GCP':
+                    show_gcp_msg = True
+                instance_type_str = item.instance_type if not pd.isna(
+                    item.instance_type) else '(*)'
+                ram_str = f'{item.ram:.0f}GB' if item.ram > 0 else '(*)'
+                data.append([
+                    item.accelerator_name, item.accelerator_count, item.cloud,
+                    instance_type_str, ram_str
+                ])
+            yield tabulate.tabulate(data, headers)
+            yield '\n\n'
+
+        if show_gcp_msg:
+            yield (
+                '(*) By default Sky uses GCP n1-highmem-8 (52GB RAM) and '
+                'attaches GPU/TPUs to it. If you need more memory, specify an '
+                'instance type according to '
+                'https://cloud.google.com/compute/docs/'
+                'general-purpose-machines#n1_machines.\n\n')
+
+        yield ('To specify a GPU/TPU in your task YAML, use `<gpu>: <qty>`. '
+               'Example:\n'
+               '    resources:\n'
+               '      accelerators:\n'
+               '        V100: 8\n\n'
+               'Alternatively, specify a cloud and instance type. Example:\n'
+               '    resources:\n'
+               '      cloud: aws\n'
+               '      instance_type: p3.16xlarge\n')
+
+    if show_all:
+        click.echo_via_pager(_output())
+    else:
+        for out in _output():
+            click.echo(out, nl=False)
+        click.echo()
+
 
 
 def main():
