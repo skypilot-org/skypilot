@@ -40,11 +40,6 @@ class CloudStorage(object):
 class S3CloudStorage(CloudStorage):
     """AWS Cloud Storage."""
 
-    # List of commands to install AWS CLI
-    _GET_AWSCLI = [
-        'pip install awscli',
-    ]
-
     def is_file(self, url: str) -> bool:
         """Returns whether <url> is a regular file."""
         bucket_name, path = data_utils.split_s3_path(url)
@@ -62,21 +57,13 @@ class S3CloudStorage(CloudStorage):
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
-        download_via_awscli = f'mkdir -p {destination} && \
-                                aws s3 sync {source} {destination} --delete'
-
-        all_commands = list(self._GET_AWSCLI)
-        all_commands.append(download_via_awscli)
-        return ' && '.join(all_commands)
+        return (f'mkdir -p {destination} && '
+                f'aws s3 sync {source} {destination} --delete')
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        download_via_awscli = f'mkdir -p {destination} && \
-                                aws s3 cp {source} {destination}'
-
-        all_commands = list(self._GET_AWSCLI)
-        all_commands.append(download_via_awscli)
-        return ' && '.join(all_commands)
+        return (f'mkdir -p {destination} && '
+                f'aws s3 cp {source} {destination}')
 
 
 class GcsCloudStorage(CloudStorage):
@@ -85,18 +72,6 @@ class GcsCloudStorage(CloudStorage):
     # We use gsutil as a basic implementation.  One pro is that its -m
     # multi-threaded download is nice, which frees us from implementing
     # parellel workers on our end.
-    _GET_GSUTIL = [
-        # Skip if gsutil already exists.
-        'pushd /tmp &>/dev/null',
-        '(test -f ~/google-cloud-sdk/bin/gsutil || (wget --quiet '
-        'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/'
-        'google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
-        'tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
-        'mv google-cloud-sdk ~/ && '
-        '~/google-cloud-sdk/install.sh -q ))',
-        'popd &>/dev/null',
-    ]
-
     _GSUTIL = '~/google-cloud-sdk/bin/gsutil'
 
     def is_file(self, url: str) -> bool:
@@ -116,18 +91,11 @@ class GcsCloudStorage(CloudStorage):
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil."""
-        download_via_gsutil = (
-            f'{self._GSUTIL} -m rsync -d -r {source} {destination}')
-        all_commands = list(self._GET_GSUTIL)
-        all_commands.append(download_via_gsutil)
-        return ' && '.join(all_commands)
+        return f'{self._GSUTIL} -m rsync -d -r {source} {destination}'
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using gsutil."""
-        download_via_gsutil = f'{self._GSUTIL} -m cp {source} {destination}'
-        all_commands = list(self._GET_GSUTIL)
-        all_commands.append(download_via_gsutil)
-        return ' && '.join(all_commands)
+        return f'{self._GSUTIL} -m cp {source} {destination}'
 
 
 def get_storage_from_path(url: str) -> CloudStorage:

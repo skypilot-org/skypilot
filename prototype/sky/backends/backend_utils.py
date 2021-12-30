@@ -156,6 +156,35 @@ class FileMountHelper(object):
         return ' && '.join(commands)
 
 
+def _make_setup_sh(task: task_lib.Task) -> Optional[str]:
+    """Make the setup script and return its path."""
+    gcloud_sdk_url = (
+        'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/'
+        'google-cloud-sdk-367.0.0-linux-x86_64.tar.gz')
+    codegen = textwrap.dedent(f"""#!/bin/bash
+        # Install AWS CLI
+        pip install awscli
+        # Install Google Cloud SDK
+        wget --quiet {gcloud_sdk_url}
+        tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz
+        mv google-cloud-sdk ~
+        ~/google-cloud-sdk/install.sh -q
+        . $(conda info --base)/etc/profile.d/conda.sh
+        # Task setup
+        {task.setup or ''}
+    """)
+    # Use a stable path, /<tempdir>/sky_setup_<checksum>.sh, because
+    # rerunning the same task without any changes to the content of the
+    # setup command should skip the setup step.  Using NamedTemporaryFile()
+    # would generate a random path every time, hence re-triggering setup.
+    checksum = zlib.crc32(codegen.encode())
+    tempdir = tempfile.gettempdir()
+    # TODO: file lock on this path, in case tasks have the same setup cmd.
+    with open(os.path.join(tempdir, f'sky_setup_{checksum}.sh'), 'w') as f:
+        f.write(codegen)
+    return f.name
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 def write_cluster_config(run_id: RunId,
                          task: task_lib.Task,
@@ -200,22 +229,7 @@ def write_cluster_config(run_id: RunId,
 
     assert cluster_name is not None
 
-    setup_sh_path = None
-    if task.setup is not None:
-        codegen = textwrap.dedent(f"""#!/bin/bash
-            . $(conda info --base)/etc/profile.d/conda.sh
-            {task.setup}
-        """)
-        # Use a stable path, /<tempdir>/sky_setup_<checksum>.sh, because
-        # rerunning the same task without any changes to the content of the
-        # setup command should skip the setup step.  Using NamedTemporaryFile()
-        # would generate a random path every time, hence re-triggering setup.
-        checksum = zlib.crc32(codegen.encode())
-        tempdir = tempfile.gettempdir()
-        # TODO: file lock on this path, in case tasks have the same setup cmd.
-        with open(os.path.join(tempdir, f'sky_setup_{checksum}.sh'), 'w') as f:
-            f.write(codegen)
-        setup_sh_path = f.name
+    setup_sh_path = _make_setup_sh(task)
 
     # File mounts handling for remote paths possibly without write access:
     #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
