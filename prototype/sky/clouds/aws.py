@@ -66,6 +66,9 @@ class AWS(clouds.Cloud):
             regions = aws_catalog.get_region_zones_for_instance_type(
                 instance_type, use_spot)
         for region in regions:
+            if region.name == 'us-west-1':
+                # TODO: troubles launching AMIs.
+                continue
             yield region, region.zones
 
     @classmethod

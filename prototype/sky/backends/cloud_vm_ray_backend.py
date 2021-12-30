@@ -235,7 +235,7 @@ class RayCodeGen(object):
         name_str = f'name=\'{task_name}\''
         if task_name is None:
             # Make the task name more meaningful in ray log.
-            name_str = 'name=\'run\''
+            name_str = 'name=\'task\''
 
         if ray_resources_dict is None:
             resources_str = ''
@@ -879,14 +879,17 @@ class CloudVmRayBackend(backends.Backend):
                 # 2GPUs.
                 task.best_resources = handle.launched_resources
                 return cluster_name, handle.launched_resources
-            logger.warning(f'Reusing existing cluster {cluster_name} with '
+            logger.error(f'Reusing existing cluster {cluster_name} with '
                            'different requested resources.\n'
                            f'Existing requested resources: '
                            f'\t{handle.requested_resources}\n'
-                           f'Newly requested resources: \t{task.resources}\n')
-            # FIXME: Consider if we should automatically delete the cluster if
-            # the requested resources are different or if we should just fail.
-            self.teardown(handle, terminate=True)
+                           f'Newly requested resources: \t{task.resources}\n'
+                           f'Please delete the cluster {cluster_name} and retry'
+                           ' or try to relaunch with a different cluster name.')
+            # FIXME: for job queue, the currect logic may be checking requested
+            # resources <= actual resources.
+            raise exceptions.ResourcesMismatchError(
+                'Requested resources do not match the existing cluster.')
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
