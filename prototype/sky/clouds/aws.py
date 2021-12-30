@@ -175,8 +175,12 @@ class AWS(clouds.Cloud):
             # VMs for `aws` to access private storage buckets.
             # `aws configure list` does not guarantee this file exists.
             assert os.path.isfile(os.path.expanduser('~/.aws/credentials'))
+        except AssertionError:
+            return (False,
+                    '~/.aws/credentials does not exist. Run `aws configure`.')
+        try:
             output = _run_output('aws configure list')
-        except (AssertionError, subprocess.CalledProcessError):
+        except subprocess.CalledProcessError:
             return False, 'AWS CLI not installed properly.'
         # Configured correctly, the AWS output should look like this:
         #   ...

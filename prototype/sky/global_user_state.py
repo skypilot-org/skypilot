@@ -26,20 +26,16 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
 
-try:
-    _CURSOR.execute('select * from clusters limit 0')
-    _CURSOR.execute('select * from config limit 0')
-except sqlite3.OperationalError:
-    # Tables do not exist, create them.
-    _CURSOR.execute("""\
-      CREATE TABLE clusters (
-        name TEXT PRIMARY KEY,
-        lauched_at INTEGER,
-        handle BLOB,
-        last_use TEXT,
-        status TEXT)""")
-    _CURSOR.execute("""\
-        CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT)""")
+_CURSOR.execute("""\
+    CREATE TABLE IF NOT EXISTS clusters (
+    name TEXT PRIMARY KEY,
+    lauched_at INTEGER,
+    handle BLOB,
+    last_use TEXT,
+    status TEXT)""")
+_CURSOR.execute("""\
+    CREATE TABLE IF NOT EXISTS config (
+    key TEXT PRIMARY KEY, value TEXT)""")
 _CONN.commit()
 
 

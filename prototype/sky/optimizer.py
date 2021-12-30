@@ -3,7 +3,7 @@ import collections
 import copy
 import enum
 import pprint
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import networkx as nx
 import numpy as np
@@ -14,6 +14,7 @@ from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
+from sky import init
 from sky import logging
 from sky import resources as resources_lib
 from sky import task
@@ -187,7 +188,7 @@ class Optimizer(object):
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = \
-                    sky.registry.fill_in_launchable_resources(
+                    fill_in_launchable_resources(
                         node,
                         blocked_launchable_resources
                     )
@@ -201,17 +202,6 @@ class Optimizer(object):
             parents = list(graph.predecessors(node))
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
-                    cloud = orig_resources.cloud
-                    enabled_clouds = global_user_state.get_enabled_clouds()
-                    if len(enabled_clouds) == 0:
-                        raise exceptions.ResourcesUnavailableError(
-                            'No cloud is enabled. Please run `sky init`.')
-                    if cloud is not None and not clouds.cloud_in_list(
-                            cloud, enabled_clouds):
-                        raise exceptions.ResourcesUnavailableError(
-                            f'Task {node} requires {cloud} which is not '
-                            'enabled. Run `sky init` to enable access to it, '
-                            'or relax the resource requirements.')
                     raise exceptions.ResourcesUnavailableError(
                         f'No launchable resource found for task {node}. '
                         'Try relaxing its resource requirements.')
@@ -349,3 +339,63 @@ class DummyResources(Resources):
 class DummyCloud(clouds.Cloud):
     """A dummy Cloud that has zero egress cost from/to."""
     pass
+
+
+
+def _cloud_in_list(cloud: clouds.Cloud, clouds: List[clouds.Cloud]) -> bool:
+    return any(cloud.is_same_cloud(c) for c in clouds)
+
+
+def _filter_out_blocked_launchable_resources(
+        launchable_resources: List[Resources],
+        blocked_launchable_resources: List[Resources]):
+    """Whether the resources are blocked."""
+    available_resources = []
+    for resources in launchable_resources:
+        for blocked_resources in blocked_launchable_resources:
+            if resources.is_launchable_fuzzy_equal(blocked_resources):
+                break
+        else:  # non-blokced launchable resources. (no break)
+            available_resources.append(resources)
+    return available_resources
+
+
+def fill_in_launchable_resources(
+        task: task.Task,
+        blocked_launchable_resources: Optional[List[Resources]],
+        try_fix_with_sky_init: bool = True,
+) -> Dict[Resources, List[Resources]]:
+    enabled_clouds = global_user_state.get_enabled_clouds()
+    if len(enabled_clouds) == 0 and try_fix_with_sky_init:
+        enabled_clouds = init.init()
+        if len(enabled_clouds) == 0:
+            # init() already printed an error message.
+            raise SystemExit()
+        return fill_in_launchable_resources(task,
+                                            blocked_launchable_resources,
+                                            False)
+    launchable = collections.defaultdict(list)
+    if blocked_launchable_resources is None:
+        blocked_launchable_resources = []
+    for resources in task.get_resources():
+        if resources.cloud is not None and not _cloud_in_list(
+                resources.cloud, enabled_clouds):
+            raise exceptions.ResourcesUnavailableError(
+                f'Task {task} requires {resources.cloud} which is not '
+                'enabled. Run `sky init` to enable access to it, '
+                'or relax the resource requirements.')
+        elif resources.is_launchable():
+            launchable[resources] = [resources]
+        elif resources.cloud is not None:
+            launchable[
+                resources] = resources.cloud.get_feasible_launchable_resources(
+                    resources)
+        else:
+            for cloud in enabled_clouds:
+                feasible_resources = cloud.get_feasible_launchable_resources(
+                    resources)
+                launchable[resources].extend(feasible_resources)
+        launchable[resources] = _filter_out_blocked_launchable_resources(
+            launchable[resources], blocked_launchable_resources)
+
+    return launchable

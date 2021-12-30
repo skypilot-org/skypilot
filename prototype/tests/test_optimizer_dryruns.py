@@ -10,9 +10,7 @@ from sky import exceptions
 # only generates plans within these clouds. The tests assume that all three
 # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
 # to force it return all three clouds.
-def _test_resources(monkeypatch,
-                    resources,
-                    enabled_clouds=sky.registry.ALL_CLOUDS):
+def _test_resources(monkeypatch, resources, enabled_clouds=clouds.ALL_CLOUDS):
     monkeypatch.setattr(
         'sky.global_user_state.get_enabled_clouds',
         lambda: enabled_clouds,

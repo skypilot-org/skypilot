@@ -39,6 +39,7 @@ import prettytable
 import sky
 from sky import backends
 from sky import global_user_state
+from sky import init as sky_init
 from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
@@ -651,25 +652,7 @@ def init():
     click.echo('Sky will use the following clouds to run tasks. '
                'To change this, configure cloud access credentials,'
                ' and rerun ' + click.style('sky init', bold=True) + '.\n')
-
-    enabled_clouds = []
-    for cloud in sky.registry.ALL_CLOUDS:
-        click.echo(f'  Checking {cloud}...', nl=False)
-        ok, reason = cloud.check_credentials()
-        click.echo('\r', nl=False)
-        status_msg = 'enabled' if ok else 'disabled'
-        status_color = 'green' if ok else 'red'
-        click.echo(
-            '  ' +
-            click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-            ' ' * 10)
-        if ok:
-            enabled_clouds.append(str(cloud))
-        else:
-            click.echo(f'    Reason: {reason}')
-    click.echo()
-
-    global_user_state.set_enabled_clouds(enabled_clouds)
+    sky_init.init()
 
 
 def main():
