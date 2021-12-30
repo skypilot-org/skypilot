@@ -880,12 +880,12 @@ class CloudVmRayBackend(backends.Backend):
                 task.best_resources = handle.launched_resources
                 return cluster_name, handle.launched_resources
             logger.error(f'Reusing existing cluster {cluster_name} with '
-                           'different requested resources.\n'
-                           f'Existing requested resources: '
-                           f'\t{handle.requested_resources}\n'
-                           f'Newly requested resources: \t{task.resources}\n'
-                           f'Please delete the cluster {cluster_name} and retry'
-                           ' or try to relaunch with a different cluster name.')
+                         'different requested resources.\n'
+                         f'Existing requested resources: '
+                         f'\t{handle.requested_resources}\n'
+                         f'Newly requested resources: \t{task.resources}\n'
+                         f'Please delete the cluster {cluster_name} and retry'
+                         ' or try to relaunch with a different cluster name.')
             # FIXME: for job queue, the currect logic may be checking requested
             # resources <= actual resources.
             raise exceptions.ResourcesMismatchError(
