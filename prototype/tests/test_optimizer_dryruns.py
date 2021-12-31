@@ -17,7 +17,7 @@ def _test_resources(monkeypatch, resources, enabled_clouds=clouds.ALL_CLOUDS):
         'sky.global_user_state.get_enabled_clouds',
         lambda: enabled_clouds,
     )
-    monkeypatch.setattr('sky.init.init', lambda: None)
+    monkeypatch.setattr('sky.init.init', lambda *_args, **_kwargs: None)
     with sky.Dag() as dag:
         task = sky.Task('test_task')
         task.set_resources({resources})

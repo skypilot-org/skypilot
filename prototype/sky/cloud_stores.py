@@ -46,6 +46,7 @@ class S3CloudStorage(CloudStorage):
 
     def is_directory(self, url: str) -> bool:
         """Returns whether S3 'url' is a directory.
+
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """

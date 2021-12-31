@@ -18,12 +18,12 @@ __all__ = [
 ]
 
 __CLOUD_DICT__ = {
-    'AWS': AWS,
-    'Azure': Azure,
-    'GCP': GCP,
+    'AWS': AWS(),
+    'Azure': Azure(),
+    'GCP': GCP(),
 }
 
-ALL_CLOUDS = [c() for c in __CLOUD_DICT__.values()]
+ALL_CLOUDS = list(__CLOUD_DICT__.values())
 
 
 def from_str(name: str) -> 'Cloud':

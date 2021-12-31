@@ -188,7 +188,7 @@ class Optimizer(object):
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = \
-                    fill_in_launchable_resources(
+                    _fill_in_launchable_resources(
                         node,
                         blocked_launchable_resources
                     )
@@ -359,16 +359,16 @@ def _filter_out_blocked_launchable_resources(
     return available_resources
 
 
-def fill_in_launchable_resources(
+def _fill_in_launchable_resources(
         task: Task,
         blocked_launchable_resources: Optional[List[Resources]],
         try_fix_with_sky_init: bool = True,
 ) -> Dict[Resources, List[Resources]]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_init:
-        init.init()
-        return fill_in_launchable_resources(task, blocked_launchable_resources,
-                                            False)
+        init.init(quiet=True)
+        return _fill_in_launchable_resources(task, blocked_launchable_resources,
+                                             False)
     launchable = collections.defaultdict(list)
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
@@ -376,8 +376,8 @@ def fill_in_launchable_resources(
         if resources.cloud is not None and not _cloud_in_list(
                 resources.cloud, enabled_clouds):
             if try_fix_with_sky_init:
-                init.init()
-                return fill_in_launchable_resources(
+                init.init(quiet=True)
+                return _fill_in_launchable_resources(
                     task, blocked_launchable_resources, False)
             raise exceptions.ResourcesUnavailableError(
                 f'Task {task} requires {resources.cloud} which is not '
