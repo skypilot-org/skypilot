@@ -9,12 +9,15 @@ from sky import exceptions
 # enabled. The optimizer checks the environment to find enabled clouds, and
 # only generates plans within these clouds. The tests assume that all three
 # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
-# to return all three clouds.
+# to return all three clouds. We also monkeypatch `sky.init.init` so that
+# when the optimizer tries calling it to update enabled_clouds, it does not
+# raise SystemExit.
 def _test_resources(monkeypatch, resources, enabled_clouds=clouds.ALL_CLOUDS):
     monkeypatch.setattr(
         'sky.global_user_state.get_enabled_clouds',
         lambda: enabled_clouds,
     )
+    monkeypatch.setattr('sky.init.init', lambda: None)
     with sky.Dag() as dag:
         task = sky.Task('test_task')
         task.set_resources({resources})
