@@ -190,9 +190,11 @@ class GCP(clouds.Cloud):
             assert resources.is_launchable(), resources
             return [resources]
         if resources.accelerators is not None:
-            available_accelerators = gcp_catalog.list_accelerators().keys()
-            for acc in resources.accelerators.keys():
-                if acc not in available_accelerators:
+            available_accelerators = gcp_catalog.list_accelerators()
+            for acc, acc_count in resources.accelerators.items():
+                if acc not in available_accelerators or not any(
+                        acc_count == info.accelerator_count
+                        for info in available_accelerators[acc]):
                     return []
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
