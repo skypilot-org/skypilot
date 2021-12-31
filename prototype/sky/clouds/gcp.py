@@ -126,8 +126,7 @@ class GCP(clouds.Cloud):
     def accelerators_to_hourly_cost(self, accelerators):
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
-        # Assumes linear pricing.
-        return gcp_catalog.get_hourly_cost(acc) * acc_count
+        return gcp_catalog.get_accelerator_hourly_cost(acc, acc_count)
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:

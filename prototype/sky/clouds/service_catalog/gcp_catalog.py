@@ -18,19 +18,22 @@ _DEFAULT_REGION = 'us-central1'
 def _get_accelerator(
         df: pd.DataFrame,
         accelerator: str,
+        count: int,
         region: Optional[str],
 ) -> pd.DataFrame:
-    idx = df['AcceleratorName'] == accelerator
+    idx = (df['AcceleratorName'] == accelerator) & (
+        df['AcceleratorCount'] == count)
     if region is not None:
         idx &= df['Region'] == region
     return df[idx]
 
 
-def get_hourly_cost(accelerator: str,
-                    region: str = _DEFAULT_REGION,
-                    use_spot: bool = False) -> float:
+def get_accelerator_hourly_cost(accelerator: str,
+                                count: int,
+                                region: str = _DEFAULT_REGION,
+                                use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    df = _get_accelerator(_df, accelerator, region)
+    df = _get_accelerator(_df, accelerator, count, region)
     assert len(set(df['Price'])) == 1, df
     if not use_spot:
         return df['Price'].iloc[0]
