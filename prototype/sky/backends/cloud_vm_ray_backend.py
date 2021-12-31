@@ -234,7 +234,8 @@ class RayCodeGen(object):
         #   num_gpus=...
         name_str = f'name=\'{task_name}\''
         if task_name is None:
-            name_str = 'name=None'
+            # Make the task name more meaningful in ray log.
+            name_str = 'name=\'task\''
 
         if ray_resources_dict is None:
             resources_str = ''
@@ -463,7 +464,8 @@ class RetryingVmProvisioner(object):
                 region, zones, stdout, stderr)
         assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, cloud: clouds.Cloud, cluster_name: str):
+    def _yield_region_zones(self, to_provision: Resources, cluster_name: str):
+        cloud = to_provision.cloud
         region = None
         zones = None
         # Try loading previously launched region/zones and try them first,
@@ -492,7 +494,11 @@ class RetryingVmProvisioner(object):
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
                 region.set_zones(zones)
             yield (region, zones)  # Ok to yield again in the next loop.
-        for region, zones in cloud.region_zones_provision_loop():
+        for region, zones in cloud.region_zones_provision_loop(
+                instance_type=to_provision.instance_type,
+                accelerators=to_provision.accelerators,
+                use_spot=to_provision.use_spot,
+        ):
             yield (region, zones)
 
     def _try_provision_tpu(self, to_provision: Resources, acc_args,
@@ -548,7 +554,7 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         self._clear_blocklist()
-        for region, zones in self._yield_region_zones(to_provision.cloud,
+        for region, zones in self._yield_region_zones(to_provision,
                                                       cluster_name):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
@@ -901,11 +907,17 @@ class CloudVmRayBackend(backends.Backend):
                 # 2GPUs.
                 task.best_resources = handle.launched_resources
                 return cluster_name, handle.launched_resources
-            logger.warning(f'Reusing existing cluster {cluster_name} with '
-                           'different requested resources.\n'
-                           f'Existing requested resources: '
-                           f'\t{handle.requested_resources}\n'
-                           f'Newly requested resources: \t{task.resources}\n')
+            logger.error(f'Reusing existing cluster {cluster_name} with '
+                         'different requested resources.\n'
+                         f'Existing requested resources: '
+                         f'\t{handle.requested_resources}\n'
+                         f'Newly requested resources: \t{task.resources}\n'
+                         f'Please delete the cluster {cluster_name} and retry'
+                         ' or try to relaunch with a different cluster name.')
+            # FIXME: for job queue, the currect logic may be checking requested
+            # resources <= actual resources.
+            raise exceptions.ResourcesMismatchError(
+                'Requested resources do not match the existing cluster.')
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
