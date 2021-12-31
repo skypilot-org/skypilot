@@ -10,7 +10,7 @@ tf.tpu.experimental.initialize_tpu_system(tpu)
 strategy = tf.distribute.experimental.TPUStrategy(tpu)
 
 ds_train, ds_info = tfds.load('amazon_us_reviews/Books_v1_02',
-                              split='train[:5%]',
+                              split='train[:20%]',
                               with_info=True,
                               data_dir="gs://weilin-bert-test")
 
@@ -127,6 +127,7 @@ with strategy.scope():
                   loss=model.compute_loss)  # can also use any keras loss fn
     model.summary()
 
-inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(256).prefetch(
+bs = 256
+inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(bs).prefetch(
     tf.data.experimental.AUTOTUNE)
-model.fit(inuse_dataset, epochs=1, batch_size=256)
+model.fit(inuse_dataset, epochs=1, batch_size=bs)
