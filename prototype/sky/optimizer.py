@@ -1,6 +1,5 @@
 """The Sky optimizer: assigns best resources to user tasks."""
 import collections
-import copy
 import enum
 import pprint
 from typing import List, Optional
