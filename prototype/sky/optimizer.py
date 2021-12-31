@@ -377,8 +377,8 @@ def fill_in_launchable_resources(
                 resources.cloud, enabled_clouds):
             if try_fix_with_sky_init:
                 init.init()
-                return fill_in_launchable_resources(task, blocked_launchable_resources,
-                                                    False)
+                return fill_in_launchable_resources(
+                    task, blocked_launchable_resources, False)
             raise exceptions.ResourcesUnavailableError(
                 f'Task {task} requires {resources.cloud} which is not '
                 'enabled. Run `sky init` to enable access to it, '

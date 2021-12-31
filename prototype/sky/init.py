@@ -36,7 +36,6 @@ def init():
     else:
         click.echo('\nSky will use only the enabled clouds to run tasks. '
                    'To change this, configure cloud credentials, '
-                   'and rerun ' + click.style('sky init', bold=True) + '.\n')
+                   'and rerun ' + click.style('sky init', bold=True) + '.')
 
     global_user_state.set_enabled_clouds(enabled_clouds)
-    return enabled_clouds
