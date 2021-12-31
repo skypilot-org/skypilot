@@ -71,8 +71,8 @@ class Optimizer(object):
             dag: Dag,
             minimize=OptimizeTarget.COST,
             blocked_launchable_resources: Optional[List[Resources]] = None):
-        dag = copy.deepcopy(dag)
-        # Optimization.
+        # This function is effectful: mutates every node in 'dag' by setting
+        # node.best_resources if it is None.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
         optimized_dag, unused_best_plan = Optimizer._optimize_cost(
             dag,

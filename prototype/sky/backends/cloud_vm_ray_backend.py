@@ -811,21 +811,16 @@ class RetryingVmProvisioner(object):
                     f'{style.RESET_ALL}')
                 # Add failed resources to the blocklist.
                 self._blocked_launchable_resources.add(to_provision)
+                # Set to None so that sky.optimize() will assign a new one
+                # (otherwise will skip re-optimizing this task).
                 # TODO: set all remaining tasks' best_resources to None.
-                assert task in self._dag.tasks, 'Internal logic error.'
-                task_index = self._dag.tasks.index(task)
                 task.best_resources = None
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.
                                          _blocked_launchable_resources)
-                # Update task itself, instead of create a new one, so that the
-                # caller can get the updated task.
-                task.__dict__.update(self._dag.tasks[task_index].__dict__)
-                # TODO: what if this launchable resource failed again and hit
-                # this codepath?  Adding an assert in case we need to fix it.
-                assert task in self._dag.tasks, 'Internal logic error.'
                 to_provision = task.best_resources
+                assert task in self._dag.tasks, 'Internal logic error.'
                 assert to_provision is not None, task
         return config_dict
 
@@ -917,7 +912,12 @@ class CloudVmRayBackend(backends.Backend):
             # FIXME: for job queue, the currect logic may be checking requested
             # resources <= actual resources.
             raise exceptions.ResourcesMismatchError(
-                'Requested resources do not match the existing cluster.')
+                'Requested resources do not match the existing cluster.\n'
+                f'  Requested: {task.num_nodes}x {task.resources}\n'
+                f'  Existing: {handle.requested_nodes}x '
+                f'{handle.requested_resources}\n'
+                f'To fix: specify a new cluster name, or down the '
+                f'existing cluster: `sky down {cluster_name}`.')
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
