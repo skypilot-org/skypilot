@@ -7,7 +7,7 @@ from sky import global_user_state
 
 
 def init(quiet: bool = False):
-    echo = lambda *_args, **_kwargs: None if quiet else click.echo
+    echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for Sky.')
 
     enabled_clouds = []
