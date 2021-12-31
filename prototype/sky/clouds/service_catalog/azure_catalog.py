@@ -33,7 +33,7 @@ def get_instance_type_for_accelerator(acc_name: str,
         _df, acc_name, acc_count)
 
 
-def list_accelerators(gpus_only: bool,
-                      name_filter: Optional[str]) -> Dict[str, List[int]]:
+def list_accelerators(gpus_only: bool, name_filter: Optional[str]
+                     ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Azure offering GPUs."""
     return common.list_accelerators_impl('Azure', _df, gpus_only, name_filter)

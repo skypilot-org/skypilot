@@ -4,6 +4,7 @@ import json
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky.clouds.service_catalog import gcp_catalog
 
 
 class GCP(clouds.Cloud):
@@ -34,43 +35,6 @@ class GCP(clouds.Cloud):
         'n1-highmem-64': 3.785696,
         'n1-highmem-96': 5.678544,
     }
-    # GPUs: https://cloud.google.com/compute/gpus-pricing.
-    _ON_DEMAND_PRICES_GPUS = {
-        # T4
-        'T4': 0.35,
-        '1x T4': 0.35,
-        '2x T4': 0.35 * 2,
-        '4x T4': 0.35 * 4,
-        # P4
-        'P4': 0.60,
-        '1x P4': 0.60,
-        '2x P4': 0.60 * 2,
-        '4x P4': 0.60 * 4,
-        # V100
-        'V100': 2.48,
-        '1x V100': 2.48,
-        '2x V100': 2.48 * 2,
-        '4x V100': 2.48 * 4,
-        '8x V100': 2.48 * 8,
-        # P100
-        'P100': 1.46,
-        '1x P100': 1.46,
-        '2x P100': 1.46 * 2,
-        '4x P100': 1.46 * 4,
-        # K80
-        'K80': 0.45,
-        '1x K80': 0.45,
-        '2x K80': 0.45 * 2,
-        '4x K80': 0.45 * 4,
-        '8x K80': 0.45 * 8,
-    }
-    # TPUs: https://cloud.google.com/tpu/pricing.
-    _ON_DEMAND_PRICES_TPUS = {
-        'tpu-v2-8': 4.5,
-        'tpu-v3-8': 8.0,
-    }
-    _ON_DEMAND_PRICES.update(_ON_DEMAND_PRICES_GPUS)
-    _ON_DEMAND_PRICES.update(_ON_DEMAND_PRICES_TPUS)
 
     _SPOT_PRICES = {
         # VMs: https://cloud.google.com/compute/all-pricing.
@@ -92,43 +56,6 @@ class GCP(clouds.Cloud):
         'n1-highmem-64': 0.796992,
         'n1-highmem-96': 1.195488,
     }
-    # GPUs: https://cloud.google.com/compute/gpus-pricing.
-    _SPOT_PRICES_GPUS = {
-        # T4
-        'T4': 0.11,
-        '1x T4': 0.11,
-        '2x T4': 0.11 * 2,
-        '4x T4': 0.11 * 4,
-        # P4
-        'P4': 0.216,
-        '1x P4': 0.216,
-        '2x P4': 0.216 * 2,
-        '4x P4': 0.216 * 4,
-        # V100
-        'V100': 0.74,
-        '1x V100': 0.74,
-        '2x V100': 0.74 * 2,
-        '4x V100': 0.74 * 4,
-        '8x V100': 0.74 * 8,
-        # P100
-        'P100': 0.43,
-        '1x P100': 0.43,
-        '2x P100': 0.43 * 2,
-        '4x P100': 0.43 * 4,
-        # K80
-        'K80': 0.0375,
-        '1x K80': 0.0375,
-        '2x K80': 0.0375 * 2,
-        '4x K80': 0.0375 * 4,
-        '8x K80': 0.0375 * 8,
-    }
-    # TPUs: https://cloud.google.com/tpu/pricing.
-    _SPOT_PRICES_TPUS = {
-        'tpu-v2-8': 1.35,
-        'tpu-v3-8': 2.40,
-    }
-    _SPOT_PRICES.update(_SPOT_PRICES_GPUS)
-    _SPOT_PRICES.update(_SPOT_PRICES_TPUS)
 
     #### Regions/Zones ####
 
@@ -190,13 +117,8 @@ class GCP(clouds.Cloud):
     def accelerators_to_hourly_cost(self, accelerators):
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
-        if acc in GCP._ON_DEMAND_PRICES_GPUS:
-            # Assuming linear pricing.
-            return GCP._ON_DEMAND_PRICES_GPUS[acc] * acc_count
-        if acc in GCP._ON_DEMAND_PRICES_TPUS:
-            assert acc_count == 1, accelerators
-            return GCP._ON_DEMAND_PRICES_TPUS[acc]
-        assert False, accelerators
+        # Assumes linear pricing.
+        return gcp_catalog.get_hourly_cost(acc) * acc_count
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -260,9 +182,9 @@ class GCP(clouds.Cloud):
             assert resources.is_launchable(), resources
             return [resources]
         if resources.accelerators is not None:
+            available_accelerators = gcp_catalog.list_accelerators().keys()
             for acc in resources.accelerators.keys():
-                if acc not in self._ON_DEMAND_PRICES_GPUS \
-                    and acc not in self._ON_DEMAND_PRICES_TPUS:
+                if acc not in available_accelerators:
                     return []
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.

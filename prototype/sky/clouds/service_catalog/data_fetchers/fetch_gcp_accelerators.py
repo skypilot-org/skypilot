@@ -7,10 +7,9 @@ TODO: Add support for regular VMs
 https://cloud.google.com/sdk/gcloud/reference/compute/machine-types/list
 """
 
-import json
-
 from absl import app
 from absl import logging
+import numpy as np
 import pandas as pd
 
 
@@ -52,11 +51,18 @@ def get_gpu_tpu_df():
         ),
     }
     # https://cloud.google.com/tpu/pricing
+    # These are the only TPUs that we can launch using our account.
     tpu_data = {
-        'tpu-v2-8': (
+        'tpu-v2-8': ([1], [('us-central1', 4.50, 1.35),
+                           ('europe-west4', 4.95, 1.485),
+                           ('asia-east1', 5.22, 1.566)]),
+        'tpu-v2-32': (
             [1],
-            [('us-central1', 4.50, 1.35), ('europe-west4', 4.95, 1.485),
-             ('asia-east1', 5.22, 1.566)],
+            [('us-central1', 24, np.nan), ('europe-west4', 24, np.nan)],
+        ),
+        'tpu-v2-128': (
+            [1],
+            [('us-central1', 96, np.nan), ('europe-west4', 96, np.nan)],
         ),
         'tpu-v3-8': (
             [1],

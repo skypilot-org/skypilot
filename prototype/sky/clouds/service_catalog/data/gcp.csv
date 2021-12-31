@@ -80,5 +80,9 @@ InstanceType,AcceleratorName,AcceleratorCount,MemoryGiB,GpuInfo,Price,SpotPrice,
 ,tpu-v2-8,1,0,tpu-v2-8,4.5,1.35,us-central1
 ,tpu-v2-8,1,0,tpu-v2-8,4.95,1.485,europe-west4
 ,tpu-v2-8,1,0,tpu-v2-8,5.22,1.566,asia-east1
+,tpu-v2-32,1,0,tpu-v2-32,24.0,,us-central1
+,tpu-v2-32,1,0,tpu-v2-32,24.0,,europe-west4
+,tpu-v2-128,1,0,tpu-v2-128,96.0,,us-central1
+,tpu-v2-128,1,0,tpu-v2-128,96.0,,europe-west4
 ,tpu-v3-8,1,0,tpu-v3-8,8.0,2.4,us-central1
 ,tpu-v3-8,1,0,tpu-v3-8,8.8,2.64,europe-west4
