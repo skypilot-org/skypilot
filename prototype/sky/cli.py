@@ -208,9 +208,6 @@ def _create_and_ssh_into_node(
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     dag = sky.optimize(dag)
     task = dag.tasks[0]
-    # Since optimize() returns a deep copy, must register the optimized dag
-    # object.  Otherwise the original dag doesn't contain 'task' and
-    # cross-cloud retry may fail (_dag.index(task)).
     backend.register_info(dag=dag)
 
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
