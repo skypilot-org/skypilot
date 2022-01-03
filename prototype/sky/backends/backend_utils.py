@@ -50,6 +50,13 @@ def _fill_template(template_path: str,
                    output_path: Optional[str] = None) -> str:
     """Create a file from a Jinja template and return the filename."""
     assert template_path.endswith('.j2'), template_path
+
+    def to_absolute(path):
+        if not os.path.isabs(path):
+            path = os.path.join(os.path.dirname(sky.__root_dir__), path)
+        return path
+
+    template_path = to_absolute(template_path)
     with open(template_path) as fin:
         template = fin.read()
     template = jinja2.Template(template)
@@ -61,12 +68,9 @@ def _fill_template(template_path: str,
             template_path).parents[0] / 'user' / f'{cluster_name}.yml'
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
+    output_path = to_absolute(output_path)
     with open(output_path, 'w') as fout:
         fout.write(content)
-    if not os.path.isabs(output_path):
-        # Need abs path here, otherwise get_rel_path() below fails.
-        output_path = os.path.join(os.path.dirname(sky.__root_dir__),
-                                   output_path)
     return output_path
 
 
