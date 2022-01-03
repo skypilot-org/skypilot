@@ -33,15 +33,13 @@ S3Store = Any
 GcsStore = Any
 
 
-def s3_to_gcs(s3_store: S3Store, gs_store: GcsStore) -> None:
+def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
     Can be viewed from: https://console.cloud.google.com/transfer/cloud
 
     Args:
-      s3_store: S3Store; AWS S3 Store that contains a
-      corresponding S3 bucket
-      gs_store: GcsStore; GCP Gs Store that contains a
-      corresponding GCS bucket
+      s3_bucket_name: str; Name of the Amazon S3 Bucket
+      gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
     credentials = GoogleCredentials.get_application_default()
     storagetransfer = discovery.build(serviceName='storagetransfer',
@@ -58,13 +56,13 @@ def s3_to_gcs(s3_store: S3Store, gs_store: GcsStore) -> None:
     # Update cloud bucket IAM role to allow for data transfer
     storage_account = storagetransfer.googleServiceAccounts().get(
         projectId=project_id).execute()
-    _add_bucket_iam_member(gs_store.name, 'roles/storage.admin',
+    _add_bucket_iam_member(gs_bucket_name, 'roles/storage.admin',
                            'serviceAccount:' + storage_account['accountEmail'])
 
     starttime = datetime.utcnow()
     transfer_job = {
         'description': f'Transferring data from S3 Bucket \
-        {s3_store.name} to GCS Bucket {gs_store.name}',
+        {s3_bucket_name} to GCS Bucket {gs_bucket_name}',
         'status': 'ENABLED',
         'projectId': project_id,
         'schedule': {
@@ -81,14 +79,14 @@ def s3_to_gcs(s3_store: S3Store, gs_store: GcsStore) -> None:
         },
         'transferSpec': {
             'awsS3DataSource': {
-                'bucketName': s3_store.name,
+                'bucketName': s3_bucket_name,
                 'awsAccessKey': {
                     'accessKeyId': aws_credentials.access_key,
                     'secretAccessKey': aws_credentials.secret_key,
                 }
             },
             'gcsDataSink': {
-                'bucketName': gs_store.name,
+                'bucketName': gs_bucket_name,
             }
         }
     }
@@ -97,17 +95,15 @@ def s3_to_gcs(s3_store: S3Store, gs_store: GcsStore) -> None:
     logger.info(f'AWS -> GCS Transfer Job: {json.dumps(result, indent=4)}')
 
 
-def gcs_to_s3(gs_store: GcsStore, s3_store: S3Store) -> None:
+def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
     """Creates a one-time transfer from Google Cloud Storage to Amazon S3.
 
-    Args:
-      gs_store: GcsStore; GCP Gs Store that contains a
-      corresponding GCS bucket
-      s3_store: S3Store; AWS S3 Store that contains a
-      corresponding S3 bucket
+     Args:
+      gs_bucket_name: str; Name of the Google Cloud Storage Bucket
+      s3_bucket_name: str; Name of the Amazon S3 Bucket
     """
-    sync_command = f'gsutil -m rsync -rd gs://{gs_store.name} \
-        s3://{s3_store.name}'
+    sync_command = f'gsutil -m rsync -rd gs://{gs_bucket_name} \
+        s3://{s3_bucket_name}'
 
     os.system(sync_command)
 

@@ -326,6 +326,7 @@ class Task(object):
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
+                assert False, 'TODO: GCS Authentication not done'
             elif storage_type is storage_lib.StorageType.AZURE:
                 assert False, 'TODO: Azure Blob not mountable yet'
             else:
