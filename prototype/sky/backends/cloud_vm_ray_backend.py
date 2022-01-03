@@ -723,7 +723,7 @@ class RetryingVmProvisioner(object):
         # Step 1: ray up the emptied config.
         if not ray_up_on_full_confg_only:
             config = backend_utils.read_yaml(cluster_config_file)
-            pinned_ray_install = 'pip3 install -U ray==1.7.0'
+            pinned_ray_install = 'pip3 install -U ray=='
 
             file_mounts = {}
             if 'ssh_public_key' in config['auth']:
