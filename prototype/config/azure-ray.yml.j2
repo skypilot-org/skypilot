@@ -11,7 +11,7 @@ provider:
     # For Azure, ray distinguishes different instances by the resource_group,
     # instead of the cluster_name. This ensures that ray creates new instances
     # for different cluster_name.
-    resource_group: {{cluster_name}}
+    resource_group: {{cluster_name}}-{{region}}
     # Keep (otherwise cannot reuse when re-provisioning).
     # teardown(terminate=True) will override this.
     cache_stopped_nodes: True

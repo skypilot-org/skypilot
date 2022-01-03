@@ -70,8 +70,21 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def region_zones_provision_loop(
-            cls) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        for region in cls.regions():
+            cls,
+            *,
+            instance_type: Optional[str] = None,
+            accelerators: Optional[Dict[str, int]] = None,
+            use_spot: bool,
+    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+        del accelerators  # unused
+
+        if instance_type is None:
+            # fallback to manually specified region/zones
+            regions = cls.regions()
+        else:
+            regions = azure_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot)
+        for region in regions:
             yield region, region.zones
 
     # TODO: factor the following three methods, as they are the same logic

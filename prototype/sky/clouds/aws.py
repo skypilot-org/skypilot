@@ -49,10 +49,26 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def region_zones_provision_loop(
-            cls) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+            cls,
+            *,
+            instance_type: Optional[str] = None,
+            accelerators: Optional[Dict[str, int]] = None,
+            use_spot: bool,
+    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
-        for region in cls.regions():
+        del accelerators  # unused
+
+        if instance_type is None:
+            # fallback to manually specified region/zones
+            regions = cls.regions()
+        else:
+            regions = aws_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot)
+        for region in regions:
+            if region.name == 'us-west-1':
+                # TODO: troubles launching AMIs.
+                continue
             yield region, region.zones
 
     @classmethod
