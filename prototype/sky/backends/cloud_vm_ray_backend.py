@@ -40,6 +40,7 @@ PostSetupFn = Callable[[str], Any]
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
+SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
 
 logger = logging.init_logger(__name__)
 
@@ -723,7 +724,7 @@ class RetryingVmProvisioner(object):
         # Step 1: ray up the emptied config.
         if not ray_up_on_full_confg_only:
             config = backend_utils.read_yaml(cluster_config_file)
-            pinned_ray_install = 'pip3 install -U ray=='
+            pinned_ray_install = f'pip3 install -U ray=={SKY_REMOTE_RAY_VERSION}'
 
             file_mounts = {}
             if 'ssh_public_key' in config['auth']:

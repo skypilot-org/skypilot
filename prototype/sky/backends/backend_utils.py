@@ -31,6 +31,8 @@ Resources = resources.Resources
 
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
+SKY_REMOTE_RAY_VERSION = '1.9.1'
+
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
@@ -398,6 +400,8 @@ def write_cluster_config(run_id: RunId,
                 'zones': ','.join(zones),
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
+                # Ray version.
+                'ray_version': SKY_REMOTE_RAY_VERSION,
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
