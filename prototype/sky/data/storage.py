@@ -415,7 +415,8 @@ class GcsStore(AbstractStore):
         """Transfer data from S3 to GCS bucket using Google's Data Transfer
         service
         """
-        data_transfer.s3_to_gcs(self.name, self.name)
+        if self.source.startswith('s3://'):
+            data_transfer.s3_to_gcs(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the GCS bucket. If the GCS bucket does not exist, this
