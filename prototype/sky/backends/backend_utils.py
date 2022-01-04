@@ -184,13 +184,13 @@ class SSHConfigHelper(object):
     def add_cluster(cls, cluster_name: str, ip: str,
                     auth_config: Dict[str, str]):
         """Add authentication information for cluster to local SSH config file.
-        
+
         If a host with `cluster_name` already exists and the configuration was
-        not added by sky, then `ip` is used to identify the host instead in the 
+        not added by sky, then `ip` is used to identify the host instead in the
         file.
-       
+
         If a host with `cluster_name` already exists and the configuration was
-        added by sky (e.g. a spot instance), then the configuration is 
+        added by sky (e.g. a spot instance), then the configuration is
         overwritten.
 
         Args:
@@ -244,13 +244,13 @@ class SSHConfigHelper(object):
     @classmethod
     def remove_cluster(cls, ip: str, auth_config: Dict[str, str]):
         """Remove authentication information for cluster from local SSH config.
-        
-        If no existing host matching the provided specification is found, then 
+
+        If no existing host matching the provided specification is found, then
         nothing is removed.
 
         Args:
             ip: IP address of a cluster's head node.
-            auth_config: read_yaml(handle.cluster_yaml)['auth'] 
+            auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
         username = auth_config['ssh_user']
 
