@@ -170,7 +170,6 @@ def _default_interactive_node_name(node_type: str):
     return f'sky-{node_type}-{getpass.getuser()}'
 
 
-# TODO: add support for --tmux.
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
         node_type: str,
