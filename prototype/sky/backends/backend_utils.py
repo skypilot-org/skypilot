@@ -186,10 +186,12 @@ class SSHConfigHelper(object):
         """Add authentication information for cluster to local SSH config file.
         
         If a host with `cluster_name` already exists and the configuration was
-        not added by sky, then `ip` is used to identify the host instead in the file.
+        not added by sky, then `ip` is used to identify the host instead in the 
+        file.
        
         If a host with `cluster_name` already exists and the configuration was
-        added by sky (e.g. a spot instance), then the configuration is overwritten.
+        added by sky (e.g. a spot instance), then the configuration is 
+        overwritten.
 
         Args:
             cluster_name: Cluster name (see `sky status`)
@@ -217,9 +219,8 @@ class SSHConfigHelper(object):
                         overwrite = True
                         overwrite_begin_idx = i - 1
                     else:
-                        logger.warning(
-                            f'{cls.ssh_conf_path} contains host named {cluster_name}.'
-                        )
+                        logger.warning(f'{cls.ssh_conf_path} contains '
+                                       f'host named {cluster_name}.')
                         host_name = ip
                         logger.warning(f'Using {ip} to identify host instead.')
                     break
