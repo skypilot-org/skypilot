@@ -121,7 +121,17 @@ def _ssh_options_list(ssh_private_key: Optional[str],
     ]
 
 
+def _add_cluster_to_ssh_config(handle):
+    auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+    cluster_name = global_user_state.get_cluster_name_from_handle(handle)
+    ip = handle.head_ip
+    backend_utils.SSHConfigHelper.add_cluster(cluster_name, ip, auth_config)
 
+
+def _remove_cluster_from_ssh_config(handle):
+    auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+    ip = handle.head_ip
+    backend_utils.SSHConfigHelper.remove_cluster(ip, auth_config)
 
 
 class RayCodeGen(object):
@@ -632,7 +642,7 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing VM{plural}. Setup completed.{style.RESET_ALL}')
-                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}sky ssh'
+                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}ssh'
                             f' {cluster_name}{style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
@@ -1319,7 +1329,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'\n{fore.CYAN}Cluster name: '
                         f'{style.BRIGHT}{name}{style.RESET_ALL}'
                         '\nTo log into the head VM:\t'
-                        f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
+                        f'{style.BRIGHT}ssh {name} {style.RESET_ALL}\n'
                         '\nTo teardown the cluster:'
                         f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n'
                         '\nTo stop the cluster:'

@@ -173,12 +173,12 @@ def _default_interactive_node_name(node_type: str):
 # TODO: add support for --tmux.
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
-    node_type: str,
-    resources: sky.Resources,
-    cluster_name: str,
-    backend: Optional[backend_lib.Backend] = None,
-    port_forward: Optional[List[int]] = None,
-    session_manager: Optional[str] = None,
+        node_type: str,
+        resources: sky.Resources,
+        cluster_name: str,
+        backend: Optional[backend_lib.Backend] = None,
+        port_forward: Optional[List[int]] = None,
+        session_manager: Optional[str] = None,
 ):
     """Creates and attaches to an interactive node.
 
