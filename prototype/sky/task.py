@@ -194,15 +194,19 @@ class Task(object):
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources = config.get('resources')
-        if resources.get('cloud') is not None:
-            resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
-        if resources.get('accelerators') is not None:
-            resources['accelerators'] = resources['accelerators']
-        if resources.get('accelerator_args') is not None:
-            resources['accelerator_args'] = dict(resources['accelerator_args'])
-        if resources.get('use_spot') is not None:
-            resources['use_spot'] = resources['use_spot']
-        resources = sky.Resources(**resources)
+        if resources is not None:
+            if resources.get('cloud') is not None:
+                resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
+            if resources.get('accelerators') is not None:
+                resources['accelerators'] = resources['accelerators']
+            if resources.get('accelerator_args') is not None:
+                resources['accelerator_args'] = dict(
+                    resources['accelerator_args'])
+            if resources.get('use_spot') is not None:
+                resources['use_spot'] = resources['use_spot']
+            resources = sky.Resources(**resources)
+        else:
+            resources = sky.Resources()
         task.set_resources({resources})
         return task
 
@@ -261,6 +265,16 @@ class Task(object):
 
     def get_resources(self):
         return self.resources
+
+    def set_setup(self, setup):
+        """Sets the setup commands """
+        self.setup = setup
+        return self
+
+    def set_run(self, run):
+        """Sets the run commands """
+        self.run = run
+        return self
 
     def set_post_setup_fn(self, post_setup_fn):
         """Sets the post setup function, which maps IPs to setup cmds"""

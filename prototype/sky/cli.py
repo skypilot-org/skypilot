@@ -262,21 +262,27 @@ def cli():
 
 
 @cli.command()
-@click.argument('yaml_path', required=True, type=str)
+@click.argument('entrypoint', required=True, type=str)
 @click.option('--cluster',
               '-c',
               default=None,
               type=str,
               help=_CLUSTER_FLAG_HELP)
+@click.option(
+    '--setup',
+    '-s',
+    required=False,
+    type=str,
+    help='Setup command or bash script to be run in the remote work directory.')
 @click.option('--dryrun',
               '-n',
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
-def run(yaml_path: Path, cluster: str, dryrun: bool):
+def run(entrypoint: Union[Path, str], cluster: str,
+        setup: Optional[Union[Path, str]], dryrun: bool):
     """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
-    with sky.Dag() as dag:
-        sky.Task.from_yaml(yaml_path)
+
     # FIXME: --cluster flag semantics has the following bug.  'sky run -c name
     # x.yml' requiring GCP.  Then change x.yml to requiring AWS.  'sky run -c
     # name x.yml' again.  The GCP cluster is not down'd but should be.  The
@@ -289,6 +295,44 @@ def run(yaml_path: Path, cluster: str, dryrun: bool):
     #
     # To fix all of the above, fix/circumvent the bug that 'ray up' not downing
     # old cloud's cluster with the same name.
+    def _run_bash_file_handler(script_path: str, task: sky.Task) -> str:
+        # Uploads bash script, runs, and deletes bash script on remote workdir
+        remote_bash = os.path.join(backend_utils.SKY_REMOTE_WORKDIR,
+                                   str(uuid.uuid4()) + '.sh')
+        task.update_file_mounts({remote_bash: os.path.abspath(script_path)})
+
+        return f'chmod +x {remote_bash}; bash {remote_bash}; rm {remote_bash}'
+
+    with sky.Dag() as dag:
+
+        if not entrypoint.isspace() and entrypoint.endswith('.yaml'):
+            assert setup is None, 'Conflicting Setup with YAML Setup! \
+            If you have setup in a bash script or terminal command, move \
+            it to Yaml.'
+
+            task = sky.Task.from_yaml(entrypoint)
+        else:
+            # TODO: Allow for Sky Run CLI to specify location of workload
+            task = sky.Task(cluster, workdir=os.getcwd())
+
+            if setup is not None:
+                if not setup.isspace() and setup.endswith('.sh'):
+                    setup_cmd = _run_bash_file_handler(setup, task)
+                else:
+                    # Setup is terminal commands
+                    setup_cmd = setup
+                task.set_setup(setup_cmd)
+
+            if not entrypoint.isspace() and entrypoint.endswith('.sh'):
+                run_cmd = _run_bash_file_handler(entrypoint, task)
+            else:
+                # Setup is terminal commands
+                run_cmd = entrypoint
+            task.set_run(run_cmd)
+            # TODO: Allow for Sky Run CLI to take in different resources
+            resources = sky.Resources()
+            task.set_resources(resources)
+
     sky.execute(dag, dryrun=dryrun, stream_logs=True, cluster_name=cluster)
 
 
@@ -299,29 +343,20 @@ def run(yaml_path: Path, cluster: str, dryrun: bool):
               required=True,
               type=str,
               help='Name of the existing cluster to execute a task on.')
-@click.option(
-    '--setup',
-    '-s',
-    required=False,
-    type=str,
-    help='Setup command or bash script to be run in the remote work directory.')
-def exec(entrypoint: Union[Path, str], cluster: str, setup: Union[Path, str]):  # pylint: disable=redefined-builtin
-    """Execute a task from a YAML spec on a cluster (optional post setup).
+def exec(entrypoint: Union[Path, str], cluster: str):  # pylint: disable=redefined-builtin
+    """Execute a task from a YAML spec on a cluster.
 
     \b
     Actions performed by this command only include:
       - workdir syncing
       - executing the run command (from yaml, command, or shell script)
         on all cluster nodes
-      - (if setup is specified) (post) setting up the cloud environment on all
-      cluster nodes, after the initial setup from provisioning the cloud machine
     `sky exec` is thus typically faster than `sky run`, provided a cluster
     already exists.
 
     All setup steps (provisioning, initial setup commands, file mounts syncing)
     are skipped. If any of those specifications changed, this command will not
-    reflect those changes. If the user desires to perform additional setup after
-    provisioning, the `--setup, -s` options are there.
+    reflect those changes.
 
     Typical workflow:
 
@@ -344,21 +379,18 @@ def exec(entrypoint: Union[Path, str], cluster: str, setup: Union[Path, str]):  
       # Pass in shell script for execution
 
       >> sky exec -c name run.sh
-
-      # For additional setup, --setup/-s takes in commands or a shell script
-
-      >> sky exec -c name -s 'pip install yapf' app.yaml
-
-      # Or...
-
-      >> sky exec -c name -s setup.sh app.yaml
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
                                  'Use `sky run` to provision first.')
 
-    def _setup_remote_shell_script(script_path: str) -> str:
+    stages = [
+        sky.execution.Stage.SYNC_WORKDIR,
+        sky.execution.Stage.EXEC,
+    ]
+
+    def _exec_bash_file_handler(script_path: str) -> str:
         # Uploads bash script, runs, and deletes bash script on remote workdir
         target = os.path.join(backend_utils.SKY_REMOTE_WORKDIR,
                               str(uuid.uuid4()) + '.sh')
@@ -367,35 +399,20 @@ def exec(entrypoint: Union[Path, str], cluster: str, setup: Union[Path, str]):  
                                                   target=target)
         return f'chmod +x {target}; bash {target}; rm {target}'
 
-    stages = [
-        sky.execution.Stage.SYNC_WORKDIR,
-        sky.execution.Stage.EXEC,
-    ]
-
     with sky.Dag() as dag:
         # Check if entrypoint is a YAML config file
         if not entrypoint.isspace() and entrypoint.endswith('.yaml'):
-            task = sky.Task.from_yaml(entrypoint)
+            sky.Task.from_yaml(entrypoint)
         elif not entrypoint.isspace() and entrypoint.endswith('.sh'):
-            task = sky.Task(
+            sky.Task(
                 'Sky Exec Shell Script',
-                run=_setup_remote_shell_script(entrypoint),  # Required field.
+                run=_exec_bash_file_handler(entrypoint),  # Required field.
             )
         else:
-            task = sky.Task(
+            sky.Task(
                 'Sky Exec Commands',
                 run=entrypoint,  # Required field.
             )
-
-        if setup is not None:
-            # Check if setup is a shell script
-            if not setup.isspace() and setup.endswith('.sh'):
-                setup_cmd = _setup_remote_shell_script(setup)
-            else:
-                setup_cmd = setup
-            post_setup_fn = lambda ip_list: {ip: setup_cmd for ip in ip_list}
-            task.set_post_setup_fn(post_setup_fn)
-            stages.append(sky.execution.Stage.PRE_EXEC)
 
     sky.execute(dag, handle=handle, stages=stages)
 
