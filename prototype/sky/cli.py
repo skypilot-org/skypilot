@@ -306,22 +306,10 @@ def run(entrypoint: Union[Path, str], cluster: str,
     with sky.Dag() as dag:
 
         if not entrypoint.isspace() and entrypoint.endswith('.yaml'):
-            assert setup is None, 'Conflicting Setup with YAML Setup! \
-            If you have setup in a bash script or terminal command, move \
-            it to Yaml.'
-
             task = sky.Task.from_yaml(entrypoint)
         else:
             # TODO: Allow for Sky Run CLI to specify location of workload
             task = sky.Task(cluster, workdir=os.getcwd())
-
-            if setup is not None:
-                if not setup.isspace() and setup.endswith('.sh'):
-                    setup_cmd = _run_bash_file_handler(setup, task)
-                else:
-                    # Setup is terminal commands
-                    setup_cmd = setup
-                task.set_setup(setup_cmd)
 
             if not entrypoint.isspace() and entrypoint.endswith('.sh'):
                 run_cmd = _run_bash_file_handler(entrypoint, task)
@@ -332,6 +320,15 @@ def run(entrypoint: Union[Path, str], cluster: str,
             # TODO: Allow for Sky Run CLI to take in different resources
             resources = sky.Resources()
             task.set_resources(resources)
+
+        # Setup can override YAML setup
+        if setup is not None:
+            if not setup.isspace() and setup.endswith('.sh'):
+                setup_cmd = _run_bash_file_handler(setup, task)
+            else:
+                # Setup is terminal commands
+                setup_cmd = setup
+            task.set_setup(setup_cmd)
 
     sky.execute(dag, dryrun=dryrun, stream_logs=True, cluster_name=cluster)
 
