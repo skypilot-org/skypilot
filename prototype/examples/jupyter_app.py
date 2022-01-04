@@ -15,8 +15,8 @@ def make_application():
 
         run = f'jupyter notebook --port 8888'
 
-        # Use 'sky ssh --port-forward=8888 <cluster_name>' to forward port to local.
-        # e.g., for AWS, 'sky ssh --port-forward=8888 sky-12345'
+        # Use 'ssh 8888:127.0.0.1:8888 <cluster_name>' to forward port to local.
+        # e.g., for AWS, 'ssh 8888:127.0.0.1:8888 sky-12345'
         jupyter = sky.Task('jupyter',
                            run=run,
                            setup=setup,

@@ -39,8 +39,8 @@ with sky.Dag() as dag:
         sky.Resources(accelerators='V100'),
     })
 
-    # Use 'sky ssh --port-forward=4650 <cluster_name>' to forward port to local.
-    # e.g., for AWS, 'sky ssh --port-forward=4650 sky-12345'
+    # Use 'ssh -L 4650:127.0.0.1:4650 <cluster_name>' to forward port to local.
+    # e.g., for AWS, 'ssh 4650:127.0.0.1:4650 sky-12345'
     tensorboard = sky.Task(
         'tensorboard',
         workdir=workdir,
