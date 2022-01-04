@@ -168,16 +168,16 @@ class SSHConfigHelper(object):
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
                               ip: str, username: str, ssh_key_path: str):
-        codegen = textwrap.dedent(f"""
+        codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
-            HostName {ip}
-            User {username}
-            IdentityFile {ssh_key_path}
-            IdentitiesOnly yes
-            ForwardAgent yes
-            Port 22
-            """)
+              HostName {ip}
+              User {username}
+              IdentityFile {ssh_key_path}
+              IdentitiesOnly yes
+              ForwardAgent yes
+              Port 22
+              """)
         return codegen
 
     @classmethod
@@ -235,10 +235,12 @@ class SSHConfigHelper(object):
             config[overwrite_begin_idx:overwrite_begin_idx +
                    len(updated_lines)] = updated_lines
             with open(config_path, 'w') as f:
+                f.write('\n')
                 f.writelines(config)
                 f.write('\n')
         else:
             with open(config_path, 'a') as f:
+                f.write('\n')
                 f.write(codegen)
 
     @classmethod
