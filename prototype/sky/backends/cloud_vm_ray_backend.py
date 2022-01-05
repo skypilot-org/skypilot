@@ -582,6 +582,7 @@ class RetryingVmProvisioner(object):
             config_dict = backend_utils.write_cluster_config(
                 None,
                 task,
+                to_provision,
                 _get_cluster_config_template(to_provision.cloud),
                 region=region,
                 zones=zones,
@@ -605,7 +606,6 @@ class RetryingVmProvisioner(object):
             handle = CloudVmRayBackend.ResourceHandle(
                 cluster_name=cluster_name,
                 cluster_yaml=cluster_config_file,
-                requested_resources=task.resources,
                 requested_nodes=task.num_nodes,
                 # OK for this to be shown in CLI as status == INIT.
                 launched_resources=to_provision.fill_accelerators(),
@@ -858,7 +858,6 @@ class CloudVmRayBackend(backends.Backend):
         - (required) Path to a cluster.yaml file.
         - (optional) A cached head node public IP.  Filled in after a
             successful provision().
-        - (optional) Requested resources
         - (optional) Requested num nodes
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
@@ -869,29 +868,23 @@ class CloudVmRayBackend(backends.Backend):
                      cluster_name: str,
                      cluster_yaml: str,
                      head_ip: Optional[str] = None,
-                     requested_resources: Optional[Set[Resources]] = None,
                      requested_nodes: Optional[int] = None,
                      launched_resources: Optional[Resources] = None,
                      tpu_delete_script: Optional[str] = None) -> None:
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
-            self.requested_resources = requested_resources
             self.requested_nodes = requested_nodes
             self.launched_resources = launched_resources
             self.tpu_delete_script = tpu_delete_script
-            self.jobs = collections.OrderedDict()
-            self.finished_jobs = collections.OrderedDict()
 
         def __repr__(self):
             return (f'ResourceHandle(\n\thead_ip={self.head_ip},'
                     '\n\tcluster_yaml='
                     f'{backend_utils.get_rel_path(self.cluster_yaml)}, '
-                    f'\n\trequested_resources={self.requested_nodes}x '
-                    f'{self.requested_resources}, '
-                    f'\n\tlaunched_resources={self.launched_resources}'
-                    f'\n\ttpu_delete_script={self.tpu_delete_script})'
-                    f'\n\jobs={self.jobs})')
+                    f'\n\launched_resources={self.requested_nodes}x '
+                    f'{self.launched_resources}, '
+                    f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
     def __init__(self):
         run_id = backend_utils.get_run_id()
@@ -964,7 +957,6 @@ class CloudVmRayBackend(backends.Backend):
         if not dryrun:  # dry run doesn't need to check existing cluster.
             cluster_name, to_provision = self._check_existing_cluster(
                 task, to_provision, cluster_name)
-        requested_resources = task.resources
         try:
             config_dict = provisioner.provision_with_retries(
                 task, to_provision, dryrun, stream_logs, cluster_name)
@@ -983,7 +975,6 @@ class CloudVmRayBackend(backends.Backend):
             cluster_yaml=cluster_config_file,
             # Cache head ip in the handle to speed up ssh operations.
             head_ip=self._get_node_ips(cluster_config_file, task.num_nodes)[0],
-            requested_resources=requested_resources,
             requested_nodes=task.num_nodes,
             launched_resources=provisioned_resources.fill_accelerators(),
             # TPU.
@@ -1224,11 +1215,9 @@ class CloudVmRayBackend(backends.Backend):
                           f'--job-id {job_id} -- {executable} {script_path}')
         self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',
                                           job_log_path, stream_logs)
-
-        handle.jobs[job_id] = backend_utils.JobStatus.PENDING
-        global_user_state.add_or_update_cluster(handle.cluster_name,
-                                                handle,
-                                                ready=True)
+        
+        job_status = backend_utils.JobStatus.PENDING
+        global_user_state.add_or_update_cluster_job(handle.cluster_name, job_id, job_status.value, is_add=True)
 
         # TODO (zhwu): This does not get the log correctly. Maybe we can directly tail our own log file in log_path on remote?
         # try:

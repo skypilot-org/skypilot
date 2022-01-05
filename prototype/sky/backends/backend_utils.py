@@ -297,6 +297,7 @@ class SSHConfigHelper(object):
 # TODO: too many things happening here - leaky abstraction. Refactor.
 def write_cluster_config(run_id: RunId,
                          task: task_lib.Task,
+                         to_provision: Resources,
                          cluster_config_template: str,
                          cluster_name: str,
                          region: Optional[clouds.Region] = None,
@@ -311,7 +312,7 @@ def write_cluster_config(run_id: RunId,
         - 'tpu-delete-script' (if TPU is requested)
     """
     cloud = task.best_resources.cloud
-    resources_vars = cloud.make_deploy_resources_variables(task)
+    resources_vars = cloud.make_deploy_resources_variables(to_provision)
     config_dict = {}
 
     if region is None:

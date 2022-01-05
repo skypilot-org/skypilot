@@ -52,6 +52,7 @@ def get_accelerators_from_instance_type_impl(
         instance_type: str,
 ) -> Optional[Dict[str, int]]:
     df = _get_instance_type(df, instance_type, None)
+    assert len(df) > 0, (df, instance_type)
     row = df.iloc[0]
     acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
     if pd.isnull(acc_name):

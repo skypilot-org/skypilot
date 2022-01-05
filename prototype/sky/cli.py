@@ -350,6 +350,18 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
                     sky.execution.Stage.EXEC,
                 ])
 
+@cli.command()
+@click.argument('cluster_name_or_job_id', required=True, type=str)
+def cancel(cluster_name_or_job_id: str):
+    """Cancel the job with the given job ID or all the jobs on a cluster."""
+    
+    backends.CloudVmRayBackend().cancel(job_id)
+
+def _shorten_duration_diff_string(diff):
+    diff = diff.replace('second', 'sec')
+    diff = diff.replace('minute', 'min')
+    diff = diff.replace('hour', 'hr')
+    return diff
 
 @cli.command()
 @click.option('--all',
@@ -358,77 +370,8 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
               is_flag=True,
               required=False,
               help='Show all information in full.')
-@click.argument('cluster', 
-                required=False, 
-                help='Show tasks on it when cluster is specified.')
-def status(cluster: str, all: bool):  # pylint: disable=redefined-builtin
+def status(all: bool):  # pylint: disable=redefined-builtin
     """Show launched clusters."""
-    if cluster is not None:
-        _show_cluster_job_status(cluster, all)
-    else:
-        _show_cluster_status(all)
-
-
-def _show_cluster_job_status(cluster_name:str, all: bool): # pylint: disable=redefined-builtin
-    """Show the status of a cluster's job."""
-    # TODO(zhwu): lock the user_state until the update finished 
-    # to prevent concurrent access by provision.
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    if handle is None:
-        raise click.UsageError(
-            f'Cluster {cluster_name} is not found (see `sky status`).')
-    cluster_table = prettytable.PrettyTable()
-    cluster_table.field_names = [
-        'JOBID',
-        'STATUS',
-    ]
-    
-    if len(handle.jobs) > 0:
-        log_dirs = [os.path.join(f'{SKY_REMOTE_WORKDIR}', 'sky_logs', f'{job_id}')
-                    for job_id in handle.jobs.keys()]
-        test_cmd = [f'echo `ls -a {log_dir} 2> /dev/null | grep sky_running | wc -l`'
-                        for log_dir in log_dirs]
-        test_cmd += [f'ray job status --address 127.0.0.1:8265 {job_id} 2>&1 | grep "Job status"' for job_id in handle.jobs.keys()]
-        test_cmd = ' && '.join(test_cmd)
-        logger.debug(test_cmd)
-        _, stdout, _ = backends.CloudVmRayBackend()._run_command_on_head_via_ssh(
-            handle, test_cmd, '/dev/null', False,)
-        
-        results = stdout.strip().split('\n')
-        assert len(results) == len(handle.jobs) * 2, (results, handle.jobs)
-        
-        # Process the results
-        new_jobs = collections.OrderedDict()
-        new_finished_jobs = collections.OrderedDict()
-        job_ids = list(handle.jobs.keys())
-        for i, job_id in enumerate(job_ids):
-            job_status = handle.jobs[job_id]
-            is_running = results[i].strip() == '1'
-            ray_status = results[i + len(handle.jobs)].strip().rstrip('.')
-            ray_status = ray_status.rpartition(' ')[-1]
-            if 'RUNNING' in ray_status:
-                job_status = JobStatus.RUNNING if is_running else JobStatus.PENDING 
-                new_jobs[job_id] = job_status
-            else:
-                job_status = JobStatus[ray_status]
-                new_finished_jobs[job_id] = job_status
-                
-            cluster_table.add_row([
-                job_id,
-                job_status.value,
-            ])
-        handle.jobs = new_jobs
-        handle.finished_jobs.update(new_finished_jobs)
-        global_user_state.add_or_update_cluster(cluster_name, handle, ready=True)
-    if all:
-        for job_id, job_status in handle.finished_jobs.items():
-            cluster_table.add_row([job_id, job_status.value])
-    
-    print(f'Sky cluster ({cluster_name})\'s Jobs\n{cluster_table}')
-
-
-def _show_cluster_status(all: bool):
-    """Show the status of a cluster."""
     show_all = all
     clusters_status = global_user_state.get_clusters()
     cluster_table = prettytable.PrettyTable()
@@ -440,12 +383,6 @@ def _show_cluster_status(all: bool):
         'STATUS',
     ]
     cluster_table.align['COMMAND'] = 'l'
-
-    def shorten_duration_diff_string(diff):
-        diff = diff.replace('second', 'sec')
-        diff = diff.replace('minute', 'min')
-        diff = diff.replace('hour', 'hr')
-        return diff
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
@@ -460,7 +397,7 @@ def _show_cluster_status(all: bool):
             # NAME
             cluster_status['name'],
             # LAUNCHED
-            shorten_duration_diff_string(duration.diff_for_humans()),
+            _shorten_duration_diff_string(duration.diff_for_humans()),
             # RESOURCES
             resources_str,
             # COMMAND
@@ -470,7 +407,74 @@ def _show_cluster_status(all: bool):
             cluster_status['status'].value,
         ])
     click.echo(f'Sky Clusters\n{cluster_table}')
-
+    
+@cli.command()
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@click.argument('cluster', 
+                required=True)
+def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
+    """Show launched job queue on clusters."""
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.UsageError(
+            f'Cluster {cluster} is not found (see `sky status`).'
+        )
+    jobs = global_user_state.get_jobs(cluster)
+    cluster_table = prettytable.PrettyTable()
+    cluster_table.field_names = [
+        'NAME',
+        'SUBMITTED',
+        'STATUS',
+    ]
+    
+    job_ids = [job['job_name'] for job in jobs]
+    if len(jobs) > 0:
+        # Hacky solution to get the job status, since ray doesn't expose it.
+        log_dirs = [os.path.join(f'{SKY_REMOTE_WORKDIR}', 'sky_logs', f'{job_id}')
+                    for job_id in job_ids]
+        test_cmd = [f'echo `ls -a {log_dir} 2> /dev/null | grep sky_running | wc -l`'
+                        for log_dir in log_dirs]
+        test_cmd += [f'ray job status --address 127.0.0.1:8265 {job_id} 2>&1 | grep "Job status"' for job_id in job_ids]
+        test_cmd = ' && '.join(test_cmd)
+        logger.debug(test_cmd)
+        _, stdout, _ = backends.CloudVmRayBackend()._run_command_on_head_via_ssh(
+            handle, test_cmd, '/dev/null', False,)
+        
+        results = stdout.strip().split('\n')
+        assert len(results) == len(jobs) * 2, (results, handle.jobs)
+        
+        # Process the results
+        for i, job in enumerate(jobs):
+            job_status = job['status']
+            is_running = results[i].strip() == '1'
+            ray_status = results[i + len(jobs)].strip().rstrip('.')
+            ray_status = ray_status.rpartition(' ')[-1]
+            if 'RUNNING' in ray_status:
+                job_status = JobStatus.RUNNING if is_running else JobStatus.PENDING 
+            else:
+                job_status = JobStatus[ray_status]
+            global_user_state.add_or_update_cluster_job(cluster, job['job_name'], job_status.value, is_add=False)
+            duration = pendulum.now().subtract(seconds=time.time() - job['submitted_at'])
+            cluster_table.add_row([
+                job['job_name'],
+                _shorten_duration_diff_string(duration.diff_for_humans()),
+                job_status.value,
+            ])
+    if all:
+        finished_jobs = global_user_state.get_finished_jobs(cluster)
+        for job in finished_jobs:
+            duration = pendulum.now().subtract(seconds=time.time() - job['submitted_at'])
+            cluster_table.add_row([job['job_name'],
+                                   _shorten_duration_diff_string(duration.diff_for_humans()), 
+                                   job['status'],
+                    ])
+    
+    print(f'Sky cluster ({cluster})\'s Jobs\n{cluster_table}')
 
 @cli.command()
 @click.argument('clusters', nargs=-1, required=False)

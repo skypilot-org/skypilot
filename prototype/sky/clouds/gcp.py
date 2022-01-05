@@ -233,8 +233,8 @@ class GCP(clouds.Cloud):
     def get_default_region(cls) -> clouds.Region:
         return cls.regions()[-1]
 
-    def make_deploy_resources_variables(self, task):
-        r = task.best_resources
+    def make_deploy_resources_variables(self, to_provision):
+        r = to_provision
         # Find GPU spec, if any.
         resources_vars = {
             'instance_type': r.instance_type,

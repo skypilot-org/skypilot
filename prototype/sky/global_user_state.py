@@ -23,6 +23,7 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
 
+
 try:
     _CURSOR.execute('select * from clusters limit 0')
 except sqlite3.OperationalError:
@@ -34,8 +35,32 @@ except sqlite3.OperationalError:
         handle BLOB,
         last_use TEXT,
         status TEXT)""")
-_CONN.commit()
+    
+try:
+    _CURSOR.execute('select * from jobs limit 0')
+except sqlite3.OperationalError:
+    # Tables do not exist, create them.
+    _CURSOR.execute("""\
+      CREATE TABLE jobs (
+        name TEXT,
+        job_name TEXT PRIMARY KEY,
+        submitted_at INTEGER,
+        status TEXT,
+        FOREIGN KEY(name) REFERENCES clusters(name))""")
+    
+try:
+    _CURSOR.execute('select * from finished_jobs limit 0')
+except sqlite3.OperationalError:
+    # Tables do not exist, create them.
+    _CURSOR.execute("""\
+      CREATE TABLE finished_jobs (
+        name TEXT,
+        job_name TEXT PRIMARY KEY,
+        submitted_at INTEGER,
+        status TEXT,
+        FOREIGN KEY(name) REFERENCES clusters(name))""")
 
+_CONN.commit()
 
 class ClusterStatus(enum.Enum):
     """Cluster status as recorded in table 'clusters'."""
@@ -73,11 +98,11 @@ def _get_pretty_entry_point() -> str:
         argv[0] = basename
     return ' '.join(argv)
 
-
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: backends.Backend.ResourceHandle,
                           ready: bool):
     """Adds or updates cluster_name -> cluster_handle mapping."""
+    # FIXME: launched_at will be changed when the cluster is updated
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
     last_use = _get_pretty_entry_point()
@@ -86,7 +111,6 @@ def add_or_update_cluster(cluster_name: str,
         'INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?, ?)',
         (cluster_name, cluster_launched_at, handle, last_use, status.value))
     _CONN.commit()
-
 
 def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
@@ -105,8 +129,53 @@ def remove_cluster(cluster_name: str, terminate: bool):
                 ClusterStatus.STOPPED.value,
                 cluster_name,
             ))
+    _CURSOR.execute('DELETE FROM jobs WHERE name=(?)', (cluster_name,))
+    _CURSOR.execute('DELETE FROM finished_jobs WHERE name=(?)', (cluster_name,))
     _CONN.commit()
 
+def add_or_update_cluster_job(cluster_name: str, job_name: str, status: str, is_add: bool):
+    if is_add:
+        job_submitted_at = int(time.time())
+        _CURSOR.execute('INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?)',
+                        (cluster_name, job_name, job_submitted_at, status))
+    elif status in ['PENDING', 'RUNNING']:
+        _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_name=(?)',
+                        (status, job_name))
+    else:
+        _CURSOR.execute('INSERT OR REPLACE INTO finished_jobs SELECT * FROM jobs WHERE job_name=(?)',
+                        (job_name,))
+        _CURSOR.execute('DELETE FROM jobs WHERE job_name=(?)', (job_name,))
+    _CONN.commit()
+
+def get_jobs(cluster_name: Optional[str]=None) -> List[Dict[str, Any]]:
+    if cluster_name is not None:
+        rows = _CURSOR.execute('select * from jobs where name=(?) order by submitted_at', (cluster_name,))
+    else:
+        rows = _CURSOR.execute('select * from jobs order by cluster_name, submitted_at')
+    records = []
+    for name, job_name, submitted_at, status in rows:
+        records.append({
+            'name': name,
+            'job_name': job_name,
+            'submitted_at': submitted_at,
+            'status': status,
+        })
+    return records
+
+def get_finished_jobs(cluster_name: Optional[str]=None) -> List[Dict[str, Any]]:
+    if cluster_name is not None:
+        rows = _CURSOR.execute('select * from finished_jobs where name=(?) order by submitted_at', (cluster_name,))
+    else:
+        rows = _CURSOR.execute('select * from finished_jobs order by cluster_name, submitted_at')
+    records = []
+    for name, job_name, submitted_at, status in rows:
+        records.append({
+            'name': name,
+            'job_name': job_name,
+            'submitted_at': submitted_at,
+            'status': status,
+        })
+    return records
 
 def get_handle_from_cluster_name(cluster_name: str
                                 ) -> Optional[backends.Backend.ResourceHandle]:
