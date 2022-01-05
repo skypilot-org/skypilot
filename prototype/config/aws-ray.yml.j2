@@ -86,16 +86,16 @@ rsync_filter:
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.
-  - pip3 install -U ray=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
+  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
 {%- if setup_sh_path is not none %}
   - cd ~/sky_workdir && bash /tmp/setup.sh  # FIXME: /tmp is volatile.
 {%- endif %}
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
-  - ray stop; ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
+  - ray stop; ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --dashboard-port 8265 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop; ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
+  - ray stop; ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --dashboard-port 8265 {{"--resources='%s'" % custom_resources if custom_resources}}
 {%- endif %}

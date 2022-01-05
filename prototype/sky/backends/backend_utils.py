@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import datetime
+import enum
 import io
 import os
 import pathlib
@@ -683,3 +684,11 @@ def make_task_bash_script(codegen: str) -> str:
     ]
     script = '\n'.join(script)
     return script
+
+class JobStatus(enum.Enum):
+    """Job status"""
+    PENDING = 'PENDING'
+    RUNNING = 'RUNNING'
+    SUCCEEDED = 'SUCCEEDED'
+    FAILED = 'FAILED'
+    STOPPED = 'STOPPED'

@@ -27,6 +27,7 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import collections
 import functools
 import getpass
 import os
@@ -54,6 +55,9 @@ _INTERACTIVE_NODE_TYPES = ('cpunode', 'gpunode', 'tpunode')
 
 Path = str
 Backend = backends.Backend
+
+SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
+JobStatus = backend_utils.JobStatus
 
 
 def _truncate_long_string(s: str, max_length: int = 50) -> str:
@@ -351,8 +355,73 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
               is_flag=True,
               required=False,
               help='Show all information in full.')
-def status(all):  # pylint: disable=redefined-builtin
+@click.argument('cluster', required=False)
+def status(cluster: str, all: bool):  # pylint: disable=redefined-builtin
     """Show launched clusters."""
+    if cluster is not None:
+        _show_cluster_job_status(cluster, all)
+    else:
+        _show_cluster_status(all)
+
+
+def _show_cluster_job_status(cluster_name:str, all: bool): # pylint: disable=redefined-builtin
+    """Show the status of a cluster's job."""
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise click.UsageError(
+            f'Cluster {cluster_name} is not found (see `sky status`).')
+    cluster_table = prettytable.PrettyTable()
+    cluster_table.field_names = [
+        'JOBID',
+        'STATUS',
+    ]
+    
+    if len(handle.jobs) > 0:
+        log_dirs = [os.path.join(f'{SKY_REMOTE_WORKDIR}', 'sky_logs', f'{job_id}')
+                    for job_id in handle.jobs.keys()]
+        test_cmd = [f'echo `ls {log_dir} 2> /dev/null | grep running | wc -l`'
+                        for log_dir in log_dirs]
+        test_cmd += [f'ray job status --address 127.0.0.1:8265 {job_id} 2>&1 | grep "Job status"' for job_id in handle.jobs.keys()]
+        test_cmd = ' && '.join(test_cmd)
+        print(test_cmd)
+        _, stdout, _ = backends.CloudVmRayBackend()._run_command_on_head_via_ssh(
+            handle, test_cmd, '/dev/null', False,)
+        
+        results = stdout.strip().split('\n')
+        assert len(results) == len(handle.jobs) * 2, (results, handle.jobs)
+        
+        # Process the results
+        new_jobs = collections.OrderedDict()
+        new_finished_jobs = collections.OrderedDict()
+        job_ids = list(handle.jobs.keys())
+        for i, job_id in enumerate(job_ids):
+            job_status = handle.jobs[job_id]
+            is_running = results[i].strip() == '1'
+            ray_status = results[i + len(handle.jobs)].strip().rstrip('.')
+            ray_status = ray_status.rpartition(' ')[-1]
+            if 'RUNNING' in ray_status:
+                job_status = JobStatus.RUNNING if is_running else JobStatus.PENDING 
+                new_jobs[job_id] = job_status
+            else:
+                job_status = JobStatus[ray_status]
+                new_finished_jobs[job_id] = job_status
+                
+            cluster_table.add_row([
+                job_id,
+                job_status.value,
+            ])
+        handle.jobs = new_jobs
+        handle.finished_jobs.update(new_finished_jobs)
+        global_user_state.add_or_update_cluster(cluster_name, handle, ready=True)
+    if all:
+        for job_id, job_status in handle.finished_jobs.items():
+            cluster_table.add_row([job_id, job_status.value])
+    
+    print(f'Sky cluster <{cluster_name}>\'s Jobs\n{cluster_table}')
+
+
+def _show_cluster_status(all: bool):
+    """Show the status of a cluster."""
     show_all = all
     clusters_status = global_user_state.get_clusters()
     cluster_table = prettytable.PrettyTable()

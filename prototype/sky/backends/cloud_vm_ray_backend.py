@@ -1,5 +1,6 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
+import collections
 import getpass
 import hashlib
 import inspect
@@ -165,6 +166,7 @@ class RayCodeGen(object):
             textwrap.dedent(f"""\
             import io
             import os
+            import pathlib
             import sys
             import selectors
             import subprocess
@@ -191,6 +193,7 @@ class RayCodeGen(object):
             self,
             ip_list: List[str],
             accelerator_dict: Dict[str, int],
+            log_dir: str,
     ) -> List[Dict[str, int]]:
         """Create the resource_handle for gang scheduling for n_tasks."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
@@ -222,6 +225,8 @@ class RayCodeGen(object):
                 # error message.
                 ray.get(pg.ready())
                 print(\'All task slots reserved.\')
+                os.makedirs(\'{log_dir}\', exist_ok=True)
+                pathlib.Path('{log_dir}/running').touch()
                 """),
         ]
 
@@ -285,13 +290,17 @@ class RayCodeGen(object):
                 ))""")
         ]
 
-    def add_epilogue(self) -> None:
+    def add_epilogue(self, log_dir: str) -> None:
         """Generates code that waits for all tasks, then exits."""
         assert self._has_prologue, 'Call add_prologue() before add_epilogue().'
         assert not self._has_epilogue, 'add_epilogue() called twice?'
         self._has_epilogue = True
 
-        self._code.append('ray.get(futures)')
+        self._code += [
+            textwrap.dedent(f"""\
+                ray.get(futures)
+                pathlib.Path('{log_dir}/done').touch()"""),
+        ]
 
     def build(self) -> str:
         """Returns the entire generated program."""
@@ -598,6 +607,7 @@ class RetryingVmProvisioner(object):
             # the cluster name and users can appropriately 'sky down'.  It also
             # means a second 'sky run -c <name>' will attempt to reuse.
             handle = CloudVmRayBackend.ResourceHandle(
+                cluster_name=cluster_name,
                 cluster_yaml=cluster_config_file,
                 requested_resources=task.resources,
                 requested_nodes=task.num_nodes,
@@ -724,7 +734,7 @@ class RetryingVmProvisioner(object):
         # Step 1: ray up the emptied config.
         if not ray_up_on_full_confg_only:
             config = backend_utils.read_yaml(cluster_config_file)
-            pinned_ray_install = f'pip3 install -U ray=={SKY_REMOTE_RAY_VERSION}'
+            pinned_ray_install = f'pip3 install -U ray[default]=={SKY_REMOTE_RAY_VERSION}'
 
             file_mounts = {}
             if 'ssh_public_key' in config['auth']:
@@ -848,6 +858,7 @@ class CloudVmRayBackend(backends.Backend):
     class ResourceHandle(object):
         """A pickle-able tuple of:
 
+        - (required) Cluster name.
         - (required) Path to a cluster.yaml file.
         - (optional) A cached head node public IP.  Filled in after a
             successful provision().
@@ -859,18 +870,22 @@ class CloudVmRayBackend(backends.Backend):
 
         def __init__(self,
                      *,
+                     cluster_name: str,
                      cluster_yaml: str,
                      head_ip: Optional[str] = None,
                      requested_resources: Optional[Resources] = None,
                      requested_nodes: Optional[int] = None,
                      launched_resources: Optional[Resources] = None,
                      tpu_delete_script: Optional[str] = None) -> None:
+            self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
             self.requested_resources = requested_resources
             self.requested_nodes = requested_nodes
             self.launched_resources = launched_resources
             self.tpu_delete_script = tpu_delete_script
+            self.jobs = collections.OrderedDict()
+            self.finished_jobs = collections.OrderedDict()
 
         def __repr__(self):
             return (f'ResourceHandle(\n\thead_ip={self.head_ip},'
@@ -879,7 +894,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'\n\trequested_resources={self.requested_nodes}x '
                     f'{self.requested_resources}, '
                     f'\n\tlaunched_resources={self.launched_resources}'
-                    f'\n\ttpu_delete_script={self.tpu_delete_script})')
+                    f'\n\ttpu_delete_script={self.tpu_delete_script})'
+                    f'\n\jobs={self.jobs})')
 
     def __init__(self):
         run_id = backend_utils.get_run_id()
@@ -967,6 +983,7 @@ class CloudVmRayBackend(backends.Backend):
         provisioned_resources = config_dict['launched_resources']
 
         handle = self.ResourceHandle(
+            cluster_name=cluster_name,
             cluster_yaml=cluster_config_file,
             # Cache head ip in the handle to speed up ssh operations.
             head_ip=self._get_node_ips(cluster_config_file, task.num_nodes)[0],
@@ -1129,7 +1146,7 @@ class CloudVmRayBackend(backends.Backend):
                 ray_resources_dict=par_task.get_task_resource_demands(i),
                 log_path=os.path.join(log_dir, f'{task_i_name}.log'),
                 stream_logs=stream_logs)
-        codegen.add_epilogue()
+        codegen.add_epilogue(log_dir)
         code = codegen.build()
 
         # Logger.
@@ -1189,17 +1206,34 @@ class CloudVmRayBackend(backends.Backend):
                             with_outputs=False)
 
         log_path = os.path.join(self.log_dir, 'run.log')
+        job_log_path = os.path.join(self.log_dir, 'job_submit.log')
         if not stream_logs:
             colorama.init()
             style = colorama.Style
             logger.info(f'Redirecting stdout/stderr, to monitor: '
                         f'{style.BRIGHT}tail -f {log_path}{style.RESET_ALL}')
 
-        assert executable is not None, executable
+        assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
-        self._run_command_on_head_via_ssh(
-            handle, f'{cd} && {executable} {script_path}', log_path,
-            stream_logs)
+        job_id = os.path.basename(self.log_dir)  # TODO
+        job_submit_cmd = ('ray job submit --address=127.0.0.1:8265 '
+                          f'--job-id {job_id} -- {executable} {script_path}')
+        self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',
+                                          job_log_path, stream_logs)
+
+        handle.jobs[job_id] = backend_utils.JobStatus.PENDING
+        global_user_state.add_or_update_cluster(handle.cluster_name,
+                                                handle,
+                                                ready=True)
+
+        # TODO: This does not get the log correctly. Maybe we can directly tail our own log file in log_path on remote?
+        # try:
+        #     self._run_command_on_head_via_ssh(handle,
+        #                                       f'tail -f ~/{self.log_dir}/*.log',
+        #                                       job_log_path, stream_logs)
+        # except KeyboardInterrupt:
+        #     self._run_command_on_head_via_ssh(handle, f'ray job stop {job_id}',
+        #                                       log_path, stream_logs)
 
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
@@ -1234,10 +1268,17 @@ class CloudVmRayBackend(backends.Backend):
             f'Task(run=...) should be a string (found {type(task.run)}).'
         script = backend_utils.make_task_bash_script(task.run)
 
-        log_path = os.path.join(self.log_dir, 'run.log')
+        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}')
+        log_path = os.path.join(log_dir, 'run.log')
+
+        ips = self._get_node_ips(handle.cluster_yaml,
+                                 task.num_nodes,
+                                 return_private_ips=True)
+        accelerator_dict = _get_task_demands_dict(task)
 
         codegen = RayCodeGen()
         codegen.add_prologue(stream_logs=stream_logs)
+        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict, log_dir)
 
         codegen.add_ray_task(
             bash_script=script,
@@ -1245,9 +1286,10 @@ class CloudVmRayBackend(backends.Backend):
             ray_resources_dict=_get_task_demands_dict(task),
             log_path=log_path,
             stream_logs=stream_logs,
+            gang_scheduling_ip=ips[0],
         )
 
-        codegen.add_epilogue()
+        codegen.add_epilogue(log_dir)
 
         self._exec_code_on_head(handle, codegen.build(), executable='python3')
         if not stream_logs:
@@ -1273,7 +1315,7 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(stream_logs=stream_logs)
-        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict)
+        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict, log_dir)
 
         ips_dict = task.run(ips)
         for ip in ips_dict:
@@ -1294,7 +1336,7 @@ class CloudVmRayBackend(backends.Backend):
                 gang_scheduling_ip=ip,
             )
 
-        codegen.add_epilogue()
+        codegen.add_epilogue(log_dir)
 
         # Logger.
         colorama.init()
@@ -1471,4 +1513,4 @@ class CloudVmRayBackend(backends.Backend):
             shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
         ]
-        backend_utils.run_with_log(command, log_path, stream_logs)
+        return backend_utils.run_with_log(command, log_path, stream_logs)
