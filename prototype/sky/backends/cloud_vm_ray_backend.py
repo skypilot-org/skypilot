@@ -226,7 +226,7 @@ class RayCodeGen(object):
                 # error message.
                 ray.get(pg.ready())
                 print(\'All task slots reserved.\')
-                pathlib.Path('{log_dir}/sky_running').touch()
+                pathlib.Path('{log_dir}/{backend_utils.SKY_JOB_RUNNING_INDICATOR}').touch()
                 """),
         ]
 

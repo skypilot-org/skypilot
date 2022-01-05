@@ -457,10 +457,9 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
 
     if len(jobs) > 0:
         # Hacky solution to get the job status, since ray doesn't expose it.
-        log_dirs = [os.path.join(f'{SKY_REMOTE_WORKDIR}', 'sky_logs', f'{run_id}')
+        indicator_paths = [os.path.join(f'{SKY_REMOTE_WORKDIR}', 'sky_logs', f'{run_id}', backend_utils.SKY_JOB_RUNNING_INDICATOR)
                     for run_id in run_ids]
-        test_cmd = [f'echo `ls -a {log_dir} 2> /dev/null | grep sky_running | wc -l`'
-                        for log_dir in log_dirs]
+        test_cmd = [f'test -f "{path}" && echo 1 || echo 0' for path in indicator_paths]
         test_cmd += [f'ray job status --address 127.0.0.1:8265 {job["job_id"]} 2>&1 | grep "Job status"' for job in jobs]
         test_cmd = ' && '.join(test_cmd)
         logger.debug(test_cmd)

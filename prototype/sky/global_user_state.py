@@ -133,7 +133,7 @@ def add_or_update_cluster_job(cluster_name: str, job_id: int, status: str, is_ad
         _CURSOR.execute('UPDATE jobs SET status=(?) WHERE name=(?) AND job_id=(?)',
                         (status, cluster_name, job_id))
     else:
-        _CURSOR.execute('UPDATE jobs SET status=(?), finished=1 WHERE name=(?) AND job_id=(?)',
+        _CURSOR.execute('UPDATE jobs SET status=(?), finished=1 WHERE name=(?) AND job_id=(?)AND finished=0',
                         (status, cluster_name, job_id))
     _CONN.commit()
 

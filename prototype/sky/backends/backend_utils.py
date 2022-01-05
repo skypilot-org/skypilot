@@ -33,6 +33,7 @@ Resources = resources.Resources
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 SKY_REMOTE_RAY_VERSION = '1.9.1'
+SKY_JOB_RUNNING_INDICATOR = '.sky_job_running'
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
