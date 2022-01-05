@@ -38,6 +38,7 @@ OptimizeTarget = optimizer.OptimizeTarget
 
 Path = str
 PostSetupFn = Callable[[str], Any]
+JobStatus = backend_utils.JobStatus
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
@@ -730,7 +731,8 @@ class RetryingVmProvisioner(object):
         # Step 1: ray up the emptied config.
         if not ray_up_on_full_confg_only:
             config = backend_utils.read_yaml(cluster_config_file)
-            pinned_ray_install = f'pip3 install -U ray[default]=={SKY_REMOTE_RAY_VERSION}'
+            pinned_ray_install = ('pip3 install -U '
+                                  f'ray[default]=={SKY_REMOTE_RAY_VERSION}')
 
             file_mounts = {}
             if 'ssh_public_key' in config['auth']:
@@ -1518,6 +1520,62 @@ class CloudVmRayBackend(backends.Backend):
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
         ]
         return backend_utils.run_with_log(command, log_path, stream_logs)
+
+    def fetch_job_queue(self, handle: ResourceHandle) -> List[str]:
+        """Update the status of the unfinished jobs and returns the job queue."""
+        # FIXME: this is a hack to get around the fact that ray doesn't support 
+        # fetching the job queue.
+        jobs = global_user_state.get_jobs(handle.cluster_name)
+
+        if len(jobs) == 0:
+            return []
+        # Hacky solution to get the job status, since ray doesn't expose it.
+        indicator_paths = [
+            os.path.join(SKY_REMOTE_WORKDIR, 'sky_logs', job['run_id'],
+                        backend_utils.SKY_JOB_RUNNING_INDICATOR)
+            for job in jobs
+        ]
+        test_cmd = [
+            f'test -f "{path}" && echo 1 || echo 0' for path in indicator_paths
+        ]
+        test_cmd += [
+            (f'ray job status --address 127.0.0.1:8265 {job["job_id"]} 2>&1 | '
+            'grep "Job status"') for job in jobs
+        ]
+        test_cmd = ' && '.join(test_cmd)
+        logger.debug(test_cmd)
+        _, stdout, _ = self._run_command_on_head_via_ssh(
+            handle,
+            test_cmd,
+            '/dev/null',
+            False,
+        )
+
+        results = stdout.strip().split('\n')
+        assert len(results) == len(jobs) * 2, (results, handle.jobs)
+
+
+        # Process the results
+        for i, job in enumerate(jobs):
+            job_status = job['status']
+            # Using the indicator file to determine if the job is running, since 
+            # ray shows the job is RUNNING when it is waiting for the resources.
+            is_running = results[i].strip() == '1'
+            ray_status = results[i + len(jobs)].strip().rstrip('.')
+            ray_status = ray_status.rpartition(' ')[-1]
+            if 'RUNNING' in ray_status:
+                if is_running:
+                    job_status = JobStatus.RUNNING
+                else:
+                    job_status = JobStatus.PENDING
+            else:
+                job_status = JobStatus[ray_status]
+            global_user_state.add_or_update_cluster_job(handle.cluster_name,
+                                                        job['job_id'],
+                                                        job_status.value,
+                                                        is_add=False)
+            job['status'] = job_status.value
+        return jobs
 
     def cancel(self, handle: ResourceHandle, job_id: str) -> None:
         """Cancels a job on cluster."""

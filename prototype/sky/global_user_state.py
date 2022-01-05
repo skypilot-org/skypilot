@@ -23,7 +23,6 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
 
-
 try:
     _CURSOR.execute('select * from clusters limit 0')
 except sqlite3.OperationalError:
@@ -35,7 +34,7 @@ except sqlite3.OperationalError:
         handle BLOB,
         last_use TEXT,
         status TEXT)""")
-    
+
 try:
     _CURSOR.execute('select * from jobs limit 0')
 except sqlite3.OperationalError:
@@ -89,6 +88,7 @@ def _get_pretty_entry_point() -> str:
         argv[0] = basename
     return ' '.join(argv)
 
+
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: backends.Backend.ResourceHandle,
                           ready: bool):
@@ -102,6 +102,7 @@ def add_or_update_cluster(cluster_name: str,
         'INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?, ?)',
         (cluster_name, cluster_launched_at, handle, last_use, status.value))
     _CONN.commit()
+
 
 def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
@@ -123,26 +124,50 @@ def remove_cluster(cluster_name: str, terminate: bool):
     _CURSOR.execute('DELETE FROM jobs WHERE name=(?)', (cluster_name,))
     _CONN.commit()
 
-def add_or_update_cluster_job(cluster_name: str, job_id: int, status: str, is_add: bool, run_id: Optional[str]=None):
+
+def add_or_update_cluster_job(cluster_name: str,
+                              job_id: int,
+                              status: str,
+                              is_add: bool,
+                              run_id: Optional[str] = None):
     if is_add:
         job_submitted_at = int(time.time())
         assert run_id is not None, (cluster_name, job_id, status, run_id)
-        _CURSOR.execute('INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?, ?, 0)',
-                        (cluster_name, job_id, job_submitted_at, status, run_id))
+        _CURSOR.execute(
+            'INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?, ?, 0)',
+            (cluster_name, job_id, job_submitted_at, status, run_id))
     elif status in ['PENDING', 'RUNNING']:
-        _CURSOR.execute('UPDATE jobs SET status=(?) WHERE name=(?) AND job_id=(?)',
-                        (status, cluster_name, job_id))
+        _CURSOR.execute(
+            'UPDATE jobs SET status=(?) WHERE name=(?) AND job_id=(?)',
+            (status, cluster_name, job_id))
     else:
-        _CURSOR.execute('UPDATE jobs SET status=(?), finished=1 WHERE name=(?) AND job_id=(?)AND finished=0',
-                        (status, cluster_name, job_id))
+        _CURSOR.execute(
+            """\
+            UPDATE jobs SET status=(?), finished=1
+            WHERE name=(?) AND job_id=(?) AND finished=0""",
+            (status, cluster_name, job_id),
+        )
     _CONN.commit()
 
 
-def _get_jobs(cluster_name: Optional[str]=None, finished: bool=False) -> List[Dict[str, Any]]:
+def _get_jobs(cluster_name: Optional[str] = None,
+              finished: bool = False) -> List[Dict[str, Any]]:
     if cluster_name is not None:
-        rows = _CURSOR.execute('select * from jobs where name=(?) and finished=(?) and status!="RESERVED" order by submitted_at', (cluster_name, int(finished)))
+        rows = _CURSOR.execute(
+            """\
+            SELECT * FROM jobs
+            WHERE name=(?) AND finished=(?) AND status!="RESERVED"
+            ORDER BY submitted_at""",
+            (cluster_name, int(finished)),
+        )
     else:
-        rows = _CURSOR.execute('select * from jobs where finished=(?) and status!="RESERVED" order by cluster_name, submitted_at', (int(finished),))
+        rows = _CURSOR.execute(
+            """\
+            SELECT * FROM jobs
+            WHERE finished=(?) AND status!="RESERVED"
+            ORDER BY cluster_name, submitted_at""",
+            (int(finished),),
+        )
     records = []
     for name, job_id, submitted_at, status, run_id, _ in rows:
         records.append({
@@ -154,22 +179,29 @@ def _get_jobs(cluster_name: Optional[str]=None, finished: bool=False) -> List[Di
         })
     return records
 
-def get_jobs(cluster_name: Optional[str]=None) -> List[Dict[str, Any]]:
+
+def get_jobs(cluster_name: Optional[str] = None) -> List[Dict[str, Any]]:
     return _get_jobs(cluster_name, finished=False)
 
-def get_finished_jobs(cluster_name: Optional[str]=None) -> List[Dict[str, Any]]:
+
+def get_finished_jobs(cluster_name: Optional[str] = None
+                     ) -> List[Dict[str, Any]]:
     return _get_jobs(cluster_name, finished=True)
 
+
 def reserve_next_job_id(cluster_name: str, run_id: Optional[str]) -> int:
-    rows = _CURSOR.execute('select max(job_id) from jobs where name=(?)', (cluster_name,))
+    rows = _CURSOR.execute('select max(job_id) from jobs where name=(?)',
+                           (cluster_name,))
     job_id = 100
     for row in rows:
         if row[0] is not None:
             job_id = row[0]
     job_id += 1
-    _CURSOR.execute('INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?, ?, 0)', (cluster_name, job_id, 0, 'RESERVED', run_id))
+    _CURSOR.execute('INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?, ?, 0)',
+                    (cluster_name, job_id, 0, 'RESERVED', run_id))
     _CONN.commit()
     return job_id
+
 
 def get_handle_from_cluster_name(cluster_name: str
                                 ) -> Optional[backends.Backend.ResourceHandle]:

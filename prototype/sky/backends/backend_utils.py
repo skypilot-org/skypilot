@@ -640,6 +640,7 @@ def check_local_gpus() -> bool:
                        check=False)
     return p.returncode == 0
 
+
 def requested_resources_available(cluster_resources: Set[Resources],
                                   task_resources: Set[Resources]):
     """Returns whether the requested resources is less demanding than cluster_resources.
