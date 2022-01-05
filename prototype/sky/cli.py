@@ -27,7 +27,6 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
-import collections
 import functools
 import getpass
 import os
@@ -351,13 +350,33 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
                 ])
 
 @cli.command()
-@click.argument('cluster_name_or_job_id', required=True, type=str)
-def cancel(cluster_name_or_job_id: str):
+@click.option('--cluster',
+              '-c',
+              required=True,
+              type=str,
+              help='Name of the existing cluster to cancel the task.')
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Cancel all task in full.')
+@click.argument('job_id', required=False, type=str)
+def cancel(cluster: str, all: bool, job_id: str):
     """Cancel the job with the given job ID or all the jobs on a cluster."""
-    
-    backends.CloudVmRayBackend().cancel(job_id)
+    cluster_name = cluster
+    if job_id is None and not all:
+        raise click.UsageError(
+            f'sky cancel requires either a job id (see `sky queue {cluster_name} --all`) '
+            'or --all.')
 
-def _shorten_duration_diff_string(diff):
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    backends.CloudVmRayBackend().cancel(handle, job_id)
+    global_user_state.add_or_update_cluster_job(cluster_name, job_id, JobStatus.STOPPED.value, is_add=False)
+
+def _readable_time_duration(start: int):
+    duration = pendulum.now().subtract(seconds=time.time() - start)
+    diff = duration.diff_for_humans()
     diff = diff.replace('second', 'sec')
     diff = diff.replace('minute', 'min')
     diff = diff.replace('hour', 'hr')
@@ -387,7 +406,6 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
         handle = cluster_status['handle']
-        duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         resources_str = '<initializing>'
         if (handle.requested_nodes is not None and
                 handle.launched_resources is not None):
@@ -397,7 +415,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
             # NAME
             cluster_status['name'],
             # LAUNCHED
-            _shorten_duration_diff_string(duration.diff_for_humans()),
+            _readable_time_duration(launched_at),
             # RESOURCES
             resources_str,
             # COMMAND
@@ -421,7 +439,7 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
     """Show launched job queue on clusters."""
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        raise click.UsageError(
+        raise click.BadParameter(
             f'Cluster {cluster} is not found (see `sky status`).'
         )
     jobs = global_user_state.get_jobs(cluster)
@@ -430,16 +448,20 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
         'NAME',
         'SUBMITTED',
         'STATUS',
+        'LOG'
     ]
+    cluster_table.align['LOG'] = 'l'
     
-    job_ids = [job['job_name'] for job in jobs]
+    run_ids = [job['run_id'] for job in jobs]
+    display_jobs = set()
+
     if len(jobs) > 0:
         # Hacky solution to get the job status, since ray doesn't expose it.
-        log_dirs = [os.path.join(f'{SKY_REMOTE_WORKDIR}', 'sky_logs', f'{job_id}')
-                    for job_id in job_ids]
+        log_dirs = [os.path.join(f'{SKY_REMOTE_WORKDIR}', 'sky_logs', f'{run_id}')
+                    for run_id in run_ids]
         test_cmd = [f'echo `ls -a {log_dir} 2> /dev/null | grep sky_running | wc -l`'
                         for log_dir in log_dirs]
-        test_cmd += [f'ray job status --address 127.0.0.1:8265 {job_id} 2>&1 | grep "Job status"' for job_id in job_ids]
+        test_cmd += [f'ray job status --address 127.0.0.1:8265 {job["job_name"]} 2>&1 | grep "Job status"' for job in jobs]
         test_cmd = ' && '.join(test_cmd)
         logger.debug(test_cmd)
         _, stdout, _ = backends.CloudVmRayBackend()._run_command_on_head_via_ssh(
@@ -459,22 +481,26 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
             else:
                 job_status = JobStatus[ray_status]
             global_user_state.add_or_update_cluster_job(cluster, job['job_name'], job_status.value, is_add=False)
-            duration = pendulum.now().subtract(seconds=time.time() - job['submitted_at'])
+            display_jobs.add(job['job_name'])
             cluster_table.add_row([
                 job['job_name'],
-                _shorten_duration_diff_string(duration.diff_for_humans()),
+                _readable_time_duration(job['submitted_at']),
                 job_status.value,
+                os.path.join('sky_logs', job['run_id']),
             ])
+
     if all:
         finished_jobs = global_user_state.get_finished_jobs(cluster)
         for job in finished_jobs:
-            duration = pendulum.now().subtract(seconds=time.time() - job['submitted_at'])
+            if job['job_name'] in display_jobs:
+                continue
             cluster_table.add_row([job['job_name'],
-                                   _shorten_duration_diff_string(duration.diff_for_humans()), 
+                                    _readable_time_duration(job['submitted_at']),
                                    job['status'],
+                                    os.path.join('sky_logs', job['run_id']),
                     ])
     
-    print(f'Sky cluster ({cluster})\'s Jobs\n{cluster_table}')
+    print(f'Sky Job Queue of Cluster: {cluster}\n{cluster_table}')
 
 @cli.command()
 @click.argument('clusters', nargs=-1, required=False)

@@ -924,8 +924,7 @@ class CloudVmRayBackend(backends.Backend):
             # Cluster already exists.
             self._check_resources_available_for_task(handle, task)
             # Use the existing cluster.
-            assert handle.launched_resources is not None, (cluster_name,
-                                                            handle)
+            assert handle.launched_resources is not None, (cluster_name, handle)
             return cluster_name, handle.launched_resources
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
@@ -1210,14 +1209,19 @@ class CloudVmRayBackend(backends.Backend):
 
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
-        job_id = os.path.basename(self.log_dir)
+        run_id = os.path.basename(self.log_dir)
+        job_id = run_id # TODO: use a better name
         job_submit_cmd = ('ray job submit --address=127.0.0.1:8265 '
                           f'--job-id {job_id} -- {executable} {script_path}')
         self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',
                                           job_log_path, stream_logs)
-        
+
         job_status = backend_utils.JobStatus.PENDING
-        global_user_state.add_or_update_cluster_job(handle.cluster_name, job_id, job_status.value, is_add=True)
+        global_user_state.add_or_update_cluster_job(handle.cluster_name,
+                                                    job_id,
+                                                    job_status.value,
+                                                    is_add=True,
+                                                    run_id=run_id)
 
         # TODO (zhwu): This does not get the log correctly. Maybe we can directly tail our own log file in log_path on remote?
         # try:
@@ -1513,3 +1517,12 @@ class CloudVmRayBackend(backends.Backend):
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
         ]
         return backend_utils.run_with_log(command, log_path, stream_logs)
+
+    def cancel(self, handle: ResourceHandle, job_id: str) -> None:
+        """Cancels a job on cluster."""
+        self._run_command_on_head_via_ssh(
+            handle,
+            f'ray stop job --address 127.0.0.1:8265 {job_id}',
+            '/dev/null',
+            False,
+        )

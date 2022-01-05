@@ -43,9 +43,11 @@ except sqlite3.OperationalError:
     _CURSOR.execute("""\
       CREATE TABLE jobs (
         name TEXT,
-        job_name TEXT PRIMARY KEY,
+        job_name TEXT,
         submitted_at INTEGER,
         status TEXT,
+        run_id TEXT,
+        PRIMARY KEY(name, job_name),
         FOREIGN KEY(name) REFERENCES clusters(name))""")
     
 try:
@@ -55,9 +57,11 @@ except sqlite3.OperationalError:
     _CURSOR.execute("""\
       CREATE TABLE finished_jobs (
         name TEXT,
-        job_name TEXT PRIMARY KEY,
+        job_name TEXT,
         submitted_at INTEGER,
         status TEXT,
+        run_id TEXT,
+        PRIMARY KEY(name, job_name),
         FOREIGN KEY(name) REFERENCES clusters(name))""")
 
 _CONN.commit()
@@ -133,32 +137,36 @@ def remove_cluster(cluster_name: str, terminate: bool):
     _CURSOR.execute('DELETE FROM finished_jobs WHERE name=(?)', (cluster_name,))
     _CONN.commit()
 
-def add_or_update_cluster_job(cluster_name: str, job_name: str, status: str, is_add: bool):
+def add_or_update_cluster_job(cluster_name: str, job_name: str, status: str, is_add: bool, run_id: Optional[str]=None):
     if is_add:
         job_submitted_at = int(time.time())
-        _CURSOR.execute('INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?)',
-                        (cluster_name, job_name, job_submitted_at, status))
+        assert run_id is not None, (cluster_name, job_name, status, run_id)
+        _CURSOR.execute('INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?, ?)',
+                        (cluster_name, job_name, job_submitted_at, status, run_id))
     elif status in ['PENDING', 'RUNNING']:
-        _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_name=(?)',
-                        (status, job_name))
+        _CURSOR.execute('UPDATE jobs SET status=(?) WHERE name=(?) AND job_name=(?)',
+                        (status, cluster_name, job_name))
     else:
-        _CURSOR.execute('INSERT OR REPLACE INTO finished_jobs SELECT * FROM jobs WHERE job_name=(?)',
-                        (job_name,))
-        _CURSOR.execute('DELETE FROM jobs WHERE job_name=(?)', (job_name,))
+        _CURSOR.execute('UPDATE jobs SET status=(?) WHERE name=(?) AND job_name=(?)',
+                        (status, cluster_name, job_name))
+        _CURSOR.execute('INSERT OR REPLACE INTO finished_jobs SELECT * FROM jobs WHERE name=(?) AND job_name=(?)',
+                        (cluster_name, job_name))
+        _CURSOR.execute('DELETE FROM jobs WHERE name=(?) AND job_name=(?)', (cluster_name, job_name))
     _CONN.commit()
 
 def get_jobs(cluster_name: Optional[str]=None) -> List[Dict[str, Any]]:
     if cluster_name is not None:
         rows = _CURSOR.execute('select * from jobs where name=(?) order by submitted_at', (cluster_name,))
     else:
-        rows = _CURSOR.execute('select * from jobs order by cluster_name, submitted_at')
+        rows = _CURSOR.execute('select * from jobs order by name, submitted_at')
     records = []
-    for name, job_name, submitted_at, status in rows:
+    for name, job_name, submitted_at, status, run_id in rows:
         records.append({
             'name': name,
             'job_name': job_name,
             'submitted_at': submitted_at,
             'status': status,
+            'run_id': run_id,
         })
     return records
 
@@ -168,12 +176,13 @@ def get_finished_jobs(cluster_name: Optional[str]=None) -> List[Dict[str, Any]]:
     else:
         rows = _CURSOR.execute('select * from finished_jobs order by cluster_name, submitted_at')
     records = []
-    for name, job_name, submitted_at, status in rows:
+    for name, job_name, submitted_at, status, run_id in rows:
         records.append({
             'name': name,
             'job_name': job_name,
             'submitted_at': submitted_at,
             'status': status,
+            'run_id': run_id,
         })
     return records
 
