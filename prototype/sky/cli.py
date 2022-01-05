@@ -358,7 +358,9 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
               is_flag=True,
               required=False,
               help='Show all information in full.')
-@click.argument('cluster', required=False)
+@click.argument('cluster', 
+                required=False, 
+                help='Show tasks on it when cluster is specified.')
 def status(cluster: str, all: bool):  # pylint: disable=redefined-builtin
     """Show launched clusters."""
     if cluster is not None:
@@ -369,7 +371,8 @@ def status(cluster: str, all: bool):  # pylint: disable=redefined-builtin
 
 def _show_cluster_job_status(cluster_name:str, all: bool): # pylint: disable=redefined-builtin
     """Show the status of a cluster's job."""
-    # TODO(zhwu): lock the user_state to prevent concurrent access.
+    # TODO(zhwu): lock the user_state until the update finished 
+    # to prevent concurrent access by provision.
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise click.UsageError(
