@@ -135,6 +135,48 @@ class Resources(object):
         # self == other
         return True
 
+    def fill_accelerators(self):
+        assert (self.cloud is not None and
+                self.instance_type is not None), self
+        
+        if self.accelerators is not None:
+            return self
+        cloud = self.cloud
+        instance_type = self.instance_type
+        
+        self.accelerators = cloud.get_accelerators_from_instance_type(instance_type)
+        return self
+            
+    
+    def less_demanding_than(self, other) -> bool:
+        """Returns whether this resources is less demanding than the other."""
+        if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
+            return False
+        # self.cloud <= other.cloud
+
+        if self.instance_type is not None and \
+            self.instance_type != other.instance_type:
+            return False
+        # self.instance_type <= other.instance_type
+
+        if self.accelerators is not None:
+            for acc in self.accelerators:
+                if acc not in other.accelerators:
+                    return False
+                if self.accelerators[acc] > other.accelerators[acc]:
+                    return False
+        # self.accelerators <= other.accelerators
+
+        if self.accelerator_args != other.accelerator_args:
+            return False
+        # self.accelerator_args == other.accelerator_args
+
+        if self.use_spot != other.use_spot:
+            return False
+
+        # self <= other
+        return True
+
     def is_launchable_fuzzy_equal(self, other) -> bool:
         """Whether the resources are the fuzzily same launchable resources."""
         assert self.cloud is not None and other.cloud is not None

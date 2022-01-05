@@ -40,11 +40,14 @@ import prettytable
 
 import sky
 from sky import backends
+from sky import logging
 from sky import global_user_state
 from sky import task as task_lib
 from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+
+logger = logging.init_logger(__name__)
 
 _CLUSTER_FLAG_HELP = """
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -366,6 +369,7 @@ def status(cluster: str, all: bool):  # pylint: disable=redefined-builtin
 
 def _show_cluster_job_status(cluster_name:str, all: bool): # pylint: disable=redefined-builtin
     """Show the status of a cluster's job."""
+    # TODO(zhwu): lock the user_state to prevent concurrent access.
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise click.UsageError(
@@ -379,11 +383,11 @@ def _show_cluster_job_status(cluster_name:str, all: bool): # pylint: disable=red
     if len(handle.jobs) > 0:
         log_dirs = [os.path.join(f'{SKY_REMOTE_WORKDIR}', 'sky_logs', f'{job_id}')
                     for job_id in handle.jobs.keys()]
-        test_cmd = [f'echo `ls {log_dir} 2> /dev/null | grep running | wc -l`'
+        test_cmd = [f'echo `ls -a {log_dir} 2> /dev/null | grep sky_running | wc -l`'
                         for log_dir in log_dirs]
         test_cmd += [f'ray job status --address 127.0.0.1:8265 {job_id} 2>&1 | grep "Job status"' for job_id in handle.jobs.keys()]
         test_cmd = ' && '.join(test_cmd)
-        print(test_cmd)
+        logger.debug(test_cmd)
         _, stdout, _ = backends.CloudVmRayBackend()._run_command_on_head_via_ssh(
             handle, test_cmd, '/dev/null', False,)
         
@@ -417,7 +421,7 @@ def _show_cluster_job_status(cluster_name:str, all: bool): # pylint: disable=red
         for job_id, job_status in handle.finished_jobs.items():
             cluster_table.add_row([job_id, job_status.value])
     
-    print(f'Sky cluster <{cluster_name}>\'s Jobs\n{cluster_table}')
+    print(f'Sky cluster ({cluster_name})\'s Jobs\n{cluster_table}')
 
 
 def _show_cluster_status(all: bool):

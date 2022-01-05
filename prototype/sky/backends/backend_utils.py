@@ -34,7 +34,6 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 SKY_REMOTE_RAY_VERSION = '1.9.1'
 
-
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
@@ -639,21 +638,22 @@ def check_local_gpus() -> bool:
                        check=False)
     return p.returncode == 0
 
-
-def is_same_requested_resources(r1: Set[Resources], r2: Set[Resources]):
-    """Returns whether the requested resources are the same.
+def requested_resources_available(cluster_resources: Set[Resources],
+                                  task_resources: Set[Resources]):
+    """Returns whether the requested resources is less demanding than cluster_resources.
 
     Args:
-        r1: Set of Resources requested previously.
-        r2: Set of Resources newly requested.
+        cluster_resources: Resources launched in cluster.
+        task_resources: Set of Resources newly requested.
 
     Returns:
-        True if the resources are the same, false otherwise.
+        True if the requested resources is less demanding, false otherwise.
     """
-    assert len(r1) == 1 and len(r2) == 1
-    r1 = list(r1)[0]
-    r2 = list(r2)[0]
-    return r1.is_same_resources(r2)
+    assert len(task_resources) == 1, task_resources
+    assert cluster_resources is not None
+
+    task_resources = list(task_resources)[0]
+    return task_resources.less_demanding_than(cluster_resources)
 
 
 def run_bash_command_with_log(bash_command: str,
@@ -684,6 +684,7 @@ def make_task_bash_script(codegen: str) -> str:
     ]
     script = '\n'.join(script)
     return script
+
 
 class JobStatus(enum.Enum):
     """Job status"""

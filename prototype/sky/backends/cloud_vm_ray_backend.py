@@ -11,7 +11,7 @@ import shlex
 import subprocess
 import tempfile
 import textwrap
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import uuid
 
 import colorama
@@ -218,6 +218,7 @@ class RayCodeGen(object):
 
         self._code += [
             textwrap.dedent(f"""\
+                os.makedirs(\'{log_dir}\', exist_ok=True)
                 pg = ray_util.placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')
                 print(\'Reserving task slots on {len(bundles)} nodes.\', flush=True)
                 # FIXME: This will print the error message from autoscaler if
@@ -225,8 +226,7 @@ class RayCodeGen(object):
                 # error message.
                 ray.get(pg.ready())
                 print(\'All task slots reserved.\')
-                os.makedirs(\'{log_dir}\', exist_ok=True)
-                pathlib.Path('{log_dir}/running').touch()
+                pathlib.Path('{log_dir}/sky_running').touch()
                 """),
         ]
 
@@ -290,17 +290,13 @@ class RayCodeGen(object):
                 ))""")
         ]
 
-    def add_epilogue(self, log_dir: str) -> None:
+    def add_epilogue(self) -> None:
         """Generates code that waits for all tasks, then exits."""
         assert self._has_prologue, 'Call add_prologue() before add_epilogue().'
         assert not self._has_epilogue, 'add_epilogue() called twice?'
         self._has_epilogue = True
 
-        self._code += [
-            textwrap.dedent(f"""\
-                ray.get(futures)
-                pathlib.Path('{log_dir}/done').touch()"""),
-        ]
+        self._code.append('ray.get(futures)'),
 
     def build(self) -> str:
         """Returns the entire generated program."""
@@ -612,7 +608,7 @@ class RetryingVmProvisioner(object):
                 requested_resources=task.resources,
                 requested_nodes=task.num_nodes,
                 # OK for this to be shown in CLI as status == INIT.
-                launched_resources=to_provision,
+                launched_resources=to_provision.fill_accelerators(),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
@@ -873,7 +869,7 @@ class CloudVmRayBackend(backends.Backend):
                      cluster_name: str,
                      cluster_yaml: str,
                      head_ip: Optional[str] = None,
-                     requested_resources: Optional[Resources] = None,
+                     requested_resources: Optional[Set[Resources]] = None,
                      requested_nodes: Optional[int] = None,
                      launched_resources: Optional[Resources] = None,
                      tpu_delete_script: Optional[str] = None) -> None:
@@ -910,34 +906,34 @@ class CloudVmRayBackend(backends.Backend):
         self._optimize_target = kwargs.pop('optimize_target',
                                            OptimizeTarget.COST)
 
-    def _check_existing_cluster(self, task: App, to_provision: Resources,
-                                cluster_name: str) -> Tuple[str, Resources]:
-        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-        if handle is not None:
-            # Cluster already exists. Check if the  resources are equal
-            # for the previous and current request. Only reuse the cluster
-            # when the requested resources are the same.
-            if task.num_nodes == handle.requested_nodes and \
-                backend_utils.is_same_requested_resources(
-                    handle.requested_resources, task.resources):
-                # Use the existing cluster.
-                assert handle.launched_resources is not None, (cluster_name,
-                                                               handle)
-                # FIXME: I'm not sure this is correct. Is this used somewhere?
-                # Suppose this is from a 'sky exec -n cluster app.yaml' where
-                # users have updated this task's resource requirements to
-                # 2GPUs.
-                task.best_resources = handle.launched_resources
-                return cluster_name, handle.launched_resources
-            # FIXME: for job queue, the currect logic may be checking requested
-            # resources <= actual resources.
+    def _check_resources_available_for_task(self, handle: ResourceHandle,
+                                            task: App):
+        """Check if the resources requested by the task are available in cluster."""
+        # requested_resources <= actual_resources.
+        if not (task.num_nodes <= handle.requested_nodes and
+                backend_utils.requested_resources_available(
+                    handle.launched_resources, task.resources)):
+            cluster_name = handle.cluster_name
             raise exceptions.ResourcesMismatchError(
                 'Requested resources do not match the existing cluster.\n'
                 f'  Requested: {task.num_nodes}x {task.resources}\n'
                 f'  Existing: {handle.requested_nodes}x '
-                f'{handle.requested_resources}\n'
+                f'{handle.launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
-                f'existing cluster first: sky down {cluster_name}')
+                f'existing cluster first: `sky down {cluster_name}`.')
+        task.best_resources = list(task.resources)[0]
+        return True
+
+    def _check_existing_cluster(self, task: App, to_provision: Resources,
+                                cluster_name: str) -> Tuple[str, Resources]:
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        if handle is not None:
+            # Cluster already exists.
+            self._check_resources_available_for_task(handle, task)
+            # Use the existing cluster.
+            assert handle.launched_resources is not None, (cluster_name,
+                                                            handle)
+            return cluster_name, handle.launched_resources
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
@@ -989,7 +985,7 @@ class CloudVmRayBackend(backends.Backend):
             head_ip=self._get_node_ips(cluster_config_file, task.num_nodes)[0],
             requested_resources=requested_resources,
             requested_nodes=task.num_nodes,
-            launched_resources=provisioned_resources,
+            launched_resources=provisioned_resources.fill_accelerators(),
             # TPU.
             tpu_delete_script=config_dict.get('tpu-delete-script'))
         global_user_state.add_or_update_cluster(cluster_name,
@@ -1129,10 +1125,18 @@ class CloudVmRayBackend(backends.Backend):
         # manipulating the futures).
         #
         # TODO: possible to open the port in the yaml?  Run Ray inside docker?
-        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
-                               'tasks')
+        log_dir_base = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}')
+        log_dir = os.path.join(log_dir_base, 'tasks')
+
+        ips = self._get_node_ips(handle.cluster_yaml,
+                                 task.num_nodes,
+                                 return_private_ips=True)
+        accelerator_dict = _get_task_demands_dict(task)
+
         codegen = RayCodeGen()
         codegen.add_prologue(stream_logs=stream_logs)
+        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict,
+                                                    log_dir)
         for i, task_i in enumerate(par_task.tasks):
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
             # to initialize conda, so that 'conda activate ...' works.
@@ -1146,7 +1150,7 @@ class CloudVmRayBackend(backends.Backend):
                 ray_resources_dict=par_task.get_task_resource_demands(i),
                 log_path=os.path.join(log_dir, f'{task_i_name}.log'),
                 stream_logs=stream_logs)
-        codegen.add_epilogue(log_dir)
+        codegen.add_epilogue()
         code = codegen.build()
 
         # Logger.
@@ -1159,8 +1163,8 @@ class CloudVmRayBackend(backends.Backend):
 
         self._exec_code_on_head(handle, code, executable='python3')
 
-        if download_logs:
-            self._rsync_down_logs(handle, log_dir, [handle.head_ip])
+        # if download_logs:
+        #     self._rsync_down_logs(handle, log_dir, [handle.head_ip])
 
     def _rsync_down_logs(self,
                          handle: ResourceHandle,
@@ -1215,7 +1219,7 @@ class CloudVmRayBackend(backends.Backend):
 
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
-        job_id = os.path.basename(self.log_dir)  # TODO
+        job_id = os.path.basename(self.log_dir)
         job_submit_cmd = ('ray job submit --address=127.0.0.1:8265 '
                           f'--job-id {job_id} -- {executable} {script_path}')
         self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',
@@ -1226,7 +1230,7 @@ class CloudVmRayBackend(backends.Backend):
                                                 handle,
                                                 ready=True)
 
-        # TODO: This does not get the log correctly. Maybe we can directly tail our own log file in log_path on remote?
+        # TODO (zhwu): This does not get the log correctly. Maybe we can directly tail our own log file in log_path on remote?
         # try:
         #     self._run_command_on_head_via_ssh(handle,
         #                                       f'tail -f ~/{self.log_dir}/*.log',
@@ -1237,6 +1241,10 @@ class CloudVmRayBackend(backends.Backend):
 
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
+        # Check the task resources vs the cluster resources. Since `sky exec`
+        # will not run the provision and _check_existing_cluster
+        self._check_resources_available_for_task(handle, task)
+
         # Execution logic differs for three types of tasks.
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):
@@ -1278,7 +1286,8 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(stream_logs=stream_logs)
-        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict, log_dir)
+        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict,
+                                                    log_dir)
 
         codegen.add_ray_task(
             bash_script=script,
@@ -1289,7 +1298,7 @@ class CloudVmRayBackend(backends.Backend):
             gang_scheduling_ip=ips[0],
         )
 
-        codegen.add_epilogue(log_dir)
+        codegen.add_epilogue()
 
         self._exec_code_on_head(handle, codegen.build(), executable='python3')
         if not stream_logs:
@@ -1304,8 +1313,8 @@ class CloudVmRayBackend(backends.Backend):
         #   ray.init(..., log_to_driver=False); otherwise too many logs.
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
-        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
-                               'tasks')
+        log_dir_base = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}')
+        log_dir = os.path.join(log_dir_base, 'tasks')
         # Get private ips here as Ray internally uses 'node:private_ip' as
         # per-node custom resources.
         ips = self._get_node_ips(handle.cluster_yaml,
@@ -1315,7 +1324,8 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(stream_logs=stream_logs)
-        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict, log_dir)
+        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict,
+                                                    log_dir_base)
 
         ips_dict = task.run(ips)
         for ip in ips_dict:
@@ -1336,7 +1346,7 @@ class CloudVmRayBackend(backends.Backend):
                 gang_scheduling_ip=ip,
             )
 
-        codegen.add_epilogue(log_dir)
+        codegen.add_epilogue()
 
         # Logger.
         colorama.init()
@@ -1352,8 +1362,8 @@ class CloudVmRayBackend(backends.Backend):
         external_ips = self._get_node_ips(handle.cluster_yaml,
                                           task.num_nodes,
                                           return_private_ips=False)
-        if download_logs:
-            self._rsync_down_logs(handle, log_dir, external_ips)
+        # if download_logs:
+        #     self._rsync_down_logs(handle, log_dir, external_ips)
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
