@@ -121,6 +121,17 @@ def _ssh_options_list(ssh_private_key: Optional[str],
     ]
 
 
+def _add_cluster_to_ssh_config(cluster_name: str, cluster_ip: str,
+                               auth_config: Dict[str, str]) -> None:
+    backend_utils.SSHConfigHelper.add_cluster(cluster_name, cluster_ip,
+                                              auth_config)
+
+
+def _remove_cluster_from_ssh_config(cluster_ip: str,
+                                    auth_config: Dict[str, str]) -> None:
+    backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
+
+
 class RayCodeGen(object):
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -975,9 +986,7 @@ class CloudVmRayBackend(backends.Backend):
                                                 handle,
                                                 ready=True)
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        cluster_name = global_user_state.get_cluster_name_from_handle(handle)
-        backend_utils.SSHConfigHelper.add_cluster(cluster_name, handle.head_ip,
-                                                  auth_config)
+        _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
         return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -1365,8 +1374,7 @@ class CloudVmRayBackend(backends.Backend):
             if handle.tpu_delete_script is not None:
                 backend_utils.run(f'bash {handle.tpu_delete_script}')
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        backend_utils.SSHConfigHelper.remove_cluster(handle.head_ip,
-                                                     auth_config)
+        _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name, terminate=terminate)
 
