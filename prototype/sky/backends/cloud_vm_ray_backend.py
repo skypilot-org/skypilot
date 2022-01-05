@@ -1210,7 +1210,8 @@ class CloudVmRayBackend(backends.Backend):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
         run_id = os.path.basename(self.log_dir)
-        job_id = run_id # TODO: use a better name
+        job_id = global_user_state.reserve_next_job_id(
+            cluster_name=handle.cluster_name, run_id=run_id)
         job_submit_cmd = ('ray job submit --address=127.0.0.1:8265 '
                           f'--job-id {job_id} -- {executable} {script_path}')
         self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',

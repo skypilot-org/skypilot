@@ -445,7 +445,7 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
     jobs = global_user_state.get_jobs(cluster)
     cluster_table = prettytable.PrettyTable()
     cluster_table.field_names = [
-        'NAME',
+        'JOB',
         'SUBMITTED',
         'STATUS',
         'LOG'
@@ -461,7 +461,7 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
                     for run_id in run_ids]
         test_cmd = [f'echo `ls -a {log_dir} 2> /dev/null | grep sky_running | wc -l`'
                         for log_dir in log_dirs]
-        test_cmd += [f'ray job status --address 127.0.0.1:8265 {job["job_name"]} 2>&1 | grep "Job status"' for job in jobs]
+        test_cmd += [f'ray job status --address 127.0.0.1:8265 {job["job_id"]} 2>&1 | grep "Job status"' for job in jobs]
         test_cmd = ' && '.join(test_cmd)
         logger.debug(test_cmd)
         _, stdout, _ = backends.CloudVmRayBackend()._run_command_on_head_via_ssh(
@@ -480,10 +480,10 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
                 job_status = JobStatus.RUNNING if is_running else JobStatus.PENDING 
             else:
                 job_status = JobStatus[ray_status]
-            global_user_state.add_or_update_cluster_job(cluster, job['job_name'], job_status.value, is_add=False)
-            display_jobs.add(job['job_name'])
+            global_user_state.add_or_update_cluster_job(cluster, job['job_id'], job_status.value, is_add=False)
+            display_jobs.add(job['job_id'])
             cluster_table.add_row([
-                job['job_name'],
+                job['job_id'],
                 _readable_time_duration(job['submitted_at']),
                 job_status.value,
                 os.path.join('sky_logs', job['run_id']),
@@ -492,9 +492,9 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
     if all:
         finished_jobs = global_user_state.get_finished_jobs(cluster)
         for job in finished_jobs:
-            if job['job_name'] in display_jobs:
+            if job['job_id'] in display_jobs:
                 continue
-            cluster_table.add_row([job['job_name'],
+            cluster_table.add_row([job['job_id'],
                                     _readable_time_duration(job['submitted_at']),
                                    job['status'],
                                     os.path.join('sky_logs', job['run_id']),
