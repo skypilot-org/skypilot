@@ -451,7 +451,6 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
     job_table.field_names = ['JOB', 'SUBMITTED', 'STATUS', 'LOG']
     job_table.align['LOG'] = 'l'
 
-
     displayed_jobs = set()
     # FIXME: fix this for different backends
     jobs = backends.CloudVmRayBackend().fetch_job_queue(handle)

@@ -1,6 +1,5 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
-import collections
 import getpass
 import hashlib
 import inspect
@@ -11,7 +10,7 @@ import shlex
 import subprocess
 import tempfile
 import textwrap
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
 
 import colorama
@@ -297,7 +296,7 @@ class RayCodeGen(object):
         assert not self._has_epilogue, 'add_epilogue() called twice?'
         self._has_epilogue = True
 
-        self._code.append('ray.get(futures)'),
+        self._code.append('ray.get(futures)')
 
     def build(self) -> str:
         """Returns the entire generated program."""
@@ -884,7 +883,7 @@ class CloudVmRayBackend(backends.Backend):
             return (f'ResourceHandle(\n\thead_ip={self.head_ip},'
                     '\n\tcluster_yaml='
                     f'{backend_utils.get_rel_path(self.cluster_yaml)}, '
-                    f'\n\launched_resources={self.requested_nodes}x '
+                    f'\n\tlaunched_resources={self.requested_nodes}x '
                     f'{self.launched_resources}, '
                     f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
@@ -903,7 +902,7 @@ class CloudVmRayBackend(backends.Backend):
 
     def _check_resources_available_for_task(self, handle: ResourceHandle,
                                             task: App):
-        """Check if the resources requested by the task are available in cluster."""
+        """Check if resources requested by the task are available."""
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.requested_nodes and
                 backend_utils.requested_resources_available(
@@ -1121,9 +1120,9 @@ class CloudVmRayBackend(backends.Backend):
         log_dir = os.path.join(log_dir_base, 'tasks')
 
         ips = self._get_node_ips(handle.cluster_yaml,
-                                 task.num_nodes,
+                                 par_task.num_nodes,
                                  return_private_ips=True)
-        accelerator_dict = _get_task_demands_dict(task)
+        accelerator_dict = _get_task_demands_dict(par_task)
 
         codegen = RayCodeGen()
         codegen.add_prologue(stream_logs=stream_logs)
@@ -1155,8 +1154,8 @@ class CloudVmRayBackend(backends.Backend):
 
         self._exec_code_on_head(handle, code, executable='python3')
 
-        # if download_logs:
-        #     self._rsync_down_logs(handle, log_dir, [handle.head_ip])
+        if download_logs:
+            self._rsync_down_logs(handle, log_dir, [handle.head_ip])
 
     def _rsync_down_logs(self,
                          handle: ResourceHandle,
@@ -1226,14 +1225,19 @@ class CloudVmRayBackend(backends.Backend):
                                                     is_add=True,
                                                     run_id=run_id)
 
-        # TODO (zhwu): This does not get the log correctly. Maybe we can directly tail our own log file in log_path on remote?
+        # TODO (zhwu): This does not get the log correctly.
+        # Maybe we can directly tail our own log file in log_path on remote?
         # try:
-        #     self._run_command_on_head_via_ssh(handle,
-        #                                       f'tail -f ~/{self.log_dir}/*.log',
-        #                                       job_log_path, stream_logs)
+        #     self._run_command_on_head_via_ssh(
+        #         handle, f'tail -f ~/{self.log_dir}/*.log', job_log_path,
+        #         stream_logs)
         # except KeyboardInterrupt:
-        #     self._run_command_on_head_via_ssh(handle, f'ray job stop {job_id}',
-        #                                       log_path, stream_logs)
+        #     self._run_command_on_head_via_ssh(
+        #         handle,
+        #         f'ray job stop {job_id}',
+        #         log_path,
+        #         stream_logs,
+        #     )
 
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
@@ -1358,8 +1362,8 @@ class CloudVmRayBackend(backends.Backend):
         external_ips = self._get_node_ips(handle.cluster_yaml,
                                           task.num_nodes,
                                           return_private_ips=False)
-        # if download_logs:
-        #     self._rsync_down_logs(handle, log_dir, external_ips)
+        if download_logs:
+            self._rsync_down_logs(handle, log_dir, external_ips)
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
@@ -1522,8 +1526,8 @@ class CloudVmRayBackend(backends.Backend):
         return backend_utils.run_with_log(command, log_path, stream_logs)
 
     def fetch_job_queue(self, handle: ResourceHandle) -> List[str]:
-        """Update the status of the unfinished jobs and returns the job queue."""
-        # FIXME: this is a hack to get around the fact that ray doesn't support 
+        """Update the status of unfinished jobs and returns the job queue."""
+        # FIXME: this is a hack to get around the fact that ray doesn't support
         # fetching the job queue.
         jobs = global_user_state.get_jobs(handle.cluster_name)
 
@@ -1532,7 +1536,7 @@ class CloudVmRayBackend(backends.Backend):
         # Hacky solution to get the job status, since ray doesn't expose it.
         indicator_paths = [
             os.path.join(SKY_REMOTE_WORKDIR, 'sky_logs', job['run_id'],
-                        backend_utils.SKY_JOB_RUNNING_INDICATOR)
+                         backend_utils.SKY_JOB_RUNNING_INDICATOR)
             for job in jobs
         ]
         test_cmd = [
@@ -1540,7 +1544,7 @@ class CloudVmRayBackend(backends.Backend):
         ]
         test_cmd += [
             (f'ray job status --address 127.0.0.1:8265 {job["job_id"]} 2>&1 | '
-            'grep "Job status"') for job in jobs
+             'grep "Job status"') for job in jobs
         ]
         test_cmd = ' && '.join(test_cmd)
         logger.debug(test_cmd)
@@ -1554,11 +1558,10 @@ class CloudVmRayBackend(backends.Backend):
         results = stdout.strip().split('\n')
         assert len(results) == len(jobs) * 2, (results, handle.jobs)
 
-
         # Process the results
         for i, job in enumerate(jobs):
             job_status = job['status']
-            # Using the indicator file to determine if the job is running, since 
+            # Using the indicator file to determine if the job is running, since
             # ray shows the job is RUNNING when it is waiting for the resources.
             is_running = results[i].strip() == '1'
             ray_status = results[i + len(jobs)].strip().rstrip('.')
