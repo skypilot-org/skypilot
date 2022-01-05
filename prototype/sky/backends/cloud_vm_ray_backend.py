@@ -121,6 +121,17 @@ def _ssh_options_list(ssh_private_key: Optional[str],
     ]
 
 
+def _add_cluster_to_ssh_config(cluster_name: str, cluster_ip: str,
+                               auth_config: Dict[str, str]) -> None:
+    backend_utils.SSHConfigHelper.add_cluster(cluster_name, cluster_ip,
+                                              auth_config)
+
+
+def _remove_cluster_from_ssh_config(cluster_ip: str,
+                                    auth_config: Dict[str, str]) -> None:
+    backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
+
+
 class RayCodeGen(object):
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -629,7 +640,7 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing VM{plural}. Setup completed.{style.RESET_ALL}')
-                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}sky ssh'
+                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}ssh'
                             f' {cluster_name}{style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
@@ -974,6 +985,8 @@ class CloudVmRayBackend(backends.Backend):
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True)
+        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+        _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
         return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -1315,7 +1328,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'\n{fore.CYAN}Cluster name: '
                         f'{style.BRIGHT}{name}{style.RESET_ALL}'
                         '\nTo log into the head VM:\t'
-                        f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
+                        f'{style.BRIGHT}ssh {name} {style.RESET_ALL}\n'
                         '\nTo teardown the cluster:'
                         f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n'
                         '\nTo stop the cluster:'
@@ -1360,6 +1373,8 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.run(f'ray down -y {f.name}')
             if handle.tpu_delete_script is not None:
                 backend_utils.run(f'bash {handle.tpu_delete_script}')
+        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+        _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name, terminate=terminate)
 
