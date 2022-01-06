@@ -24,7 +24,6 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def regions(cls):
-        # Deprecated.
         if not cls._regions:
             # https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/
             cls._regions = [

@@ -1,6 +1,5 @@
 """The Sky optimizer: assigns best resources to user tasks."""
 import collections
-import copy
 import enum
 import pprint
 from typing import Dict, List, Optional
@@ -73,8 +72,8 @@ class Optimizer(object):
             dag: Dag,
             minimize=OptimizeTarget.COST,
             blocked_launchable_resources: Optional[List[Resources]] = None):
-        dag = copy.deepcopy(dag)
-        # Optimization.
+        # This function is effectful: mutates every node in 'dag' by setting
+        # node.best_resources if it is None.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
         optimized_dag, unused_best_plan = Optimizer._optimize_cost(
             dag,
@@ -207,7 +206,7 @@ class Optimizer(object):
                         'To fix: relax its resource requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.info('Defaulting estimated time to 1 hr. '
-                                '(Task.set_time_estimator() not called.)')
+                                'Call Task.set_time_estimator() to override.')
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource

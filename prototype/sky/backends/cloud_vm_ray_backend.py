@@ -121,6 +121,17 @@ def _ssh_options_list(ssh_private_key: Optional[str],
     ]
 
 
+def _add_cluster_to_ssh_config(cluster_name: str, cluster_ip: str,
+                               auth_config: Dict[str, str]) -> None:
+    backend_utils.SSHConfigHelper.add_cluster(cluster_name, cluster_ip,
+                                              auth_config)
+
+
+def _remove_cluster_from_ssh_config(cluster_ip: str,
+                                    auth_config: Dict[str, str]) -> None:
+    backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
+
+
 class RayCodeGen(object):
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -501,6 +512,46 @@ class RetryingVmProvisioner(object):
         ):
             yield (region, zones)
 
+    def _try_provision_tpu(self, to_provision: Resources, acc_args,
+                           config_dict) -> bool:
+        """Returns whether the provision is successful."""
+        tpu_name = acc_args['tpu_name']
+        assert 'tpu-create-script' in config_dict, \
+            'Expect TPU provisioning with gcloud.'
+        try:
+            backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+            return True
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode('ascii')
+            if 'ALREADY_EXISTS' in stderr:
+                # FIXME: should use 'start' on stopped TPUs, replacing
+                # 'create'. Or it can be in a "deleting" state. Investigate the
+                # right thing to do (force kill + re-provision?).
+                logger.info(f'TPU {tpu_name} already exists; skipped creation.')
+                return True
+
+            if 'PERMISSION_DENIED' in stderr:
+                logger.info('TPUs are not available in this zone.')
+                return False
+
+            if 'no more capacity in the zone' in stderr:
+                logger.info('No more capacity in this zone.')
+                return False
+
+            if 'CloudTpu received an invalid AcceleratorType' in stderr:
+                # INVALID_ARGUMENT: CloudTpu received an invalid
+                # AcceleratorType, "v3-8" for zone "us-central1-c". Valid
+                # values are "v2-8, ".
+                tpu_type = list(to_provision.accelerators.keys())[0]
+                logger.info(
+                    f'TPU type {tpu_type} is not available in this zone.')
+                return False
+
+            logger.error(stderr)
+            raise e
+
     def _retry_region_zones(self, task: App, to_provision: Resources,
                             dryrun: bool, stream_logs: bool, cluster_name: str,
                             prev_cluster_config: Optional[Dict[str, Any]]):
@@ -535,28 +586,11 @@ class RetryingVmProvisioner(object):
             acc_args = to_provision.accelerator_args
             tpu_name = None
             if acc_args is not None and acc_args.get('tpu_name') is not None:
+                success = self._try_provision_tpu(to_provision, acc_args,
+                                                  config_dict)
+                if not success:
+                    continue
                 tpu_name = acc_args['tpu_name']
-                assert 'tpu-create-script' in config_dict, \
-                    'Expect TPU provisioning with gcloud.'
-                try:
-                    backend_utils.run(
-                        f'bash {config_dict["tpu-create-script"]}',
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE)
-                except subprocess.CalledProcessError as e:
-                    stderr = e.stderr.decode('ascii')
-                    if 'ALREADY_EXISTS' in stderr:
-                        # FIXME: should use 'start' on stopped TPUs, replacing
-                        # 'create'.
-                        logger.info(
-                            f'TPU {tpu_name} already exists; skipped creation.')
-                    elif 'PERMISSION_DENIED' in stderr:
-                        logger.info(
-                            'TPU resource is not available in this zone.')
-                        continue
-                    else:
-                        logger.error(stderr)
-                        raise e
             cluster_config_file = config_dict['ray']
 
             # Record early, so if anything goes wrong, 'sky status' will show
@@ -606,7 +640,7 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing VM{plural}. Setup completed.{style.RESET_ALL}')
-                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}sky ssh'
+                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}ssh'
                             f' {cluster_name}{style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
@@ -784,20 +818,20 @@ class RetryingVmProvisioner(object):
                 provision_failed = True
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {to_provision}. '
-                    f'Retrying other launchable resources...{style.RESET_ALL}')
+                    'Trying other launchable resources (if any)...'
+                    f'{style.RESET_ALL}')
                 # Add failed resources to the blocklist.
                 self._blocked_launchable_resources.add(to_provision)
+                # Set to None so that sky.optimize() will assign a new one
+                # (otherwise will skip re-optimizing this task).
                 # TODO: set all remaining tasks' best_resources to None.
-                task_index = self._dag.tasks.index(task)
                 task.best_resources = None
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.
                                          _blocked_launchable_resources)
-                # Update task itself, instead of create a new one, so that the
-                # caller can get the updated task.
-                task.__dict__.update(self._dag.tasks[task_index].__dict__)
                 to_provision = task.best_resources
+                assert task in self._dag.tasks, 'Internal logic error.'
                 assert to_provision is not None, task
         return config_dict
 
@@ -889,7 +923,12 @@ class CloudVmRayBackend(backends.Backend):
             # FIXME: for job queue, the currect logic may be checking requested
             # resources <= actual resources.
             raise exceptions.ResourcesMismatchError(
-                'Requested resources do not match the existing cluster.')
+                'Requested resources do not match the existing cluster.\n'
+                f'  Requested: {task.num_nodes}x {task.resources}\n'
+                f'  Existing: {handle.requested_nodes}x '
+                f'{handle.requested_resources}\n'
+                f'To fix: specify a new cluster name, or down the '
+                f'existing cluster: `sky down {cluster_name}`.')
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
@@ -927,7 +966,8 @@ class CloudVmRayBackend(backends.Backend):
         except exceptions.ResourcesUnavailableError as e:
             raise exceptions.ResourcesUnavailableError(
                 'Failed to provision all possible launchable resources. '
-                f'Relax the task\'s resource requirements:\n{task}') from e
+                f'Relax the task\'s resource requirements:\n{task.resources}'
+            ) from e
         if dryrun:
             return
         cluster_config_file = config_dict['ray']
@@ -945,6 +985,8 @@ class CloudVmRayBackend(backends.Backend):
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True)
+        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+        _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
         return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -1286,7 +1328,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'\n{fore.CYAN}Cluster name: '
                         f'{style.BRIGHT}{name}{style.RESET_ALL}'
                         '\nTo log into the head VM:\t'
-                        f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
+                        f'{style.BRIGHT}ssh {name} {style.RESET_ALL}\n'
                         '\nTo teardown the cluster:'
                         f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n'
                         '\nTo stop the cluster:'
@@ -1331,6 +1373,8 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.run(f'ray down -y {f.name}')
             if handle.tpu_delete_script is not None:
                 backend_utils.run(f'bash {handle.tpu_delete_script}')
+        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+        _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name, terminate=terminate)
 

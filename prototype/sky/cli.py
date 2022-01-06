@@ -171,7 +171,6 @@ def _default_interactive_node_name(node_type: str):
     return f'sky-{node_type}-{getpass.getuser()}'
 
 
-# TODO: add support for --tmux.
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
         node_type: str,
@@ -207,10 +206,9 @@ def _create_and_ssh_into_node(
         task.set_resources(resources)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
-    backend.register_info(dag=dag)
-
     dag = sky.optimize(dag)
     task = dag.tasks[0]
+    backend.register_info(dag=dag)
 
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None or handle.head_ip is None:
@@ -235,7 +233,7 @@ def _create_and_ssh_into_node(
     backend_utils.run(commands, shell=False, check=False)
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
 
-    click.echo('To attach it again:  ', nl=False)
+    click.echo('To attach to it again:  ', nl=False)
     if cluster_name == _default_interactive_node_name(node_type):
         option = ''
     else:
@@ -397,52 +395,6 @@ def status(all):  # pylint: disable=redefined-builtin
             cluster_status['status'],
         ])
     click.echo(f'Sky Clusters\n{cluster_table}')
-
-
-@cli.command()
-@click.argument('cluster', required=False)
-@click.option('--port-forward',
-              '-p',
-              multiple=True,
-              default=[],
-              type=int,
-              required=False,
-              help=('Port to be forwarded. To forward multiple ports, '
-                    'use this option multiple times.'))
-def ssh(cluster: str, port_forward: Optional[List[int]]):
-    """SSH into an existing cluster.
-
-    CLUSTER is the name of the cluster to attach to.  If CLUSTER is not
-    supplied, the cluster launched last will be used.
-
-    Examples:
-
-      \b
-      # ssh into a specific cluster.
-      sky ssh cluster_name
-
-      \b
-      # Port forward.
-      sky ssh --port-forward 8080 --port-forward 4650 cluster_name
-      sky ssh -p 8080 -p 4650 cluster_name
-    """
-    name = cluster
-    if name is None:
-        launched_clusters = global_user_state.get_clusters()
-        if len(launched_clusters) == 0:
-            raise click.UsageError(
-                'No launched clusters found (see `sky status`).')
-        name = sorted(launched_clusters,
-                      key=lambda x: x['launched_at'])[-1]['name']
-    assert isinstance(name, str) and name, name
-    handle = global_user_state.get_handle_from_cluster_name(name)
-    if handle is None:
-        raise click.UsageError(
-            f'Cluster {name} is not found (see `sky status`).')
-    command = backends.CloudVmRayBackend().ssh_head_command(
-        handle, port_forward=port_forward)
-    # Disable check, since the returncode could be non-zero if the user Ctrl-D.
-    backend_utils.run(command, shell=False, check=False)
 
 
 @cli.command()

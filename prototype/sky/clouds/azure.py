@@ -58,7 +58,6 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
-        # Deprecated.
         # NOTE on zones: Ray Autoscaler does not support specifying
         # availability zones, and Azure CLI will try launching VMs in all
         # zones. Hence for our purposes we do not keep track of zones.
