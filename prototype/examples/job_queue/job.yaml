@@ -9,7 +9,7 @@
 resources:
   cloud: aws
   accelerators:
-    V100: 0.5
+    K80: 0.5
 
 setup: |
   echo "running setup"

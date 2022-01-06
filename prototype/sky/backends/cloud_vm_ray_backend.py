@@ -42,6 +42,7 @@ SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
+SKY_REMOTE_UTIL_PATH = backend_utils.SKY_REMOTE_UTIL_PATH
 
 logger = logging.init_logger(__name__)
 
@@ -159,9 +160,13 @@ class RayCodeGen(object):
         # For n nodes gang scheduling.
         self._ip_to_bundle_index = None
 
-    def add_prologue(self, stream_logs: bool) -> None:
+        # job_id
+        self.job_id = None
+
+    def add_prologue(self, job_id: int, stream_logs: bool) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
+        self.job_id = job_id
         self._code = [
             textwrap.dedent(f"""\
             import io
@@ -175,6 +180,11 @@ class RayCodeGen(object):
 
             import ray
             import ray.util as ray_util
+
+            sys.path.append('{SKY_REMOTE_UTIL_PATH}')
+            import job_queue
+            
+            job_queue.change_status({job_id!r}, {JobStatus.PENDING.value!r})
 
             ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
 
@@ -226,6 +236,8 @@ class RayCodeGen(object):
                 # error message.
                 ray.get(pg.ready())
                 print(\'All task slots reserved.\')
+                job_queue.change_status({self.job_id!r}, {JobStatus.RUNNING.value!r})
+
                 pathlib.Path('{log_dir}/{backend_utils.SKY_JOB_RUNNING_INDICATOR}').touch()
                 """),
         ]
@@ -297,6 +309,7 @@ class RayCodeGen(object):
         self._has_epilogue = True
 
         self._code.append('ray.get(futures)')
+        self._code.append(f'job_queue.change_status({self.job_id!r}, {JobStatus.SUCCEEDED.value!r})')
 
     def build(self) -> str:
         """Returns the entire generated program."""
@@ -1092,6 +1105,7 @@ class CloudVmRayBackend(backends.Backend):
     def _execute_par_task(self,
                           handle: ResourceHandle,
                           par_task: task_mod.ParTask,
+                          job_id: int,
                           stream_logs: bool,
                           download_logs: bool = True) -> None:
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
@@ -1125,7 +1139,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = _get_task_demands_dict(par_task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(stream_logs=stream_logs)
+        codegen.add_prologue(job_id, stream_logs=stream_logs)
         codegen.add_gang_scheduling_placement_group(ips, accelerator_dict,
                                                     log_dir)
         for i, task_i in enumerate(par_task.tasks):
@@ -1152,7 +1166,7 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             _log_hint_for_redirected_outputs(log_dir, handle.cluster_yaml)
 
-        self._exec_code_on_head(handle, code, executable='python3')
+        self._exec_code_on_head(handle, code, job_id, executable='python3')
 
         if download_logs:
             self._rsync_down_logs(handle, log_dir, [handle.head_ip])
@@ -1183,6 +1197,7 @@ class CloudVmRayBackend(backends.Backend):
             self,
             handle: ResourceHandle,
             codegen: str,
+            job_id: int,
             executable: str,
             stream_logs: bool = True,
     ) -> None:
@@ -1210,66 +1225,64 @@ class CloudVmRayBackend(backends.Backend):
 
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
-        run_id = os.path.basename(self.log_dir)
-        job_id = global_user_state.reserve_next_job_id(
-            cluster_name=handle.cluster_name, run_id=run_id)
+
+        # TODO: Pipe the output to one file.
+        # TODO: Add hint for the user to monitor the job log.
         job_submit_cmd = ('ray job submit --address=127.0.0.1:8265 '
                           f'--job-id {job_id} -- {executable} {script_path}')
         self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',
                                           job_log_path, stream_logs)
+        
+    def _fetch_job_id(self, handle: ResourceHandle) -> int:
+        run_id = os.path.basename(self.log_dir)
+        codegen = backend_utils.JobQueueDBCodeGen()
+        username = getpass.getuser()
+        codegen.reserve_next_job_id(username, run_id)
+        job_id = self._run_command_on_head_via_ssh(handle,
+                                                   codegen.build(),
+                                                   '/dev/null',
+                                                   stream_logs=False)[1]
+        job_id = int(job_id)
+        return job_id
 
-        job_status = backend_utils.JobStatus.PENDING
-        global_user_state.add_or_update_cluster_job(handle.cluster_name,
-                                                    job_id,
-                                                    job_status.value,
-                                                    is_add=True,
-                                                    run_id=run_id)
-
-        # TODO (zhwu): This does not get the log correctly.
-        # Maybe we can directly tail our own log file in log_path on remote?
-        # try:
-        #     self._run_command_on_head_via_ssh(
-        #         handle, f'tail -f ~/{self.log_dir}/*.log', job_log_path,
-        #         stream_logs)
-        # except KeyboardInterrupt:
-        #     self._run_command_on_head_via_ssh(
-        #         handle,
-        #         f'ray job stop {job_id}',
-        #         log_path,
-        #         stream_logs,
-        #     )
-
+    
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self._check_resources_available_for_task(handle, task)
 
+
         # Execution logic differs for three types of tasks.
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):
+            job_id = self._fetch_job_id(handle)
             return self._execute_par_task(handle,
                                           task,
+                                          job_id,
                                           stream_logs,
-                                          download_logs=True)
+                                          download_logs=False)
 
         # Otherwise, handle a basic Task.
         if task.run is None:
             logger.info(f'Nothing to run; run command not specified:\n{task}')
             return
 
+        job_id = self._fetch_job_id(handle)
+
         # Case: Task(run, num_nodes=1)
         if task.num_nodes == 1:
-            return self._execute_task_one_node(handle, task, stream_logs)
+            return self._execute_task_one_node(handle, task, job_id, stream_logs)
 
         # Case: Task(run, num_nodes=N)
         assert task.num_nodes > 1, task.num_nodes
         return self._execute_task_n_nodes(handle,
                                           task,
+                                          job_id,
                                           stream_logs,
-                                          download_logs=True)
+                                          download_logs=False)
 
-    def _execute_task_one_node(self, handle: ResourceHandle, task: App,
+    def _execute_task_one_node(self, handle: ResourceHandle, task: App, job_id: int,
                                stream_logs: bool) -> None:
         # Launch the command as a Ray task.
         assert isinstance(task.run, str), \
@@ -1285,7 +1298,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = _get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(stream_logs=stream_logs)
+        codegen.add_prologue(job_id, stream_logs=stream_logs)
         codegen.add_gang_scheduling_placement_group(ips, accelerator_dict,
                                                     log_dir)
 
@@ -1300,13 +1313,14 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen.add_epilogue()
 
-        self._exec_code_on_head(handle, codegen.build(), executable='python3')
+        self._exec_code_on_head(handle, codegen.build(), job_id, executable='python3')
         if not stream_logs:
             self._rsync_down_logs(handle, self.log_dir, [handle.head_ip])
 
     def _execute_task_n_nodes(self,
                               handle: ResourceHandle,
                               task: App,
+                              job_id: int,
                               stream_logs: bool,
                               download_logs: bool = True) -> None:
         # Strategy:
@@ -1323,7 +1337,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = _get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(stream_logs=stream_logs)
+        codegen.add_prologue(job_id, stream_logs=stream_logs)
         codegen.add_gang_scheduling_placement_group(ips, accelerator_dict,
                                                     log_dir_base)
 
@@ -1356,7 +1370,7 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             _log_hint_for_redirected_outputs(log_dir, handle.cluster_yaml)
 
-        self._exec_code_on_head(handle, codegen.build(), executable='python3')
+        self._exec_code_on_head(handle, codegen.build(), job_id, executable='python3')
 
         # Get external IPs for the nodes
         external_ips = self._get_node_ips(handle.cluster_yaml,
@@ -1525,60 +1539,14 @@ class CloudVmRayBackend(backends.Backend):
         ]
         return backend_utils.run_with_log(command, log_path, stream_logs)
 
-    def fetch_job_queue(self, handle: ResourceHandle) -> List[str]:
-        """Update the status of unfinished jobs and returns the job queue."""
-        # FIXME: this is a hack to get around the fact that ray doesn't support
-        # fetching the job queue.
-        jobs = global_user_state.get_jobs(handle.cluster_name)
-
-        if len(jobs) == 0:
-            return []
-        # Hacky solution to get the job status, since ray doesn't expose it.
-        indicator_paths = [
-            os.path.join(SKY_REMOTE_WORKDIR, 'sky_logs', job['run_id'],
-                         backend_utils.SKY_JOB_RUNNING_INDICATOR)
-            for job in jobs
-        ]
-        test_cmd = [
-            f'test -f "{path}" && echo 1 || echo 0' for path in indicator_paths
-        ]
-        test_cmd += [
-            (f'ray job status --address 127.0.0.1:8265 {job["job_id"]} 2>&1 | '
-             'grep "Job status"') for job in jobs
-        ]
-        test_cmd = ' && '.join(test_cmd)
-        logger.debug(test_cmd)
-        _, stdout, _ = self._run_command_on_head_via_ssh(
-            handle,
-            test_cmd,
-            '/dev/null',
-            False,
-        )
-
-        results = stdout.strip().split('\n')
-        assert len(results) == len(jobs) * 2, (results, handle.jobs)
-
-        # Process the results
-        for i, job in enumerate(jobs):
-            job_status = job['status']
-            # Using the indicator file to determine if the job is running, since
-            # ray shows the job is RUNNING when it is waiting for the resources.
-            is_running = results[i].strip() == '1'
-            ray_status = results[i + len(jobs)].strip().rstrip('.')
-            ray_status = ray_status.rpartition(' ')[-1]
-            if 'RUNNING' in ray_status:
-                if is_running:
-                    job_status = JobStatus.RUNNING
-                else:
-                    job_status = JobStatus.PENDING
-            else:
-                job_status = JobStatus[ray_status]
-            global_user_state.add_or_update_cluster_job(handle.cluster_name,
-                                                        job['job_id'],
-                                                        job_status.value,
-                                                        is_add=False)
-            job['status'] = job_status.value
-        return jobs
+    def get_job_queue(self, handle: ResourceHandle, all_jobs: bool, all_users: bool) -> None:
+        codegen = backend_utils.JobQueueDBCodeGen()
+        username = getpass.getuser()
+        if all_users:
+            username = None
+        codegen.show_jobs(username, all_jobs)
+        return self._run_command_on_head_via_ssh(handle, codegen.build(), '/dev/null', False)[1]
+        
 
     def cancel(self, handle: ResourceHandle, job_id: str) -> None:
         """Cancels a job on cluster."""

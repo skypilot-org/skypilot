@@ -120,12 +120,12 @@ class Task(object):
             config = yaml.safe_load(f)
 
         # TODO: perform more checks on yaml and raise meaningful errors.
-        if 'run' not in config:
-            raise ValueError('The YAML spec should include a \'run\' field.')
+        # if 'run' not in config:
+        #     raise ValueError('The YAML spec should include a \'run\' field.')
 
         task = Task(
             config.get('name'),
-            run=config['run'],  # Required field.
+            run=config.get('run'),
             workdir=config.get('workdir'),
             setup=config.get('setup'),
             num_nodes=config.get('num_nodes'),

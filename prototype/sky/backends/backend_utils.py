@@ -1,6 +1,7 @@
 """Util constants/functions for the backends."""
 import datetime
 import enum
+import inspect
 import io
 import os
 import pathlib
@@ -22,6 +23,7 @@ from sky import clouds
 from sky import logging
 from sky import resources
 from sky import task as task_lib
+from sky.backends import sky_remote_utils
 
 logger = logging.init_logger(__name__)
 
@@ -34,6 +36,7 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 SKY_REMOTE_RAY_VERSION = '1.9.1'
 SKY_JOB_RUNNING_INDICATOR = '.sky_job_running'
+SKY_REMOTE_UTIL_PATH = '/tmp/sky_remote_utils'
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
@@ -404,6 +407,9 @@ def write_cluster_config(run_id: RunId,
                 'aws_default_ami': aws_default_ami,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
+                # Sky remote utils.
+                'sky_remote_utils': os.path.abspath(
+                    os.path.dirname(sky_remote_utils.__file__)),
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -696,3 +702,26 @@ class JobStatus(enum.Enum):
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
     STOPPED = 'STOPPED'
+
+class JobQueueDBCodeGen(object):
+    def __init__(self) -> None:
+        super().__init__()
+        self._code = [
+            'import sys',
+            f'sys.path.append({SKY_REMOTE_UTIL_PATH!r})',
+            'import job_queue',
+        ]
+
+    def reserve_next_job_id(self, username: str, run_id: str) -> str:
+        self._code.append(
+            f'job_queue.reserve_next_job_id({username!r}, {run_id!r})'
+        )
+
+    def show_jobs(self, username: Optional[str], all: bool) -> str:
+        self._code.append(
+            f'job_queue.show_jobs({username!r}, {all})'
+        )
+        
+    def build(self) -> str:
+        code = ';'.join(self._code)
+        return f'python3 -c {code!r}'
