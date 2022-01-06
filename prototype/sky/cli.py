@@ -469,23 +469,23 @@ def stop(
 @cli.command()
 @click.argument('clusters', nargs=-1, required=False)
 def start(clusters: Tuple[str]):
-    """Start cluster(s).
+    """Restart cluster(s).
 
     If a cluster is previously stopped (status == STOPPED) or failed in
-    provisioning/a task's setup (status == INIT), the clsuter will be started
-    by this command.  (In the second case, any failed setup steps are not
-    performed and only the machines are started.)
+    provisioning/a task's setup (status == INIT), this command will attempt to
+    start the cluster.  (In the second case, any failed setup steps are not
+    performed and only a request to start the machines is attempted.)
 
-    If a cluster is already in an UP status, this command has no effects on it.
+    If a cluster is already in an UP status, this command has no effect on it.
 
     Examples:
 
       \b
-      # Start a specific cluster.
+      # Restart a specific cluster.
       sky start cluster_name
 
       \b
-      # Start multiple clusters.
+      # Restart multiple clusters.
       sky start cluster1 cluster2
     """
     to_start = []
