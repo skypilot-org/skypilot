@@ -757,7 +757,10 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
               is_flag=True,
               default=False,
               help='Show details of all GPU/TPU/accelerator offerings.')
-def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-builtin
+def show_gpus(
+        gpu_name: Optional[str],
+        all: bool,  # pylint: disable=redefined-builtin
+):
     """Show all GPU/TPU/accelerator offerings that Sky supports."""
     show_all = all
     if show_all and gpu_name is not None:
