@@ -308,8 +308,12 @@ class RayCodeGen(object):
         assert not self._has_epilogue, 'add_epilogue() called twice?'
         self._has_epilogue = True
 
-        self._code.append('ray.get(futures)')
-        self._code.append(f'job_queue.change_status({self.job_id!r}, {JobStatus.SUCCEEDED.value!r})')
+        self._code += [
+            textwrap.dedent(f"""\
+            ray.get(futures)
+            job_queue.change_status({self.job_id!r},
+                                    {JobStatus.SUCCEEDED.value!r})""")
+        ]
 
     def build(self) -> str:
         """Returns the entire generated program."""
@@ -1232,7 +1236,7 @@ class CloudVmRayBackend(backends.Backend):
                           f'--job-id {job_id} -- {executable} {script_path}')
         self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',
                                           job_log_path, stream_logs)
-        
+
     def _fetch_job_id(self, handle: ResourceHandle) -> int:
         run_id = os.path.basename(self.log_dir)
         codegen = backend_utils.JobQueueDBCodeGen()
@@ -1245,13 +1249,11 @@ class CloudVmRayBackend(backends.Backend):
         job_id = int(job_id)
         return job_id
 
-    
     def execute(self, handle: ResourceHandle, task: App,
                 stream_logs: bool) -> None:
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self._check_resources_available_for_task(handle, task)
-
 
         # Execution logic differs for three types of tasks.
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
@@ -1272,7 +1274,8 @@ class CloudVmRayBackend(backends.Backend):
 
         # Case: Task(run, num_nodes=1)
         if task.num_nodes == 1:
-            return self._execute_task_one_node(handle, task, job_id, stream_logs)
+            return self._execute_task_one_node(handle, task, job_id,
+                                               stream_logs)
 
         # Case: Task(run, num_nodes=N)
         assert task.num_nodes > 1, task.num_nodes
@@ -1282,8 +1285,8 @@ class CloudVmRayBackend(backends.Backend):
                                           stream_logs,
                                           download_logs=False)
 
-    def _execute_task_one_node(self, handle: ResourceHandle, task: App, job_id: int,
-                               stream_logs: bool) -> None:
+    def _execute_task_one_node(self, handle: ResourceHandle, task: App,
+                               job_id: int, stream_logs: bool) -> None:
         # Launch the command as a Ray task.
         assert isinstance(task.run, str), \
             f'Task(run=...) should be a string (found {type(task.run)}).'
@@ -1313,7 +1316,10 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen.add_epilogue()
 
-        self._exec_code_on_head(handle, codegen.build(), job_id, executable='python3')
+        self._exec_code_on_head(handle,
+                                codegen.build(),
+                                job_id,
+                                executable='python3')
         if not stream_logs:
             self._rsync_down_logs(handle, self.log_dir, [handle.head_ip])
 
@@ -1370,7 +1376,10 @@ class CloudVmRayBackend(backends.Backend):
         if not stream_logs:
             _log_hint_for_redirected_outputs(log_dir, handle.cluster_yaml)
 
-        self._exec_code_on_head(handle, codegen.build(), job_id, executable='python3')
+        self._exec_code_on_head(handle,
+                                codegen.build(),
+                                job_id,
+                                executable='python3')
 
         # Get external IPs for the nodes
         external_ips = self._get_node_ips(handle.cluster_yaml,
@@ -1539,14 +1548,15 @@ class CloudVmRayBackend(backends.Backend):
         ]
         return backend_utils.run_with_log(command, log_path, stream_logs)
 
-    def get_job_queue(self, handle: ResourceHandle, all_jobs: bool, all_users: bool) -> None:
+    def get_job_queue(self, handle: ResourceHandle, all_jobs: bool,
+                      all_users: bool) -> None:
         codegen = backend_utils.JobQueueDBCodeGen()
         username = getpass.getuser()
         if all_users:
             username = None
         codegen.show_jobs(username, all_jobs)
-        return self._run_command_on_head_via_ssh(handle, codegen.build(), '/dev/null', False)[1]
-        
+        return self._run_command_on_head_via_ssh(handle, codegen.build(),
+                                                 '/dev/null', False)[1]
 
     def cancel(self, handle: ResourceHandle, job_id: str) -> None:
         """Cancels a job on cluster."""

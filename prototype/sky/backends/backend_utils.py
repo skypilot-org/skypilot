@@ -1,7 +1,6 @@
 """Util constants/functions for the backends."""
 import datetime
 import enum
-import inspect
 import io
 import os
 import pathlib
@@ -703,7 +702,10 @@ class JobStatus(enum.Enum):
     FAILED = 'FAILED'
     STOPPED = 'STOPPED'
 
+
 class JobQueueDBCodeGen(object):
+    """codegen for job queue database"""
+
     def __init__(self) -> None:
         super().__init__()
         self._code = [
@@ -714,14 +716,11 @@ class JobQueueDBCodeGen(object):
 
     def reserve_next_job_id(self, username: str, run_id: str) -> str:
         self._code.append(
-            f'job_queue.reserve_next_job_id({username!r}, {run_id!r})'
-        )
+            f'job_queue.reserve_next_job_id({username!r}, {run_id!r})')
 
-    def show_jobs(self, username: Optional[str], all: bool) -> str:
-        self._code.append(
-            f'job_queue.show_jobs({username!r}, {all})'
-        )
-        
+    def show_jobs(self, username: Optional[str], all_jobs: bool) -> str:
+        self._code.append(f'job_queue.show_jobs({username!r}, {all_jobs})')
+
     def build(self) -> str:
         code = ';'.join(self._code)
         return f'python3 -c {code!r}'

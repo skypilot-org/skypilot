@@ -336,6 +336,7 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
       >> sky run -c name app.yaml
 
     """
+    click.secho(f'Executing task on cluster {cluster} ...', fg='yellow')
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
@@ -432,6 +433,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         ])
     click.echo(f'Sky Clusters\n{cluster_table}')
 
+
 @cli.command()
 @click.option('--all-users',
               '-au',
@@ -455,15 +457,20 @@ def queue(cluster: str, all_jobs: bool, all_users: bool):  # pylint: disable=red
         if handle is None:
             raise click.BadParameter(
                 f'Cluster {cluster} is not found (see `sky status`).')
-        job_table = backend.get_job_queue(handle, all_jobs=all_jobs, all_users=all_users)
+        job_table = backend.get_job_queue(handle,
+                                          all_jobs=all_jobs,
+                                          all_users=all_users)
         click.echo(f'Sky Job Queue of Cluster {cluster}\n{job_table}')
         return
 
     clusters_status = global_user_state.get_clusters()
     for cluster_status in clusters_status:
         handle = cluster_status['handle']
-        job_table = backend.get_job_queue(handle, all_jobs=all_jobs, all_users=all_users)
-        click.echo(f'Sky Job Queue of Cluster {handle.cluster_name}\n{job_table}')
+        job_table = backend.get_job_queue(handle,
+                                          all_jobs=all_jobs,
+                                          all_users=all_users)
+        click.echo(
+            f'Sky Job Queue of Cluster {handle.cluster_name}\n{job_table}')
 
 
 @cli.command()

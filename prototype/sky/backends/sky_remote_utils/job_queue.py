@@ -1,3 +1,7 @@
+"""Sky job queue, backed by a sqlite database.
+
+This is a remote utility module that provides job queue functionality.
+"""
 import os
 import pathlib
 import sqlite3
@@ -26,8 +30,8 @@ except sqlite3.OperationalError:
         status TEXT,
         run_id TEXT)""")
 
-
 _CONN.commit()
+
 
 def reserve_next_job_id(username: str, run_id: str) -> int:
     job_submitted_at = int(time.time())
@@ -42,15 +46,19 @@ def reserve_next_job_id(username: str, run_id: str) -> int:
     _CONN.commit()
     print(job_id)
 
+
 def change_status(job_id: int, status: str) -> None:
     _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
                     (status, job_id))
     _CONN.commit()
 
 
-def _get_jobs(username: Optional[str], status_list: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+def _get_jobs(username: Optional[str],
+              status_list: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     if status_list is None:
-        status_list = ['PENDING', 'RUNNING', 'RESERVED', 'STOPPED', 'SUCCEEDED', 'FAILED']
+        status_list = [
+            'PENDING', 'RUNNING', 'RESERVED', 'STOPPED', 'SUCCEEDED', 'FAILED'
+        ]
     if username is None:
         rows = _CURSOR.execute(
             f"""\
@@ -63,16 +71,16 @@ def _get_jobs(username: Optional[str], status_list: Optional[List[str]] = None) 
         rows = _CURSOR.execute(
             f"""\
             SELECT * FROM jobs
-            WHERE status IN ({','.join(['?'] * len(status_list))}) AND username=(?)
+            WHERE status IN ({','.join(['?'] * len(status_list))})
+            AND username=(?)
             ORDER BY status, job_id DESC""",
             (*status_list, username),
         )
 
-
     records = []
-    for username, job_id, submitted_at, status, run_id in rows:
+    for user, job_id, submitted_at, status, run_id in rows:
         records.append({
-            'username': username,
+            'username': user,
             'job_id': job_id,
             'submitted_at': submitted_at,
             'status': status,
@@ -89,14 +97,14 @@ def _update_status():
 
     test_cmd = [
         (f'ray job status --address 127.0.0.1:8265 {job["job_id"]} 2>&1 | '
-            'grep "Job status"') for job in running_jobs
+         'grep "Job status"') for job in running_jobs
     ]
     test_cmd = ' && '.join(test_cmd)
     proc = subprocess.run(test_cmd,
-                        shell=True,
-                        check=True,
-                        executable='/bin/bash',
-                        stdout=subprocess.PIPE)
+                          shell=True,
+                          check=True,
+                          executable='/bin/bash',
+                          stdout=subprocess.PIPE)
     stdout = proc.stdout.decode('utf-8')
 
     results = stdout.strip().split('\n')
@@ -134,10 +142,10 @@ def _show_job_queue(jobs):
     print(job_table)
 
 
-def show_jobs(username: Optional[str], all: bool):
+def show_jobs(username: Optional[str], all_jobs: bool):
     _update_status()
     status_list = ['PENDING', 'RUNNING']
-    if all:
+    if all_jobs:
         status_list = None
 
     jobs = _get_jobs(username, status_list=status_list)
