@@ -308,12 +308,7 @@ class RayCodeGen(object):
         assert not self._has_epilogue, 'add_epilogue() called twice?'
         self._has_epilogue = True
 
-        self._code += [
-            textwrap.dedent(f"""\
-            ray.get(futures)
-            job_queue.change_status({self.job_id!r},
-                                    {JobStatus.SUCCEEDED.value!r})""")
-        ]
+        self._code.append('ray.get(futures)')
 
     def build(self) -> str:
         """Returns the entire generated program."""
