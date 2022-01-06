@@ -756,9 +756,9 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
               '-a',
               is_flag=True,
               default=False,
-              help='Show detailed information of all GPU/TPU offerings.')
+              help='Show details of all GPU/TPU/accelerator offerings.')
 def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-builtin
-    """List all GPU offerings that Sky supports."""
+    """Show all GPU/TPU/accelerator offerings that Sky supports."""
     show_all = all
     if show_all and gpu_name is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
