@@ -42,7 +42,7 @@ def reserve_next_job_id(username: str, run_id: str) -> int:
             job_id = row[0]
     job_id += 1
     _CURSOR.execute('INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?, ?)',
-                    (username, job_id, job_submitted_at, 'RESERVED', run_id))
+                    (username, job_id, job_submitted_at, 'INIT', run_id))
     _CONN.commit()
     print(job_id)
 
@@ -57,7 +57,7 @@ def _get_jobs(username: Optional[str],
               status_list: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     if status_list is None:
         status_list = [
-            'PENDING', 'RUNNING', 'RESERVED', 'STOPPED', 'SUCCEEDED', 'FAILED'
+            'PENDING', 'RUNNING', 'INIT', 'STOPPED', 'SUCCEEDED', 'FAILED'
         ]
     if username is None:
         rows = _CURSOR.execute(
