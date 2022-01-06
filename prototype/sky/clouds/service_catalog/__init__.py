@@ -4,14 +4,14 @@ from typing import Dict, List, Optional
 
 from sky.clouds.service_catalog import aws_catalog
 from sky.clouds.service_catalog import azure_catalog
+from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import gcp_catalog
-from sky.clouds.service_catalog.common import InstanceTypeInfo
 
 
 def list_accelerators(
         gpus_only: bool = True,
         name_filter: Optional[str] = None,
-) -> Dict[str, List[InstanceTypeInfo]]:
+) -> Dict[str, List[common.InstanceTypeInfo]]:
     """List the names of all accelerators offered by Sky.
 
     Returns: A dictionary of canonical accelerator names mapped to a list
@@ -60,7 +60,7 @@ def get_common_gpus() -> List[str]:
 
 def get_tpus() -> List[str]:
     """Returns a list of TPU names."""
-    return ['tpu-v2-8', 'tpu-v3-8']
+    return ['tpu-v2-8', 'tpu-v2-32', 'tpu-v2-128', 'tpu-v3-8']
 
 
 __all__ = [

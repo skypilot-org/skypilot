@@ -13,16 +13,16 @@ class InstanceTypeInfo(NamedTuple):
     - cloud: Cloud name.
     - instance_type: String that can be used in YAML to specify this instance
       type. E.g. `p3.2xlarge`.
-    - accelerator_name: TODO
-    - accelerator_count: TODO
-    - ram: Instance memory in GiB.
+    - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
+    - accelerator_count: Number of accelerators offered by this instance type.
+    - memory: Instance memory in GiB.
     - price: Regular instance price per hour.
     """
     cloud: str
     instance_type: str
     accelerator_name: str
     accelerator_count: int
-    ram: float
+    memory: float
 
 
 def get_data_path(filename: str) -> str:
@@ -122,8 +122,11 @@ def list_accelerators_impl(
 ) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
+    `name_filter` is a regular expression used to filter accelerator names
+    using pandas.Series.str.contains.
+
     Returns a mapping from the canonical names of accelerators to a list of
-    counts, each representing an instance type offered by this cloud.
+    instance types offered by this cloud.
     """
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
@@ -146,7 +149,7 @@ def list_accelerators_impl(
             ),
             axis='columns',
         ).tolist()
-        ret.sort(key=lambda info: (info.accelerator_count, info.ram))
+        ret.sort(key=lambda info: (info.accelerator_count, info.memory))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}

@@ -760,8 +760,9 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
 def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-builtin
     """List all GPU offerings that Sky supports."""
     show_all = all
-    assert not (show_all and gpu_name is not None
-               ), '--all is only allowed without a GPU name.'
+    if show_all and gpu_name is not None:
+        raise click.UsageError(
+                '--all is only allowed without a GPU name.')
 
     def _output():
         if gpu_name is None:
@@ -797,24 +798,24 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                                                    name_filter=gpu_name)
         show_gcp_msg = False
         for gpu, items in result.items():
-            headers = ['GPU', 'Qty', 'Cloud', 'Instance Type', 'RAM']
+            headers = ['GPU', 'Qty', 'Cloud', 'Instance Type', 'Host Memory']
             data = []
             for item in items:
                 if item.cloud == 'GCP':
                     show_gcp_msg = True
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(*)'
-                ram_str = f'{item.ram:.0f}GB' if item.ram > 0 else '(*)'
+                memory_str = f'{item.memory:.0f}GB' if item.memory > 0 else '(*)'
                 data.append([
                     item.accelerator_name, item.accelerator_count, item.cloud,
-                    instance_type_str, ram_str
+                    instance_type_str, memory_str
                 ])
             yield tabulate.tabulate(data, headers)
             yield '\n\n'
 
         if show_gcp_msg:
             yield (
-                '(*) By default Sky uses GCP n1-highmem-8 (52GB RAM) and '
+                '(*) By default Sky uses GCP n1-highmem-8 (52GB memory) and '
                 'attaches GPU/TPUs to it. If you need more memory, specify an '
                 'instance type according to '
                 'https://cloud.google.com/compute/docs/'
