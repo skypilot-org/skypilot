@@ -60,4 +60,11 @@ sky down dtf &
 time python "$DIR"/multi_echo.py
 # python "$DIR"/huggingface_glue_imdb_grid_search_app.py
 
+# Job Queue.
+time sky run -c jq "$DIR"/job_queue/cluster.yaml
+time sky exec -c jq "$DIR"/job_queue/job.yaml
+time sky exec -c jq "$DIR"/job_queue/job.yaml
+time sky exec -c jq "$DIR"/job_queue/job.yaml
+sky queue jq
+
 wait

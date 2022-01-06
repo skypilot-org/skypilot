@@ -157,7 +157,7 @@ def _get_jobs(cluster_name: Optional[str] = None,
             """\
             SELECT * FROM jobs
             WHERE name=(?) AND finished=(?) AND status!="RESERVED"
-            ORDER BY submitted_at DESC""",
+            ORDER BY status, job_id DESC""",
             (cluster_name, int(finished)),
         )
     else:
@@ -165,7 +165,7 @@ def _get_jobs(cluster_name: Optional[str] = None,
             """\
             SELECT * FROM jobs
             WHERE finished=(?) AND status!="RESERVED"
-            ORDER BY cluster_name, submitted_at""",
+            ORDER BY job_id DESC, name""",
             (int(finished),),
         )
     records = []

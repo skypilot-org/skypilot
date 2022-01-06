@@ -433,20 +433,8 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     click.echo(f'Sky Clusters\n{cluster_table}')
 
 
-@cli.command()
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
-@click.argument('cluster', required=True)
-def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
-    """Show launched job queue on clusters."""
-    handle = global_user_state.get_handle_from_cluster_name(cluster)
-    if handle is None:
-        raise click.BadParameter(
-            f'Cluster {cluster} is not found (see `sky status`).')
+def _show_job_queue(handle, all: bool):
+    cluster = handle.cluster_name
     job_table = prettytable.PrettyTable()
     job_table.field_names = ['JOB', 'SUBMITTED', 'STATUS', 'LOG']
     job_table.align['LOG'] = 'l'
@@ -477,6 +465,26 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
 
     print(f'Sky Job Queue of Cluster: {cluster}\n{job_table}')
 
+@cli.command()
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@click.argument('cluster', required=False)
+def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
+    """Show launched job queue on clusters."""
+    if cluster is not None:
+        handle = global_user_state.get_handle_from_cluster_name(cluster)
+        if handle is None:
+            raise click.BadParameter(
+                f'Cluster {cluster} is not found (see `sky status`).')
+        return _show_job_queue(handle, all)
+
+    clusters_status = global_user_state.get_clusters()
+    for cluster_status in clusters_status:
+        _show_job_queue(cluster_status['handle'], all)
 
 @cli.command()
 @click.argument('clusters', nargs=-1, required=False)
