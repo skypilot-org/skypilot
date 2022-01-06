@@ -9,7 +9,11 @@ from sky.clouds.service_catalog import azure_catalog
 
 
 def _run_output(cmd):
-    proc = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE)
+    proc = subprocess.run(cmd,
+                          shell=True,
+                          check=True,
+                          suderr=subprocess.PIPE,
+                          stdout=subprocess.PIPE)
     return proc.stdout.decode('ascii')
 
 

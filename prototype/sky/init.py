@@ -26,7 +26,7 @@ def init(quiet: bool = False):
             echo(f'    Reason: {reason}')
 
     if len(enabled_clouds) == 0:
-        echo(
+        click.echo(
             click.style(
                 'No cloud is enabled. Sky will not be able to run any task. '
                 'Please setup access to a cloud, and rerun `sky init`.',
