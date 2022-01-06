@@ -96,7 +96,8 @@ class Task(object):
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
         self.estimated_outputs_size_gigabytes = None
-        self.resources = None
+        # Default VM, will be overwritten if Task.set_resources() is called.
+        self.resources = sky.Resources()
         self.time_estimator_func = None
         self.file_mounts = None
         # Filled in by the optimizer.  If None, this Task is not planned.
@@ -265,21 +266,6 @@ class Task(object):
 
     def get_resources(self):
         return self.resources
-
-    def set_setup(self, setup):
-        """Sets the setup commands """
-        self.setup = setup
-        return self
-
-    def set_run(self, run):
-        """Sets the run commands """
-        self.run = run
-        return self
-
-    def set_post_setup_fn(self, post_setup_fn):
-        """Sets the post setup function, which maps IPs to setup cmds"""
-        self.post_setup_fn = post_setup_fn
-        return self
 
     def set_time_estimator(self, func):
         """Sets a func mapping resources to estimated time (secs)."""

@@ -316,10 +316,7 @@ def run(entrypoint: Union[Path, str], cluster: str,
             else:
                 # Setup is terminal commands
                 run_cmd = entrypoint
-            task.set_run(run_cmd)
-            # TODO: Allow for Sky Run CLI to take in different resources
-            resources = sky.Resources()
-            task.set_resources(resources)
+            task.run = run_cmd
 
         # Setup can override YAML setup
         if setup is not None:
@@ -328,7 +325,7 @@ def run(entrypoint: Union[Path, str], cluster: str,
             else:
                 # Setup is terminal commands
                 setup_cmd = setup
-            task.set_setup(setup_cmd)
+            task.setup = setup_cmd
 
     sky.execute(dag, dryrun=dryrun, stream_logs=True, cluster_name=cluster)
 
@@ -341,19 +338,20 @@ def run(entrypoint: Union[Path, str], cluster: str,
               type=str,
               help='Name of the existing cluster to execute a task on.')
 def exec(entrypoint: Union[Path, str], cluster: str):  # pylint: disable=redefined-builtin
-    """Execute a task from a YAML spec on a cluster.
+    """Execute a task from a YAML spec on a cluster (skip setup).
 
     \b
     Actions performed by this command only include:
       - workdir syncing
-      - executing the run command (from yaml, command, or shell script)
+      - executing the task's run command (from yaml, command, or shell script)
         on all cluster nodes
     `sky exec` is thus typically faster than `sky run`, provided a cluster
     already exists.
 
-    All setup steps (provisioning, initial setup commands, file mounts syncing)
-    are skipped. If any of those specifications changed, this command will not
-    reflect those changes.
+    All setup steps (provisioning, setup commands, file mounts syncing) are
+    skipped.  If any of those specifications changed, this command will not
+    reflect those changes.  To ensure a cluster's setup is up to date, use `sky
+    run` instead.
 
     Typical workflow:
 
@@ -363,12 +361,17 @@ def exec(entrypoint: Union[Path, str], cluster: str):  # pylint: disable=redefin
 
     \b
       # Starting iterative development...
-      # For example, modify local workdir code and run sky exec...
+      # For example, modify local workdir code.
+      # Future commands: simply execute the task on the launched cluster.
 
       >> sky exec -c name app.yaml
 
+      # Simply do "sky run" again if anything other than Task.run is modified:
+
+      >> sky run -c name app.yaml
 
     Advanced use cases:
+
       #  Pass in commands for execution
 
       >> sky exec -c name 'echo Hello World'
@@ -376,16 +379,12 @@ def exec(entrypoint: Union[Path, str], cluster: str):  # pylint: disable=redefin
       # Pass in shell script for execution
 
       >> sky exec -c name run.sh
+
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
                                  'Use `sky run` to provision first.')
-
-    stages = [
-        sky.execution.Stage.SYNC_WORKDIR,
-        sky.execution.Stage.EXEC,
-    ]
 
     def _exec_bash_file_handler(script_path: str) -> str:
         # Uploads bash script, runs, and deletes bash script on remote workdir
@@ -411,7 +410,12 @@ def exec(entrypoint: Union[Path, str], cluster: str):  # pylint: disable=redefin
                 run=entrypoint,  # Required field.
             )
 
-    sky.execute(dag, handle=handle, stages=stages)
+    sky.execute(dag,
+                handle=handle,
+                stages=[
+                    sky.execution.Stage.SYNC_WORKDIR,
+                    sky.execution.Stage.EXEC,
+                ])
 
 
 @cli.command()
