@@ -757,10 +757,7 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
               is_flag=True,
               default=False,
               help='Show details of all GPU/TPU/accelerator offerings.')
-def show_gpus(
-        gpu_name: Optional[str],
-        all: bool,  # pylint: disable=redefined-builtin
-):
+def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-builtin
     """Show all GPU/TPU/accelerator offerings that Sky supports."""
     show_all = all
     if show_all and gpu_name is not None:
@@ -807,10 +804,10 @@ def show_gpus(
                     show_gcp_msg = True
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(*)'
-                memory_str = f'{item.memory:.0f}GB' if item.memory > 0 else '(*)'
+                mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '(*)'
                 data.append([
                     item.accelerator_name, item.accelerator_count, item.cloud,
-                    instance_type_str, memory_str
+                    instance_type_str, mem_str
                 ])
             yield tabulate.tabulate(data, headers)
             yield '\n\n'
