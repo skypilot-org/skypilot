@@ -448,7 +448,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
 @click.argument('cluster', required=False)
 def queue(cluster: str, all_jobs: bool, all_users: bool):  # pylint: disable=redefined-builtin
     """Show launched job queue on clusters."""
-    click.echo('Fetching and parsing job queue...', fg='yellow')
+    click.secho('Fetching and parsing job queue...', fg='yellow')
     backend = backends.CloudVmRayBackend()
     if cluster is not None:
         handle = global_user_state.get_handle_from_cluster_name(cluster)

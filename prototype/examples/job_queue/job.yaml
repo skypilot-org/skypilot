@@ -7,7 +7,7 @@
 #   sky down -c min
 
 resources:
-  cloud: aws
+  cloud: gcp
   accelerators:
     K80: 0.5
 
