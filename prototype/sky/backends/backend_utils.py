@@ -257,6 +257,9 @@ class SSHConfigHelper(object):
         username = auth_config['ssh_user']
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
+        if not os.path.exists(config_path):
+            return
+
         with open(config_path) as f:
             config = f.readlines()
 
