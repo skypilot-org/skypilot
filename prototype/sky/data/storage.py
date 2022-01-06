@@ -289,8 +289,12 @@ class S3Store(AbstractStore):
             data_transfer.gcs_to_s3(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
-        """Obtains the S3 bucket. If the S3 bucket does not exist, this
-        method will create the S3 bucket
+        """Obtains the S3 bucket.
+
+        If the bucket exists, this method will connect to the bucket.
+        If the bucket does not exist, there are two cases:
+          1) Raise an error if the bucket source starts with s3://
+          2) Create a new bucket otherwise
         """
         s3 = boto3.resource('s3')
         bucket = s3.Bucket(self.name)
@@ -415,8 +419,12 @@ class GcsStore(AbstractStore):
             data_transfer.s3_to_gcs(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
-        """Obtains the GCS bucket. If the GCS bucket does not exist, this
-        method will create the GCS bucket
+        """Obtains the GCS bucket.
+
+        If the bucket exists, this method will connect to the bucket.
+        If the bucket does not exist, there are two cases:
+          1) Raise an error if the bucket source starts with gs://
+          2) Create a new bucket otherwise
         """
         try:
             bucket = self.client.get_bucket(self.name)
