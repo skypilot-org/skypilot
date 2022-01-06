@@ -433,7 +433,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     click.echo(f'Sky Clusters\n{cluster_table}')
 
 
-def _show_job_queue(handle, all: bool):
+def _show_job_queue(handle, all: bool):  # pylint: disable=redefined-builtin
     cluster = handle.cluster_name
     job_table = prettytable.PrettyTable()
     job_table.field_names = ['JOB', 'SUBMITTED', 'STATUS', 'LOG']
@@ -465,6 +465,7 @@ def _show_job_queue(handle, all: bool):
 
     print(f'Sky Job Queue of Cluster: {cluster}\n{job_table}')
 
+
 @cli.command()
 @click.option('--all',
               '-a',
@@ -485,6 +486,7 @@ def queue(cluster: str, all: bool):  # pylint: disable=redefined-builtin
     clusters_status = global_user_state.get_clusters()
     for cluster_status in clusters_status:
         _show_job_queue(cluster_status['handle'], all)
+
 
 @cli.command()
 @click.argument('clusters', nargs=-1, required=False)
