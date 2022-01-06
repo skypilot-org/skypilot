@@ -12,6 +12,11 @@ from typing import Any, Dict, List, Optional
 import pendulum
 import prettytable
 
+
+SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_LOGS_DIRECTORY = 'sky_logs'
+
+
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
@@ -64,7 +69,7 @@ def _get_jobs(username: Optional[str],
             f"""\
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
-            ORDER BY status, job_id DESC""",
+            ORDER BY job_id DESC""",
             (*status_list,),
         )
     else:
@@ -73,7 +78,7 @@ def _get_jobs(username: Optional[str],
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
             AND username=(?)
-            ORDER BY status, job_id DESC""",
+            ORDER BY job_id DESC""",
             (*status_list, username),
         )
 
@@ -150,3 +155,15 @@ def show_jobs(username: Optional[str], all_jobs: bool):
 
     jobs = _get_jobs(username, status_list=status_list)
     _show_job_queue(jobs)
+
+def log_dir(job_id: int) -> str:
+    """Returns the path to the log file for a job and the status."""
+    _update_status()
+    rows = _CURSOR.execute(
+        f"""\
+            SELECT * FROM jobs
+            WHERE job_id=(?)""", (job_id,))
+    for row in rows:
+        status = row[3]
+        run_id = row[4]
+    return os.path.join(SKY_REMOTE_WORKDIR, SKY_LOGS_DIRECTORY, run_id), status

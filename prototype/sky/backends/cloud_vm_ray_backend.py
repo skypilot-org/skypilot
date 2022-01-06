@@ -28,6 +28,7 @@ from sky import optimizer
 from sky import resources as resources_lib
 from sky import task as task_mod
 from sky.backends import backend_utils
+from sky.backends.sky_remote_utils import log_utils
 
 App = backend_utils.App
 
@@ -182,20 +183,20 @@ class RayCodeGen(object):
             import ray.util as ray_util
 
             sys.path.append('{SKY_REMOTE_UTIL_PATH}')
-            import job_queue
+            import job_utils
             
-            job_queue.change_status({job_id!r}, {JobStatus.PENDING.value!r})
+            job_utils.change_status({job_id!r}, {JobStatus.PENDING.value!r})
 
             ray.init('auto', namespace='__sky__', log_to_driver={stream_logs})
 
             print('cluster_resources:', ray.cluster_resources())
             print('available_resources:', ray.available_resources())
             print('live nodes:', ray.state.node_ids())
-
+            
             futures = []"""),
-            inspect.getsource(backend_utils.redirect_process_output),
-            inspect.getsource(backend_utils.run_with_log),
-            inspect.getsource(backend_utils.run_bash_command_with_log),
+            inspect.getsource(log_utils.redirect_process_output),
+            inspect.getsource(log_utils.run_with_log),
+            inspect.getsource(log_utils.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
 
@@ -228,7 +229,6 @@ class RayCodeGen(object):
 
         self._code += [
             textwrap.dedent(f"""\
-                os.makedirs(\'{log_dir}\', exist_ok=True)
                 pg = ray_util.placement_group({json.dumps(bundles)}, \'STRICT_SPREAD\')
                 print(\'Reserving task slots on {len(bundles)} nodes.\', flush=True)
                 # FIXME: This will print the error message from autoscaler if
@@ -236,9 +236,7 @@ class RayCodeGen(object):
                 # error message.
                 ray.get(pg.ready())
                 print(\'All task slots reserved.\')
-                job_queue.change_status({self.job_id!r}, {JobStatus.RUNNING.value!r})
-
-                pathlib.Path('{log_dir}/{backend_utils.SKY_JOB_RUNNING_INDICATOR}').touch()
+                job_utils.change_status({self.job_id!r}, {JobStatus.RUNNING.value!r})
                 """),
         ]
 
@@ -1101,12 +1099,9 @@ class CloudVmRayBackend(backends.Backend):
                                                         task.container_name,
                                                         ssh_user=ssh_user)
 
-    def _execute_par_task(self,
-                          handle: ResourceHandle,
-                          par_task: task_mod.ParTask,
-                          job_id: int,
-                          stream_logs: bool,
-                          download_logs: bool = True) -> None:
+    def _execute_par_task(self, handle: ResourceHandle,
+                          par_task: task_mod.ParTask, job_id: int,
+                          stream_logs: bool) -> None:
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         for task in par_task.tasks:
             assert task.num_nodes == 1, \
@@ -1167,9 +1162,6 @@ class CloudVmRayBackend(backends.Backend):
 
         self._exec_code_on_head(handle, code, job_id, executable='python3')
 
-        if download_logs:
-            self._rsync_down_logs(handle, log_dir, [handle.head_ip])
-
     def _rsync_down_logs(self,
                          handle: ResourceHandle,
                          log_dir: str,
@@ -1204,8 +1196,7 @@ class CloudVmRayBackend(backends.Backend):
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
             fp.flush()
-            basename = os.path.basename(fp.name)
-            script_path = os.path.join(SKY_REMOTE_APP_DIR, basename)
+            script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
             # We choose to sync code + exec, because the alternative of 'ray
             # submit' may not work as it may use system python (python2) to
             # execute the script.  Happens for AWS.
@@ -1214,27 +1205,35 @@ class CloudVmRayBackend(backends.Backend):
                             target=script_path,
                             with_outputs=False)
 
-        log_path = os.path.join(self.log_dir, 'run.log')
         job_log_path = os.path.join(self.log_dir, 'job_submit.log')
-        if not stream_logs:
-            colorama.init()
-            style = colorama.Style
-            logger.info(f'Redirecting stdout/stderr, to monitor: '
-                        f'{style.BRIGHT}tail -f {log_path}{style.RESET_ALL}')
+        remote_log_dir = os.path.join(SKY_REMOTE_WORKDIR, self.log_dir)
+        remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
         # TODO: Pipe the output to one file.
         # TODO: Add hint for the user to monitor the job log.
-        job_submit_cmd = ('ray job submit --address=127.0.0.1:8265 '
-                          f'--job-id {job_id} -- {executable} {script_path}')
+        job_submit_cmd = (
+            f'mkdir -p {remote_log_dir} && ray job submit '
+            f'--address=127.0.0.1:8265 --job-id {job_id} -- '
+            f'"{executable} {script_path} > {remote_log_path} 2>&1"'
+        )
+
+        # TODO: Show our own information for job submission.
         self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',
                                           job_log_path, stream_logs)
+        if stream_logs:
+            colorama.init()
+            style = colorama.Style
+            logger.info(
+                f'To stream logs: '
+                f'{style.BRIGHT}sky logs -c {handle.cluster_name} {job_id} {style.RESET_ALL}'
+            )
 
     def _fetch_job_id(self, handle: ResourceHandle) -> int:
         run_id = os.path.basename(self.log_dir)
-        codegen = backend_utils.JobQueueDBCodeGen()
+        codegen = backend_utils.JobUtilsCodeGen()
         username = getpass.getuser()
         codegen.reserve_next_job_id(username, run_id)
         job_id = self._run_command_on_head_via_ssh(handle,
@@ -1287,7 +1286,8 @@ class CloudVmRayBackend(backends.Backend):
             f'Task(run=...) should be a string (found {type(task.run)}).'
         script = backend_utils.make_task_bash_script(task.run)
 
-        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}')
+        log_dir = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}',
+                               'tasks')
         log_path = os.path.join(log_dir, 'run.log')
 
         ips = self._get_node_ips(handle.cluster_yaml,
@@ -1315,15 +1315,9 @@ class CloudVmRayBackend(backends.Backend):
                                 codegen.build(),
                                 job_id,
                                 executable='python3')
-        if not stream_logs:
-            self._rsync_down_logs(handle, self.log_dir, [handle.head_ip])
 
-    def _execute_task_n_nodes(self,
-                              handle: ResourceHandle,
-                              task: App,
-                              job_id: int,
-                              stream_logs: bool,
-                              download_logs: bool = True) -> None:
+    def _execute_task_n_nodes(self, handle: ResourceHandle, task: App,
+                              job_id: int, stream_logs: bool) -> None:
         # Strategy:
         #   ray.init(..., log_to_driver=False); otherwise too many logs.
         #   for node:
@@ -1380,8 +1374,6 @@ class CloudVmRayBackend(backends.Backend):
         external_ips = self._get_node_ips(handle.cluster_yaml,
                                           task.num_nodes,
                                           return_private_ips=False)
-        if download_logs:
-            self._rsync_down_logs(handle, log_dir, external_ips)
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
@@ -1543,15 +1535,12 @@ class CloudVmRayBackend(backends.Backend):
         ]
         return backend_utils.run_with_log(command, log_path, stream_logs)
 
-    def get_job_queue(self, handle: ResourceHandle, all_jobs: bool,
-                      all_users: bool) -> None:
-        codegen = backend_utils.JobQueueDBCodeGen()
-        username = getpass.getuser()
-        if all_users:
-            username = None
-        codegen.show_jobs(username, all_jobs)
-        return self._run_command_on_head_via_ssh(handle, codegen.build(),
-                                                 '/dev/null', False)[1]
+    def run_on_head(self, handle: ResourceHandle, cmd: str, stream_logs: bool=False) -> None:
+        """Runs 'cmd' on the cluster's head node."""
+        return self._run_command_on_head_via_ssh(handle,
+                                                 cmd,
+                                                 '/dev/null',
+                                                 stream_logs=stream_logs)[1]
 
     def cancel(self, handle: ResourceHandle, job_id: str) -> None:
         """Cancels a job on cluster."""

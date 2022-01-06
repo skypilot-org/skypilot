@@ -433,6 +433,28 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         ])
     click.echo(f'Sky Clusters\n{cluster_table}')
 
+@cli.command()
+@click.option('--cluster',
+              '-c',
+              required=True,
+              type=str,
+              help='Name of the existing cluster to find the job.')
+@click.argument('job_id', required=True, type=str)
+def logs(cluster: str, job_id: str):
+    """Tailing the log of a job."""
+    # TODO: Add an option for downloading logs.
+    cluster_name = cluster
+    backend = backends.CloudVmRayBackend()
+
+    codegen = backend_utils.JobUtilsCodeGen()
+    codegen.tail_logs(job_id)
+    code = codegen.build()
+
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
+                                 ' (see `sky status`).')
+    backend.run_on_head(handle, code, stream_logs=True)
 
 @cli.command()
 @click.option('--all-users',
@@ -452,23 +474,28 @@ def queue(cluster: str, all_jobs: bool, all_users: bool):  # pylint: disable=red
     """Show launched job queue on clusters."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     backend = backends.CloudVmRayBackend()
+
+    codegen = backend_utils.JobUtilsCodeGen()
+    username = getpass.getuser()
+    if all_users:
+        username = None
+    codegen.show_jobs(username, all_jobs)
+    code = codegen.build()
+
     if cluster is not None:
         handle = global_user_state.get_handle_from_cluster_name(cluster)
         if handle is None:
             raise click.BadParameter(
                 f'Cluster {cluster} is not found (see `sky status`).')
-        job_table = backend.get_job_queue(handle,
-                                          all_jobs=all_jobs,
-                                          all_users=all_users)
+            
+        job_table = backend.run_on_head(handle, code)
         click.echo(f'Sky Job Queue of Cluster {cluster}\n{job_table}')
         return
 
     clusters_status = global_user_state.get_clusters()
     for cluster_status in clusters_status:
         handle = cluster_status['handle']
-        job_table = backend.get_job_queue(handle,
-                                          all_jobs=all_jobs,
-                                          all_users=all_users)
+        job_table = backend.run_on_head(handle, code)
         click.echo(
             f'Sky Job Queue of Cluster {handle.cluster_name}\n{job_table}')
 

@@ -23,6 +23,7 @@ from sky import logging
 from sky import resources
 from sky import task as task_lib
 from sky.backends import sky_remote_utils
+from sky.backends.sky_remote_utils import job_utils, log_utils
 
 logger = logging.init_logger(__name__)
 
@@ -31,8 +32,11 @@ App = Union[task_lib.Task, task_lib.ParTask]
 RunId = str
 Resources = resources.Resources
 
+# NOTE: keep in sync with the cluster template 'file_mounts'.
+SKY_REMOTE_WORKDIR = job_utils.SKY_REMOTE_WORKDIR
+SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
+SKY_LOGS_DIRECTORY = job_utils.SKY_LOGS_DIRECTORY
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
-SKY_LOGS_DIRECTORY = './sky_logs'
 SKY_REMOTE_RAY_VERSION = '1.9.1'
 SKY_JOB_RUNNING_INDICATOR = '.sky_job_running'
 SKY_REMOTE_UTIL_PATH = '/tmp/sky_remote_utils'
@@ -40,9 +44,8 @@ SKY_REMOTE_UTIL_PATH = '/tmp/sky_remote_utils'
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
-SKY_REMOTE_WORKDIR = '~/sky_workdir'
-SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 
+run_with_log = log_utils.run_with_log
 
 def get_rel_path(path: str) -> str:
     cwd = os.getcwd()
@@ -543,54 +546,6 @@ def run_command_on_ip_via_ssh(ip: str,
             raise subprocess.CalledProcessError(proc.returncode, cmd)
 
 
-def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
-    """Redirect the process's filtered stdout/stderr to both stream and file"""
-    log_path = os.path.expanduser(log_path)
-    dirname = os.path.dirname(log_path)
-    os.makedirs(dirname, exist_ok=True)
-
-    out_io = io.TextIOWrapper(proc.stdout,
-                              encoding='utf-8',
-                              newline='',
-                              errors='replace')
-    err_io = io.TextIOWrapper(proc.stderr,
-                              encoding='utf-8',
-                              newline='',
-                              errors='replace')
-    sel = selectors.DefaultSelector()
-    sel.register(out_io, selectors.EVENT_READ)
-    sel.register(err_io, selectors.EVENT_READ)
-
-    stdout = ''
-    stderr = ''
-
-    start_streaming_flag = False
-    with open(log_path, 'a') as fout:
-        while len(sel.get_map()) > 0:
-            events = sel.select()
-            for key, _ in events:
-                line = key.fileobj.readline()
-                if not line:
-                    # Unregister the io when EOF reached
-                    sel.unregister(key.fileobj)
-                    continue
-                # Remove special characters to avoid cursor hidding
-                line = line.replace('\x1b[?25l', '')
-                if start_streaming_at in line:
-                    start_streaming_flag = True
-                if key.fileobj is out_io:
-                    stdout += line
-                    out_stream = sys.stdout
-                else:
-                    stderr += line
-                    out_stream = sys.stderr
-                if stream_logs and start_streaming_flag:
-                    out_stream.write(line)
-                    out_stream.flush()
-                fout.write(line)
-    return stdout, stderr
-
-
 def run(cmd, **kwargs):
     shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
@@ -609,29 +564,6 @@ def run_no_outputs(cmd, **kwargs):
                stdout=subprocess.DEVNULL,
                stderr=subprocess.DEVNULL,
                **kwargs)
-
-
-def run_with_log(cmd: List[str],
-                 log_path: str,
-                 stream_logs: bool = False,
-                 start_streaming_at: str = '',
-                 return_none: bool = False,
-                 **kwargs):
-    """Runs a command and logs its output to a file.
-
-    Retruns the process, stdout and stderr of the command.
-      Note that the stdout and stderr is already decoded.
-    """
-    with subprocess.Popen(cmd,
-                          stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE,
-                          **kwargs) as proc:
-        stdout, stderr = redirect_process_output(
-            proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
-        proc.wait()
-        if return_none:
-            return None
-        return proc, stdout, stderr
 
 
 def check_local_gpus() -> bool:
@@ -664,22 +596,6 @@ def requested_resources_available(cluster_resources: Set[Resources],
     return task_resources.less_demanding_than(cluster_resources)
 
 
-def run_bash_command_with_log(bash_command: str,
-                              log_path: str,
-                              stream_logs: bool = False):
-    with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-        fp.write(bash_command)
-        fp.flush()
-        script_path = fp.name
-        run_with_log(
-            f'/bin/bash {script_path}',
-            log_path,
-            stream_logs=stream_logs,
-            return_none=True,
-            # The script will be not found without this
-            shell=True,
-        )
-
 
 def make_task_bash_script(codegen: str) -> str:
     script = [
@@ -703,7 +619,7 @@ class JobStatus(enum.Enum):
     STOPPED = 'STOPPED'
 
 
-class JobQueueDBCodeGen(object):
+class JobUtilsCodeGen(object):
     """codegen for job queue database"""
 
     def __init__(self) -> None:
@@ -711,15 +627,22 @@ class JobQueueDBCodeGen(object):
         self._code = [
             'import sys',
             f'sys.path.append({SKY_REMOTE_UTIL_PATH!r})',
-            'import job_queue',
+            'import job_utils',
+            'import log_utils',
         ]
 
     def reserve_next_job_id(self, username: str, run_id: str) -> str:
         self._code.append(
-            f'job_queue.reserve_next_job_id({username!r}, {run_id!r})')
+            f'job_utils.reserve_next_job_id({username!r}, {run_id!r})')
 
     def show_jobs(self, username: Optional[str], all_jobs: bool) -> str:
-        self._code.append(f'job_queue.show_jobs({username!r}, {all_jobs})')
+        self._code.append(f'job_utils.show_jobs({username!r}, {all_jobs})')
+
+    def tail_logs(self, job_id: str) -> str:
+        self._code += [
+            f'log_dir, status = job_utils.log_dir({job_id!r})',
+            f'log_utils.tail_logs({job_id!r}, log_dir, status)',
+        ]
 
     def build(self) -> str:
         code = ';'.join(self._code)
