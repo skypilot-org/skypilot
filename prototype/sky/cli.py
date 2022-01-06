@@ -761,8 +761,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
     """List all GPU offerings that Sky supports."""
     show_all = all
     if show_all and gpu_name is not None:
-        raise click.UsageError(
-                '--all is only allowed without a GPU name.')
+        raise click.UsageError('--all is only allowed without a GPU name.')
 
     def _output():
         if gpu_name is None:
