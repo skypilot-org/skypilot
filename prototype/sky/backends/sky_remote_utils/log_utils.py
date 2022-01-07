@@ -95,6 +95,31 @@ def run_bash_command_with_log(bash_command: str,
         )
 
 
+def _follow(file,
+            sleep_sec: float = 0.1,
+            start_streaming_at='',
+            end_following_at=None) -> Iterator[str]:
+    """ Yield each line from a file as they are written.
+    `sleep_sec` is the time to sleep after empty reads. """
+    line = ''
+    start_streaming = False
+    while True:
+        tmp = file.readline()
+        if tmp is not None:
+            line += tmp
+            if line.endswith('\n') or line.endswith('\r'):
+                if start_streaming_at == line.strip():
+                    start_streaming = True
+                if (end_following_at is not None and
+                        end_following_at == line.strip()):
+                    return
+                if start_streaming:
+                    yield line
+                line = ''
+        elif sleep_sec:
+            time.sleep(sleep_sec)
+
+
 def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
@@ -103,11 +128,12 @@ def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
     log_path = os.path.join(log_dir, 'run.log')
     if status in ['RUNNING', 'PENDING']:
         try:
-            tail_cmd = f'tail -f {log_path} | sed \'/^SKY INFO: All tasks finished.$/ q\''
-            run_with_log(tail_cmd.split(),
-                         log_path='/dev/null',
-                         stream_logs=True,
-                         start_streaming_at='SKY INFO: All task slots reserved.')
+            with open(log_path, 'r') as log_file:
+                for line in _follow(
+                        log_file,
+                        start_streaming_at='SKY INFO: All task slots reserved.',
+                        end_following_at='SKY INFO: All tasks finished.'):
+                    print(line, end='')
         except KeyboardInterrupt:
             return
     else:
