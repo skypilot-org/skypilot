@@ -204,20 +204,25 @@ class RayCodeGen(object):
 
     def add_gang_scheduling_placement_group(
             self,
-            ip_list: List[str],
+            ip_list: Optional[List[str]],
             accelerator_dict: Dict[str, int],
     ) -> List[Dict[str, int]]:
         """Create the resource_handle for gang scheduling for n_tasks."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
-        bundles = [
-            {
-                # Set CPU to avoid ray hanging the resources allocation
-                # for remote functions, since the task will request 1 CPU
-                # by default.
-                'CPU': 1,
-                f'node:{ip}': 0.01
-            } for ip in ip_list
-        ]
+        bundles = [{'CPU': 1}]
+        self._ip_to_bundle_index = {None: 0}
+        if ip_list:
+            bundles = [
+                {
+                    # Set CPU to avoid ray hanging the resources allocation
+                    # for remote functions, since the task will request 1 CPU
+                    # by default.
+                    'CPU': 1,
+                    f'node:{ip}': 0.01
+                } for ip in ip_list
+            ]
+            self._ip_to_bundle_index = {ip: i for i, ip in enumerate(ip_list)}
+            
         if accelerator_dict is not None:
             gpu_dict = {'GPU': list(accelerator_dict.values())[0]}
             for bundle in bundles:
@@ -226,7 +231,6 @@ class RayCodeGen(object):
                     # Set the GPU to avoid ray hanging the resources allocation
                     **gpu_dict,
                 })
-        self._ip_to_bundle_index = {ip: i for i, ip in enumerate(ip_list)}
 
         self._code += [
             textwrap.dedent(f"""\
@@ -974,7 +978,8 @@ class CloudVmRayBackend(backends.Backend):
         except exceptions.ResourcesUnavailableError as e:
             raise exceptions.ResourcesUnavailableError(
                 'Failed to provision all possible launchable resources. '
-                f'Relax the task\'s resource requirements:\n{task.resources}'
+                f'Relax the task\'s resource requirements:\n {task.num_nodes}x '
+                f'{task.resources}'
             ) from e
         if dryrun:
             return
@@ -1218,15 +1223,13 @@ class CloudVmRayBackend(backends.Backend):
 
         self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',
                                           job_log_path, stream_logs)
-        colorama.init()
-        style = colorama.Style
-        logger.info(f'To stream logs: '
-                    f'{style.BRIGHT}sky logs -c {handle.cluster_name} {job_id}'
-                    f'{style.RESET_ALL}')
+        
         try:
             if not detach:
                 backend_utils.run(f'sky logs -c {handle.cluster_name} {job_id}')
         finally:
+            colorama.init()
+            style = colorama.Style
             fore = colorama.Fore
             name = handle.cluster_name
             logger.info(
@@ -1235,6 +1238,9 @@ class CloudVmRayBackend(backends.Backend):
                 f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                 '\nTo cancel the job:\t'
                 f'{style.BRIGHT}sky cancel -c {name} {job_id} {style.RESET_ALL}'
+                'To stream logs:\t'
+                f'{style.BRIGHT}sky logs -c {handle.cluster_name} {job_id}'
+                f'{style.RESET_ALL}'
                 '\nTo view the job queue:\t'
                 f'{style.BRIGHT}sky queue -c {name} {style.RESET_ALL}')
 
@@ -1295,9 +1301,7 @@ class CloudVmRayBackend(backends.Backend):
                                'tasks')
         log_path = os.path.join(log_dir, 'run.log')
 
-        ips = self._get_node_ips(handle.cluster_yaml,
-                                 task.num_nodes,
-                                 return_private_ips=True)
+        ips = None
         accelerator_dict = _get_task_demands_dict(task)
 
         codegen = RayCodeGen()
@@ -1309,7 +1313,7 @@ class CloudVmRayBackend(backends.Backend):
             task_name=task.name,
             ray_resources_dict=_get_task_demands_dict(task),
             log_path=log_path,
-            gang_scheduling_ip=ips[0],
+            gang_scheduling_ip=None,
         )
 
         codegen.add_epilogue()
@@ -1544,12 +1548,3 @@ class CloudVmRayBackend(backends.Backend):
                                                  cmd,
                                                  '/dev/null',
                                                  stream_logs=stream_logs)[1]
-
-    def cancel(self, handle: ResourceHandle, job_id: str) -> None:
-        """Cancels a job on cluster."""
-        self._run_command_on_head_via_ssh(
-            handle,
-            f'ray job stop --address 127.0.0.1:8265 {job_id}',
-            '/dev/null',
-            False,
-        )

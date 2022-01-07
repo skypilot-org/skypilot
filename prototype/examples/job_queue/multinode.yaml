@@ -1,0 +1,13 @@
+# A minimal example.
+#
+# Runs a task that simply lists the default conda environments.
+#
+# Usage:
+#   sky run -c jq cluster.yaml
+#   sky exec -c jq job.yaml
+
+resources:
+  cloud: aws
+  accelerators: K80
+
+num_nodes: 2

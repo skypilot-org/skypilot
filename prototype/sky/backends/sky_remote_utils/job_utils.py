@@ -7,7 +7,7 @@ import pathlib
 import sqlite3
 import subprocess
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import pendulum
 import prettytable
@@ -83,6 +83,8 @@ def _get_jobs(username: Optional[str],
 
     records = []
     for user, job_id, submitted_at, status, run_id in rows:
+        if job_id is None:
+            break
         records.append({
             'username': user,
             'job_id': job_id,
@@ -154,6 +156,20 @@ def show_jobs(username: Optional[str], all_jobs: bool):
 
     jobs = _get_jobs(username, status_list=status_list)
     _show_job_queue(jobs)
+
+def cancel_jobs(jobs: Optional[List[str]]) -> None:
+    if jobs is None:
+        job_records = _get_jobs(None, ['RUNNING', 'PENDING'])
+        jobs = [job['job_id'] for job in job_records]
+    cancel_cmd = [f'ray job stop --address 127.0.0.1:8265 {job_id}'
+                  for job_id in jobs]
+    cancel_cmd = ';'.join(cancel_cmd)
+    subprocess.run(cancel_cmd,
+                   shell=True,
+                   check=True,
+                   executable='/bin/bash')
+    for job_id in jobs:
+        change_status(job_id, 'STOPPED')
 
 
 def log_dir(job_id: int) -> str:

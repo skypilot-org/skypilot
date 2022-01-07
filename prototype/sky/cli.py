@@ -374,17 +374,34 @@ def exec(yaml_path: Path, cluster: str, detach: bool):  # pylint: disable=redefi
               is_flag=True,
               required=False,
               help='Cancel all task in full.')
-@click.argument('job_id', required=False, type=str)
-def cancel(cluster: str, all: bool, job_id: str):  # pylint: disable=redefined-builtin
+@click.argument('jobs', required=False, type=int, nargs=-1)
+def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     """Cancel the job with the given job ID or all the jobs on a cluster."""
-    cluster_name = cluster
-    if job_id is None and not all:
+    if len(jobs) == 0 and not all:
         raise click.UsageError(
             'sky cancel requires either a job id '
-            f'(see `sky queue {cluster_name} --all`) or the --all flag.')
+            f'(see `sky queue {cluster} -aj`) or the --all flag.')
 
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    backends.CloudVmRayBackend().cancel(handle, job_id)
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.BadParameter(f'Cluster \'{cluster}\' not found'
+                                 ' (see `sky status`).')
+    
+    if all:
+        click.secho(f'Cancelling all jobs on cluster {cluster} ...', fg='yellow')
+        jobs = None
+    else:
+        click.secho(f'Cancelling jobs {jobs} on cluster {cluster} ...',
+                    fg='yellow')
+        
+        
+    codegen = backend_utils.JobUtilsCodeGen()
+    codegen.cancel_jobs(jobs)
+    code = codegen.build()
+    
+    # FIXME: Assumes a specific backend.
+    backend = backends.CloudVmRayBackend()
+    backend.run_on_head(handle, code, stream_logs=False)
     
 
 def _readable_time_duration(start: int):

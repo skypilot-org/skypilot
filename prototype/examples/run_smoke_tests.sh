@@ -62,9 +62,17 @@ time python "$DIR"/multi_echo.py
 
 # Job Queue.
 time sky run -c jq "$DIR"/job_queue/cluster.yaml
-time sky exec -c jq "$DIR"/job_queue/job.yaml
-time sky exec -c jq "$DIR"/job_queue/job.yaml
-time sky exec -c jq "$DIR"/job_queue/job.yaml
+time sky exec -c jq "$DIR"/job_queue/job.yaml -d
+time sky exec -c jq "$DIR"/job_queue/job.yaml -d
+time sky exec -c jq "$DIR"/job_queue/job.yaml -d
 sky queue jq
+sky down jq &
+
+time sky run -c mjq "$DIR"/job_queue/multinode.yaml
+time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml
+time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml
+time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml
+sky queue mjq
+sky down mjq &
 
 wait
