@@ -209,6 +209,7 @@ def _create_and_ssh_into_node(
     dag = sky.optimize(dag)
     task = dag.tasks[0]
     backend.register_info(dag=dag)
+    task.update_file_mounts(sky_init.get_cloud_credential_file_mounts())
 
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None or handle.head_ip is None:
