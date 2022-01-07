@@ -391,7 +391,7 @@ def status(all):  # pylint: disable=redefined-builtin
             cluster_status['last_use']
             if show_all else _truncate_long_string(cluster_status['last_use']),
             # STATUS
-            cluster_status['status'],
+            cluster_status['status'].value,
         ])
     click.echo(f'Sky Clusters\n{cluster_table}')
 
@@ -525,7 +525,7 @@ def start(clusters: Tuple[str]):
             #      INIT state cluster due to head_ip not being cached).
             #
             #      This can be replicated by adding `exit 1` to Task.setup.
-            if record['status'] == 'UP':
+            if record['status'] == global_user_state.ClusterStatus.UP:
                 # An UP cluster; skipping 'sky start' because:
                 #  1. For a really up cluster, this has no effects (ray up -y
                 #    --no-restart) anyway.
@@ -538,7 +538,9 @@ def start(clusters: Tuple[str]):
                 #    This is dangerous and unwanted behavior!
                 print(f'Cluster {name} already has status UP.')
                 continue
-            assert record['status'] in ('INIT', 'STOPPED'), record
+            assert record['status'] in (
+                global_user_state.ClusterStatus.INIT,
+                global_user_state.ClusterStatus.STOPPED), record
             to_start.append({'name': name, 'handle': record['handle']})
     if not to_start:
         return
