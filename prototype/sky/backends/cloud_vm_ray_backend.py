@@ -921,9 +921,10 @@ class CloudVmRayBackend(backends.Backend):
                                             task: App):
         """Check if resources requested by the task are available."""
         # requested_resources <= actual_resources.
-        assert task.num_nodes == handle.requested_nodes, (
-            f'Task #nodes {task.num_nodes} != #launched nodes'
-            f' {handle.requested_nodes} is not supported for now.')
+        assert (task.num_nodes == handle.requested_nodes
+                or task.num_nodes == 1), (
+            f'We currently only support Task #nodes=1, when task #nodes '
+            f'{task.num_nodes} != #launched nodes {handle.requested_nodes}.')
         if not (task.num_nodes <= handle.requested_nodes and
                 backend_utils.requested_resources_available(
                     handle.launched_resources, task.resources)):
