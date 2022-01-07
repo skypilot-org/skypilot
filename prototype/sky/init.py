@@ -1,4 +1,5 @@
 """Sky Initialization: check cloud credentials and enable clouds."""
+from typing import Dict
 
 import click
 
@@ -6,7 +7,7 @@ from sky import clouds
 from sky import global_user_state
 
 
-def init(quiet: bool = False):
+def init(quiet: bool = False) -> None:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for Sky.')
 
@@ -39,3 +40,11 @@ def init(quiet: bool = False):
              'and rerun ' + click.style('sky init', bold=True) + '.')
 
     global_user_state.set_enabled_clouds(enabled_clouds)
+
+
+def get_cloud_credential_file_mounts() -> Dict[str, str]:
+    enabled_clouds = global_user_state.get_enabled_clouds()
+    ret = {}
+    for cloud in enabled_clouds:
+        ret.update(cloud.get_credential_file_mounts())
+    return ret

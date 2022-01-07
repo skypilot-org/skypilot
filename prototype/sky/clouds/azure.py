@@ -1,6 +1,7 @@
 """Azure."""
 import copy
 import json
+import os
 import subprocess
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -12,7 +13,7 @@ def _run_output(cmd):
     proc = subprocess.run(cmd,
                           shell=True,
                           check=True,
-                          suderr=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
     return proc.stdout.decode('ascii')
 
@@ -154,6 +155,13 @@ class Azure(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+        # This file is required because it will be synced to remote VMs for
+        # `az` to access private storage buckets.
+        # `az account show` does not guarantee this file exists.
+        if not os.path.isfile(os.path.expanduser('~/.azure/accessTokens.json')):
+            return (
+                False,
+                '~/.azure/accessTokens.json does not exist. Run `az login`.')
         try:
             output = _run_output('az account show --output=json')
         except subprocess.CalledProcessError:
@@ -165,3 +173,6 @@ class Azure(clouds.Cloud):
         if output.startswith('{'):
             return True, None
         return False, 'Azure credentials not set. Run `az login`.'
+
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        return {'~/.azure': '~/.azure'}

@@ -315,12 +315,10 @@ class Task(object):
             if storage_type is storage_lib.StorageType.S3:
                 # TODO: allow for Storage mounting of different clouds
                 self.update_file_mounts({
-                    '~/.aws': '~/.aws',
                     mnt_path: 's3://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.GCS:
                 self.update_file_mounts({
-                    '~/.config/gcloud': '~/.config/gcloud',
                     mnt_path: 'gs://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.AZURE:

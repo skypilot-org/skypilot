@@ -13,7 +13,7 @@ def _run_output(cmd):
     proc = subprocess.run(cmd,
                           shell=True,
                           check=True,
-                          suderr=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
     return proc.stdout.decode('ascii')
 
@@ -190,12 +190,10 @@ class AWS(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
-        try:
-            # This file is required because it will be synced to remote
-            # VMs for `aws` to access private storage buckets.
-            # `aws configure list` does not guarantee this file exists.
-            assert os.path.isfile(os.path.expanduser('~/.aws/credentials'))
-        except AssertionError:
+        # This file is required because it will be synced to remote VMs for
+        # `aws` to access private storage buckets.
+        # `aws configure list` does not guarantee this file exists.
+        if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
             return (False,
                     '~/.aws/credentials does not exist. Run `aws configure`.')
         try:
@@ -224,3 +222,6 @@ class AWS(clouds.Cloud):
         if access_key_ok and secret_key_ok:
             return True, None
         return False, 'AWS credentials not set. Run `aws configure`.'
+
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        return {'~/.aws': '~/.aws'}

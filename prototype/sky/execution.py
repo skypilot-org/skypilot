@@ -19,6 +19,7 @@ from typing import Any, List, Optional
 
 import sky
 from sky import backends
+from sky import init
 from sky import logging
 from sky import optimizer
 
@@ -85,6 +86,8 @@ def execute(dag: sky.Dag,
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag, optimize_target=optimize_target)
+
+    task.update_file_mounts(init.get_cloud_credential_file_mounts())
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket

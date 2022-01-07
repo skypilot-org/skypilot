@@ -314,3 +314,6 @@ class GCP(clouds.Cloud):
                 '$ gcloud auth application-default login\n    '
                 '$ gcloud auth application-default set-quota-project <proj>')
         return True, None
+
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        return {'~/.config/gcloud': '~/.config/gcloud'}
