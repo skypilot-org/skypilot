@@ -454,6 +454,7 @@ def logs(cluster: str, job_id: str):
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
                                  ' (see `sky status`).')
+    click.secho('Start streaming logs...', fg='yellow')
     backend.run_on_head(handle, code, stream_logs=True)
 
 @cli.command()

@@ -103,10 +103,11 @@ def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
     log_path = os.path.join(log_dir, 'run.log')
     if status in ['RUNNING', 'PENDING']:
         try:
-            run_with_log(['tail', '-zF', log_path],
+            tail_cmd = f'tail -f {log_path} | sed \'/^SKY INFO: All tasks finished.$/ q\''
+            run_with_log(tail_cmd.split(),
                          log_path='/dev/null',
                          stream_logs=True,
-                         start_streaming_at='All task slots reserved.')
+                         start_streaming_at='SKY INFO: All task slots reserved.')
         except KeyboardInterrupt:
             return
     else:

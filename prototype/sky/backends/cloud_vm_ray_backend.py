@@ -235,7 +235,7 @@ class RayCodeGen(object):
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
-                print(\'All task slots reserved.\')
+                print(\'SKY INFO: All task slots reserved.\')
                 job_utils.change_status({self.job_id!r}, {JobStatus.RUNNING.value!r})
                 """),
         ]
@@ -307,6 +307,7 @@ class RayCodeGen(object):
         self._has_epilogue = True
 
         self._code.append('ray.get(futures)')
+        self._code.append('print(\'SKY INFO: All tasks finished.\')')
 
     def build(self) -> str:
         """Returns the entire generated program."""
