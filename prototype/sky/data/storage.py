@@ -174,6 +174,8 @@ class Storage(object):
         # from existing ones
         self.stores = {} if stores is None else stores
 
+        # If source is a pre-existing bucket, connect to the bucket
+        # If the bucket does not exist, this will error out
         if 's3://' in self.source:
             self.get_or_copy_to_s3()
         elif 'gs://' in self.source:
@@ -246,6 +248,9 @@ class S3Store(AbstractStore):
             assert name == data_utils.split_gcs_path(source)[0], (
                 'GCS Bucket is specified as path, the name should be the '
                 'same as GCS bucket!')
+            assert data_utils.verify_gcs_bucket(name), (
+                f'Source specified as {source}, a GCS bucket. ',
+                'GCS Bucket should exist!')
 
         self.client = data_utils.create_s3_client(region)
         self.region = region
@@ -375,6 +380,9 @@ class GcsStore(AbstractStore):
             assert name == data_utils.split_s3_path(source)[0], (
                 'S3 Bucket is specified as path, the name should be the '
                 'same as S3 bucket!')
+            assert data_utils.verify_s3_bucket(name), (
+                f'Source specified as {source}, an S3 bucket. ',
+                'S3 Bucket should exist!')
 
         elif self.source.startswith('gs://'):
             assert name == data_utils.split_gcs_path(source)[0], (
