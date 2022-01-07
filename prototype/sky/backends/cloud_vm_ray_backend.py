@@ -1533,7 +1533,7 @@ class CloudVmRayBackend(backends.Backend):
         """Cancels a job on cluster."""
         self._run_command_on_head_via_ssh(
             handle,
-            f'ray stop job --address 127.0.0.1:8265 {job_id}',
+            f'ray job stop --address 127.0.0.1:8265 {job_id}',
             '/dev/null',
             False,
         )

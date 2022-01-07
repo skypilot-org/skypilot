@@ -374,11 +374,7 @@ def cancel(cluster: str, all: bool, job_id: str):  # pylint: disable=redefined-b
 
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     backends.CloudVmRayBackend().cancel(handle, job_id)
-    global_user_state.add_or_update_cluster_job(cluster_name,
-                                                job_id,
-                                                JobStatus.STOPPED.value,
-                                                is_add=False)
-
+    
 
 def _readable_time_duration(start: int):
     duration = pendulum.now().subtract(seconds=time.time() - start)
