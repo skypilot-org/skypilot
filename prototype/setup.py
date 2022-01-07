@@ -23,8 +23,7 @@ setup(
         "Programming Language :: Python :: 3.9",
     ],
     description="Sky Prototype",
-    long_description=open(
-        os.path.join(ROOT_DIR, "README.md"),
-        "r",
-        encoding="utf-8").read(),
+    long_description=open(os.path.join(ROOT_DIR, "README.md"),
+                          "r",
+                          encoding="utf-8").read(),
 )
