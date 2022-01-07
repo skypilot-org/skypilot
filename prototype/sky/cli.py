@@ -408,8 +408,8 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     backend.run_on_head(handle, code, stream_logs=False)
 
 
-def _readable_time_duration(start: int):
-    duration = pendulum.now().subtract(seconds=time.time() - start)
+def _readable_time_duration(start_time: int):
+    duration = pendulum.now().subtract(seconds=time.time() - start_time)
     diff = duration.diff_for_humans()
     diff = diff.replace('second', 'sec')
     diff = diff.replace('minute', 'min')

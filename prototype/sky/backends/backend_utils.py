@@ -1,6 +1,5 @@
 """Util constants/functions for the backends."""
 import datetime
-import enum
 import os
 import pathlib
 import subprocess
@@ -41,6 +40,8 @@ SKY_REMOTE_UTIL_PATH = '/tmp/sky_remote_utils'
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
+
+JobStatus = job_utils.JobStatus
 
 run_with_log = log_utils.run_with_log
 
@@ -607,17 +608,19 @@ def make_task_bash_script(codegen: str) -> str:
     return script
 
 
-class JobStatus(enum.Enum):
-    """Job status"""
-    PENDING = 'PENDING'
-    RUNNING = 'RUNNING'
-    SUCCEEDED = 'SUCCEEDED'
-    FAILED = 'FAILED'
-    STOPPED = 'STOPPED'
-
-
 class JobUtilsCodeGen(object):
-    """codegen for job queue database"""
+    """Code generator for job utility functions.
+
+    Usage:
+
+      >> codegen = JobUtilsCodeGen()
+
+      >> codegen.show_jobs(...)
+      >> codegen.reserve_next_job_id(...)
+      >> codegen.<method>(...)
+
+      >> code = codegen.build()
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -628,17 +631,17 @@ class JobUtilsCodeGen(object):
             'import log_utils',
         ]
 
-    def reserve_next_job_id(self, username: str, run_id: str) -> str:
+    def reserve_next_job_id(self, username: str, run_id: str) -> None:
         self._code.append(
             f'job_utils.reserve_next_job_id({username!r}, {run_id!r})')
 
-    def show_jobs(self, username: Optional[str], all_jobs: bool) -> str:
+    def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:
         self._code.append(f'job_utils.show_jobs({username!r}, {all_jobs})')
 
-    def cancel_jobs(self, job_ids: Optional[List[int]]) -> str:
+    def cancel_jobs(self, job_ids: Optional[List[int]]) -> None:
         self._code.append(f'job_utils.cancel_jobs({job_ids!r})')
 
-    def tail_logs(self, job_id: str) -> str:
+    def tail_logs(self, job_id: str) -> None:
         self._code += [
             f'log_dir, status = job_utils.log_dir({job_id!r})',
             f'log_utils.tail_logs({job_id!r}, log_dir, status)',

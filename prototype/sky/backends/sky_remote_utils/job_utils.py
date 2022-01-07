@@ -2,19 +2,30 @@
 
 This is a remote utility module that provides job queue functionality.
 """
+import enum
 import os
 import pathlib
 import sqlite3
 import subprocess
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pendulum
 import prettytable
 
-
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 SKY_LOGS_DIRECTORY = 'sky_logs'
+
+
+class JobStatus(enum.Enum):
+    """Job status"""
+    INIT = 'INIT'
+    PENDING = 'PENDING'
+    RUNNING = 'RUNNING'
+    SUCCEEDED = 'SUCCEEDED'
+    FAILED = 'FAILED'
+    STOPPED = 'STOPPED'
+
 
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
@@ -38,6 +49,7 @@ _CONN.commit()
 
 
 def reserve_next_job_id(username: str, run_id: str) -> int:
+    """Reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     rows = _CURSOR.execute('select max(job_id) from jobs')
     job_id = 100
@@ -58,18 +70,21 @@ def change_status(job_id: int, status: str) -> None:
 
 
 def _get_jobs(username: Optional[str],
-              status_list: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+              status_list: Optional[List[JobStatus]] = None
+             ) -> List[Dict[str, Any]]:
     if status_list is None:
         status_list = [
-            'PENDING', 'RUNNING', 'INIT', 'STOPPED', 'SUCCEEDED', 'FAILED'
+            JobStatus.PENDING, JobStatus.RUNNING, JobStatus.SUCCEEDED,
+            JobStatus.FAILED, JobStatus.STOPPED, JobStatus.INIT
         ]
+    status_str_list = [status.value for status in status_list]
     if username is None:
         rows = _CURSOR.execute(
             f"""\
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
             ORDER BY job_id DESC""",
-            (*status_list,),
+            (*status_str_list,),
         )
     else:
         rows = _CURSOR.execute(
@@ -78,7 +93,7 @@ def _get_jobs(username: Optional[str],
             WHERE status IN ({','.join(['?'] * len(status_list))})
             AND username=(?)
             ORDER BY job_id DESC""",
-            (*status_list, username),
+            (*status_str_list, username),
         )
 
     records = []
@@ -89,14 +104,14 @@ def _get_jobs(username: Optional[str],
             'username': user,
             'job_id': job_id,
             'submitted_at': submitted_at,
-            'status': status,
+            'status': JobStatus[status],
             'run_id': run_id,
         })
     return records
 
 
-def _update_status():
-    running_jobs = _get_jobs(username=None, status_list=['RUNNING'])
+def _update_status() -> None:
+    running_jobs = _get_jobs(username=None, status_list=[JobStatus.RUNNING])
 
     if len(running_jobs) == 0:
         return
@@ -123,7 +138,7 @@ def _update_status():
         change_status(job['job_id'], ray_status)
 
 
-def _readable_time_duration(start: int):
+def _readable_time_duration(start: int) -> str:
     duration = pendulum.now().subtract(seconds=time.time() - start)
     diff = duration.diff_for_humans()
     diff = diff.replace('second', 'sec')
@@ -132,7 +147,7 @@ def _readable_time_duration(start: int):
     return diff
 
 
-def _show_job_queue(jobs):
+def _show_job_queue(jobs) -> None:
     job_table = prettytable.PrettyTable()
     job_table.field_names = ['JOB', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
     job_table.align['LOG'] = 'l'
@@ -142,15 +157,21 @@ def _show_job_queue(jobs):
             job['job_id'],
             job['username'],
             _readable_time_duration(job['submitted_at']),
-            job['status'],
+            job['status'].value,
             os.path.join('sky_logs', job['run_id']),
         ])
     print(job_table)
 
 
-def show_jobs(username: Optional[str], all_jobs: bool):
+def show_jobs(username: Optional[str], all_jobs: bool) -> None:
+    """Show the job queue.
+
+    Args:
+        username: The username to show jobs for. Show all the users if None.
+        all_jobs: Whether to show the completed jobs.
+    """
     _update_status()
-    status_list = ['PENDING', 'RUNNING']
+    status_list = [JobStatus.PENDING, JobStatus.RUNNING]
     if all_jobs:
         status_list = None
 
@@ -159,8 +180,13 @@ def show_jobs(username: Optional[str], all_jobs: bool):
 
 
 def cancel_jobs(jobs: Optional[List[str]]) -> None:
+    """Cancel the jobs.
+
+    Args:
+        jobs: The job ids to cancel. If None, cancel all the jobs.
+    """
     if jobs is None:
-        job_records = _get_jobs(None, ['RUNNING', 'PENDING'])
+        job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
         jobs = [job['job_id'] for job in job_records]
     cancel_cmd = [
         f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
@@ -168,10 +194,10 @@ def cancel_jobs(jobs: Optional[List[str]]) -> None:
     cancel_cmd = ';'.join(cancel_cmd)
     subprocess.run(cancel_cmd, shell=True, check=True, executable='/bin/bash')
     for job_id in jobs:
-        change_status(job_id, 'STOPPED')
+        change_status(job_id, JobStatus.STOPPED.value)
 
 
-def log_dir(job_id: int) -> str:
+def log_dir(job_id: int) -> Tuple[Optional[str], Optional[str]]:
     """Returns the path to the log file for a job and the status."""
     _update_status()
     rows = _CURSOR.execute(

@@ -37,6 +37,7 @@ except sqlite3.OperationalError:
 
 _CONN.commit()
 
+
 class ClusterStatus(enum.Enum):
     """Cluster status as recorded in table 'clusters'."""
     # NOTE: these statuses are as recorded in our local cache, the table
