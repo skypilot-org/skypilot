@@ -16,8 +16,7 @@ setup: |
 
 run: |
   conda env list
-  uuid=$(uuidgen)
   for i in {1..120}; do
-    echo "$uuid $i"
+    echo "$i"
     sleep 1
   done

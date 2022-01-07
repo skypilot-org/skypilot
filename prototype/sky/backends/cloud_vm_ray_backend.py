@@ -1212,13 +1212,13 @@ class CloudVmRayBackend(backends.Backend):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
+        # TODO: Add detach option.
         # TODO: Pipe the output to one file.
         # TODO: Add hint for the user to monitor the job log.
         job_submit_cmd = (
             f'mkdir -p {remote_log_dir} && ray job submit '
             f'--address=127.0.0.1:8265 --job-id {job_id} -- '
-            f'"{executable} {script_path} > {remote_log_path} 2>&1"'
-        )
+            f'"{executable} -u {script_path} 2>&1 > {remote_log_path}"')
 
         # TODO: Show our own information for job submission.
         self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',

@@ -3,8 +3,9 @@ import os
 import selectors
 import subprocess
 import sys
+import time
 import tempfile
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 
 def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
@@ -101,9 +102,13 @@ def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
 
     log_path = os.path.join(log_dir, 'run.log')
     if status in ['RUNNING', 'PENDING']:
-        run_with_log(['tail', '-f', log_path],
-                     log_path='/dev/null',
-                     stream_logs=True)
+        try:
+            run_with_log(['tail', '-zF', log_path],
+                         log_path='/dev/null',
+                         stream_logs=True,
+                         start_streaming_at='All task slots reserved.')
+        except KeyboardInterrupt:
+            return
     else:
         with open(log_path, 'r') as f:
             print(f.read())
