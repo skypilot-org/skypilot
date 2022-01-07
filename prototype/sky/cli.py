@@ -298,7 +298,11 @@ def run(yaml_path: Path, cluster: str, dryrun: bool, detach: bool):
     #
     # To fix all of the above, fix/circumvent the bug that 'ray up' not downing
     # old cloud's cluster with the same name.
-    sky.execute(dag, dryrun=dryrun, stream_logs=True, cluster_name=cluster, detach=detach)
+    sky.execute(dag,
+                dryrun=dryrun,
+                stream_logs=True,
+                cluster_name=cluster,
+                detach=detach)
 
 
 @cli.command()
@@ -386,23 +390,23 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster}\' not found'
                                  ' (see `sky status`).')
-    
+
     if all:
-        click.secho(f'Cancelling all jobs on cluster {cluster} ...', fg='yellow')
+        click.secho(f'Cancelling all jobs on cluster {cluster} ...',
+                    fg='yellow')
         jobs = None
     else:
         click.secho(f'Cancelling jobs {jobs} on cluster {cluster} ...',
                     fg='yellow')
-        
-        
+
     codegen = backend_utils.JobUtilsCodeGen()
     codegen.cancel_jobs(jobs)
     code = codegen.build()
-    
+
     # FIXME: Assumes a specific backend.
     backend = backends.CloudVmRayBackend()
     backend.run_on_head(handle, code, stream_logs=False)
-    
+
 
 def _readable_time_duration(start: int):
     duration = pendulum.now().subtract(seconds=time.time() - start)

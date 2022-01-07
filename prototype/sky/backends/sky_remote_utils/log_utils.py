@@ -133,13 +133,14 @@ def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
     if status in ['RUNNING', 'PENDING']:
         try:
             with open(log_path, 'r') as log_file:
-                # Using `_follow` instead of `tail -f` to streaming the whole log
-                # and creating a new process for tail.
+                # Using `_follow` instead of `tail -f` to streaming the whole
+                # log and creating a new process for tail.
                 for line in _follow(
                         log_file,
                         start_streaming_at='SKY INFO: Reserving task slots on',
-                        # FIXME: This is a hack to finish the tailing. If the job
-                        # is killed by the user, the tailing process will not end.
+                        # FIXME: This is a hack to finish the tailing. If the
+                        # job  is killed by the user, the tailing process will
+                        # not end.
                         end_following_at='SKY INFO: All tasks finished.'):
                     print(line, end='')
         except KeyboardInterrupt:

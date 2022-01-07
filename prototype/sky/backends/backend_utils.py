@@ -634,7 +634,7 @@ class JobUtilsCodeGen(object):
 
     def show_jobs(self, username: Optional[str], all_jobs: bool) -> str:
         self._code.append(f'job_utils.show_jobs({username!r}, {all_jobs})')
-        
+
     def cancel_jobs(self, job_ids: Optional[List[int]]) -> str:
         self._code.append(f'job_utils.cancel_jobs({job_ids!r})')
 
