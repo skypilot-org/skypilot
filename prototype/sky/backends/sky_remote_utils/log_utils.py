@@ -138,10 +138,12 @@ def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
                 for line in _follow(
                         log_file,
                         start_streaming_at='SKY INFO: All task slots reserved.',
+                        # FIXME: This is a hack to finish the tailing. If the job
+                        # is killed by the user, the tailing process will not end.
                         end_following_at='SKY INFO: All tasks finished.'):
                     print(line, end='')
         except KeyboardInterrupt:
             return
     else:
         with open(log_path, 'r') as f:
-            print(f.read())
+            print(f.read().replace('SKY INFO: All tasks finished.', ''))
