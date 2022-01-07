@@ -29,14 +29,14 @@ App = Union[task_lib.Task, task_lib.ParTask]
 RunId = str
 Resources = resources.Resources
 
-# NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_WORKDIR = '/tmp/workdir'
-SKY_REMOTE_APP_DIR = '/tmp/sky_app'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_LOGS_DIRECTORY = './sky_logs'
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
+# Keep the following two fields in sync with the cluster template:
+SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 
 
 def get_rel_path(path: str) -> str:
@@ -257,6 +257,9 @@ class SSHConfigHelper(object):
         username = auth_config['ssh_user']
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
+        if not os.path.exists(config_path):
+            return
+
         with open(config_path) as f:
             config = f.readlines()
 
@@ -531,6 +534,7 @@ def run_command_on_ip_via_ssh(ip: str,
 
 def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
     """Redirect the process's filtered stdout/stderr to both stream and file"""
+    log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
 
