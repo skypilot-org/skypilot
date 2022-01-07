@@ -161,6 +161,17 @@ def run_rsync(handle: ResourceHandle,
         backend_utils.run_no_outputs(command)
 
 
+def _add_cluster_to_ssh_config(cluster_name: str, cluster_ip: str,
+                               auth_config: Dict[str, str]) -> None:
+    backend_utils.SSHConfigHelper.add_cluster(cluster_name, cluster_ip,
+                                              auth_config)
+
+
+def _remove_cluster_from_ssh_config(cluster_ip: str,
+                                    auth_config: Dict[str, str]) -> None:
+    backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
+
+
 class RayCodeGen(object):
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -669,7 +680,7 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing VM{plural}. Setup completed.{style.RESET_ALL}')
-                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}sky ssh'
+                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}ssh'
                             f' {cluster_name}{style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
@@ -932,7 +943,6 @@ class CloudVmRayBackend(backends.Backend):
             if task.num_nodes == handle.requested_nodes and \
                 backend_utils.is_same_requested_resources(
                     handle.requested_resources, task.resources):
-
                 # Use the existing cluster.
                 assert handle.launched_resources is not None, (cluster_name,
                                                                handle)
@@ -942,13 +952,6 @@ class CloudVmRayBackend(backends.Backend):
                 # 2GPUs.
                 task.best_resources = handle.launched_resources
                 return cluster_name, handle.launched_resources
-            logger.error(f'Reusing existing cluster {cluster_name} with '
-                         'different requested resources.\n'
-                         f'Existing requested resources: '
-                         f'\t{handle.requested_resources}\n'
-                         f'Newly requested resources: \t{task.resources}\n'
-                         f'Please delete the cluster {cluster_name} and retry'
-                         ' or try to relaunch with a different cluster name.')
             # FIXME: for job queue, the currect logic may be checking requested
             # resources <= actual resources.
             raise exceptions.ResourcesMismatchError(
@@ -957,7 +960,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'  Existing: {handle.requested_nodes}x '
                 f'{handle.requested_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
-                f'existing cluster: `sky down {cluster_name}`.')
+                f'existing cluster first: sky down {cluster_name}')
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
@@ -1014,6 +1017,8 @@ class CloudVmRayBackend(backends.Backend):
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True)
+        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+        _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
         return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -1189,6 +1194,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'{style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
         os.makedirs(local_log_dir, exist_ok=True)
         # Call the ray sdk to rsync the logs back to local.
+        # FIXME: can we make rsync not verbose here (-v)?
         for ip in ips:
             sdk.rsync(
                 handle.cluster_yaml,
@@ -1355,7 +1361,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'\n{fore.CYAN}Cluster name: '
                         f'{style.BRIGHT}{name}{style.RESET_ALL}'
                         '\nTo log into the head VM:\t'
-                        f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}\n'
+                        f'{style.BRIGHT}ssh {name} {style.RESET_ALL}\n'
                         '\nTo teardown the cluster:'
                         f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}\n'
                         '\nTo stop the cluster:'
@@ -1400,6 +1406,8 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.run(f'ray down -y {f.name}')
             if handle.tpu_delete_script is not None:
                 backend_utils.run(f'bash {handle.tpu_delete_script}')
+        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+        _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name, terminate=terminate)
 

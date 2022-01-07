@@ -3,6 +3,7 @@
 from typing import Any, Tuple
 
 import boto3
+from google.api_core import exceptions as gcs_exceptions
 from google.cloud import storage
 
 Client = Any
@@ -49,3 +50,27 @@ def create_gcs_client() -> Client:
       region: str; Region name, e.g. us-central1, us-west1
     """
     return storage.Client()
+
+
+def verify_s3_bucket(name: str) -> bool:
+    """Helper method that checks if the S3 bucket exists
+
+    Args:
+      name: str; Name of S3 Bucket (without s3:// prefix)
+    """
+    s3 = boto3.resource('s3')
+    bucket = s3.Bucket(name)
+    return bucket in s3.buckets.all()
+
+
+def verify_gcs_bucket(name: str) -> bool:
+    """Helper method that checks if the GCS bucket exists
+
+    Args:
+      name: str; Name of GCS Bucket (without gs:// prefix)
+    """
+    try:
+        create_gcs_client().get_bucket(name)
+        return True
+    except gcs_exceptions.NotFound:
+        return False
