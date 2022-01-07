@@ -391,7 +391,7 @@ def status(all):  # pylint: disable=redefined-builtin
             cluster_status['last_use']
             if show_all else _truncate_long_string(cluster_status['last_use']),
             # STATUS
-            cluster_status['status'],
+            cluster_status['status'].value,
         ])
     click.echo(f'Sky Clusters\n{cluster_table}')
 
@@ -428,7 +428,7 @@ def down(
       # Tear down all existing clusters.
       sky down -a
     """
-    _terminate_or_stop(clusters, apply_to_all=all, terminate=True)
+    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
 
 
 @cli.command()
@@ -463,11 +463,106 @@ def stop(
       # Stop all existing clusters.
       sky stop -a
     """
-    _terminate_or_stop(clusters, apply_to_all=all, terminate=False)
+    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=False)
 
 
-def _terminate_or_stop(names: Tuple[str], apply_to_all: Optional[bool],
-                       terminate: bool) -> None:
+@cli.command()
+@click.argument('clusters', nargs=-1, required=False)
+def start(clusters: Tuple[str]):
+    """Restart cluster(s).
+
+    If a cluster is previously stopped (status == STOPPED) or failed in
+    provisioning/a task's setup (status == INIT), this command will attempt to
+    start the cluster.  (In the second case, any failed setup steps are not
+    performed and only a request to start the machines is attempted.)
+
+    If a cluster is already in an UP status, this command has no effect on it.
+
+    Examples:
+
+      \b
+      # Restart a specific cluster.
+      sky start cluster_name
+
+      \b
+      # Restart multiple clusters.
+      sky start cluster1 cluster2
+    """
+    to_start = []
+    if clusters:
+
+        def _filter(name, all_clusters):
+            for cluster_record in all_clusters:
+                if name == cluster_record['name']:
+                    return cluster_record
+            return None
+
+        all_clusters = global_user_state.get_clusters()
+        for name in clusters:
+            record = _filter(name, all_clusters)
+            if record is None:
+                print(f'Cluster {name} was not found.')
+                continue
+            # A cluster may have one of the following states:
+            #
+            #  STOPPED - ok to restart
+            #    (currently, only AWS clusters can be in this state)
+            #
+            #  UP - skipped, see below
+            #
+            #  INIT - ok to restart:
+            #    1. It can be a failed-to-provision cluster, so it isn't up
+            #      (Ex: gpunode --gpus=A100:8).  Running `sky start` enables
+            #      retrying the provisioning - without setup steps being
+            #      completed. (Arguably the original command that failed should
+            #      be used instead; but using start isn't harmful - after it
+            #      gets provisioned successfully the user can use the original
+            #      command).
+            #
+            #    2. It can be an up cluster that failed one of the setup steps.
+            #      This way 'sky start' can change its status to UP, enabling
+            #      'sky ssh' to debug things (otherwise `sky ssh` will fail an
+            #      INIT state cluster due to head_ip not being cached).
+            #
+            #      This can be replicated by adding `exit 1` to Task.setup.
+            if record['status'] == global_user_state.ClusterStatus.UP:
+                # An UP cluster; skipping 'sky start' because:
+                #  1. For a really up cluster, this has no effects (ray up -y
+                #    --no-restart) anyway.
+                #  2. A cluster may show as UP but is manually stopped in the
+                #    UI.  If Azure/GCP: ray autoscaler doesn't support reusing,
+                #    so 'sky start -c existing' will actually launch a new
+                #    cluster with this name, leaving the original cluster
+                #    zombied (remains as stopped in the cloud's UI).
+                #
+                #    This is dangerous and unwanted behavior!
+                print(f'Cluster {name} already has status UP.')
+                continue
+            assert record['status'] in (
+                global_user_state.ClusterStatus.INIT,
+                global_user_state.ClusterStatus.STOPPED), record
+            to_start.append({'name': name, 'handle': record['handle']})
+    if not to_start:
+        return
+    # FIXME: Assumes a specific backend.
+    backend = cloud_vm_ray_backend.CloudVmRayBackend()
+    for record in to_start:
+        name = record['name']
+        handle = record['handle']
+        with sky.Dag():
+            dummy_task = sky.Task().set_resources(handle.requested_resources)
+            dummy_task.num_nodes = handle.requested_nodes
+        click.secho(f'Starting cluster {name}...', bold=True)
+        backend.provision(dummy_task,
+                          to_provision=None,
+                          dryrun=False,
+                          stream_logs=True,
+                          cluster_name=name)
+        click.secho(f'Cluster {name} started.', fg='green')
+
+
+def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
+                                terminate: bool) -> None:
     """Terminates or stops a cluster (or all clusters)."""
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
@@ -492,7 +587,7 @@ def _terminate_or_stop(names: Tuple[str], apply_to_all: Optional[bool],
     if not to_down:
         if len(names) > 0:
             cluster_list = ', '.join(names)
-            print(f'Clusters {cluster_list} not found (see `sky status`).')
+            print(f'Clusters ({cluster_list}) not found (see `sky status`).')
         else:
             print('No existing clusters found (see `sky status`).')
 
@@ -506,9 +601,8 @@ def _terminate_or_stop(names: Tuple[str], apply_to_all: Optional[bool],
             click.secho(f'Terminating cluster {name}...done.', fg='green')
         else:
             click.secho(f'Stopping cluster {name}...done.', fg='green')
-            click.echo(
-                f'  Tip: to resume the cluster, use "sky run -c {name} <yaml>" '
-                'or "sky cpunode/gpunode".')
+            click.echo('  To restart the cluster, run: ', nl=False)
+            click.secho(f'sky start {name}', bold=True)
 
 
 @_interactive_node_cli_command

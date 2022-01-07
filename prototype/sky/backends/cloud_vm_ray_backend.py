@@ -903,7 +903,6 @@ class CloudVmRayBackend(backends.Backend):
             if task.num_nodes == handle.requested_nodes and \
                 backend_utils.is_same_requested_resources(
                     handle.requested_resources, task.resources):
-
                 # Use the existing cluster.
                 assert handle.launched_resources is not None, (cluster_name,
                                                                handle)
@@ -913,13 +912,6 @@ class CloudVmRayBackend(backends.Backend):
                 # 2GPUs.
                 task.best_resources = handle.launched_resources
                 return cluster_name, handle.launched_resources
-            logger.error(f'Reusing existing cluster {cluster_name} with '
-                         'different requested resources.\n'
-                         f'Existing requested resources: '
-                         f'\t{handle.requested_resources}\n'
-                         f'Newly requested resources: \t{task.resources}\n'
-                         f'Please delete the cluster {cluster_name} and retry'
-                         ' or try to relaunch with a different cluster name.')
             # FIXME: for job queue, the currect logic may be checking requested
             # resources <= actual resources.
             raise exceptions.ResourcesMismatchError(
@@ -928,7 +920,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'  Existing: {handle.requested_nodes}x '
                 f'{handle.requested_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
-                f'existing cluster: `sky down {cluster_name}`.')
+                f'existing cluster first: sky down {cluster_name}')
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
@@ -1162,6 +1154,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'{style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
         os.makedirs(local_log_dir, exist_ok=True)
         # Call the ray sdk to rsync the logs back to local.
+        # FIXME: can we make rsync not verbose here (-v)?
         for ip in ips:
             sdk.rsync(
                 handle.cluster_yaml,
