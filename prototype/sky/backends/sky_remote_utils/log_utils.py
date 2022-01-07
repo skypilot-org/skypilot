@@ -112,7 +112,7 @@ def _follow(file,
         if tmp is not None:
             line += tmp
             if line.endswith('\n') or line.endswith('\r'):
-                if start_streaming_at == line.strip():
+                if start_streaming_at in line.strip():
                     start_streaming = True
                 if (end_following_at is not None and
                         end_following_at == line.strip()):
@@ -137,7 +137,7 @@ def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
                 # and creating a new process for tail.
                 for line in _follow(
                         log_file,
-                        start_streaming_at='SKY INFO: All task slots reserved.',
+                        start_streaming_at='SKY INFO: Reserving task slots on',
                         # FIXME: This is a hack to finish the tailing. If the job
                         # is killed by the user, the tailing process will not end.
                         end_following_at='SKY INFO: All tasks finished.'):

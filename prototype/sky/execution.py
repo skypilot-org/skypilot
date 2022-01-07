@@ -47,7 +47,8 @@ def execute(dag: sky.Dag,
             backend: Optional[backends.Backend] = None,
             optimize_target: OptimizeTarget = OptimizeTarget.COST,
             stages: Optional[List[Stage]] = None,
-            cluster_name: Optional[str] = None) -> None:
+            cluster_name: Optional[str] = None,
+            detach: bool = False) -> None:
     """Runs a DAG.
 
     If the DAG has not been optimized yet, this will call sky.optimize() for
@@ -127,7 +128,7 @@ def execute(dag: sky.Dag,
 
         if stages is None or Stage.EXEC in stages:
             try:
-                backend.execute(handle, task, stream_logs)
+                backend.execute(handle, task, stream_logs, detach)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, teardown)

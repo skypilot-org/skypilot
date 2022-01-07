@@ -277,7 +277,12 @@ def cli():
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
-def run(yaml_path: Path, cluster: str, dryrun: bool):
+@click.option('--detach',
+              '-d',
+              default=False,
+              is_flag=True,
+              help='If True, detach from the job and return.')
+def run(yaml_path: Path, cluster: str, dryrun: bool, detach: bool):
     """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
@@ -293,7 +298,7 @@ def run(yaml_path: Path, cluster: str, dryrun: bool):
     #
     # To fix all of the above, fix/circumvent the bug that 'ray up' not downing
     # old cloud's cluster with the same name.
-    sky.execute(dag, dryrun=dryrun, stream_logs=True, cluster_name=cluster)
+    sky.execute(dag, dryrun=dryrun, stream_logs=True, cluster_name=cluster, detach=detach)
 
 
 @cli.command()
@@ -303,7 +308,12 @@ def run(yaml_path: Path, cluster: str, dryrun: bool):
               required=True,
               type=str,
               help='Name of the existing cluster to execute a task on.')
-def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
+@click.option('--detach',
+              '-d',
+              default=False,
+              is_flag=True,
+              help='If True, detach from the job and return.')
+def exec(yaml_path: Path, cluster: str, detach: bool):  # pylint: disable=redefined-builtin
     """Execute a task from a YAML spec on a cluster (skip setup).
 
     \b
@@ -348,7 +358,8 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
                 stages=[
                     sky.execution.Stage.SYNC_WORKDIR,
                     sky.execution.Stage.EXEC,
-                ])
+                ],
+                detach=detach)
 
 
 @cli.command()
