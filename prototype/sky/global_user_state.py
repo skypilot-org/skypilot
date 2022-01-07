@@ -82,9 +82,9 @@ def add_or_update_cluster(cluster_name: str,
     handle = pickle.dumps(cluster_handle)
     last_use = _get_pretty_entry_point()
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
-    _CURSOR.execute('INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?, ?)',
-                    (cluster_name, cluster_launched_at, handle, last_use,
-                     status.value))
+    _CURSOR.execute(
+        'INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?, ?)',
+        (cluster_name, cluster_launched_at, handle, last_use, status.value))
     _CONN.commit()
 
 
