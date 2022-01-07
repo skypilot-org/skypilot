@@ -10,7 +10,7 @@
 #    commands may require flags to follow symlinks (e.g., ls -H; du -L).
 
 resources:
-  cloud: azure
+  cloud: gcp
 
 # Format for file_mounts:
 #

@@ -78,7 +78,7 @@ with sky.Dag() as dag:
     train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
                      estimated_size_gigabytes=70)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
-    train.set_resources(sky.Resources(sky.Azure(), accelerators='V100'))
+    train.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
 
 # sky.execute(dag, dryrun=True)
 sky.execute(dag, cluster_name='dtf')
