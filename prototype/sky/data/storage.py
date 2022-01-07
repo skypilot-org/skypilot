@@ -174,6 +174,13 @@ class Storage(object):
         # from existing ones
         self.stores = {} if stores is None else stores
 
+        # If source is a pre-existing bucket, connect to the bucket
+        # If the bucket does not exist, this will error out
+        if 's3://' in self.source:
+            self.get_or_copy_to_s3()
+        elif 'gs://' in self.source:
+            self.get_or_copy_to_gcs()
+
     def get_or_copy_to_s3(self):
         """Adds AWS S3 Store to Storage
         """
@@ -213,9 +220,6 @@ class Storage(object):
         else:
             raise ValueError(f'{cloud_type} not supported as a Store!')
 
-        # Transfer data between buckets if needed
-        self._perform_bucket_transfer(store)
-
         assert store.is_initialized
 
         self.stores[cloud_type] = store
@@ -227,24 +231,6 @@ class Storage(object):
         for _, store in self.stores.items():
             store.delete()
 
-    def _perform_bucket_transfer(self, cur_store: AbstractStore):
-        """Private Method that determines if buckets should transfer data
-        between each other
-
-        Args:
-          cur_store: AbstractStore; The current store that is being added
-          to self.stores
-        """
-        if self.source.startswith('s3://'):
-            if isinstance(cur_store, GcsStore):
-                logger.info('Initating GCS Data Transfer Service from S3->GCS')
-                assert StorageType.S3 in self.stores
-                s3_store = self.stores[StorageType.S3]
-                cur_store.transfer_to_gcs(s3_store)
-        elif self.source.startswith('gs://'):
-            if isinstance(cur_store, S3Store):
-                assert False, 'GCS -> S3 Data Transfer not implemented yet'
-
 
 class S3Store(AbstractStore):
     """S3Store inherits from Storage Object and represents the backend
@@ -254,22 +240,35 @@ class S3Store(AbstractStore):
     def __init__(self, name: str, source: str, region='us-east-2'):
         super().__init__(name, source)
         if self.source.startswith('s3://'):
-            assert name == data_utils.split_s3_path(source)[
-                0], 'S3 Bucket is specified as path, the name should be the \
-             same as S3 bucket!'
+            assert name == data_utils.split_s3_path(source)[0], (
+                'S3 Bucket is specified as path, the name should be the '
+                'same as S3 bucket!')
+
+        elif self.source.startswith('gs://'):
+            assert name == data_utils.split_gcs_path(source)[0], (
+                'GCS Bucket is specified as path, the name should be the '
+                'same as GCS bucket!')
+            assert data_utils.verify_gcs_bucket(name), (
+                f'Source specified as {source}, a GCS bucket. ',
+                'GCS Bucket should exist!')
 
         self.client = data_utils.create_s3_client(region)
         self.region = region
         self.bucket, is_new_bucket = self._get_bucket()
         assert not is_new_bucket or self.source
-        if not self.source.startswith('s3://') and not self.source.startswith(
-                'gs://'):
+
+        if self.source.startswith('s3://'):
+            pass
+        elif self.source.startswith('gs://'):
+            self._transfer_to_s3()
+        else:
             if is_new_bucket:
                 logger.info('Uploading Local to S3')
                 self.upload_local_dir(self.source)
             else:
                 logger.info('Syncing Local to S3')
                 self.sync_local_dir()
+
         self.is_initialized = True
 
     def delete(self) -> None:
@@ -290,14 +289,24 @@ class S3Store(AbstractStore):
         sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'
         os.system(sync_command)
 
+    def _transfer_to_s3(self) -> None:
+        if self.source.startswith('gs://'):
+            data_transfer.gcs_to_s3(self.name, self.name)
+
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
-        """Obtains the S3 bucket. If the S3 bucket does not exist, this
-        method will create the S3 bucket
+        """Obtains the S3 bucket.
+
+        If the bucket exists, this method will connect to the bucket.
+        If the bucket does not exist, there are two cases:
+          1) Raise an error if the bucket source starts with s3://
+          2) Create a new bucket otherwise
         """
         s3 = boto3.resource('s3')
         bucket = s3.Bucket(self.name)
         if bucket in s3.buckets.all():
             return bucket, False
+        if self.source.startswith('s3://'):
+            raise ValueError('Attempted to connect to a non-existent bucket.')
         return self._create_s3_bucket(self.name), True
 
     def _upload_file(self, local_path: str, remote_path: str) -> None:
@@ -367,17 +376,29 @@ class GcsStore(AbstractStore):
 
     def __init__(self, name: str, source: str, region='us-central1'):
         super().__init__(name, source)
-        if 'gs://' in self.source:
-            assert name == data_utils.split_gcs_path(source)[
-                0], 'GCS Bucket is specified as path, the name should be the \
-                same as GCS bucket!'
+        if self.source.startswith('s3://'):
+            assert name == data_utils.split_s3_path(source)[0], (
+                'S3 Bucket is specified as path, the name should be the '
+                'same as S3 bucket!')
+            assert data_utils.verify_s3_bucket(name), (
+                f'Source specified as {source}, an S3 bucket. ',
+                'S3 Bucket should exist!')
+
+        elif self.source.startswith('gs://'):
+            assert name == data_utils.split_gcs_path(source)[0], (
+                'GCS Bucket is specified as path, the name should be the '
+                'same as GCS bucket!')
 
         self.client = data_utils.create_gcs_client()
         self.region = region
         self.bucket, is_new_bucket = self._get_bucket()
         assert not is_new_bucket or self.source
-        if not self.source.startswith('gs://') and not self.source.startswith(
-                's3://'):
+
+        if self.source.startswith('gs://'):
+            pass
+        elif self.source.startswith('s3://'):
+            self._transfer_to_gcs()
+        else:
             if is_new_bucket:
                 logger.info('Uploading Local to GCS')
                 self.upload_local_dir(self.source)
@@ -401,23 +422,25 @@ class GcsStore(AbstractStore):
         sync_command = f'gsutil -m rsync -d -r {self.source} gs://{self.name}/'
         os.system(sync_command)
 
-    def transfer_to_gcs(self, s3_store: AbstractStore) -> None:
-        """Transfer data from S3 to GCS bucket using Google's Data Transfer
-        service
-
-        Args:
-          s3_store: Object; S3 Backend, see S3Store
-        """
-        data_transfer.s3_to_gcs(s3_store, self)
+    def _transfer_to_gcs(self) -> None:
+        if self.source.startswith('s3://'):
+            data_transfer.s3_to_gcs(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
-        """Obtains the GCS bucket. If the GCS bucket does not exist, this
-        method will create the GCS bucket
+        """Obtains the GCS bucket.
+
+        If the bucket exists, this method will connect to the bucket.
+        If the bucket does not exist, there are two cases:
+          1) Raise an error if the bucket source starts with gs://
+          2) Create a new bucket otherwise
         """
         try:
             bucket = self.client.get_bucket(self.name)
             return bucket, False
         except gcs_exceptions.NotFound as e:
+            if self.source.startswith('gs://'):
+                raise ValueError(
+                    'Attempted to connect to a non-existent bucket.') from e
             logger.info(e)
             return self._create_gcs_bucket(self.name), True
 
