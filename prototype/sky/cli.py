@@ -433,6 +433,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         ])
     click.echo(f'Sky Clusters\n{cluster_table}')
 
+
 @cli.command()
 @click.option('--cluster',
               '-c',
@@ -456,6 +457,7 @@ def logs(cluster: str, job_id: str):
                                  ' (see `sky status`).')
     click.secho('Start streaming logs...', fg='yellow')
     backend.run_on_head(handle, code, stream_logs=True)
+
 
 @cli.command()
 @click.option('--all-users',
@@ -488,7 +490,7 @@ def queue(cluster: str, all_jobs: bool, all_users: bool):  # pylint: disable=red
         if handle is None:
             raise click.BadParameter(
                 f'Cluster {cluster} is not found (see `sky status`).')
-            
+
         job_table = backend.run_on_head(handle, code)
         click.echo(f'Sky Job Queue of Cluster {cluster}\n{job_table}')
         return

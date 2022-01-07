@@ -1,4 +1,4 @@
-"""Sky job queue, backed by a sqlite database.
+"""Sky job utils, backed by a sqlite database.
 
 This is a remote utility module that provides job queue functionality.
 """
@@ -15,7 +15,6 @@ import prettytable
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 SKY_LOGS_DIRECTORY = 'sky_logs'
-
 
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
@@ -156,11 +155,12 @@ def show_jobs(username: Optional[str], all_jobs: bool):
     jobs = _get_jobs(username, status_list=status_list)
     _show_job_queue(jobs)
 
+
 def log_dir(job_id: int) -> str:
     """Returns the path to the log file for a job and the status."""
     _update_status()
     rows = _CURSOR.execute(
-        f"""\
+        """\
             SELECT * FROM jobs
             WHERE job_id=(?)""", (job_id,))
     for row in rows:

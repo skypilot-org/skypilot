@@ -1,3 +1,7 @@
+"""Sky logging utils.
+
+This is a remote utility module that provides logging functionality.
+"""
 import io
 import os
 import selectors
@@ -129,6 +133,8 @@ def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
     if status in ['RUNNING', 'PENDING']:
         try:
             with open(log_path, 'r') as log_file:
+                # Using `_follow` instead of `tail -f` to streaming the whole log
+                # and creating a new process for tail.
                 for line in _follow(
                         log_file,
                         start_streaming_at='SKY INFO: All task slots reserved.',

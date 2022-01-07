@@ -204,7 +204,6 @@ class RayCodeGen(object):
             self,
             ip_list: List[str],
             accelerator_dict: Dict[str, int],
-            log_dir: str,
     ) -> List[Dict[str, int]]:
         """Create the resource_handle for gang scheduling for n_tasks."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
@@ -1135,8 +1134,7 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id, stream_logs=stream_logs)
-        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict,
-                                                    log_dir)
+        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict)
         for i, task_i in enumerate(par_task.tasks):
             # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
             # to initialize conda, so that 'conda activate ...' works.
@@ -1229,8 +1227,8 @@ class CloudVmRayBackend(backends.Backend):
             style = colorama.Style
             logger.info(
                 f'To stream logs: '
-                f'{style.BRIGHT}sky logs -c {handle.cluster_name} {job_id} {style.RESET_ALL}'
-            )
+                f'{style.BRIGHT}sky logs -c {handle.cluster_name} {job_id}'
+                f'{style.RESET_ALL}')
 
     def _fetch_job_id(self, handle: ResourceHandle) -> int:
         run_id = os.path.basename(self.log_dir)
@@ -1254,11 +1252,7 @@ class CloudVmRayBackend(backends.Backend):
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         if isinstance(task, task_mod.ParTask):
             job_id = self._fetch_job_id(handle)
-            return self._execute_par_task(handle,
-                                          task,
-                                          job_id,
-                                          stream_logs,
-                                          download_logs=False)
+            return self._execute_par_task(handle, task, job_id, stream_logs)
 
         # Otherwise, handle a basic Task.
         if task.run is None:
@@ -1274,11 +1268,7 @@ class CloudVmRayBackend(backends.Backend):
 
         # Case: Task(run, num_nodes=N)
         assert task.num_nodes > 1, task.num_nodes
-        return self._execute_task_n_nodes(handle,
-                                          task,
-                                          job_id,
-                                          stream_logs,
-                                          download_logs=False)
+        return self._execute_task_n_nodes(handle, task, job_id, stream_logs)
 
     def _execute_task_one_node(self, handle: ResourceHandle, task: App,
                                job_id: int, stream_logs: bool) -> None:
@@ -1298,8 +1288,7 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id, stream_logs=stream_logs)
-        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict,
-                                                    log_dir)
+        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict)
 
         codegen.add_ray_task(
             bash_script=script,
@@ -1334,8 +1323,7 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id, stream_logs=stream_logs)
-        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict,
-                                                    log_dir_base)
+        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict)
 
         ips_dict = task.run(ips)
         for ip in ips_dict:
@@ -1370,11 +1358,6 @@ class CloudVmRayBackend(backends.Backend):
                                 codegen.build(),
                                 job_id,
                                 executable='python3')
-
-        # Get external IPs for the nodes
-        external_ips = self._get_node_ips(handle.cluster_yaml,
-                                          task.num_nodes,
-                                          return_private_ips=False)
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
@@ -1536,7 +1519,10 @@ class CloudVmRayBackend(backends.Backend):
         ]
         return backend_utils.run_with_log(command, log_path, stream_logs)
 
-    def run_on_head(self, handle: ResourceHandle, cmd: str, stream_logs: bool=False) -> None:
+    def run_on_head(self,
+                    handle: ResourceHandle,
+                    cmd: str,
+                    stream_logs: bool = False) -> None:
         """Runs 'cmd' on the cluster's head node."""
         return self._run_command_on_head_via_ssh(handle,
                                                  cmd,

@@ -1,12 +1,9 @@
 """Util constants/functions for the backends."""
 import datetime
 import enum
-import io
 import os
 import pathlib
-import selectors
 import subprocess
-import sys
 import tempfile
 import textwrap
 import time
@@ -46,6 +43,7 @@ _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
 
 run_with_log = log_utils.run_with_log
+
 
 def get_rel_path(path: str) -> str:
     cwd = os.getcwd()
@@ -594,7 +592,6 @@ def requested_resources_available(cluster_resources: Set[Resources],
 
     task_resources = list(task_resources)[0]
     return task_resources.less_demanding_than(cluster_resources)
-
 
 
 def make_task_bash_script(codegen: str) -> str:
