@@ -6,7 +6,7 @@
 
 ```bash
 # Sky requires python version >= 3.6
-pip install -e ".[aws,azure,gcp]"
+pip install -e ".[all]"
 
 python examples/resnet_app.py
 

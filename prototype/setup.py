@@ -22,10 +22,12 @@ install_requires = [
 ]
 
 extras_require = {
-    'aws': 'awscli==1.22.17',
-    'azure': 'azure-cli',
+    'aws': ['awscli==1.22.17'],
+    'azure': ['azure-cli'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
 }
+
+extras_require['all'] = sum(extras_require.values(), [])
 
 setup(
     name='sky',
