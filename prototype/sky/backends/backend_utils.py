@@ -316,7 +316,7 @@ def write_cluster_config(run_id: RunId,
         - 'tpu-create-script' (if TPU is requested)
         - 'tpu-delete-script' (if TPU is requested)
     """
-    cloud = task.best_resources.cloud
+    cloud = to_provision.cloud
     resources_vars = cloud.make_deploy_resources_variables(to_provision)
     config_dict = {}
 

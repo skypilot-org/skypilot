@@ -937,7 +937,6 @@ class CloudVmRayBackend(backends.Backend):
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: `sky down {cluster_name}`.')
         task.best_resources = list(task.resources)[0]
-        return True
 
     def _check_existing_cluster(self, task: App, to_provision: Resources,
                                 cluster_name: str) -> Tuple[str, Resources]:
@@ -1113,6 +1112,7 @@ class CloudVmRayBackend(backends.Backend):
     def _execute_par_task(self, handle: ResourceHandle,
                           par_task: task_mod.ParTask, job_id: int,
                           stream_logs: bool, detach: bool) -> None:
+        # TODO: Deprecate the par_task, using the task directly.
         # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
         for task in par_task.tasks:
             assert task.num_nodes == 1, \
