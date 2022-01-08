@@ -72,6 +72,8 @@ time sky run -c mjq "$DIR"/job_queue/multinode.yaml
 time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml
 time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml
 time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml
+sky cancel -c mjq 102
+sky logs -c mjq 101
 sky queue mjq
 sky down mjq &
 
