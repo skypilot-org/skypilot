@@ -31,7 +31,8 @@ import functools
 import getpass
 import os
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
+import yaml
 
 import click
 import pendulum
@@ -244,6 +245,20 @@ def _create_and_ssh_into_node(
     click.secho(f'sky stop {cluster_name}', bold=True)
 
 
+def _check_yaml(entrypoint: str) -> bool:
+    """Checks if entrypoint is a readable yaml file"""
+    is_yaml = True
+    try:
+        with open(entrypoint, 'r') as f:
+            try:
+                yaml.safe_load(f)
+            except yaml.YAMLError:
+                is_yaml = False
+    except OSError:
+        is_yaml = False
+    return is_yaml
+
+
 class _NaturalOrderGroup(click.Group):
     """Lists commands in the order they are defined in this script.
 
@@ -260,7 +275,7 @@ def cli():
 
 
 @cli.command()
-@click.argument('yaml_path', required=True, type=str)
+@click.argument('entrypoint', required=True, type=str)
 @click.option('--cluster',
               '-c',
               default=None,
@@ -271,10 +286,9 @@ def cli():
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
-def run(yaml_path: Path, cluster: str, dryrun: bool):
+def run(entrypoint: Union[Path, str], cluster: str, dryrun: bool):
     """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
-    with sky.Dag() as dag:
-        sky.Task.from_yaml(yaml_path)
+
     # FIXME: --cluster flag semantics has the following bug.  'sky run -c name
     # x.yml' requiring GCP.  Then change x.yml to requiring AWS.  'sky run -c
     # name x.yml' again.  The GCP cluster is not down'd but should be.  The
@@ -287,55 +301,64 @@ def run(yaml_path: Path, cluster: str, dryrun: bool):
     #
     # To fix all of the above, fix/circumvent the bug that 'ray up' not downing
     # old cloud's cluster with the same name.
+    with sky.Dag() as dag:
+        if _check_yaml(entrypoint):
+            # Treat entrypoint as a yaml.
+            sky.Task.from_yaml(entrypoint)
+        else:
+            # Treat entrypoint as a bash command.
+            sky.Task(cluster, run=entrypoint, workdir=os.getcwd())
+
     sky.execute(dag, dryrun=dryrun, stream_logs=True, cluster_name=cluster)
 
 
 @cli.command()
-@click.argument('yaml_path', required=True, type=str)
+@click.argument('entrypoint', required=True, type=str)
 @click.option('--cluster',
               '-c',
               required=True,
               type=str,
               help='Name of the existing cluster to execute a task on.')
-def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
+def exec(entrypoint: Union[Path, str], cluster: str):  # pylint: disable=redefined-builtin
     """Execute a task from a YAML spec on a cluster (skip setup).
-
     \b
     Actions performed by this command only include:
       - workdir syncing
-      - executing the task's run command
+      - executing the task's run command (from yaml, command, or shell script)
+        on all cluster nodes
     `sky exec` is thus typically faster than `sky run`, provided a cluster
     already exists.
-
     All setup steps (provisioning, setup commands, file mounts syncing) are
     skipped.  If any of those specifications changed, this command will not
     reflect those changes.  To ensure a cluster's setup is up to date, use `sky
     run` instead.
-
     Typical workflow:
-
       # First command: set up the cluster once.
-
       >> sky run -c name app.yaml
-
     \b
       # Starting iterative development...
       # For example, modify local workdir code.
       # Future commands: simply execute the task on the launched cluster.
-
       >> sky exec -c name app.yaml
-
       # Simply do "sky run" again if anything other than Task.run is modified:
-
       >> sky run -c name app.yaml
-
+    Advanced use cases:
+      #  Pass in commands for execution
+      >> sky exec -c name 'echo Hello World'
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
                                  'Use `sky run` to provision first.')
+
     with sky.Dag() as dag:
-        sky.Task.from_yaml(yaml_path)
+        if _check_yaml(entrypoint):
+            # Treat entrypoint as a yaml file
+            sky.Task.from_yaml(entrypoint)
+        else:
+            # Treat entrypoint as a bash command.
+            sky.Task(cluster, run=entrypoint)
+
     sky.execute(dag,
                 handle=handle,
                 stages=[
