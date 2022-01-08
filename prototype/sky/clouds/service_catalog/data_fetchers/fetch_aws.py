@@ -109,6 +109,9 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
             return None, np.nan
         return accelerator['Name'], accelerator['Count']
 
+    def get_memory_gib(row) -> float:
+        return row['MemoryInfo']['SizeInMiB'] // 1024
+
     def get_additional_columns(row):
         acc_name, acc_count = get_acc_info(row)
         # AWS p3dn.24xlarge offers a different V100 GPU.
@@ -120,6 +123,7 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
             'SpotPrice': get_spot_price(row),
             'AcceleratorName': acc_name,
             'AcceleratorCount': acc_count,
+            'MemoryGiB': get_memory_gib(row),
         })
 
     df['Region'] = region
