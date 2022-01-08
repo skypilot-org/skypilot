@@ -14,7 +14,7 @@ Example usage:
   >> sky status
 
   # Tear down a specific cluster.
-  >> sky down -c cluster_name
+  >> sky down cluster_name
 
   # Tear down all existing clusters.
   >> sky down -a
@@ -291,7 +291,7 @@ def _create_and_ssh_into_node(
     if cluster_name == _default_interactive_node_name(node_type):
         option = ''
     else:
-        option = f' -c {cluster_name}'
+        option = f' {cluster_name}'
     click.secho(f'sky {node_type}{option}', bold=True)
     click.echo('To stop the node:\t', nl=False)
     click.secho(f'sky stop {cluster_name}', bold=True)
@@ -965,10 +965,9 @@ def gpunode(cluster: str, sync: Optional[bool],
       $ sky gpunode
 
       \b
-      # Alternatively, create multiple interactive nodes by specifying names
-      # via --cluster (-c).
-      $ sky gpunode -c node0
-      $ sky gpunode -c node1
+      # Alternatively, create multiple interactive nodes by specifying names.
+      $ sky gpunode node0
+      $ sky gpunode node1
 
       \b
       # Port forward.
@@ -1044,10 +1043,9 @@ def cpunode(cluster: str, sync: Optional[bool],
       $ sky cpunode
 
       \b
-      # Alternatively, create multiple interactive nodes by specifying names
-      # via --cluster (-c).
-      $ sky cpunode -c node0
-      $ sky cpunode -c node1
+      # Alternatively, create multiple interactive nodes by specifying names.
+      $ sky cpunode node0
+      $ sky cpunode node1
 
       \b
       # Port forward.
@@ -1117,10 +1115,9 @@ def tpunode(cluster: str, sync: Optional[bool],
       $ sky tpunode
 
       \b
-      # Alternatively, create multiple interactive nodes by specifying names
-      # via --cluster (-c).
-      $ sky tpunode -c node0
-      $ sky tpunode -c node1
+      # Alternatively, create multiple interactive nodes by specifying names.
+      $ sky tpunode node0
+      $ sky tpunode node1
 
       \b
       # Port forward.
