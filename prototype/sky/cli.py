@@ -324,7 +324,7 @@ def exec(entrypoint: Union[Path, str], cluster: str):  # pylint: disable=redefin
     \b
     Actions performed by this command only include:
       - workdir syncing
-      - executing the task's run command (from yaml, command, or shell script)
+      - executing the task's run command (from yaml or bash command)
         on all cluster nodes
     `sky exec` is thus typically faster than `sky run`, provided a cluster
     already exists.
