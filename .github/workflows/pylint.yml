@@ -28,7 +28,7 @@ jobs:
         pip install pylint==2.8.2
         # https://github.com/edaniszewski/pylint-quotes
         pip install pylint-quotes
-        pip install -e prototype
+        pip install -e "prototype[all]"
     - name: Analysing the code with pylint
       run: |
         pylint --load-plugins pylint_quotes prototype/sky
