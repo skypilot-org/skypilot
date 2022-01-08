@@ -109,6 +109,8 @@ def _ssh_options_list(ssh_private_key: Optional[str],
         'ControlPersist': '30s',
         # ConnectTimeout.
         'ConnectTimeout': '{}s'.format(timeout),
+        # ForwardAgent (for git credentials).
+        'ForwardAgent': 'yes',
     }
     ssh_key_option = [
         '-i',
