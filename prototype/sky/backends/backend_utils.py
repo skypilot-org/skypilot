@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import textwrap
 import time
-from typing import Dict, List, Optional, Union, Set
+from typing import Dict, List, Optional, Set
 import yaml
 import zlib
 
@@ -18,8 +18,8 @@ from sky import clouds
 from sky import logging
 from sky import resources
 from sky import task as task_lib
-from sky.backends import sky_remote_libs
-from sky.backends.sky_remote_libs import job_lib, log_lib
+from sky.backends import remote_libs
+from sky.backends.remote_libs import job_lib, log_lib
 
 logger = logging.init_logger(__name__)
 
@@ -35,7 +35,7 @@ SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.1'
 SKY_JOB_RUNNING_INDICATOR = '.sky_job_running'
-SKY_REMOTE_UTIL_PATH = '/tmp/sky_remote_libs'
+SKY_REMOTE_LIB_PATH = '~/.sky/remote_libs'
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
@@ -409,8 +409,9 @@ def write_cluster_config(run_id: RunId,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Sky remote utils.
-                'sky_remote_libs': os.path.abspath(
-                    os.path.dirname(sky_remote_libs.__file__)),
+                'sky_remote_libs_remote_path': SKY_REMOTE_LIB_PATH,
+                'sky_remote_libs_local_path': os.path.abspath(
+                    os.path.dirname(remote_libs.__file__)),
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -626,14 +627,15 @@ class JobUtilsCodeGen(object):
         super().__init__()
         self._code = [
             'import sys',
-            f'sys.path.append({SKY_REMOTE_UTIL_PATH!r})',
+            'import os',
+            f'lib_path = os.path.expanduser({SKY_REMOTE_LIB_PATH!r})',
+            'sys.path.append(lib_path)',
             'import job_lib',
             'import log_lib',
         ]
 
     def add_job(self, username: str, run_id: str) -> None:
-        self._code.append(
-            f'job_lib.add_job({username!r}, {run_id!r})')
+        self._code.append(f'job_lib.add_job({username!r}, {run_id!r})')
 
     def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:
         self._code.append(f'job_lib.show_jobs({username!r}, {all_jobs})')

@@ -63,9 +63,8 @@ with sky.Dag() as dag:
         workdir=workdir,
         setup=setup,
         run='conda activate resnet && \
-            tensorboard --logdir resnet-model-dir --port 4650'                                                              ,
+            tensorboard --logdir resnet-model-dir --port 4650',
     )
-    # FIXME: We need to support task without specify resources.
     tensorboard.set_resources(sky.Resources())
 
 sky.execute(dag,

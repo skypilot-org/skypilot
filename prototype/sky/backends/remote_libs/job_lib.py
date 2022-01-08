@@ -1,4 +1,4 @@
-"""Sky job utils, backed by a sqlite database.
+"""Sky job lib, backed by a sqlite database.
 
 This is a remote utility module that provides job queue functionality.
 """
@@ -55,14 +55,15 @@ def add_job(username: str, run_id: str) -> int:
     _CURSOR.execute('INSERT INTO jobs VALUES (?, null, ?, ?, ?)',
                     (username, job_submitted_at, 'INIT', run_id))
     _CONN.commit()
-    rows = _CURSOR.execute('SELECT job_Id FROM jobs WHERE run_id=(?)', (run_id,))
+    rows = _CURSOR.execute('SELECT job_Id FROM jobs WHERE run_id=(?)',
+                           (run_id,))
     for row in rows:
         job_id = row[0]
     assert job_id is not None
     print(job_id)
 
 
-def change_status(job_id: int, status: str) -> None:
+def set_status(job_id: int, status: str) -> None:
     _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
                     (status, job_id))
     _CONN.commit()
@@ -134,7 +135,7 @@ def _update_status() -> None:
     for i, job in enumerate(running_jobs):
         ray_status = results[i].strip().rstrip('.')
         ray_status = ray_status.rpartition(' ')[-1]
-        change_status(job['job_id'], ray_status)
+        set_status(job['job_id'], ray_status)
 
 
 def _readable_time_duration(start: int) -> str:
@@ -193,7 +194,7 @@ def cancel_jobs(jobs: Optional[List[str]]) -> None:
     cancel_cmd = ';'.join(cancel_cmd)
     subprocess.run(cancel_cmd, shell=True, check=True, executable='/bin/bash')
     for job_id in jobs:
-        change_status(job_id, JobStatus.STOPPED.value)
+        set_status(job_id, JobStatus.STOPPED.value)
 
 
 def log_dir(job_id: int) -> Tuple[Optional[str], Optional[str]]:

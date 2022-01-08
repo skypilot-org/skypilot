@@ -132,8 +132,8 @@ class AWS(clouds.Cloud):
     ) -> Optional[Dict[str, int]]:
         return aws_catalog.get_accelerators_from_instance_type(instance_type)
 
-    def make_deploy_resources_variables(self, to_provison):
-        r = to_provison
+    def make_deploy_resources_variables(self, resources):
+        r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:

@@ -35,7 +35,7 @@ class Task(object):
             name: Optional[str] = None,
             *,
             setup: Optional[str] = None,
-            run: CommandOrCommandGen = None,
+            run: Optional[CommandOrCommandGen] = None,
             workdir: Optional[str] = None,
             num_nodes: Optional[int] = None,
             # Advanced:
@@ -46,7 +46,7 @@ class Task(object):
     ):
         """Initializes a Task.
 
-        All fields are optional except 'run': either a shell command to run
+        All fields are optional: either a shell command to run
         (str) or a command generator for different nodes (lambda; see below).
 
         Before executing a Task, it is required to call Task.set_resources() to
@@ -120,8 +120,6 @@ class Task(object):
             config = yaml.safe_load(f)
 
         # TODO: perform more checks on yaml and raise meaningful errors.
-        # if 'run' not in config:
-        #     raise ValueError('The YAML spec should include a \'run\' field.')
 
         task = Task(
             config.get('name'),

@@ -121,14 +121,10 @@ class LocalDockerBackend(backends.Backend):
             'Post setup is currently not supported in LocalDockerBackend')
 
     def execute(self, handle: ResourceHandle, task: App,
-                stream_logs: bool) -> None:
+                stream_logs: bool, detach_run: bool) -> None:
         """ Launches the container."""
 
-        # ParTask and Tasks with more than 1 nodes are not currently supported
-        # if isinstance(task, task_mod.ParTask):
-        #     raise NotImplementedError(
-        #         'ParTask is currently not supported in LocalDockerBackend.')
-
+        # FIXME: handle the detach_run
         if task.num_nodes > 1:
             raise NotImplementedError(
                 'Tasks with num_nodes > 1 is currently not supported in '

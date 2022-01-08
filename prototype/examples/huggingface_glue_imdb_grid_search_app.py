@@ -12,7 +12,7 @@ with sky.Dag() as dag:
     python3 -c \'import datasets; datasets.load_dataset("imdb")\''
 
     sky.Task(setup=common_setup).set_resources(resources_to_launch)
-# `detach_run` will only detach the `run` command. The provision and `setup` are 
+# `detach_run` will only detach the `run` command. The provision and `setup` are
 # still blocking.
 handle = sky.execute(dag, cluster_name='hgs', detach_run=True)
 

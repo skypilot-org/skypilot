@@ -86,8 +86,8 @@ class Cloud(object):
     def is_same_cloud(self, other):
         raise NotImplementedError
 
-    def make_deploy_resources_variables(self, to_provision):
-        """Converts a planned sky.Task into cloud-specific resource variables.
+    def make_deploy_resources_variables(self, resources):
+        """Converts a planned sky.Resources into cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
         any accelerators, etc.) in the cloud's deployment YAML template.

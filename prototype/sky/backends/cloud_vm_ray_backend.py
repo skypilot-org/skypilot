@@ -27,7 +27,7 @@ from sky import logging
 from sky import optimizer
 from sky import resources as resources_lib
 from sky.backends import backend_utils
-from sky.backends.sky_remote_libs import log_lib
+from sky.backends.remote_libs import log_lib
 
 App = backend_utils.App
 
@@ -42,7 +42,7 @@ SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
-SKY_REMOTE_UTIL_PATH = backend_utils.SKY_REMOTE_UTIL_PATH
+SKY_REMOTE_LIB_PATH = backend_utils.SKY_REMOTE_LIB_PATH
 
 logger = logging.init_logger(__name__)
 
@@ -182,19 +182,14 @@ class RayCodeGen(object):
             import ray
             import ray.util as ray_util
 
-            sys.path.append('{SKY_REMOTE_UTIL_PATH}')
+            lib_path = os.path.expanduser({SKY_REMOTE_LIB_PATH!r})
+            sys.path.append(lib_path)
             import job_lib
             
-            job_lib.change_status({job_id!r}, {JobStatus.PENDING.value!r})
+            job_lib.set_status({job_id!r}, {JobStatus.PENDING.value!r})
 
-            # Set this streaming to true to collect logs to the head node, 
-            # the stream_logs=False is used to avoid streaming to console.
             ray.init('auto', namespace='__sky__{job_id}__', log_to_driver=True)
 
-            # print('cluster_resources:', ray.cluster_resources())
-            # print('available_resources:', ray.available_resources())
-            # print('live nodes:', ray.state.node_ids())
-            
             futures = []"""),
             inspect.getsource(log_lib.redirect_process_output),
             inspect.getsource(log_lib.run_with_log),
@@ -249,7 +244,7 @@ class RayCodeGen(object):
                 print(\'SKY INFO: All task slots reserved.\',
                       file=sys.stderr,
                       flush=True)
-                job_lib.change_status({self.job_id!r}, {JobStatus.RUNNING.value!r})
+                job_lib.set_status({self.job_id!r}, {JobStatus.RUNNING.value!r})
                 """),
         ]
 
@@ -1210,6 +1205,7 @@ class CloudVmRayBackend(backends.Backend):
                                                    codegen.build(),
                                                    '/dev/null',
                                                    stream_logs=False)[1]
+        logger.info(f'Job_id: {job_id}')
         job_id = int(job_id)
         return job_id
 
