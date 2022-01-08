@@ -66,3 +66,12 @@ Resource provisioning
 ## Design notes
 
 *Empower the user to debug things.*  This means exposing SSH access to the launched VMs, saving and priting logs, etc.
+
+
+## SSH Access
+The system currently supports SSH access for launched VMs by modifying your local `~/.ssh/config`. For git credentials to forward seamlessly, users must start their SSH agent and add their GitHub SSH key to it:
+```
+eval "$(ssh-agent -s)"
+ssh-add -K /path/to/key  # e.g. ~/.ssh/id_ed25519
+```
+For more information on GitHub authentication and keys, see their [setup tutorial](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent).
