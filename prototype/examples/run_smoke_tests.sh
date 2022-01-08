@@ -24,8 +24,8 @@ sky down fm &
 # time sky exec -c resnet "$DIR"/resnet_app.yaml
 # time python "$DIR"/resnet_app.py
 # sky down resnet &
-# FIXME: if concurrently running two runs of resnet, the second run should be
-# waiting for the first run, but this is not happening.
+# If concurrently running two runs of resnet, the second run will be
+# waiting for the first run.
 
 # Task(), 1 node.
 # 6:47.90 total
