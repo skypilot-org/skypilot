@@ -301,7 +301,7 @@ class RayCodeGen(object):
                 .options({name_str}{resources_str}{num_gpus_str}) \\
                 .remote(
                     {bash_script!r},
-                    '{log_path}',
+                    {log_path!r},
                     stream_logs=True,
                 ))""")
         ]
@@ -907,7 +907,9 @@ class CloudVmRayBackend(backends.Backend):
     def __init__(self):
         run_id = backend_utils.get_run_id()
         self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, run_id)
-        os.makedirs(self.log_dir, exist_ok=True)
+        # Do not make directories to avoid create folder for commands that
+        # do not need it (`sky status`, `sky logs` ...)
+        # os.makedirs(self.log_dir, exist_ok=True)
 
         self._dag = None
         self._optimize_target = None
@@ -1229,7 +1231,7 @@ class CloudVmRayBackend(backends.Backend):
         job_submit_cmd = (
             f'mkdir -p {remote_log_dir} && ray job submit '
             f'--address=127.0.0.1:8265 --job-id {job_id} -- '
-            f'"{executable} -u {script_path} 2>&1 > {remote_log_path}"')
+            f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',
                                           job_log_path, stream_logs)
@@ -1248,7 +1250,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                 '\nTo cancel the job:\t'
                 f'{style.BRIGHT}sky cancel -c {name} {job_id} {style.RESET_ALL}'
-                'To stream logs:\t'
+                '\nTo stream logs:\t'
                 f'{style.BRIGHT}sky logs -c {handle.cluster_name} {job_id}'
                 f'{style.RESET_ALL}'
                 '\nTo view the job queue:\t'

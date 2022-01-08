@@ -14,6 +14,7 @@ from typing import Iterator, List, Optional
 
 def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
     """Redirect the process's filtered stdout/stderr to both stream and file"""
+    log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
 
@@ -130,6 +131,7 @@ def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
         return
 
     log_path = os.path.join(log_dir, 'run.log')
+    log_path = os.path.expanduser(log_path)
     if status in ['RUNNING', 'PENDING']:
         try:
             with open(log_path, 'r') as log_file:
