@@ -61,8 +61,6 @@ def execute(dag: sky.Dag,
       teardown: bool; whether to teardown the launched resources after
         execution.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
-        Hint: for a ParTask, set this to False to avoid a lot of log outputs;
-        each task's output can be redirected to their own files.
       handle: Any; if provided, execution will use an existing backend cluster
         handle instead of provisioning a new one.
       backend: Backend; backend to use for executing the tasks. Defaults to
@@ -149,3 +147,4 @@ def execute(dag: sky.Dag,
         if not status_printed:
             # Needed because this finally doesn't always get executed on errors.
             backends.backend_utils.run('sky status')
+    return handle

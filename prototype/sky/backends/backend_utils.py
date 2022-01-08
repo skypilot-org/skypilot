@@ -24,7 +24,7 @@ from sky.backends.sky_remote_utils import job_utils, log_utils
 logger = logging.init_logger(__name__)
 
 # An application.  These are the task types to support.
-App = Union[task_lib.Task, task_lib.ParTask]
+App = Union[task_lib.Task]
 RunId = str
 Resources = resources.Resources
 

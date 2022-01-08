@@ -2,13 +2,13 @@ import subprocess
 
 import sky
 
+# Start the instance.
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
     subprocess.run(f'cd {workdir} && git checkout 222cc86',
                    shell=True,
                    check=True)
-
     # The setup command.  Will be run under the working directory.
     setup = 'pip install --upgrade pip && \
         conda init bash && \
@@ -17,6 +17,13 @@ with sky.Dag() as dag:
            conda activate resnet && \
            pip install tensorflow==2.4.0 pyyaml && \
            cd models && pip install -e .)'
+
+    task = sky.Task('setup', workdir=workdir, setup=setup)
+    task.set_resources(sky.Resources(sky.AWS(), accelerators={'V100': 1}))
+handle = sky.execute(dag, cluster_name='tb', detach=True)
+
+# Run the training task.
+with sky.Dag() as dag:
 
     # The command to run.  Will be run under the working directory.
     run = 'conda activate resnet && mkdir -p resnet-model-dir && \
@@ -31,16 +38,24 @@ with sky.Dag() as dag:
     train = sky.Task(
         'train',
         workdir=workdir,
-        setup=setup,
         run=run,
     )
 
     train.set_resources({
         sky.Resources(accelerators='V100'),
     })
+sky.execute(dag,
+            cluster_name='tb',
+            handle=handle,
+            stages=[
+                sky.execution.Stage.EXEC,
+            ],
+            detach=True)
 
+# Run the tensorboard task.
+with sky.Dag() as dag:
     # Use 'ssh -L 4650:localhost:4650 <cluster_name>' to forward port to local.
-    # 'ssh -L 4650:localhost:4650 sky-12345'
+    # 'ssh -L 4650:localhost:4650 tb'
     tensorboard = sky.Task(
         'tensorboard',
         workdir=workdir,
@@ -48,11 +63,13 @@ with sky.Dag() as dag:
         run='conda activate resnet && \
             tensorboard --logdir resnet-model-dir --port 4650',
     )
+    # FIXME: We need to support task without specify resources.
+    tensorboard.set_resources(sky.Resources())
 
-    # Run the training and tensorboard in parallel.
-    task = sky.ParTask([train, tensorboard])
-    total = sky.Resources(sky.AWS(), accelerators={'V100': 1})
-    task.set_resources(total)
-
-# sky.execute(dag, dryrun=True)
-sky.execute(dag)
+sky.execute(dag,
+            cluster_name='tb',
+            handle=handle,
+            stages=[
+                sky.execution.Stage.EXEC,
+            ],
+            detach=True)

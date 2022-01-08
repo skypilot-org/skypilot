@@ -125,9 +125,9 @@ class LocalDockerBackend(backends.Backend):
         """ Launches the container."""
 
         # ParTask and Tasks with more than 1 nodes are not currently supported
-        if isinstance(task, task_mod.ParTask):
-            raise NotImplementedError(
-                'ParTask is currently not supported in LocalDockerBackend.')
+        # if isinstance(task, task_mod.ParTask):
+        #     raise NotImplementedError(
+        #         'ParTask is currently not supported in LocalDockerBackend.')
 
         if task.num_nodes > 1:
             raise NotImplementedError(

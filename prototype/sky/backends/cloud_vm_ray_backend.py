@@ -1111,72 +1111,6 @@ class CloudVmRayBackend(backends.Backend):
                                                         task.container_name,
                                                         ssh_user=ssh_user)
 
-    def _execute_par_task(self, handle: ResourceHandle,
-                          par_task: task_mod.ParTask, job_id: int,
-                          stream_logs: bool, detach: bool) -> None:
-        # TODO: Deprecate the par_task, using the task directly.
-        # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
-        for task in par_task.tasks:
-            assert task.num_nodes == 1, \
-                ('ParTask does not support inner Tasks with '
-                f'num_nodes > 1: {task}')
-        # Strategy:
-        #  ray.init(..., log_to_driver=False); otherwise too many logs.
-        #  for task:
-        #    submit _run_cmd(cmds[i]) with resource {task i's resource}
-        # Concrete impl. of the above: codegen a script that contains all the
-        # tasks, rsync the script to head, and run that script on head.
-
-        # We cannot connect from this local node to the remote Ray cluster
-        # using a Ray client, because the default port 10001 may not be open to
-        # this local node.
-        #
-        # One downside(?) of client mode is to dictate local machine having the
-        # same python & ray versions as the cluster.  We can plumb through the
-        # yamls to take care of it.  The upsides are many-fold (e.g., directly
-        # manipulating the futures).
-        #
-        log_dir_base = os.path.join(f'{SKY_REMOTE_WORKDIR}', f'{self.log_dir}')
-        log_dir = os.path.join(log_dir_base, 'tasks')
-
-        ips = self._get_node_ips(handle.cluster_yaml,
-                                 par_task.num_nodes,
-                                 return_private_ips=True)
-        accelerator_dict = _get_task_demands_dict(par_task)
-
-        codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
-        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict)
-        for i, task_i in enumerate(par_task.tasks):
-            # '. $(conda info --base)/etc/profile.d/conda.sh || true' is used
-            # to initialize conda, so that 'conda activate ...' works.
-            task_i_script = backend_utils.make_task_bash_script(task_i.run)
-            task_i_name = f'task-{i}' if task_i.name is None else task_i.name
-            codegen.add_ray_task(
-                bash_script=task_i_script,
-                task_name=task_i_name,
-                # We can't access t.best_resources because the inner task
-                # doesn't undergo optimization.  Example value: {"V100": 1}.
-                ray_resources_dict=par_task.get_task_resource_demands(i),
-                log_path=os.path.join(log_dir, f'{task_i_name}.log'))
-        codegen.add_epilogue()
-        code = codegen.build()
-
-        # Logger.
-        colorama.init()
-        fore = colorama.Fore
-        style = colorama.Style
-        logger.info(f'{fore.CYAN}Starting ParTask execution.{style.RESET_ALL}')
-        if not stream_logs:
-            _log_hint_for_redirected_outputs(log_dir, handle.cluster_yaml)
-
-        self._exec_code_on_head(handle,
-                                code,
-                                job_id,
-                                executable='python3',
-                                stream_logs=stream_logs,
-                                detach=detach)
-
     def _rsync_down_logs(self,
                          handle: ResourceHandle,
                          log_dir: str,
@@ -1278,13 +1212,6 @@ class CloudVmRayBackend(backends.Backend):
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self._check_resources_available_for_task(handle, task)
-
-        # Execution logic differs for three types of tasks.
-        # Case: ParTask(tasks), t.num_nodes == 1 for t in tasks
-        if isinstance(task, task_mod.ParTask):
-            job_id = self._fetch_job_id(handle)
-            return self._execute_par_task(handle, task, job_id, stream_logs,
-                                          detach)
 
         # Otherwise, handle a basic Task.
         if task.run is None:

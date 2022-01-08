@@ -1,14 +1,22 @@
 import sky
 
+# Create the cluster.
 with sky.Dag() as dag:
-    task = sky.ParTask([
-        sky.Task(run=f'echo {i}; sleep 5').set_resources(
-            sky.Resources(accelerators={'K80': 0.05})) for i in range(16)
-    ])
+    cluster_resources = sky.Resources(sky.AWS(), accelerators={'K80': 1})
+    task = sky.Task().set_resources(cluster_resources)
+handle = sky.execute(dag, cluster_name='multi_echo', detach=True)
 
-    # Share the total resources among the inner Tasks.  The inner Tasks will be
-    # bin-packed and scheduled according to their individual demands.
-    total = sky.Resources(sky.GCP(), accelerators={'K80': 1})
-    task.set_resources(total)
-
-sky.execute(dag, cluster_name='multi-echo')
+# Run the multiple tasks.
+for i in range(16):
+    with sky.Dag() as dag:
+        task = sky.Task(run=f'echo {i}; sleep 15')
+        resources = sky.Resources(accelerators={'K80': 0.1})
+        task.set_resources(resources)
+    # FIXME: Simplify this API.
+    sky.execute(dag,
+                cluster_name='multi_echo',
+                handle=handle,
+                stages=[
+                    sky.execution.Stage.EXEC,
+                ],
+                detach=True)
