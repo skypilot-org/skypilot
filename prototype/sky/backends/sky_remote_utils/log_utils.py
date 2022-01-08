@@ -112,7 +112,7 @@ def _follow(file,
         tmp = file.readline()
         if tmp is not None:
             line += tmp
-            if line.endswith('\n') or line.endswith('\r'):
+            if '\n' in line or '\r' in line:
                 if start_streaming_at in line.strip():
                     start_streaming = True
                 if start_streaming:
@@ -144,9 +144,9 @@ def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
                         # job  is killed by the user, the tailing process will
                         # not end.
                         end_following_at='SKY INFO: All tasks finished.'):
-                    print(line, end='')
+                    print(line, end='', flush=True)
         except KeyboardInterrupt:
             return
     else:
         with open(log_path, 'r') as f:
-            print(f.read().replace('SKY INFO: All tasks finished.', ''))
+            print(f.read())

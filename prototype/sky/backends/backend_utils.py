@@ -649,4 +649,4 @@ class JobUtilsCodeGen(object):
 
     def build(self) -> str:
         code = ';'.join(self._code)
-        return f'python3 -c {code!r}'
+        return f'python3 -u -c {code!r}'

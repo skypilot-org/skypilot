@@ -177,6 +177,7 @@ class RayCodeGen(object):
             import selectors
             import subprocess
             import tempfile
+            import time
             from typing import Dict, List, Optional, Union
 
             import ray
@@ -234,16 +235,21 @@ class RayCodeGen(object):
                     # Set the GPU to avoid ray hanging the resources allocation
                     **gpu_dict,
                 })
+
         pack_mode = 'STRICT_SPREAD'
         self._code += [
             textwrap.dedent(f"""\
                 pg = ray_util.placement_group({json.dumps(bundles)}, {pack_mode!r})
-                print(\'SKY INFO: Reserving task slots on {len(bundles)} nodes.\', flush=True)
+                print('SKY INFO: Reserving task slots on {len(bundles)} nodes.',
+                      file=sys.stderr,
+                      flush=True)
                 # FIXME: This will print the error message from autoscaler if
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
-                print(\'SKY INFO: All task slots reserved.\')
+                print(\'SKY INFO: All task slots reserved.\',
+                      file=sys.stderr,
+                      flush=True)
                 job_utils.change_status({self.job_id!r}, {JobStatus.RUNNING.value!r})
                 """),
         ]
@@ -312,8 +318,14 @@ class RayCodeGen(object):
         assert not self._has_epilogue, 'add_epilogue() called twice?'
         self._has_epilogue = True
 
-        self._code.append('ray.get(futures)')
-        self._code.append('print(\'SKY INFO: All tasks finished.\')')
+        self._code += [
+            textwrap.dedent(f"""\
+                ray.get(futures)
+                time.sleep(3)
+                print(\'SKY INFO: All tasks finished.\',
+                      file=sys.stderr, 
+                      flush=True)""")
+        ]
 
     def build(self) -> str:
         """Returns the entire generated program."""
