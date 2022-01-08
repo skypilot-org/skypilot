@@ -57,7 +57,7 @@ head_node_type: ray.head.default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-  "/tmp/sky_remote_utils": "{{sky_remote_utils}}",
+  "/tmp/sky_remote_libs": "{{sky_remote_libs}}",
 {%- if workdir is not none %}
   "~/sky_workdir": "{{workdir}}",
 {%- endif %}

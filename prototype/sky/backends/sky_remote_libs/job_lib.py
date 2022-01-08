@@ -40,26 +40,25 @@ except sqlite3.OperationalError:
     _CURSOR.execute("""\
       CREATE TABLE jobs (
         username TEXT,
-        job_id INTEGER PRIMARY KEY,
+        job_id INTEGER PRIMARY KEY AUTOINCREMENT,
         submitted_at INTEGER,
         status TEXT,
-        run_id TEXT)""")
+        run_id TEXT CANDIDATE KEY)""")
 
 _CONN.commit()
 
 
-def reserve_next_job_id(username: str, run_id: str) -> int:
+def add_job(username: str, run_id: str) -> int:
     """Reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
-    rows = _CURSOR.execute('select max(job_id) from jobs')
-    job_id = 100
-    for row in rows:
-        if row[0] is not None:
-            job_id = row[0]
-    job_id += 1
-    _CURSOR.execute('INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?, ?)',
-                    (username, job_id, job_submitted_at, 'INIT', run_id))
+    # job_id will autoincrement with the null value
+    _CURSOR.execute('INSERT INTO jobs VALUES (?, null, ?, ?, ?)',
+                    (username, job_submitted_at, 'INIT', run_id))
     _CONN.commit()
+    rows = _CURSOR.execute('SELECT job_Id FROM jobs WHERE run_id=(?)', (run_id,))
+    for row in rows:
+        job_id = row[0]
+    assert job_id is not None
     print(job_id)
 
 

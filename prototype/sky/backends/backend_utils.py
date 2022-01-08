@@ -18,32 +18,32 @@ from sky import clouds
 from sky import logging
 from sky import resources
 from sky import task as task_lib
-from sky.backends import sky_remote_utils
-from sky.backends.sky_remote_utils import job_utils, log_utils
+from sky.backends import sky_remote_libs
+from sky.backends.sky_remote_libs import job_lib, log_lib
 
 logger = logging.init_logger(__name__)
 
 # An application.  These are the task types to support.
-App = Union[task_lib.Task]
+App = task_lib.Task
 RunId = str
 Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_WORKDIR = job_utils.SKY_REMOTE_WORKDIR
+SKY_REMOTE_WORKDIR = job_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
-SKY_LOGS_DIRECTORY = job_utils.SKY_LOGS_DIRECTORY
+SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.1'
 SKY_JOB_RUNNING_INDICATOR = '.sky_job_running'
-SKY_REMOTE_UTIL_PATH = '/tmp/sky_remote_utils'
+SKY_REMOTE_UTIL_PATH = '/tmp/sky_remote_libs'
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
 
-JobStatus = job_utils.JobStatus
+JobStatus = job_lib.JobStatus
 
-run_with_log = log_utils.run_with_log
+run_with_log = log_lib.run_with_log
 
 
 def get_rel_path(path: str) -> str:
@@ -409,8 +409,8 @@ def write_cluster_config(run_id: RunId,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Sky remote utils.
-                'sky_remote_utils': os.path.abspath(
-                    os.path.dirname(sky_remote_utils.__file__)),
+                'sky_remote_libs': os.path.abspath(
+                    os.path.dirname(sky_remote_libs.__file__)),
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -616,7 +616,7 @@ class JobUtilsCodeGen(object):
       >> codegen = JobUtilsCodeGen()
 
       >> codegen.show_jobs(...)
-      >> codegen.reserve_next_job_id(...)
+      >> codegen.add_job(...)
       >> codegen.<method>(...)
 
       >> code = codegen.build()
@@ -627,24 +627,24 @@ class JobUtilsCodeGen(object):
         self._code = [
             'import sys',
             f'sys.path.append({SKY_REMOTE_UTIL_PATH!r})',
-            'import job_utils',
-            'import log_utils',
+            'import job_lib',
+            'import log_lib',
         ]
 
-    def reserve_next_job_id(self, username: str, run_id: str) -> None:
+    def add_job(self, username: str, run_id: str) -> None:
         self._code.append(
-            f'job_utils.reserve_next_job_id({username!r}, {run_id!r})')
+            f'job_lib.add_job({username!r}, {run_id!r})')
 
     def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:
-        self._code.append(f'job_utils.show_jobs({username!r}, {all_jobs})')
+        self._code.append(f'job_lib.show_jobs({username!r}, {all_jobs})')
 
     def cancel_jobs(self, job_ids: Optional[List[int]]) -> None:
-        self._code.append(f'job_utils.cancel_jobs({job_ids!r})')
+        self._code.append(f'job_lib.cancel_jobs({job_ids!r})')
 
     def tail_logs(self, job_id: str) -> None:
         self._code += [
-            f'log_dir, status = job_utils.log_dir({job_id!r})',
-            f'log_utils.tail_logs({job_id!r}, log_dir, status)',
+            f'log_dir, status = job_lib.log_dir({job_id!r})',
+            f'log_lib.tail_logs({job_id!r}, log_dir, status)',
         ]
 
     def build(self) -> str:

@@ -27,7 +27,7 @@ from sky import logging
 from sky import optimizer
 from sky import resources as resources_lib
 from sky.backends import backend_utils
-from sky.backends.sky_remote_utils import log_utils
+from sky.backends.sky_remote_libs import log_lib
 
 App = backend_utils.App
 
@@ -183,9 +183,9 @@ class RayCodeGen(object):
             import ray.util as ray_util
 
             sys.path.append('{SKY_REMOTE_UTIL_PATH}')
-            import job_utils
+            import job_lib
             
-            job_utils.change_status({job_id!r}, {JobStatus.PENDING.value!r})
+            job_lib.change_status({job_id!r}, {JobStatus.PENDING.value!r})
 
             # Set this streaming to true to collect logs to the head node, 
             # the stream_logs=False is used to avoid streaming to console.
@@ -196,9 +196,9 @@ class RayCodeGen(object):
             # print('live nodes:', ray.state.node_ids())
             
             futures = []"""),
-            inspect.getsource(log_utils.redirect_process_output),
-            inspect.getsource(log_utils.run_with_log),
-            inspect.getsource(log_utils.run_bash_command_with_log),
+            inspect.getsource(log_lib.redirect_process_output),
+            inspect.getsource(log_lib.run_with_log),
+            inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
 
@@ -249,7 +249,7 @@ class RayCodeGen(object):
                 print(\'SKY INFO: All task slots reserved.\',
                       file=sys.stderr,
                       flush=True)
-                job_utils.change_status({self.job_id!r}, {JobStatus.RUNNING.value!r})
+                job_lib.change_status({self.job_id!r}, {JobStatus.RUNNING.value!r})
                 """),
         ]
 
@@ -1205,7 +1205,7 @@ class CloudVmRayBackend(backends.Backend):
         run_id = os.path.basename(self.log_dir)
         codegen = backend_utils.JobUtilsCodeGen()
         username = getpass.getuser()
-        codegen.reserve_next_job_id(username, run_id)
+        codegen.add_job(username, run_id)
         job_id = self._run_command_on_head_via_ssh(handle,
                                                    codegen.build(),
                                                    '/dev/null',
