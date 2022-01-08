@@ -115,11 +115,11 @@ def _follow(file,
             if line.endswith('\n') or line.endswith('\r'):
                 if start_streaming_at in line.strip():
                     start_streaming = True
+                if start_streaming:
+                    yield line
                 if (end_following_at is not None and
                         end_following_at == line.strip()):
                     return
-                if start_streaming:
-                    yield line
                 line = ''
         elif sleep_sec:
             time.sleep(sleep_sec)
