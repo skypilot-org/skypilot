@@ -444,8 +444,12 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         resources_str = '<initializing>'
         if (handle.requested_nodes is not None and
                 handle.launched_resources is not None):
+            launched_resource_str = str(handle.launched_resources)
+            if not show_all:
+                launched_resource_str = _truncate_long_string(
+                    launched_resource_str)
             resources_str = (f'{handle.requested_nodes}x '
-                             f'{handle.launched_resources}')
+                             f'{launched_resource_str}')
         cluster_table.add_row([
             # NAME
             cluster_status['name'],

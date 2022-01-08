@@ -26,7 +26,6 @@ from sky import global_user_state
 from sky import logging
 from sky import optimizer
 from sky import resources as resources_lib
-from sky import task as task_mod
 from sky.backends import backend_utils
 from sky.backends.sky_remote_utils import log_utils
 
@@ -319,7 +318,7 @@ class RayCodeGen(object):
         self._has_epilogue = True
 
         self._code += [
-            textwrap.dedent(f"""\
+            textwrap.dedent("""\
                 ray.get(futures)
                 time.sleep(3)
                 print(\'SKY INFO: All tasks finished.\',
