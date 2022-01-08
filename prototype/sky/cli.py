@@ -277,12 +277,12 @@ def cli():
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
-@click.option('--detach',
+@click.option('--detach_run',
               '-d',
               default=False,
               is_flag=True,
-              help='If True, detach from the job and return.')
-def run(yaml_path: Path, cluster: str, dryrun: bool, detach: bool):
+              help='If True, detach_run from the job and return.')
+def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
     """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
@@ -302,7 +302,7 @@ def run(yaml_path: Path, cluster: str, dryrun: bool, detach: bool):
                 dryrun=dryrun,
                 stream_logs=True,
                 cluster_name=cluster,
-                detach=detach)
+                detach_run=detach_run)
 
 
 @cli.command()
@@ -312,12 +312,12 @@ def run(yaml_path: Path, cluster: str, dryrun: bool, detach: bool):
               required=True,
               type=str,
               help='Name of the existing cluster to execute a task on.')
-@click.option('--detach',
+@click.option('--detach_run',
               '-d',
               default=False,
               is_flag=True,
-              help='If True, detach from the job and return.')
-def exec(yaml_path: Path, cluster: str, detach: bool):  # pylint: disable=redefined-builtin
+              help='If True, detach_run from the job and return.')
+def exec(yaml_path: Path, cluster: str, detach_run: bool):  # pylint: disable=redefined-builtin
     """Execute a task from a YAML spec on a cluster (skip setup).
 
     \b
@@ -363,7 +363,7 @@ def exec(yaml_path: Path, cluster: str, detach: bool):  # pylint: disable=redefi
                     sky.execution.Stage.SYNC_WORKDIR,
                     sky.execution.Stage.EXEC,
                 ],
-                detach=detach)
+                detach_run=detach_run)
 
 
 @cli.command()

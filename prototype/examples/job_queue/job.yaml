@@ -1,10 +1,10 @@
-# A minimal example.
+# A task submitted to an existing cluster.
 #
-# Runs a task that simply lists the default conda environments.
+# Runs a task on a existing cluster.
 #
 # Usage:
-#   sky run -c min minimal.yaml
-#   sky down -c min
+#   sky run -c jq cluster.yaml
+#   sky exec -c jq job.yaml
 
 resources:
   accelerators:

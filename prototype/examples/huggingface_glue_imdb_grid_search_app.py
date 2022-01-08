@@ -12,22 +12,26 @@ with sky.Dag() as dag:
     python3 -c \'import datasets; datasets.load_dataset("imdb")\''
 
     sky.Task(setup=common_setup).set_resources(resources_to_launch)
-handle = sky.execute(dag, cluster_name='hgs', detach=True)
+# `detach_run` will only detach the `run` command. The provision and `setup` are 
+# still blocking.
+handle = sky.execute(dag, cluster_name='hgs', detach_run=True)
 
 for lr in [1e-5, 2e-5, 3e-5, 4e-5]:
     with sky.Dag() as dag:
         # To be filled in: {lr}.
-        run_format = 'cd transformers/examples/pytorch/text-classification && \
-            python3 run_glue.py \
-                --learning_rate {lr} \
-                --output_dir /tmp/imdb-{lr}/ \
-                --model_name_or_path bert-base-cased \
-                --dataset_name imdb  \
-                --do_train \
-                --max_seq_length 128 \
-                --per_device_train_batch_size 32 \
-                --max_steps 50 \
+        run_format = f"""\
+            cd transformers/examples/pytorch/text-classification
+            python3 run_glue.py
+                --learning_rate {lr}
+                --output_dir /tmp/imdb-{lr}/
+                --model_name_or_path bert-base-cased
+                --dataset_name imdb
+                --do_train
+                --max_seq_length 128
+                --per_device_train_batch_size 32
+                --max_steps 50
                 --fp16 2>&1 | tee run-{lr}.log'
+            """
 
         per_trial_resources = sky.Resources(accelerators={'V100': 1})
 
@@ -46,4 +50,4 @@ for lr in [1e-5, 2e-5, 3e-5, 4e-5]:
                     sky.execution.Stage.EXEC,
                 ],
                 stream_logs=False,
-                detach=True)
+                detach_run=True)

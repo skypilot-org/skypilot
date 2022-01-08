@@ -1,6 +1,6 @@
-# A minimal example.
+# A dummy task for cluster creation.
 #
-# Runs a task that simply lists the default conda environments.
+# Runs a dummy task that provision a cluster.
 #
 # Usage:
 #   sky run -c jq cluster.yaml

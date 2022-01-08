@@ -1151,7 +1151,7 @@ class CloudVmRayBackend(backends.Backend):
             job_id: int,
             executable: str,
             stream_logs: bool = True,
-            detach: bool = False,
+            detach_run: bool = False,
     ) -> None:
         """Executes generated code on the head node."""
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
@@ -1182,7 +1182,7 @@ class CloudVmRayBackend(backends.Backend):
                                           job_log_path, stream_logs)
 
         try:
-            if not detach:
+            if not detach_run:
                 backend_utils.run(f'sky logs -c {handle.cluster_name} {job_id}')
         finally:
             colorama.init()
@@ -1218,7 +1218,7 @@ class CloudVmRayBackend(backends.Backend):
             handle: ResourceHandle,
             task: App,
             stream_logs: bool,
-            detach: bool,
+            detach_run: bool,
     ) -> None:
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
@@ -1234,16 +1234,16 @@ class CloudVmRayBackend(backends.Backend):
         # Case: Task(run, num_nodes=1)
         if task.num_nodes == 1:
             return self._execute_task_one_node(handle, task, job_id,
-                                               stream_logs, detach)
+                                               stream_logs, detach_run)
 
         # Case: Task(run, num_nodes=N)
         assert task.num_nodes > 1, task.num_nodes
         return self._execute_task_n_nodes(handle, task, job_id, stream_logs,
-                                          detach)
+                                          detach_run)
 
     def _execute_task_one_node(self, handle: ResourceHandle, task: App,
                                job_id: int, stream_logs: bool,
-                               detach: bool) -> None:
+                               detach_run: bool) -> None:
         # Launch the command as a Ray task.
         assert isinstance(task.run, str), \
             f'Task(run=...) should be a string (found {type(task.run)}).'
@@ -1275,11 +1275,11 @@ class CloudVmRayBackend(backends.Backend):
                                 job_id,
                                 executable='python3',
                                 stream_logs=stream_logs,
-                                detach=detach)
+                                detach_run=detach_run)
 
     def _execute_task_n_nodes(self, handle: ResourceHandle, task: App,
                               job_id: int, stream_logs: bool,
-                              detach: bool) -> None:
+                              detach_run: bool) -> None:
         # Strategy:
         #   ray.init(..., log_to_driver=False); otherwise too many logs.
         #   for node:
@@ -1330,7 +1330,7 @@ class CloudVmRayBackend(backends.Backend):
                                 job_id,
                                 executable='python3',
                                 stream_logs=stream_logs,
-                                detach=detach)
+                                detach_run=detach_run)
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()

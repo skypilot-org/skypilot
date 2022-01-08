@@ -1,10 +1,11 @@
-# A minimal example.
+# A task runs on an existing multinode cluster.
 #
-# Runs a task that simply lists the default conda environments.
+# Runs a task that requires multinode.
 #
 # Usage:
-#   sky run -c min minimal.yaml
-#   sky down -c min
+#   sky run -c mjq cluster_multinode.yaml
+#   sky exec -c mjq job_multinode.yaml
+#   sky exec -c mjq job.yaml
 
 resources:
   accelerators:

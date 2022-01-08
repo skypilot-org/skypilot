@@ -20,7 +20,9 @@ with sky.Dag() as dag:
 
     task = sky.Task('setup', workdir=workdir, setup=setup)
     task.set_resources(sky.Resources(sky.AWS(), accelerators={'V100': 1}))
-handle = sky.execute(dag, cluster_name='tb', detach=True)
+# `detach_run` will only detach the `run` command. The provision and `setup` are
+# still blocking.
+handle = sky.execute(dag, cluster_name='tb', detach_run=True)
 
 # Run the training task.
 with sky.Dag() as dag:
@@ -50,7 +52,7 @@ sky.execute(dag,
             stages=[
                 sky.execution.Stage.EXEC,
             ],
-            detach=True)
+            detach_run=True)
 
 # Run the tensorboard task.
 with sky.Dag() as dag:
@@ -61,7 +63,7 @@ with sky.Dag() as dag:
         workdir=workdir,
         setup=setup,
         run='conda activate resnet && \
-            tensorboard --logdir resnet-model-dir --port 4650',
+            tensorboard --logdir resnet-model-dir --port 4650'                                                              ,
     )
     # FIXME: We need to support task without specify resources.
     tensorboard.set_resources(sky.Resources())
@@ -72,4 +74,4 @@ sky.execute(dag,
             stages=[
                 sky.execution.Stage.EXEC,
             ],
-            detach=True)
+            detach_run=True)

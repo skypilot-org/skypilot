@@ -156,7 +156,7 @@ class LocalDockerBackend(backends.Backend):
         try:
             container = self.client.containers.run(image_tag,
                                                    remove=True,
-                                                   detach=True,
+                                                   detach_run=True,
                                                    privileged=True,
                                                    volumes=volumes,
                                                    runtime=runtime)

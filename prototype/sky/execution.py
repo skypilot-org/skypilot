@@ -48,7 +48,7 @@ def execute(dag: sky.Dag,
             optimize_target: OptimizeTarget = OptimizeTarget.COST,
             stages: Optional[List[Stage]] = None,
             cluster_name: Optional[str] = None,
-            detach: bool = False) -> None:
+            detach_run: bool = False) -> None:
     """Runs a DAG.
 
     If the DAG has not been optimized yet, this will call sky.optimize() for
@@ -72,6 +72,7 @@ def execute(dag: sky.Dag,
         setup.
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
+      detach_run: bool; whether to detach the process after the job submitted.
     """
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]
@@ -126,7 +127,7 @@ def execute(dag: sky.Dag,
 
         if stages is None or Stage.EXEC in stages:
             try:
-                backend.execute(handle, task, stream_logs, detach)
+                backend.execute(handle, task, stream_logs, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, teardown)
