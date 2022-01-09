@@ -125,6 +125,10 @@ class LocalDockerBackend(backends.Backend):
         """ Launches the container."""
 
         # FIXME: handle the detach_run
+        if not detach_run:
+            raise NotImplementedError('detach_run=False is not supported in '
+                                      'LocalDockerBackend.')
+
         if task.num_nodes > 1:
             raise NotImplementedError(
                 'Tasks with num_nodes > 1 is currently not supported in '
@@ -152,7 +156,7 @@ class LocalDockerBackend(backends.Backend):
         try:
             container = self.client.containers.run(image_tag,
                                                    remove=True,
-                                                   detach_run=True,
+                                                   detach=True,
                                                    privileged=True,
                                                    volumes=volumes,
                                                    runtime=runtime)

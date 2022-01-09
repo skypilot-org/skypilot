@@ -37,7 +37,6 @@ OptimizeTarget = optimizer.OptimizeTarget
 
 Path = str
 PostSetupFn = Callable[[str], Any]
-JobStatus = backend_utils.JobStatus
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
@@ -195,7 +194,7 @@ class RayCodeGen(object):
             sys.path.append(lib_path)
             import job_lib
             
-            job_lib.set_status({job_id!r}, {JobStatus.PENDING.value!r})
+            job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             ray.init('auto', namespace='__sky__{job_id}__', log_to_driver=True)
 
@@ -257,7 +256,7 @@ class RayCodeGen(object):
                 print(\'SKY INFO: All task slots reserved.\',
                       file=sys.stderr,
                       flush=True)
-                job_lib.set_status({self.job_id!r}, {JobStatus.RUNNING.value!r})
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.RUNNING)
                 """),
         ]
 

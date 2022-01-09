@@ -24,14 +24,22 @@ class JobStatus(enum.Enum):
     RUNNING = 'RUNNING'
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
-    STOPPED = 'STOPPED'
+    CANCELLED = 'CANCELLED'
+
+
+RAY_TO_JOB_STATUS_MAP = {
+    'RUNNING': JobStatus.RUNNING,
+    'SUCCEEDED': JobStatus.SUCCEEDED,
+    'FAILED': JobStatus.FAILED,
+    'STOPPED': JobStatus.CANCELLED,
+}
 
 
 class JobInfoLoc(enum.IntEnum):
     """Job Info's Location in the DB record"""
     JOB_ID = 0
     USERNAME = 1
-    SUBMITTED = 2
+    SUBMITTED_AT = 2
     STATUS = 3
     RUN_TIMESTAMP = 4
 
@@ -58,7 +66,7 @@ _CONN.commit()
 
 
 def add_job(username: str, run_timestamp: str) -> int:
-    """Reserve the next available job id for the user."""
+    """Atomically reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     # job_id will autoincrement with the null value
     _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?)', (
@@ -76,9 +84,9 @@ def add_job(username: str, run_timestamp: str) -> int:
     print(job_id)
 
 
-def set_status(job_id: int, status: str) -> None:
+def set_status(job_id: int, status: JobStatus) -> None:
     _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
-                    (status, job_id))
+                    (status.value, job_id))
     _CONN.commit()
 
 
@@ -86,10 +94,7 @@ def _get_jobs(username: Optional[str],
               status_list: Optional[List[JobStatus]] = None
              ) -> List[Dict[str, Any]]:
     if status_list is None:
-        status_list = [
-            JobStatus.PENDING, JobStatus.RUNNING, JobStatus.SUCCEEDED,
-            JobStatus.FAILED, JobStatus.STOPPED, JobStatus.INIT
-        ]
+        status_list = list(JobStatus)
     status_str_list = [status.value for status in status_list]
     if username is None:
         rows = _CURSOR.execute(
@@ -116,7 +121,7 @@ def _get_jobs(username: Optional[str],
         records.append({
             'job_id': row[JobInfoLoc.JOB_ID.value],
             'username': row[JobInfoLoc.USERNAME.value],
-            'submitted_at': row[JobInfoLoc.SUBMITTED.value],
+            'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
             'status': JobStatus[row[JobInfoLoc.STATUS.value]],
             'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
         })
@@ -129,6 +134,7 @@ def _update_status() -> None:
     if len(running_jobs) == 0:
         return
 
+    # TODO: if too slow, directly query against redis.
     test_cmd = [
         (f'ray job status --address 127.0.0.1:8265 {job["job_id"]} 2>&1 | '
          'grep "Job status"') for job in running_jobs
@@ -148,7 +154,8 @@ def _update_status() -> None:
     for i, job in enumerate(running_jobs):
         ray_status = results[i].strip().rstrip('.')
         ray_status = ray_status.rpartition(' ')[-1]
-        set_status(job['job_id'], ray_status)
+        status = RAY_TO_JOB_STATUS_MAP[ray_status]
+        set_status(job['job_id'], status)
 
 
 def _readable_time_duration(start: int) -> str:
@@ -162,7 +169,7 @@ def _readable_time_duration(start: int) -> str:
 
 def _show_job_queue(jobs) -> None:
     job_table = prettytable.PrettyTable()
-    job_table.field_names = ['JOB', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
+    job_table.field_names = ['JOB', 'USER', 'SUBMITTED_AT', 'STATUS', 'LOG']
     job_table.align['LOG'] = 'l'
 
     for job in jobs:
@@ -181,7 +188,7 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
 
     Args:
         username: The username to show jobs for. Show all the users if None.
-        all_jobs: Whether to show the completed jobs.
+        all_jobs: Whether to show all jobs, not just the pending/running ones.
     """
     _update_status()
     status_list = [JobStatus.PENDING, JobStatus.RUNNING]
@@ -207,7 +214,7 @@ def cancel_jobs(jobs: Optional[List[str]]) -> None:
     cancel_cmd = ';'.join(cancel_cmd)
     subprocess.run(cancel_cmd, shell=True, check=True, executable='/bin/bash')
     for job_id in jobs:
-        set_status(job_id, JobStatus.STOPPED.value)
+        set_status(job_id, JobStatus.CANCELLED)
 
 
 def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:

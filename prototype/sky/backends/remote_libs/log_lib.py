@@ -109,7 +109,7 @@ def _follow(file,
             start_streaming_at='',
             end_following_at=None) -> Iterator[str]:
     """ Yield each line from a file as they are written.
-    
+
     `sleep_sec` is the time to sleep after empty reads. """
     line = ''
     start_streaming = False

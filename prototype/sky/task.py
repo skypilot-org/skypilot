@@ -46,8 +46,9 @@ class Task(object):
     ):
         """Initializes a Task.
 
-        All fields are optional: either a shell command to run
-        (str) or a command generator for different nodes (lambda; see below).
+        All fields are optional.  `Task.run` is the actual program: either a
+        shell command to run (str) or a command generator for different nodes
+        (lambda; see below).
 
         Before executing a Task, it is required to call Task.set_resources() to
         assign resource requirements to this task.
