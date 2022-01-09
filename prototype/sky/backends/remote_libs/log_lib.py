@@ -13,7 +13,7 @@ from typing import Iterator, List, Optional
 
 # Need this to make `job_lib` visible to this file, when imported as a module
 sys.path.append(os.path.dirname(__file__))
-import job_lib
+import job_lib  # pylint: disable=wrong-import-position
 
 
 def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
@@ -109,6 +109,7 @@ def _follow(file,
             start_streaming_at='',
             end_following_at=None) -> Iterator[str]:
     """ Yield each line from a file as they are written.
+    
     `sleep_sec` is the time to sleep after empty reads. """
     line = ''
     start_streaming = False

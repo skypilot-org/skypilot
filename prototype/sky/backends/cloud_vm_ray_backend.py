@@ -200,6 +200,9 @@ class RayCodeGen(object):
             ray.init('auto', namespace='__sky__{job_id}__', log_to_driver=True)
 
             futures = []"""),
+            # FIXME: This is a hack to make sure that the functions can be found
+            # by ray.remote. This should be removed once we have a better way to
+            # specify dependencies for ray.
             inspect.getsource(log_lib.redirect_process_output),
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.run_bash_command_with_log),
@@ -211,8 +214,9 @@ class RayCodeGen(object):
             ip_list: Optional[List[str]],
             accelerator_dict: Dict[str, int],
     ) -> List[Dict[str, int]]:
-        """Create the resource_handle for gang scheduling for n_tasks."""
-        assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
+        """Create the gang scheduling placement group for a Task."""
+        assert self._has_prologue, ('Call add_prologue() before '
+                                    'add_gang_scheduling_placement_group().')
         bundles = [{'CPU': 1}]
         self._ip_to_bundle_index = {None: 0}
         if ip_list is not None:
@@ -1207,7 +1211,7 @@ class CloudVmRayBackend(backends.Backend):
                 '\nTo view the job queue:\t'
                 f'{style.BRIGHT}sky queue -c {name} {style.RESET_ALL}')
 
-    def _fetch_job_id(self, handle: ResourceHandle) -> int:
+    def _add_job(self, handle: ResourceHandle) -> int:
         run_timestamp = os.path.basename(self.log_dir)
         codegen = backend_utils.JobLibCodeGen()
         username = getpass.getuser()
@@ -1237,7 +1241,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'Nothing to run; run command not specified:\n{task}')
             return
 
-        job_id = self._fetch_job_id(handle)
+        job_id = self._add_job(handle)
 
         # Case: Task(run, num_nodes=1)
         if task.num_nodes == 1:
@@ -1505,7 +1509,7 @@ class CloudVmRayBackend(backends.Backend):
     def run_on_head(self,
                     handle: ResourceHandle,
                     cmd: str,
-                    stream_logs: bool = False) -> None:
+                    stream_logs: bool = False) -> str:
         """Runs 'cmd' on the cluster's head node."""
         return self._run_command_on_head_via_ssh(handle,
                                                  cmd,
