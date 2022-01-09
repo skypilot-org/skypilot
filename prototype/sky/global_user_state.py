@@ -131,6 +131,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')
     records = []
     for name, launched_at, handle, last_use, status in rows:
+        # TODO: use namedtuple instead of dict
         records.append({
             'name': name,
             'launched_at': launched_at,

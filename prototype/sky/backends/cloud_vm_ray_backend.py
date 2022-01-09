@@ -937,7 +937,7 @@ class CloudVmRayBackend(backends.Backend):
         self._optimize_target = kwargs.pop('optimize_target',
                                            OptimizeTarget.COST)
 
-    def _check_resources_available_for_task(self, handle: ResourceHandle,
+    def _check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
                                             task: App):
         """Check if resources requested by the task are available."""
         assert (
@@ -947,14 +947,14 @@ class CloudVmRayBackend(backends.Backend):
         assert len(task.resources) == 1, task.resources
 
         launched_resources = handle.launched_resources.fill_accelerators()
-        task_resources: Resources = list(task.resources)[0]
+        task_resources = list(task.resources)[0]
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(launched_resources)):
             cluster_name = handle.cluster_name
             raise exceptions.ResourcesMismatchError(
                 'Requested resources do not match the existing cluster.\n'
-                f'  Requested: {task.num_nodes}x {task.resources}\n'
+                f'  Requested: {task.num_nodes}x {task_resources}\n'
                 f'  Existing: {handle.launched_nodes}x '
                 f'{handle.launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '

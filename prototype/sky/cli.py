@@ -286,6 +286,8 @@ def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
     """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
+
+    click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
     sky.run(dag,
             dryrun=dryrun,
             stream_logs=True,
@@ -340,10 +342,10 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):
       >> sky run -c name app.yaml
 
     """
-    click.secho(f'Executing task on cluster {cluster} ...', fg='yellow')
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
 
+    click.secho(f'Executing task on cluster {cluster} ...', fg='yellow')
     sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
 
 

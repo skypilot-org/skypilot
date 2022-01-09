@@ -118,6 +118,7 @@ def _get_jobs(username: Optional[str],
     for row in rows:
         if row[0] is None:
             break
+        # TODO: use namedtuple instead of dict
         records.append({
             'job_id': row[JobInfoLoc.JOB_ID.value],
             'username': row[JobInfoLoc.USERNAME.value],
