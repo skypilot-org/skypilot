@@ -39,8 +39,6 @@ SKY_REMOTE_LIB_PATH = '~/.sky/remote_libs'
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
 
-JobStatus = job_lib.JobStatus
-
 run_with_log = log_lib.run_with_log
 
 
