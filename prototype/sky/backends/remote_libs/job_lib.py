@@ -81,7 +81,7 @@ def add_job(username: str, run_timestamp: str) -> int:
     for row in rows:
         job_id = row[0]
     assert job_id is not None
-    print(job_id)
+    return job_id
 
 
 def set_status(job_id: int, status: JobStatus) -> None:

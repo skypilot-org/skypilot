@@ -632,7 +632,10 @@ class JobLibCodeGen(object):
         ]
 
     def add_job(self, username: str, run_timestamp: str) -> None:
-        self._code.append(f'job_lib.add_job({username!r}, {run_timestamp!r})')
+        self._code += [
+            f'job_id = job_lib.add_job({username!r}, {run_timestamp!r})',
+            'print(job_id, flush=True)',
+        ]
 
     def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:
         self._code.append(f'job_lib.show_jobs({username!r}, {all_jobs})')
