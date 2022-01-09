@@ -1,5 +1,4 @@
 """Resources: compute requirements of Tasks."""
-import copy
 from typing import Dict, Optional, Union
 
 from sky import clouds
