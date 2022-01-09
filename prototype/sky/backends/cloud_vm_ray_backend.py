@@ -199,14 +199,14 @@ class RayCodeGen(object):
 
     def add_gang_scheduling_placement_group(
             self,
-            ip_list: List[str],
+            ip_list: Optional[List[str]],
             accelerator_dict: Dict[str, int],
     ) -> List[Dict[str, int]]:
         """Create the resource_handle for gang scheduling for n_tasks."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
         bundles = [{'CPU': 1}]
         self._ip_to_bundle_index = {None: 0}
-        if ip_list:
+        if ip_list is not None:
             bundles = [
                 {
                     # Set CPU to avoid ray hanging the resources allocation
@@ -258,8 +258,7 @@ class RayCodeGen(object):
     ) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
-        assert gang_scheduling_ip is None or \
-            self._ip_to_bundle_index is not None, \
+        assert self._ip_to_bundle_index is not None, \
             'Call add_gang_scheduling_placement_group() before add_ray_task().'
 
         # Build remote_task.options(...)
@@ -1201,8 +1200,9 @@ class CloudVmRayBackend(backends.Backend):
         codegen = backend_utils.JobUtilsCodeGen()
         username = getpass.getuser()
         codegen.add_job(username, run_id)
+        code = codegen.build()
         job_id = self._run_command_on_head_via_ssh(handle,
-                                                   codegen.build(),
+                                                   code,
                                                    '/dev/null',
                                                    stream_logs=False)[1]
         logger.info(f'Job_id: {job_id}')
@@ -1249,12 +1249,11 @@ class CloudVmRayBackend(backends.Backend):
                                'tasks')
         log_path = os.path.join(log_dir, 'run.log')
 
-        ips = None
         accelerator_dict = _get_task_demands_dict(task)
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
-        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict)
+        codegen.add_gang_scheduling_placement_group(None, accelerator_dict)
 
         codegen.add_ray_task(
             bash_script=script,

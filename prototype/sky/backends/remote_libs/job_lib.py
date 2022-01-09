@@ -27,6 +27,15 @@ class JobStatus(enum.Enum):
     STOPPED = 'STOPPED'
 
 
+class JobInfoLoc(enum.IntEnum):
+    """Job Info's Location in the DB record"""
+    JOB_ID = 0
+    USERNAME = 1
+    SUBMITTED = 2
+    STATUS = 3
+    RUN_ID = 4
+
+
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
@@ -39,8 +48,8 @@ except sqlite3.OperationalError:
     # Tables do not exist, create them.
     _CURSOR.execute("""\
       CREATE TABLE jobs (
-        username TEXT,
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT,
         submitted_at INTEGER,
         status TEXT,
         run_id TEXT CANDIDATE KEY)""")
@@ -52,10 +61,14 @@ def add_job(username: str, run_id: str) -> int:
     """Reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     # job_id will autoincrement with the null value
-    _CURSOR.execute('INSERT INTO jobs VALUES (?, null, ?, ?, ?)',
-                    (username, job_submitted_at, 'INIT', run_id))
+    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?)', (
+        username,
+        job_submitted_at,
+        JobStatus.INIT.value,
+        run_id,
+    ))
     _CONN.commit()
-    rows = _CURSOR.execute('SELECT job_Id FROM jobs WHERE run_id=(?)',
+    rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_id=(?)',
                            (run_id,))
     for row in rows:
         job_id = row[0]
@@ -97,15 +110,15 @@ def _get_jobs(username: Optional[str],
         )
 
     records = []
-    for user, job_id, submitted_at, status, run_id in rows:
-        if job_id is None:
+    for row in rows:
+        if row[0] is None:
             break
         records.append({
-            'username': user,
-            'job_id': job_id,
-            'submitted_at': submitted_at,
-            'status': JobStatus[status],
-            'run_id': run_id,
+            'job_id': row[JobInfoLoc.JOB_ID.value],
+            'username': row[JobInfoLoc.USERNAME.value],
+            'submitted_at': row[JobInfoLoc.SUBMITTED.value],
+            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
+            'run_id': row[JobInfoLoc.RUN_ID.value],
         })
     return records
 
@@ -205,6 +218,6 @@ def log_dir(job_id: int) -> Tuple[Optional[str], Optional[str]]:
             SELECT * FROM jobs
             WHERE job_id=(?)""", (job_id,))
     for row in rows:
-        status = row[3]
-        run_id = row[4]
+        status = row[JobInfoLoc.STATUS.value]
+        run_id = row[JobInfoLoc.RUN_ID.value]
     return os.path.join(SKY_REMOTE_WORKDIR, SKY_LOGS_DIRECTORY, run_id), status
