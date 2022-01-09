@@ -1,4 +1,5 @@
 """Resources: compute requirements of Tasks."""
+import copy
 from typing import Dict, Optional, Union
 
 from sky import clouds
@@ -136,16 +137,17 @@ class Resources(object):
         return True
 
     def fill_accelerators(self):
-        assert (self.cloud is not None and self.instance_type is not None), self
+        assert self.is_launchable(), self
+        r = copy.deepcopy(self)
 
-        if self.accelerators is not None:
-            return self
-        cloud = self.cloud
-        instance_type = self.instance_type
+        if r.accelerators is not None:
+            return r
+        cloud = r.cloud
+        instance_type = r.instance_type
 
-        self.accelerators = cloud.get_accelerators_from_instance_type(
+        r.accelerators = cloud.get_accelerators_from_instance_type(
             instance_type)
-        return self
+        return r
 
     def less_demanding_than(self, other) -> bool:
         """Returns whether this resources is less demanding than the other."""

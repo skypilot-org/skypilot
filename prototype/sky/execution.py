@@ -2,7 +2,7 @@
 
 Usage:
 
-   >> sky.execute(planned_dag)
+   >> sky.run(planned_dag)
 
 Current resource privisioners:
 
@@ -19,6 +19,7 @@ from typing import Any, List, Optional
 
 import sky
 from sky import backends
+from sky import global_user_state
 from sky import logging
 from sky import optimizer
 
@@ -39,7 +40,7 @@ class Stage(enum.Enum):
     TEARDOWN = 6
 
 
-def execute(dag: sky.Dag,
+def _execute(dag: sky.Dag,
             dryrun: bool = False,
             teardown: bool = False,
             stream_logs: bool = True,
@@ -148,4 +149,47 @@ def execute(dag: sky.Dag,
         if not status_printed:
             # Needed because this finally doesn't always get executed on errors.
             backends.backend_utils.run('sky status')
-    return handle
+
+def run(dag: sky.Dag,
+        dryrun: bool = False,
+        teardown: bool = False,
+        stream_logs: bool = True,
+        backend: Optional[backends.Backend] = None,
+        optimize_target: OptimizeTarget = OptimizeTarget.COST,
+        cluster_name: Optional[str] = None,
+        detach_run: bool = False) -> None:
+    _execute(dag=dag,
+            dryrun=dryrun,
+            teardown=teardown,
+            stream_logs=stream_logs,
+            handle=None,
+            backend=backend,
+            optimize_target=optimize_target,
+            cluster_name=cluster_name,
+            detach_run=detach_run)
+  
+def exec(dag: sky.Dag,
+        dryrun: bool = False,
+        teardown: bool = False,
+        stream_logs: bool = True,
+        backend: Optional[backends.Backend] = None,
+        optimize_target: OptimizeTarget = OptimizeTarget.COST,
+        cluster_name: Optional[str] = None,
+        detach_run: bool = False) -> None:
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise ValueError(f'Cluster \'{cluster_name}\' not found.  '
+                                 'Use `sky run` to provision first.')
+    _execute(dag=dag,
+            dryrun=dryrun,
+            teardown=teardown,
+            stream_logs=stream_logs,
+            handle=handle,
+            backend=backend,
+            optimize_target=optimize_target,
+            stages=[
+                    Stage.SYNC_WORKDIR,
+                    Stage.EXEC,
+                ],
+            cluster_name=cluster_name,
+            detach_run=detach_run)

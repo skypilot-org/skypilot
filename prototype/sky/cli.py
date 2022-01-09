@@ -59,7 +59,6 @@ Path = str
 Backend = backends.Backend
 
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
-JobStatus = backend_utils.JobStatus
 
 
 def _truncate_long_string(s: str, max_length: int = 50) -> str:
@@ -281,7 +280,8 @@ def cli():
               '-d',
               default=False,
               is_flag=True,
-              help='If True, detach_run from the job and return.')
+              help='If True, run setup first (blocking), '
+              'then detach from the job\'s execution.')
 def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
     """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
     with sky.Dag() as dag:
@@ -298,11 +298,11 @@ def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
     #
     # To fix all of the above, fix/circumvent the bug that 'ray up' not downing
     # old cloud's cluster with the same name.
-    sky.execute(dag,
-                dryrun=dryrun,
-                stream_logs=True,
-                cluster_name=cluster,
-                detach_run=detach_run)
+    sky.run(dag,
+            dryrun=dryrun,
+            stream_logs=True,
+            cluster_name=cluster,
+            detach_run=detach_run)
 
 
 @cli.command()
@@ -316,7 +316,8 @@ def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
               '-d',
               default=False,
               is_flag=True,
-              help='If True, detach_run from the job and return.')
+              help='If True, run setup first (blocking), '
+              'then detach from the job\'s execution.')
 def exec(yaml_path: Path, cluster: str, detach_run: bool):  # pylint: disable=redefined-builtin
     """Execute a task from a YAML spec on a cluster (skip setup).
 
@@ -351,19 +352,12 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):  # pylint: disable=re
 
     """
     click.secho(f'Executing task on cluster {cluster} ...', fg='yellow')
-    handle = global_user_state.get_handle_from_cluster_name(cluster)
-    if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
-                                 'Use `sky run` to provision first.')
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
-    sky.execute(dag,
-                handle=handle,
-                stages=[
-                    sky.execution.Stage.SYNC_WORKDIR,
-                    sky.execution.Stage.EXEC,
-                ],
-                detach_run=detach_run)
+    
+    sky.exec(dag,
+            cluster_name=cluster,
+            detach_run=detach_run)
 
 
 @cli.command()
@@ -442,13 +436,13 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         launched_at = cluster_status['launched_at']
         handle = cluster_status['handle']
         resources_str = '<initializing>'
-        if (handle.requested_nodes is not None and
+        if (handle.launched_nodes is not None and
                 handle.launched_resources is not None):
             launched_resource_str = str(handle.launched_resources)
             if not show_all:
                 launched_resource_str = _truncate_long_string(
                     launched_resource_str)
-            resources_str = (f'{handle.requested_nodes}x '
+            resources_str = (f'{handle.launched_nodes}x '
                              f'{launched_resource_str}')
         cluster_table.add_row([
             # NAME
@@ -690,7 +684,7 @@ def start(clusters: Tuple[str]):
         handle = record['handle']
         with sky.Dag():
             dummy_task = sky.Task().set_resources(handle.requested_resources)
-            dummy_task.num_nodes = handle.requested_nodes
+            dummy_task.num_nodes = handle.launched_nodes
         click.secho(f'Starting cluster {name}...', bold=True)
         backend.provision(dummy_task,
                           to_provision=None,

@@ -25,7 +25,6 @@ logger = logging.init_logger(__name__)
 
 # An application.  These are the task types to support.
 App = task_lib.Task
-RunId = str
 Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
@@ -34,7 +33,6 @@ SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.1'
-SKY_JOB_RUNNING_INDICATOR = '.sky_job_running'
 SKY_REMOTE_LIB_PATH = '~/.sky/remote_libs'
 
 # Do not use /tmp because it gets cleared on VM restart.
@@ -300,8 +298,7 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
-def write_cluster_config(run_timestamp: RunId,
-                         task: task_lib.Task,
+def write_cluster_config(task: task_lib.Task,
                          to_provision: Resources,
                          cluster_config_template: str,
                          cluster_name: str,
@@ -316,6 +313,8 @@ def write_cluster_config(run_timestamp: RunId,
         - 'tpu-create-script' (if TPU is requested)
         - 'tpu-delete-script' (if TPU is requested)
     """
+    # task.best_resources may not be equal to to_provision if the user
+    # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
     resources_vars = cloud.make_deploy_resources_variables(to_provision)
     config_dict = {}
@@ -392,7 +391,6 @@ def write_cluster_config(run_timestamp: RunId,
             resources_vars,
             **{
                 'cluster_name': cluster_name,
-                'run_timestamp': run_timestamp,
                 'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
@@ -479,7 +477,7 @@ def dump_yaml(path, config):
                   default_flow_style=False)
 
 
-def get_run_timestamp() -> RunId:
+def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
