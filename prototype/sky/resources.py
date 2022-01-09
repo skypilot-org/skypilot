@@ -136,19 +136,6 @@ class Resources(object):
         # self == other
         return True
 
-    def fill_accelerators(self):
-        assert self.is_launchable(), self
-        r = copy.deepcopy(self)
-
-        if r.accelerators is not None:
-            return r
-        cloud = r.cloud
-        instance_type = r.instance_type
-
-        r.accelerators = cloud.get_accelerators_from_instance_type(
-            instance_type)
-        return r
-
     def less_demanding_than(self, other) -> bool:
         """Returns whether this resources is less demanding than the other."""
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
@@ -160,14 +147,15 @@ class Resources(object):
             return False
         # self.instance_type <= other.instance_type
 
-        if self.accelerators is not None and other.accelerators is None:
+        other_accelerators = other.get_accelerators()
+        if self.accelerators is not None and other_accelerators is None:
             return False
 
         if self.accelerators is not None:
             for acc in self.accelerators:
-                if acc not in other.accelerators:
+                if acc not in other_accelerators:
                     return False
-                if self.accelerators[acc] > other.accelerators[acc]:
+                if self.accelerators[acc] > other_accelerators[acc]:
                     return False
         # self.accelerators <= other.accelerators
 

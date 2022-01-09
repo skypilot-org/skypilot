@@ -14,5 +14,4 @@ for i in range(16):
         task = sky.Task(run=f'echo {i}; sleep 15')
         resources = sky.Resources(accelerators={'K80': 0.1})
         task.set_resources(resources)
-    # FIXME: Simplify this API.
     sky.exec(dag, cluster_name='multi_echo', detach_run=True)

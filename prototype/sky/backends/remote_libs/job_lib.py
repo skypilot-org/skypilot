@@ -27,7 +27,7 @@ class JobStatus(enum.Enum):
     CANCELLED = 'CANCELLED'
 
 
-RAY_TO_JOB_STATUS_MAP = {
+_RAY_TO_JOB_STATUS_MAP = {
     'RUNNING': JobStatus.RUNNING,
     'SUCCEEDED': JobStatus.SUCCEEDED,
     'FAILED': JobStatus.FAILED,
@@ -155,7 +155,7 @@ def _update_status() -> None:
     for i, job in enumerate(running_jobs):
         ray_status = results[i].strip().rstrip('.')
         ray_status = ray_status.rpartition(' ')[-1]
-        status = RAY_TO_JOB_STATUS_MAP[ray_status]
+        status = _RAY_TO_JOB_STATUS_MAP[ray_status]
         set_status(job['job_id'], status)
 
 
@@ -170,7 +170,7 @@ def _readable_time_duration(start: int) -> str:
 
 def _show_job_queue(jobs) -> None:
     job_table = prettytable.PrettyTable()
-    job_table.field_names = ['JOB', 'USER', 'SUBMITTED_AT', 'STATUS', 'LOG']
+    job_table.field_names = ['JOB', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
     job_table.align['LOG'] = 'l'
 
     for job in jobs:

@@ -60,8 +60,13 @@ def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
     """Returns the accelerator dict of the task"""
     # TODO: CPU and other memory resources are not supported yet.
     accelerator_dict = None
-    assert len(task.resources) == 1, task.resources
-    resources = list(task.resources)[0]
+    if task.best_resources is not None:
+        resources = task.best_resources
+    else:
+        # Task may (e.g., sky run) or may not (e.g., sky exec) have undergone
+        # sky.optimize(), so best_resources may be None.
+        assert len(task.resources) == 1, task.resources
+        resources = list(task.resources)[0]
     if resources is not None:
         accelerator_dict = resources.get_accelerators()
     return accelerator_dict
@@ -233,8 +238,14 @@ class RayCodeGen(object):
             self._ip_to_bundle_index = {ip: i for i, ip in enumerate(ip_list)}
 
         if accelerator_dict is not None:
+            acc_name = list(accelerator_dict.keys())[0]
             acc_count = list(accelerator_dict.values())[0]
             gpu_dict = {'GPU': acc_count}
+            # gpu_dict should be empty when the accelerator is not GPU.
+            # FIXME: This is a hack to make sure that we do not reserve
+            # GPU when requesting TPU.
+            if 'tpu' in acc_name.lower():
+                gpu_dict = dict()
             for bundle in bundles:
                 bundle.update({
                     **accelerator_dict,
@@ -947,7 +958,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'{task.num_nodes} != #launched nodes {handle.launched_nodes}.')
         assert len(task.resources) == 1, task.resources
 
-        launched_resources = handle.launched_resources.fill_accelerators()
+        launched_resources = handle.launched_resources
         task_resources = list(task.resources)[0]
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
