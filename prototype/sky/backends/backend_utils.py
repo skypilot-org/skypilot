@@ -300,7 +300,7 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
-def write_cluster_config(run_id: RunId,
+def write_cluster_config(run_timestamp: RunId,
                          task: task_lib.Task,
                          to_provision: Resources,
                          cluster_config_template: str,
@@ -392,7 +392,7 @@ def write_cluster_config(run_id: RunId,
             resources_vars,
             **{
                 'cluster_name': cluster_name,
-                'run_id': run_id,
+                'run_timestamp': run_timestamp,
                 'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
@@ -479,7 +479,7 @@ def dump_yaml(path, config):
                   default_flow_style=False)
 
 
-def get_run_id() -> RunId:
+def get_run_timestamp() -> RunId:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
@@ -634,8 +634,8 @@ class JobUtilsCodeGen(object):
             'import log_lib',
         ]
 
-    def add_job(self, username: str, run_id: str) -> None:
-        self._code.append(f'job_lib.add_job({username!r}, {run_id!r})')
+    def add_job(self, username: str, run_timestamp: str) -> None:
+        self._code.append(f'job_lib.add_job({username!r}, {run_timestamp!r})')
 
     def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:
         self._code.append(f'job_lib.show_jobs({username!r}, {all_jobs})')

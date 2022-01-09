@@ -33,7 +33,7 @@ class JobInfoLoc(enum.IntEnum):
     USERNAME = 1
     SUBMITTED = 2
     STATUS = 3
-    RUN_ID = 4
+    RUN_TIMESTAMP = 4
 
 
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
@@ -52,12 +52,12 @@ except sqlite3.OperationalError:
         username TEXT,
         submitted_at INTEGER,
         status TEXT,
-        run_id TEXT CANDIDATE KEY)""")
+        run_timestamp TEXT CANDIDATE KEY)""")
 
 _CONN.commit()
 
 
-def add_job(username: str, run_id: str) -> int:
+def add_job(username: str, run_timestamp: str) -> int:
     """Reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     # job_id will autoincrement with the null value
@@ -65,11 +65,11 @@ def add_job(username: str, run_id: str) -> int:
         username,
         job_submitted_at,
         JobStatus.INIT.value,
-        run_id,
+        run_timestamp,
     ))
     _CONN.commit()
-    rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_id=(?)',
-                           (run_id,))
+    rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
+                           (run_timestamp,))
     for row in rows:
         job_id = row[0]
     assert job_id is not None
@@ -118,7 +118,7 @@ def _get_jobs(username: Optional[str],
             'username': row[JobInfoLoc.USERNAME.value],
             'submitted_at': row[JobInfoLoc.SUBMITTED.value],
             'status': JobStatus[row[JobInfoLoc.STATUS.value]],
-            'run_id': row[JobInfoLoc.RUN_ID.value],
+            'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
         })
     return records
 
@@ -171,7 +171,7 @@ def _show_job_queue(jobs) -> None:
             job['username'],
             _readable_time_duration(job['submitted_at']),
             job['status'].value,
-            os.path.join('sky_logs', job['run_id']),
+            os.path.join('sky_logs', job['run_timestamp']),
         ])
     print(job_table)
 
@@ -219,5 +219,6 @@ def log_dir(job_id: int) -> Tuple[Optional[str], Optional[str]]:
             WHERE job_id=(?)""", (job_id,))
     for row in rows:
         status = row[JobInfoLoc.STATUS.value]
-        run_id = row[JobInfoLoc.RUN_ID.value]
-    return os.path.join(SKY_REMOTE_WORKDIR, SKY_LOGS_DIRECTORY, run_id), status
+        run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
+    return os.path.join(SKY_REMOTE_WORKDIR, SKY_LOGS_DIRECTORY,
+                        run_timestamp), status

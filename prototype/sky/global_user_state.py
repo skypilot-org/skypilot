@@ -30,7 +30,7 @@ except sqlite3.OperationalError:
     _CURSOR.execute("""\
       CREATE TABLE clusters (
         name TEXT PRIMARY KEY,
-        lauched_at INTEGER,
+        launched_at INTEGER,
         handle BLOB,
         last_use TEXT,
         status TEXT)""")
@@ -79,7 +79,7 @@ def add_or_update_cluster(cluster_name: str,
                           cluster_handle: backends.Backend.ResourceHandle,
                           ready: bool):
     """Adds or updates cluster_name -> cluster_handle mapping."""
-    # FIXME: launched_at will be changed when the cluster is updated
+    # FIXME: launched_at will be changed when `sky run -c` is called.
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
     last_use = _get_pretty_entry_point()
