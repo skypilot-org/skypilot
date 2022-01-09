@@ -160,6 +160,9 @@ class Resources(object):
             return False
         # self.instance_type <= other.instance_type
 
+        if self.accelerators is not None and other.accelerators is None:
+            return False
+
         if self.accelerators is not None:
             for acc in self.accelerators:
                 if acc not in other.accelerators:

@@ -7,11 +7,11 @@ import docker
 from sky import backends
 from sky import logging
 from sky import resources
-from sky import task as task_mod
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import docker_utils
 
-App = backend_utils.App
+Task = task_lib.Task
 Resources = resources.Resources
 Path = str
 PostSetupFn = Callable[[str], Any]
@@ -54,7 +54,7 @@ class LocalDockerBackend(backends.Backend):
         self.client = docker.from_env()
 
     def provision(self,
-                  task: App,
+                  task: Task,
                   to_provision: Resources,
                   dryrun: bool,
                   stream_logs: bool,
@@ -112,7 +112,7 @@ class LocalDockerBackend(backends.Backend):
         self.volume_mounts[handle] = docker_mounts
 
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
-                       task: App) -> None:
+                       task: Task) -> None:
         """Post setup is tricky to do in LocalDockerBackend.
 
         Future investigation: Can we support it with a custom ENTRYPOINT?.
@@ -120,7 +120,7 @@ class LocalDockerBackend(backends.Backend):
         logger.warning(
             'Post setup is currently not supported in LocalDockerBackend')
 
-    def execute(self, handle: ResourceHandle, task: App, stream_logs: bool,
+    def execute(self, handle: ResourceHandle, task: Task, stream_logs: bool,
                 detach_run: bool) -> None:
         """ Launches the container."""
 
@@ -142,7 +142,7 @@ class LocalDockerBackend(backends.Backend):
         self._execute_task_one_node(handle, task)
 
     def _execute_task_one_node(self, handle: ResourceHandle,
-                               task: task_mod.Task) -> None:
+                               task: Task) -> None:
         assert task.name == handle, (task.name, handle)
         colorama.init()
         style = colorama.Style

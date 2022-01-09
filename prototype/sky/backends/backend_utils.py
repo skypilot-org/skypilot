@@ -23,8 +23,6 @@ from sky.backends.remote_libs import job_lib, log_lib
 
 logger = logging.init_logger(__name__)
 
-# An application.  These are the task types to support.
-App = task_lib.Task
 Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
@@ -574,24 +572,6 @@ def check_local_gpus() -> bool:
     return p.returncode == 0
 
 
-def requested_resources_available(cluster_resources: Set[Resources],
-                                  task_resources: Set[Resources]):
-    """Returns whether requested resources is less demanding than available.
-
-    Args:
-        cluster_resources: Resources launched in cluster.
-        task_resources: Set of Resources newly requested.
-
-    Returns:
-        True if the requested resources is less demanding, false otherwise.
-    """
-    assert len(task_resources) == 1, task_resources
-    assert cluster_resources is not None
-
-    task_resources = list(task_resources)[0]
-    return task_resources.less_demanding_than(cluster_resources)
-
-
 def make_task_bash_script(codegen: str) -> str:
     script = [
         textwrap.dedent(f"""\
@@ -632,7 +612,7 @@ class JobLibCodeGen(object):
     def add_job(self, username: str, run_timestamp: str) -> None:
         self._code += [
             f'job_id = job_lib.add_job({username!r}, {run_timestamp!r})',
-            'print(job_id, flush=True)',
+            f'print(\'__sky__job__id__{run_timestamp}:\', job_id, flush=True)',
         ]
 
     def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:

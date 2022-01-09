@@ -26,14 +26,14 @@ from sky import global_user_state
 from sky import logging
 from sky import optimizer
 from sky import resources as resources_lib
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends.remote_libs import log_lib
 
-App = backend_utils.App
-
-Resources = resources_lib.Resources
 Dag = dag_lib.Dag
 OptimizeTarget = optimizer.OptimizeTarget
+Resources = resources_lib.Resources
+Task = task_lib.Task
 
 Path = str
 PostSetupFn = Callable[[str], Any]
@@ -56,7 +56,7 @@ def _get_cluster_config_template(cloud):
     return os.path.join(os.path.dirname(sky.__root_dir__), path)
 
 
-def _get_task_demands_dict(task: App) -> Optional[Tuple[Optional[str], int]]:
+def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
     """Returns the accelerator dict of the task"""
     # TODO: CPU and other memory resources are not supported yet.
     accelerator_dict = None
@@ -592,7 +592,7 @@ class RetryingVmProvisioner(object):
             logger.error(stderr)
             raise e
 
-    def _retry_region_zones(self, task: App, to_provision: Resources,
+    def _retry_region_zones(self, task: Task, to_provision: Resources,
                             dryrun: bool, stream_logs: bool, cluster_name: str,
                             prev_cluster_config: Optional[Dict[str, Any]]):
         """The provision retry loop."""
@@ -689,7 +689,8 @@ class RetryingVmProvisioner(object):
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
 
-    def _gang_schedule_ray_up(self, task: App, to_provision_cloud: clouds.Cloud,
+    def _gang_schedule_ray_up(self, task: Task,
+                              to_provision_cloud: clouds.Cloud,
                               cluster_config_file: str, log_abs_path: str,
                               stream_logs: bool,
                               prev_cluster_config: Optional[Dict[str, Any]]):
@@ -815,7 +816,7 @@ class RetryingVmProvisioner(object):
 
         return False, proc, stdout, stderr
 
-    def provision_with_retries(self, task: App, to_provision: Resources,
+    def provision_with_retries(self, task: Task, to_provision: Resources,
                                dryrun: bool, stream_logs: bool,
                                cluster_name: str):
         """Provision with retries for all launchable resources."""
@@ -938,7 +939,7 @@ class CloudVmRayBackend(backends.Backend):
                                            OptimizeTarget.COST)
 
     def _check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
-                                            task: App):
+                                                   task: Task):
         """Check if resources requested by the task are available."""
         assert (
             task.num_nodes == handle.launched_nodes or task.num_nodes == 1), (
@@ -960,7 +961,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: `sky down {cluster_name}`.')
 
-    def _check_existing_cluster(self, task: App, to_provision: Resources,
+    def _check_existing_cluster(self, task: Task, to_provision: Resources,
                                 cluster_name: str) -> Tuple[str, Resources]:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
@@ -979,7 +980,7 @@ class CloudVmRayBackend(backends.Backend):
         return cluster_name, to_provision
 
     def provision(self,
-                  task: App,
+                  task: Task,
                   to_provision: Resources,
                   dryrun: bool,
                   stream_logs: bool,
@@ -1116,7 +1117,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'See errors above and log: {log_path}')
 
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
-                       task: App) -> None:
+                       task: Task) -> None:
         ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
         config = backend_utils.read_yaml(handle.cluster_yaml)
         ssh_user = config['auth']['ssh_user'].strip()
@@ -1216,10 +1217,11 @@ class CloudVmRayBackend(backends.Backend):
         username = getpass.getuser()
         codegen.add_job(username, run_timestamp)
         code = codegen.build()
-        job_id = self._run_command_on_head_via_ssh(handle,
-                                                   code,
-                                                   '/dev/null',
-                                                   stream_logs=False)[1]
+        job_id_str = self.run_on_head(handle, code, stream_logs=False)
+        # To avoid the job_id_str being corrupted by the input from the keyboard.
+        re_match = re.findall(f'__sky__job__id__{run_timestamp}: (\d+)', job_id_str)
+        job_id = int(re_match[0])
+
         logger.info(f'Job_id: {job_id}')
         job_id = int(job_id)
         return job_id
@@ -1227,7 +1229,7 @@ class CloudVmRayBackend(backends.Backend):
     def execute(
             self,
             handle: ResourceHandle,
-            task: App,
+            task: Task,
             stream_logs: bool,
             detach_run: bool,
     ) -> None:
@@ -1252,7 +1254,7 @@ class CloudVmRayBackend(backends.Backend):
         return self._execute_task_n_nodes(handle, task, job_id, stream_logs,
                                           detach_run)
 
-    def _execute_task_one_node(self, handle: ResourceHandle, task: App,
+    def _execute_task_one_node(self, handle: ResourceHandle, task: Task,
                                job_id: int, stream_logs: bool,
                                detach_run: bool) -> None:
         # Launch the command as a Ray task.
@@ -1287,7 +1289,7 @@ class CloudVmRayBackend(backends.Backend):
                                 stream_logs=stream_logs,
                                 detach_run=detach_run)
 
-    def _execute_task_n_nodes(self, handle: ResourceHandle, task: App,
+    def _execute_task_n_nodes(self, handle: ResourceHandle, task: Task,
                               job_id: int, stream_logs: bool,
                               detach_run: bool) -> None:
         # Strategy:
@@ -1362,7 +1364,7 @@ class CloudVmRayBackend(backends.Backend):
             if handle.tpu_delete_script is not None:
                 logger.info('Tip: `sky down` will delete launched TPU(s) too.')
 
-    def teardown_ephemeral_storage(self, task: App) -> None:
+    def teardown_ephemeral_storage(self, task: Task) -> None:
         storage_mounts = task.storage_mounts
         if storage_mounts is not None:
             for storage, _ in storage_mounts.items():

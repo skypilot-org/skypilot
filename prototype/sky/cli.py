@@ -476,20 +476,20 @@ def logs(cluster: str, job_id: str):
 
 @cli.command()
 @click.option('--all-users',
-              '-au',
+              '-u',
               default=False,
               is_flag=True,
               required=False,
               help='Show all users\' information in full.')
 @click.option('--all-jobs',
-              '-aj',
+              '-a',
               default=False,
               is_flag=True,
               required=False,
               help='Show all jobs\' information in full.')
 @click.argument('cluster', required=False)
-def queue(cluster: str, all_jobs: bool, all_users: bool):  # pylint: disable=redefined-builtin
-    """Show launched job queue on clusters."""
+def queue(cluster: Optional[str], all_jobs: bool, all_users: bool):
+    """Show the job queue for a cluster."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     backend = backends.CloudVmRayBackend()
 
