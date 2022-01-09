@@ -22,7 +22,7 @@ with sky.Dag() as dag:
     task.set_resources(sky.Resources(sky.AWS(), accelerators={'V100': 1}))
 # `detach_run` will only detach the `run` command. The provision and `setup` are
 # still blocking.
-handle = sky.execute(dag, cluster_name='tb', detach_run=True)
+sky.run(dag, cluster_name='tb', detach_run=True)
 
 # Run the training task.
 with sky.Dag() as dag:
@@ -46,12 +46,8 @@ with sky.Dag() as dag:
     train.set_resources({
         sky.Resources(accelerators='V100'),
     })
-sky.execute(dag,
+sky.exec(dag,
             cluster_name='tb',
-            handle=handle,
-            stages=[
-                sky.execution.Stage.EXEC,
-            ],
             detach_run=True)
 
 # Run the tensorboard task.
@@ -67,10 +63,6 @@ with sky.Dag() as dag:
     )
     tensorboard.set_resources(sky.Resources())
 
-sky.execute(dag,
+sky.exec(dag,
             cluster_name='tb',
-            handle=handle,
-            stages=[
-                sky.execution.Stage.EXEC,
-            ],
             detach_run=True)
