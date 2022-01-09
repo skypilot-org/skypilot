@@ -69,6 +69,7 @@ def run_with_log(cmd: List[str],
                  stream_logs: bool = False,
                  start_streaming_at: str = '',
                  return_none: bool = False,
+                 check: bool = False,
                  **kwargs):
     """Runs a command and logs its output to a file.
 
@@ -82,6 +83,12 @@ def run_with_log(cmd: List[str],
         stdout, stderr = redirect_process_output(
             proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
         proc.wait()
+        if proc.returncode != 0 and check:
+            raise subprocess.CalledProcessError(
+                proc.returncode,
+                cmd,
+                output=stdout,
+                stderr=stderr)
         if return_none:
             return None
         return proc, stdout, stderr
@@ -101,6 +108,7 @@ def run_bash_command_with_log(bash_command: str,
             return_none=True,
             # The script will be not found without this
             shell=True,
+            check=True,
         )
 
 

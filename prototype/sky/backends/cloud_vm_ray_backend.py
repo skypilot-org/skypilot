@@ -337,10 +337,10 @@ class RayCodeGen(object):
         self._code += [
             textwrap.dedent("""\
                 ray.get(futures)
+                sys.stdout.flush()
                 sys.stderr.flush()
                 print(\'SKY INFO: All tasks finished.\',
-                      file=sys.stderr, 
-                      flush=True)""")
+                      file=sys.stderr, flush=True)""")
         ]
 
     def build(self) -> str:
