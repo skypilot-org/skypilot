@@ -286,18 +286,6 @@ def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
     """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
-    # FIXME: --cluster flag semantics has the following bug.  'sky run -c name
-    # x.yml' requiring GCP.  Then change x.yml to requiring AWS.  'sky run -c
-    # name x.yml' again.  The GCP cluster is not down'd but should be.  The
-    # root cause is due to 'ray up' not dealing with this cross-cloud case (but
-    # does correctly deal with in-cloud config changes).
-    #
-    # This bug also means that the old GCP cluster with the same name is
-    # orphaned.  `sky down` would not have an entry pointing to that handle, so
-    # would only down the NEW cluster.
-    #
-    # To fix all of the above, fix/circumvent the bug that 'ray up' not downing
-    # old cloud's cluster with the same name.
     sky.run(dag,
             dryrun=dryrun,
             stream_logs=True,
@@ -318,7 +306,8 @@ def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
               is_flag=True,
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
-def exec(yaml_path: Path, cluster: str, detach_run: bool):  # pylint: disable=redefined-builtin
+# pylint: disable=redefined-builtin
+def exec(yaml_path: Path, cluster: str, detach_run: bool):
     """Execute a task from a YAML spec on a cluster (skip setup).
 
     \b
@@ -354,10 +343,8 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):  # pylint: disable=re
     click.secho(f'Executing task on cluster {cluster} ...', fg='yellow')
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
-    
-    sky.exec(dag,
-            cluster_name=cluster,
-            detach_run=detach_run)
+
+    sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
 
 
 @cli.command()
@@ -393,7 +380,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         click.secho(f'Cancelling jobs {jobs} on cluster {cluster} ...',
                     fg='yellow')
 
-    codegen = backend_utils.JobUtilsCodeGen()
+    codegen = backend_utils.JobLibCodeGen()
     codegen.cancel_jobs(jobs)
     code = codegen.build()
 
@@ -473,7 +460,7 @@ def logs(cluster: str, job_id: str):
     cluster_name = cluster
     backend = backends.CloudVmRayBackend()
 
-    codegen = backend_utils.JobUtilsCodeGen()
+    codegen = backend_utils.JobLibCodeGen()
     codegen.tail_logs(job_id)
     code = codegen.build()
 
@@ -504,7 +491,7 @@ def queue(cluster: str, all_jobs: bool, all_users: bool):  # pylint: disable=red
     click.secho('Fetching and parsing job queue...', fg='yellow')
     backend = backends.CloudVmRayBackend()
 
-    codegen = backend_utils.JobUtilsCodeGen()
+    codegen = backend_utils.JobLibCodeGen()
     username = getpass.getuser()
     if all_users:
         username = None

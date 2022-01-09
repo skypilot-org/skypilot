@@ -11,6 +11,10 @@ import time
 import tempfile
 from typing import Iterator, List, Optional
 
+# Need this to make `job_lib` visible to this file, when imported as a module
+sys.path.append(os.path.dirname(__file__))
+import job_lib
+
 
 def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
     """Redirect the process's filtered stdout/stderr to both stream and file"""
@@ -125,14 +129,15 @@ def _follow(file,
             time.sleep(sleep_sec)
 
 
-def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
+def tail_logs(job_id: int, log_dir: Optional[str],
+              status: Optional[job_lib.JobStatus]):
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
 
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
-    if status in ['RUNNING', 'PENDING']:
+    if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
             with open(log_path, 'r') as log_file:
                 # Using `_follow` instead of `tail -f` to streaming the whole
@@ -140,10 +145,12 @@ def tail_logs(job_id: str, log_dir: Optional[str], status: Optional[str]):
                 for line in _follow(
                         log_file,
                         start_streaming_at='SKY INFO: Reserving task slots on',
-                        # FIXME: This is a hack to finish the tailing. If the
-                        # job  is killed by the user, the tailing process will
-                        # not end.
-                        end_following_at='SKY INFO: All tasks finished.'):
+                        # TODO: This is hacky and not robust as the ray's logs
+                        # to drive will be printed after the ending 'SKY INFO'
+                        # line, causing the tail_logs to exit early. We should
+                        # use pid or ray status to determine if the job is
+                        # finished.
+                        end_following_at=None):
                     print(line, end='', flush=True)
         except KeyboardInterrupt:
             return

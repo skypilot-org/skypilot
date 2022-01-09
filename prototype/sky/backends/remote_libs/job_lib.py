@@ -210,7 +210,7 @@ def cancel_jobs(jobs: Optional[List[str]]) -> None:
         set_status(job_id, JobStatus.STOPPED.value)
 
 
-def log_dir(job_id: int) -> Tuple[Optional[str], Optional[str]]:
+def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
     """Returns the path to the log file for a job and the status."""
     _update_status()
     rows = _CURSOR.execute(
@@ -218,7 +218,10 @@ def log_dir(job_id: int) -> Tuple[Optional[str], Optional[str]]:
             SELECT * FROM jobs
             WHERE job_id=(?)""", (job_id,))
     for row in rows:
+        if row[0] is None:
+            return None, None
         status = row[JobInfoLoc.STATUS.value]
+        status = JobStatus[status]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
     return os.path.join(SKY_REMOTE_WORKDIR, SKY_LOGS_DIRECTORY,
                         run_timestamp), status

@@ -43,7 +43,4 @@ for lr in [1e-5, 2e-5, 3e-5, 4e-5]:
 
     # Set 'stream_logs=False' to not mix all tasks' outputs together.
     # Each task's output is redirected to run-{lr}.log and can be tail-ed.
-    sky.exec(dag,
-            cluster_name='hgs',
-            stream_logs=False,
-            detach_run=True)
+    sky.exec(dag, cluster_name='hgs', stream_logs=False, detach_run=True)

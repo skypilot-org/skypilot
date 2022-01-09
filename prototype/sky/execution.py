@@ -41,15 +41,15 @@ class Stage(enum.Enum):
 
 
 def _execute(dag: sky.Dag,
-            dryrun: bool = False,
-            teardown: bool = False,
-            stream_logs: bool = True,
-            handle: Any = None,
-            backend: Optional[backends.Backend] = None,
-            optimize_target: OptimizeTarget = OptimizeTarget.COST,
-            stages: Optional[List[Stage]] = None,
-            cluster_name: Optional[str] = None,
-            detach_run: bool = False) -> None:
+             dryrun: bool = False,
+             teardown: bool = False,
+             stream_logs: bool = True,
+             handle: Any = None,
+             backend: Optional[backends.Backend] = None,
+             optimize_target: OptimizeTarget = OptimizeTarget.COST,
+             stages: Optional[List[Stage]] = None,
+             cluster_name: Optional[str] = None,
+             detach_run: bool = False) -> None:
     """Runs a DAG.
 
     If the DAG has not been optimized yet, this will call sky.optimize() for
@@ -150,6 +150,7 @@ def _execute(dag: sky.Dag,
             # Needed because this finally doesn't always get executed on errors.
             backends.backend_utils.run('sky status')
 
+
 def run(dag: sky.Dag,
         dryrun: bool = False,
         teardown: bool = False,
@@ -159,37 +160,40 @@ def run(dag: sky.Dag,
         cluster_name: Optional[str] = None,
         detach_run: bool = False) -> None:
     _execute(dag=dag,
-            dryrun=dryrun,
-            teardown=teardown,
-            stream_logs=stream_logs,
-            handle=None,
-            backend=backend,
-            optimize_target=optimize_target,
-            cluster_name=cluster_name,
-            detach_run=detach_run)
-  
-def exec(dag: sky.Dag,
+             dryrun=dryrun,
+             teardown=teardown,
+             stream_logs=stream_logs,
+             handle=None,
+             backend=backend,
+             optimize_target=optimize_target,
+             cluster_name=cluster_name,
+             detach_run=detach_run)
+
+
+def exec(  # pylint: disable=redefined-builtin
+        dag: sky.Dag,
         dryrun: bool = False,
         teardown: bool = False,
         stream_logs: bool = True,
         backend: Optional[backends.Backend] = None,
         optimize_target: OptimizeTarget = OptimizeTarget.COST,
         cluster_name: Optional[str] = None,
-        detach_run: bool = False) -> None:
+        detach_run: bool = False,
+) -> None:
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster \'{cluster_name}\' not found.  '
-                                 'Use `sky run` to provision first.')
+                         'Use `sky run` to provision first.')
     _execute(dag=dag,
-            dryrun=dryrun,
-            teardown=teardown,
-            stream_logs=stream_logs,
-            handle=handle,
-            backend=backend,
-            optimize_target=optimize_target,
-            stages=[
-                    Stage.SYNC_WORKDIR,
-                    Stage.EXEC,
-                ],
-            cluster_name=cluster_name,
-            detach_run=detach_run)
+             dryrun=dryrun,
+             teardown=teardown,
+             stream_logs=stream_logs,
+             handle=handle,
+             backend=backend,
+             optimize_target=optimize_target,
+             stages=[
+                 Stage.SYNC_WORKDIR,
+                 Stage.EXEC,
+             ],
+             cluster_name=cluster_name,
+             detach_run=detach_run)

@@ -607,12 +607,12 @@ def make_task_bash_script(codegen: str) -> str:
     return script
 
 
-class JobUtilsCodeGen(object):
+class JobLibCodeGen(object):
     """Code generator for job utility functions.
 
     Usage:
 
-      >> codegen = JobUtilsCodeGen()
+      >> codegen = JobLibCodeGen()
 
       >> codegen.show_jobs(...)
       >> codegen.add_job(...)
@@ -622,7 +622,6 @@ class JobUtilsCodeGen(object):
     """
 
     def __init__(self) -> None:
-        super().__init__()
         self._code = [
             'import sys',
             'import os',
@@ -643,8 +642,8 @@ class JobUtilsCodeGen(object):
 
     def tail_logs(self, job_id: str) -> None:
         self._code += [
-            f'log_dir, status = job_lib.log_dir({job_id!r})',
-            f'log_lib.tail_logs({job_id!r}, log_dir, status)',
+            f'log_dir, status = job_lib.log_dir({job_id})',
+            f'log_lib.tail_logs({job_id}, log_dir, status)',
         ]
 
     def build(self) -> str:

@@ -46,9 +46,7 @@ with sky.Dag() as dag:
     train.set_resources({
         sky.Resources(accelerators='V100'),
     })
-sky.exec(dag,
-            cluster_name='tb',
-            detach_run=True)
+sky.exec(dag, cluster_name='tb', detach_run=True)
 
 # Run the tensorboard task.
 with sky.Dag() as dag:
@@ -63,6 +61,4 @@ with sky.Dag() as dag:
     )
     tensorboard.set_resources(sky.Resources())
 
-sky.exec(dag,
-            cluster_name='tb',
-            detach_run=True)
+sky.exec(dag, cluster_name='tb', detach_run=True)
