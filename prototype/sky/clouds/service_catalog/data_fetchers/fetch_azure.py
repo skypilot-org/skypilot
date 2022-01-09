@@ -1,4 +1,4 @@
-"""A script that queries AWS API to get instance types and pricing information.
+"""A script that queries Azure API to get instance types and pricing info.
 
 This script takes about 1 minute to finish.
 """
@@ -8,7 +8,6 @@ from typing import Optional, Tuple
 import urllib
 
 from absl import app
-from absl import flags
 from absl import logging
 import numpy as np
 import pandas as pd
@@ -105,8 +104,11 @@ def get_gpu_name(family: str) -> str:
         'standardNVPromoFamily': 'M60',
         'standardNVSv4Family': 'Radeon MI25',
     }
+    # NP-series offer Xilinx U250 FPGAs which are not GPUs,
+    # so we do not include them here.
+    # https://docs.microsoft.com/en-us/azure/virtual-machines/np-series
     family = family.replace(' ', '')
-    return gpu_data.get(family, 'Unknown')
+    return gpu_data.get(family)
 
 
 def get_all_regions_instance_types_df():
@@ -140,20 +142,29 @@ def get_all_regions_instance_types_df():
             return np.nan
         return spot_pricing_rows.iloc[0]['unitPrice']
 
-    def get_gpu_info(row) -> Tuple[str, float]:
+    def get_capabilities(row) -> Tuple[str, float]:
+        gpu_name = None
+        gpu_count = np.nan
+        memory_gb = np.nan
         caps = row['capabilities']
         for item in caps:
             if item['name'] == 'GPUs':
-                return get_gpu_name(row['family']), item['value']
-        return None, np.nan
+                gpu_name = get_gpu_name(row['family'])
+                if gpu_name is not None:
+                    gpu_count = item['value']
+            elif item['name'] == 'MemoryGB':
+                memory_gb = item['value']
+        return gpu_name, gpu_count, memory_gb
 
     def get_additional_columns(row):
-        gpu_name, gpu_count = get_gpu_info(row)
+        gpu_name, gpu_count, memory_gb = get_capabilities(row)
         return pd.Series({
             'Price': get_price(row),
             'SpotPrice': get_spot_price(row),
             'AcceleratorName': gpu_name,
             'AcceleratorCount': gpu_count,
+            'MemoryGiB': memory_gb,
+            'GpuInfo': gpu_name,
         })
 
     df_ret = pd.concat(

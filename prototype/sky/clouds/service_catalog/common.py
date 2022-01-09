@@ -1,10 +1,28 @@
 """Common utilities for service catalog."""
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, NamedTuple, Optional
 
 import pandas as pd
 
-from sky.clouds import cloud
+from sky.clouds import cloud as cloud_lib
+
+
+class InstanceTypeInfo(NamedTuple):
+    """Instance type information.
+
+    - cloud: Cloud name.
+    - instance_type: String that can be used in YAML to specify this instance
+      type. E.g. `p3.2xlarge`.
+    - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
+    - accelerator_count: Number of accelerators offered by this instance type.
+    - memory: Instance memory in GiB.
+    - price: Regular instance price per hour.
+    """
+    cloud: str
+    instance_type: str
+    accelerator_name: str
+    accelerator_count: int
+    memory: float
 
 
 def get_data_path(filename: str) -> str:
@@ -96,31 +114,57 @@ def get_instance_type_for_accelerator_impl(
     return result.iloc[0]['InstanceType']
 
 
-def list_accelerators_impl(df: pd.DataFrame,
-                           gpus_only: bool) -> Dict[str, List[int]]:
+def list_accelerators_impl(
+        cloud: str,
+        df: pd.DataFrame,
+        gpus_only: bool,
+        name_filter: Optional[str],
+) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
+    `name_filter` is a regular expression used to filter accelerator names
+    using pandas.Series.str.contains.
+
     Returns a mapping from the canonical names of accelerators to a list of
-    counts, each representing an instance type offered by this cloud.
+    instance types offered by this cloud.
     """
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
-    df = df[['AcceleratorName', 'AcceleratorCount']].dropna().drop_duplicates()
+    df = df[[
+        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB'
+    ]].dropna(subset=['AcceleratorName']).drop_duplicates()
+    if name_filter is not None:
+        df = df[df['AcceleratorName'].str.contains(name_filter, regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
-    groupby = df.groupby('AcceleratorName')
-    return groupby['AcceleratorCount'].apply(lambda xs: sorted(list(xs))
-                                            ).to_dict()
+    grouped = df.groupby('AcceleratorName')
+
+    def make_list_from_df(rows):
+        ret = rows.apply(
+            lambda row: InstanceTypeInfo(
+                cloud,
+                row['InstanceType'],
+                row['AcceleratorName'],
+                row['AcceleratorCount'],
+                row['MemoryGiB'],
+            ),
+            axis='columns',
+        ).tolist()
+        ret.sort(key=lambda info: (info.accelerator_count, info.memory))
+        return ret
+
+    return {k: make_list_from_df(v) for k, v in grouped}
 
 
 def get_region_zones_for_instance_type(df: pd.DataFrame, instance_type: str,
-                                       use_spot: bool) -> List[cloud.Region]:
+                                       use_spot: bool
+                                      ) -> List[cloud_lib.Region]:
     """Returns a list of regions for a given instance type."""
     price_str = 'SpotPrice' if use_spot else 'Price'
     df = df[df['InstanceType'] == instance_type].sort_values(price_str)
-    regions = [cloud.Region(region) for region in df['Region'].unique()]
+    regions = [cloud_lib.Region(region) for region in df['Region'].unique()]
     if 'AvailabilityZone' in df.columns:
         zones_in_region = df.groupby('Region')['AvailabilityZone'].apply(
-            lambda x: [cloud.Zone(zone) for zone in x])
+            lambda x: [cloud_lib.Zone(zone) for zone in x])
         for region in regions:
             region.set_zones(zones_in_region[region.name])
     return regions

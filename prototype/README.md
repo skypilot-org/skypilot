@@ -7,8 +7,9 @@
 ```bash
 # Sky requires python version >= 3.6
 
-pip install -r requirements.txt
-pip install -e .
+# You can just install the dependencies for
+# certain clouds, e.g., ".[aws,azure,gcp]"
+pip install -e ".[all]"
 
 python examples/resnet_app.py
 
