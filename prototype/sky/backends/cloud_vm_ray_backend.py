@@ -1218,8 +1218,9 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_job(username, run_timestamp)
         code = codegen.build()
         job_id_str = self.run_on_head(handle, code, stream_logs=False)
-        # To avoid the job_id_str being corrupted by the input from the keyboard.
-        re_match = re.findall(f'__sky__job__id__{run_timestamp}: (\d+)', job_id_str)
+        # To avoid the job_id_str being corrupted by the input from keyboard.
+        re_match = re.findall(rf'__sky__job__id__{run_timestamp}: (\d+)',
+                              job_id_str)
         job_id = int(re_match[0])
 
         logger.info(f'Job_id: {job_id}')

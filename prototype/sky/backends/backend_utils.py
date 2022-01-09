@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import textwrap
 import time
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 import yaml
 import zlib
 
