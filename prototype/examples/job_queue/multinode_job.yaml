@@ -1,0 +1,25 @@
+# A task runs on an existing multinode cluster.
+#
+# Runs a task that requires multinode.
+#
+# Usage:
+#   sky run -c mjq cluster_multinode.yaml
+#   sky exec -c mjq job_multinode.yaml
+#   sky exec -c mjq job.yaml
+
+resources:
+  accelerators:
+    K80: 0.5
+
+num_nodes: 2
+
+setup: |
+  echo "running setup"
+
+run: |
+  timestamp=$(date +%s)
+  conda env list
+  for i in {1..120}; do
+    echo "$timestamp $i"
+    sleep 1
+  done

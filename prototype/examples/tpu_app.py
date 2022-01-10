@@ -28,4 +28,4 @@ with sky.Dag() as dag:
                       }),
     })
 
-sky.execute(dag)
+sky.run(dag)

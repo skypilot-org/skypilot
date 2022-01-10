@@ -1,15 +1,12 @@
 """Util constants/functions for the backends."""
 import datetime
-import io
 import os
 import pathlib
-import selectors
 import subprocess
-import sys
 import tempfile
 import textwrap
 import time
-from typing import Dict, List, Optional, Union, Set
+from typing import Dict, List, Optional
 import yaml
 import zlib
 
@@ -21,22 +18,26 @@ from sky import clouds
 from sky import logging
 from sky import resources
 from sky import task as task_lib
+from sky.backends import remote_libs
+from sky.backends.remote_libs import job_lib, log_lib
 
 logger = logging.init_logger(__name__)
 
-# An application.  These are the task types to support.
-App = Union[task_lib.Task, task_lib.ParTask]
-RunId = str
 Resources = resources.Resources
 
+# NOTE: keep in sync with the cluster template 'file_mounts'.
+SKY_REMOTE_WORKDIR = job_lib.SKY_REMOTE_WORKDIR
+SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
+SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
-SKY_LOGS_DIRECTORY = './sky_logs'
+SKY_REMOTE_RAY_VERSION = '1.9.1'
+SKY_REMOTE_LIB_PATH = '~/.sky/remote_libs'
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
-SKY_REMOTE_WORKDIR = '~/sky_workdir'
-SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
+
+run_with_log = log_lib.run_with_log
 
 
 def get_rel_path(path: str) -> str:
@@ -293,8 +294,8 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
-def write_cluster_config(run_id: RunId,
-                         task: task_lib.Task,
+def write_cluster_config(task: task_lib.Task,
+                         to_provision: Resources,
                          cluster_config_template: str,
                          cluster_name: str,
                          region: Optional[clouds.Region] = None,
@@ -308,8 +309,10 @@ def write_cluster_config(run_id: RunId,
         - 'tpu-create-script' (if TPU is requested)
         - 'tpu-delete-script' (if TPU is requested)
     """
-    cloud = task.best_resources.cloud
-    resources_vars = cloud.make_deploy_resources_variables(task)
+    # task.best_resources may not be equal to to_provision if the user
+    # is running a job with less resources than the cluster has.
+    cloud = to_provision.cloud
+    resources_vars = cloud.make_deploy_resources_variables(to_provision)
     config_dict = {}
 
     if region is None:
@@ -384,7 +387,6 @@ def write_cluster_config(run_id: RunId,
             resources_vars,
             **{
                 'cluster_name': cluster_name,
-                'run_id': run_id,
                 'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
@@ -398,6 +400,12 @@ def write_cluster_config(run_id: RunId,
                 'zones': ','.join(zones),
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
+                # Ray version.
+                'ray_version': SKY_REMOTE_RAY_VERSION,
+                # Sky remote utils.
+                'sky_remote_libs_remote_path': SKY_REMOTE_LIB_PATH,
+                'sky_remote_libs_local_path': os.path.abspath(
+                    os.path.dirname(remote_libs.__file__)),
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -465,7 +473,7 @@ def dump_yaml(path, config):
                   default_flow_style=False)
 
 
-def get_run_id() -> RunId:
+def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
@@ -532,54 +540,6 @@ def run_command_on_ip_via_ssh(ip: str,
             raise subprocess.CalledProcessError(proc.returncode, cmd)
 
 
-def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
-    """Redirect the process's filtered stdout/stderr to both stream and file"""
-    log_path = os.path.expanduser(log_path)
-    dirname = os.path.dirname(log_path)
-    os.makedirs(dirname, exist_ok=True)
-
-    out_io = io.TextIOWrapper(proc.stdout,
-                              encoding='utf-8',
-                              newline='',
-                              errors='replace')
-    err_io = io.TextIOWrapper(proc.stderr,
-                              encoding='utf-8',
-                              newline='',
-                              errors='replace')
-    sel = selectors.DefaultSelector()
-    sel.register(out_io, selectors.EVENT_READ)
-    sel.register(err_io, selectors.EVENT_READ)
-
-    stdout = ''
-    stderr = ''
-
-    start_streaming_flag = False
-    with open(log_path, 'a') as fout:
-        while len(sel.get_map()) > 0:
-            events = sel.select()
-            for key, _ in events:
-                line = key.fileobj.readline()
-                if not line:
-                    # Unregister the io when EOF reached
-                    sel.unregister(key.fileobj)
-                    continue
-                # Remove special characters to avoid cursor hidding
-                line = line.replace('\x1b[?25l', '')
-                if start_streaming_at in line:
-                    start_streaming_flag = True
-                if key.fileobj is out_io:
-                    stdout += line
-                    out_stream = sys.stdout
-                else:
-                    stderr += line
-                    out_stream = sys.stderr
-                if stream_logs and start_streaming_flag:
-                    out_stream.write(line)
-                    out_stream.flush()
-                fout.write(line)
-    return stdout, stderr
-
-
 def run(cmd, **kwargs):
     shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
@@ -600,29 +560,6 @@ def run_no_outputs(cmd, **kwargs):
                **kwargs)
 
 
-def run_with_log(cmd: List[str],
-                 log_path: str,
-                 stream_logs: bool = False,
-                 start_streaming_at: str = '',
-                 return_none: bool = False,
-                 **kwargs):
-    """Runs a command and logs its output to a file.
-
-    Retruns the process, stdout and stderr of the command.
-      Note that the stdout and stderr is already decoded.
-    """
-    with subprocess.Popen(cmd,
-                          stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE,
-                          **kwargs) as proc:
-        stdout, stderr = redirect_process_output(
-            proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
-        proc.wait()
-        if return_none:
-            return None
-        return proc, stdout, stderr
-
-
 def check_local_gpus() -> bool:
     """Returns whether GPUs are available on the local machine by checking
     if nvidia-smi is installed.
@@ -633,39 +570,6 @@ def check_local_gpus() -> bool:
                        capture_output=True,
                        check=False)
     return p.returncode == 0
-
-
-def is_same_requested_resources(r1: Set[Resources], r2: Set[Resources]):
-    """Returns whether the requested resources are the same.
-
-    Args:
-        r1: Set of Resources requested previously.
-        r2: Set of Resources newly requested.
-
-    Returns:
-        True if the resources are the same, false otherwise.
-    """
-    assert len(r1) == 1 and len(r2) == 1
-    r1 = list(r1)[0]
-    r2 = list(r2)[0]
-    return r1.is_same_resources(r2)
-
-
-def run_bash_command_with_log(bash_command: str,
-                              log_path: str,
-                              stream_logs: bool = False):
-    with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-        fp.write(bash_command)
-        fp.flush()
-        script_path = fp.name
-        run_with_log(
-            f'/bin/bash {script_path}',
-            log_path,
-            stream_logs=stream_logs,
-            return_none=True,
-            # The script will be not found without this
-            shell=True,
-        )
 
 
 def make_task_bash_script(codegen: str) -> str:
@@ -679,3 +583,50 @@ def make_task_bash_script(codegen: str) -> str:
     ]
     script = '\n'.join(script)
     return script
+
+
+class JobLibCodeGen(object):
+    """Code generator for job utility functions.
+
+    Usage:
+
+      >> codegen = JobLibCodeGen()
+
+      >> codegen.show_jobs(...)
+      >> codegen.add_job(...)
+      >> codegen.<method>(...)
+
+      >> code = codegen.build()
+    """
+
+    def __init__(self) -> None:
+        self._code = [
+            'import sys',
+            'import os',
+            f'lib_path = os.path.expanduser({SKY_REMOTE_LIB_PATH!r})',
+            'sys.path.append(lib_path)',
+            'import job_lib',
+            'import log_lib',
+        ]
+
+    def add_job(self, username: str, run_timestamp: str) -> None:
+        self._code += [
+            f'job_id = job_lib.add_job({username!r}, {run_timestamp!r})',
+            f'print(\'__sky__job__id__{run_timestamp}:\', job_id, flush=True)',
+        ]
+
+    def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:
+        self._code.append(f'job_lib.show_jobs({username!r}, {all_jobs})')
+
+    def cancel_jobs(self, job_ids: Optional[List[int]]) -> None:
+        self._code.append(f'job_lib.cancel_jobs({job_ids!r})')
+
+    def tail_logs(self, job_id: str) -> None:
+        self._code += [
+            f'log_dir, status = job_lib.log_dir({job_id})',
+            f'log_lib.tail_logs({job_id}, log_dir, status)',
+        ]
+
+    def build(self) -> str:
+        code = ';'.join(self._code)
+        return f'python3 -u -c {code!r}'

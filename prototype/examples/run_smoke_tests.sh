@@ -24,8 +24,8 @@ sky down fm &
 # time sky exec -c resnet "$DIR"/resnet_app.yaml
 # time python "$DIR"/resnet_app.py
 # sky down resnet &
-# FIXME: if concurrently running two runs of resnet, the second run should be
-# waiting for the first run, but this is not happening.
+# If concurrently running two runs of resnet, the second run will be
+# waiting for the first run.
 
 # Task(), 1 node.
 # 6:47.90 total
@@ -59,5 +59,23 @@ sky down dtf &
 # 6:23.58 total
 time python "$DIR"/multi_echo.py
 # python "$DIR"/huggingface_glue_imdb_grid_search_app.py
+
+# Job Queue.
+time sky run -c jq "$DIR"/job_queue/cluster.yaml
+time sky exec -c jq "$DIR"/job_queue/job.yaml -d
+time sky exec -c jq "$DIR"/job_queue/job.yaml -d
+time sky exec -c jq "$DIR"/job_queue/job.yaml -d
+sky queue jq
+sky down jq &
+
+time sky run -c mjq "$DIR"/job_queue/multinode.yaml
+time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml -d
+time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml -d
+time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml -d
+# The job id is automatically increment from 1.
+sky cancel -c mjq 1
+sky logs -c mjq 2
+sky queue mjq
+sky down mjq &
 
 wait

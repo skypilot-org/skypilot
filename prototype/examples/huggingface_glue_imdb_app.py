@@ -38,4 +38,4 @@ with sky.Dag() as dag:
     )
     train.set_resources({sky.Resources(accelerators='V100')})
 
-sky.execute(dag)
+sky.run(dag)
