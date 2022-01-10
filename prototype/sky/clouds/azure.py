@@ -96,8 +96,8 @@ class Azure(clouds.Cloud):
     ) -> Optional[Dict[str, int]]:
         return azure_catalog.get_accelerators_from_instance_type(instance_type)
 
-    def make_deploy_resources_variables(self, task):
-        r = task.best_resources
+    def make_deploy_resources_variables(self, resources):
+        r = resources
         assert not r.use_spot, \
             'Our subscription offer ID does not support spot instances.'
         # r.accelerators is cleared but .instance_type encodes the info.
