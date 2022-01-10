@@ -1,6 +1,6 @@
 # Example Sky apps
 
-To run an example:
+To launch an example:
 ```python
 python examples/<name>.py
 ```

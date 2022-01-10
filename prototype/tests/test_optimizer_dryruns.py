@@ -8,7 +8,7 @@ def _test_resources(resources):
     with sky.Dag() as dag:
         train = sky.Task('train')
         train.set_resources({resources})
-    sky.run(dag, dryrun=True)
+    sky.launch(dag, dryrun=True)
     assert True
 
 

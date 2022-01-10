@@ -58,4 +58,4 @@ with sky.Dag() as dag:
     })
 
 dag = sky.Optimizer.optimize(dag)
-sky.run(dag)
+sky.launch(dag)

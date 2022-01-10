@@ -7,8 +7,8 @@ Example usage:
 
   # Run a task, described in a yaml file.
   # Provisioning, setup, file syncing are handled.
-  >> sky run task.yaml
-  >> sky run [-c cluster_name] task.yaml
+  >> sky launch task.yaml
+  >> sky launch [-c cluster_name] task.yaml
 
   # Show the list of running clusters.
   >> sky status
@@ -300,8 +300,8 @@ def cli():
               is_flag=True,
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
-def run(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
-        detach_run: bool):
+def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
+           detach_run: bool):
     """Launch a task from a YAML or command (rerun setup if cluster exists).
 
     If entrypoint points to a valid YAML file, it is read in as the task
@@ -317,11 +317,11 @@ def run(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
             sky.Task(name='<cmd>', run=entrypoint)
 
     click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
-    sky.run(dag,
-            dryrun=dryrun,
-            stream_logs=True,
-            cluster_name=cluster,
-            detach_run=detach_run)
+    sky.launch(dag,
+               dryrun=dryrun,
+               stream_logs=True,
+               cluster_name=cluster,
+               detach_run=detach_run)
 
 
 @cli.command()
@@ -350,19 +350,19 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
       - workdir syncing
       - executing the task's run command (if entrypoint is a yaml; if specified,
       executed on all nodes) or a bash command (only on the cluster's head node)
-    `sky exec` is thus typically faster than `sky run`, provided a cluster
+    `sky exec` is thus typically faster than `sky launch`, provided a cluster
     already exists.
 
     All setup steps (provisioning, setup commands, file mounts syncing) are
     skipped.  If any of those specifications changed, this command will not
     reflect those changes.  To ensure a cluster's setup is up to date, use `sky
-    run` instead.
+    launch` instead.
 
     Typical workflow:
 
       # First command: set up the cluster once.
 
-      >> sky run -c name app.yaml
+      >> sky launch -c name app.yaml
 
     \b
       # Starting iterative development...
@@ -371,9 +371,9 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
 
       >> sky exec -c name app.yaml
 
-      # Simply do "sky run" again if anything other than Task.run is modified:
+      # Do "sky launch" again if anything other than Task.run is modified:
 
-      >> sky run -c name app.yaml
+      >> sky launch -c name app.yaml
 
     Advanced use cases:
 
