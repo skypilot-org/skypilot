@@ -80,7 +80,7 @@ def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
     if task.best_resources is not None:
         resources = task.best_resources
     else:
-        # Task may (e.g., sky run) or may not (e.g., sky exec) have undergone
+        # Task may (e.g., sky launch) or may not (e.g., sky exec) have undergone
         # sky.optimize(), so best_resources may be None.
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
@@ -658,7 +658,7 @@ class RetryingVmProvisioner(object):
 
             # Record early, so if anything goes wrong, 'sky status' will show
             # the cluster name and users can appropriately 'sky down'.  It also
-            # means a second 'sky run -c <name>' will attempt to reuse.
+            # means a second 'sky launch -c <name>' will attempt to reuse.
             handle = CloudVmRayBackend.ResourceHandle(
                 cluster_name=cluster_name,
                 cluster_yaml=cluster_config_file,
@@ -739,13 +739,13 @@ class RetryingVmProvisioner(object):
             # Redirect stdout/err to the file and streaming (if stream_logs).
             proc, stdout, stderr = backend_utils.run_with_log(
                 # NOTE: --no-restart solves the following bug.  Without it, if
-                # 'ray up' (sky run) twice on a cluster with >1 node, the
+                # 'ray up' (sky launch) twice on a cluster with >1 node, the
                 # worker node gets disconnected/killed by ray autoscaler; the
                 # whole task will just freeze.  (Doesn't affect 1-node
                 # clusters.)  With this flag, ray processes no longer restart
                 # and this bug doesn't show.  Downside is existing tasks on the
                 # cluster will keep running (which may be ok with the semantics
-                # of 'sky run' twice).
+                # of 'sky launch' twice).
                 # Tracked in https://github.com/ray-project/ray/issues/20402.
                 ['ray', 'up', '-y', '--no-restart', cluster_config_file],
                 log_abs_path,
@@ -1481,8 +1481,7 @@ class CloudVmRayBackend(backends.Backend):
         if handle.head_ip is None:
             raise ValueError(
                 f'The cluster "{config["cluster_name"]}" appears to be down. '
-                'Run a re-provisioning command again (e.g., sky run) and retry.'
-            )
+                'Run a re-provisioning command (e.g., sky launch) and retry.')
         auth = config['auth']
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')

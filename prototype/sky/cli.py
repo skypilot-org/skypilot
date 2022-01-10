@@ -7,8 +7,8 @@ Example usage:
 
   # Run a task, described in a yaml file.
   # Provisioning, setup, file syncing are handled.
-  >> sky run task.yaml
-  >> sky run [-c cluster_name] task.yaml
+  >> sky launch task.yaml
+  >> sky launch [-c cluster_name] task.yaml
 
   # Show the list of running clusters.
   >> sky status
@@ -285,17 +285,17 @@ def cli():
               is_flag=True,
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
-def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
+def launch(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
     """Launch task from a YAML spec (re-setup if a cluster exists)."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
 
     click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
-    sky.run(dag,
-            dryrun=dryrun,
-            stream_logs=True,
-            cluster_name=cluster,
-            detach_run=detach_run)
+    sky.launch(dag,
+               dryrun=dryrun,
+               stream_logs=True,
+               cluster_name=cluster,
+               detach_run=detach_run)
 
 
 @cli.command()
@@ -319,7 +319,7 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):
     Actions performed by this command only include:
       - workdir syncing
       - executing the task's run command
-    `sky exec` is thus typically faster than `sky run`, provided a cluster
+    `sky exec` is thus typically faster than `sky launch`, provided a cluster
     already exists.
 
     All setup steps (provisioning, setup commands, file mounts syncing) are
@@ -331,7 +331,7 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):
 
       # First command: set up the cluster once.
 
-      >> sky run -c name app.yaml
+      >> sky launch -c name app.yaml
 
     \b
       # Starting iterative development...
@@ -340,9 +340,9 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):
 
       >> sky exec -c name app.yaml
 
-      # Simply do "sky run" again if anything other than Task.run is modified:
+      # Do "sky launch" again if anything other than Task.run is modified:
 
-      >> sky run -c name app.yaml
+      >> sky launch -c name app.yaml
 
     """
     with sky.Dag() as dag:

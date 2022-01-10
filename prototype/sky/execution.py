@@ -185,7 +185,7 @@ def exec(  # pylint: disable=redefined-builtin
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster \'{cluster_name}\' not found.  '
-                         'Use `sky run` to provision first.')
+                         'Use `sky launch` to provision first.')
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,

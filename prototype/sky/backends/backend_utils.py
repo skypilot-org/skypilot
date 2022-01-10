@@ -543,7 +543,7 @@ def run_command_on_ip_via_ssh(ip: str,
             raise subprocess.CalledProcessError(proc.returncode, cmd)
 
 
-def run(cmd, **kwargs):
+def launch(cmd, **kwargs):
     shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
     executable = kwargs.pop('executable', '/bin/bash')
@@ -557,10 +557,10 @@ def run(cmd, **kwargs):
 
 
 def run_no_outputs(cmd, **kwargs):
-    return run(cmd,
-               stdout=subprocess.DEVNULL,
-               stderr=subprocess.DEVNULL,
-               **kwargs)
+    return launch(cmd,
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL,
+                  **kwargs)
 
 
 def check_local_gpus() -> bool:

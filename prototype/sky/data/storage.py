@@ -164,7 +164,7 @@ class Storage(object):
             on local machine or on cloud (s3://, gs://, etc.). Paths do not need
             to be absolute.
           stores: Optional; - specify pre-initialized stores (S3Store, GcsStore)
-          persistent: bool; Whether to persist across sky runs.
+          persistent: bool; Whether to persist across sky launches.
         """
         self.name = name
         self.source = source
