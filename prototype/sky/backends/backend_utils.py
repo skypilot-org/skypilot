@@ -33,6 +33,9 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.1'
 SKY_REMOTE_LIB_PATH = '~/.sky/remote_libs'
 
+BOLD = '\033[1m'
+RESET_BOLD = '\033[0m'
+
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
