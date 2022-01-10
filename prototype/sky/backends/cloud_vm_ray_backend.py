@@ -46,6 +46,23 @@ SKY_REMOTE_LIB_PATH = backend_utils.SKY_REMOTE_LIB_PATH
 logger = logging.init_logger(__name__)
 
 
+def _check_cluster_name_is_valid(cluster_name: str) -> None:
+    """Errors out on invalid cluster names not supported by cloud providers.
+
+    Bans (including but not limited to) names that:
+    - are digits-only
+    - contain underscore (_)
+    """
+    if cluster_name is None:
+        return
+    # GCP errors return this exact regex.  An informal description is also at:
+    # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
+    valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
+    if re.fullmatch(valid_regex, cluster_name) is None:
+        raise ValueError(f'Cluster name "{cluster_name}" is invalid; '
+                         f'ensure it is fully matched by regex: {valid_regex}')
+
+
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
         clouds.AWS: 'config/aws-ray.yml.j2',
@@ -200,7 +217,7 @@ class RayCodeGen(object):
             lib_path = os.path.expanduser({SKY_REMOTE_LIB_PATH!r})
             sys.path.append(lib_path)
             import job_lib
-            
+
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             ray.init('auto', namespace='__sky__{job_id}__', log_to_driver=True)
@@ -1004,6 +1021,7 @@ class CloudVmRayBackend(backends.Backend):
             # TODO: change this ID formatting to something more pleasant.
             # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
             cluster_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+        _check_cluster_name_is_valid(cluster_name)
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
