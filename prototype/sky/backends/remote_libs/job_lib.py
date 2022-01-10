@@ -128,17 +128,14 @@ def _get_jobs(username: Optional[str],
         })
     return records
 
-
-def _update_status() -> None:
-    running_jobs = _get_jobs(username=None, status_list=[JobStatus.RUNNING])
-
-    if len(running_jobs) == 0:
-        return
+def query_job_status(job_ids: List[int]) -> List[JobStatus]:
+    if len(job_ids) == 0:
+        return []
 
     # TODO: if too slow, directly query against redis.
     test_cmd = [
-        (f'ray job status --address 127.0.0.1:8265 {job["job_id"]} 2>&1 | '
-         'grep "Job status"') for job in running_jobs
+        (f'ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
+         'grep "Job status"') for job in job_ids
     ]
     test_cmd = ' && '.join(test_cmd)
     proc = subprocess.run(test_cmd,
@@ -149,13 +146,24 @@ def _update_status() -> None:
     stdout = proc.stdout.decode('utf-8')
 
     results = stdout.strip().split('\n')
-    assert len(results) == len(running_jobs), (results, running_jobs)
+    assert len(results) == len(job_ids), (results, job_ids)
 
     # Process the results
-    for i, job in enumerate(running_jobs):
-        ray_status = results[i].strip().rstrip('.')
+    job_status_list = []
+    for res in results:
+        ray_status = res.strip().rstrip('.')
         ray_status = ray_status.rpartition(' ')[-1]
         status = _RAY_TO_JOB_STATUS_MAP[ray_status]
+        job_status_list.append(status)
+    return job_status_list
+
+def _update_status() -> None:
+    running_jobs = _get_jobs(username=None, status_list=[JobStatus.RUNNING])
+    running_job_ids = [job['job_id'] for job in running_jobs]
+
+    job_status = query_job_status(running_job_ids)
+    # Process the results
+    for job, status in zip(running_jobs, job_status):
         set_status(job['job_id'], status)
 
 

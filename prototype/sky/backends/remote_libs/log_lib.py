@@ -110,30 +110,40 @@ def run_bash_command_with_log(bash_command: str,
         )
 
 
-def _follow(file,
-            sleep_sec: float = 0.1,
-            start_streaming_at='',
-            end_following_at=None) -> Iterator[str]:
+def _follow_job_logs(file,
+                     job_id: int,
+                     sleep_sec: float = 0.5,
+                     start_streaming_at='') -> Iterator[str]:
     """ Yield each line from a file as they are written.
 
     `sleep_sec` is the time to sleep after empty reads. """
     line = ''
+    status = job_lib.query_job_status([job_id])[0]
     start_streaming = False
+    pending_info_logged = False
     while True:
         tmp = file.readline()
-        if tmp is not None:
+        if tmp is not None and tmp != '':
             line += tmp
             if '\n' in line or '\r' in line:
-                if start_streaming_at in line.strip():
+                if start_streaming_at in line:
                     start_streaming = True
                 if start_streaming:
                     yield line
-                if (end_following_at is not None and
-                        end_following_at == line.strip()):
-                    return
                 line = ''
-        elif sleep_sec:
-            time.sleep(sleep_sec)
+        else:
+            # Check the job status before query again to avoid
+            # unfinished logs.
+            if status == job_lib.JobStatus.PENDING:
+                if not pending_info_logged:
+                    yield (f'SKY INFO: Job {job_id} is still '
+                           'pending for the resources...\n')
+            elif status != job_lib.JobStatus.RUNNING:
+                return
+            
+            if sleep_sec:
+                time.sleep(sleep_sec)
+            status = job_lib.query_job_status([job_id])[0]
 
 
 def tail_logs(job_id: int, log_dir: Optional[str],
@@ -146,18 +156,13 @@ def tail_logs(job_id: int, log_dir: Optional[str],
     log_path = os.path.expanduser(log_path)
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
-            with open(log_path, 'r') as log_file:
+            with open(log_path, 'r', newline='') as log_file:
                 # Using `_follow` instead of `tail -f` to streaming the whole
                 # log and creating a new process for tail.
-                for line in _follow(
+                for line in _follow_job_logs(
                         log_file,
-                        start_streaming_at='SKY INFO: Reserving task slots on',
-                        # TODO: This is hacky and not robust as the ray's logs
-                        # to drive will be printed after the ending 'SKY INFO'
-                        # line, causing the tail_logs to exit early. We should
-                        # use pid or ray status to determine if the job is
-                        # finished.
-                        end_following_at=None):
+                        job_id=job_id,
+                        start_streaming_at='SKY INFO: Reserving task slots on'):
                     print(line, end='', flush=True)
         except KeyboardInterrupt:
             return

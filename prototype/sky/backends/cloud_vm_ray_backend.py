@@ -353,14 +353,7 @@ class RayCodeGen(object):
         assert not self._has_epilogue, 'add_epilogue() called twice?'
         self._has_epilogue = True
 
-        self._code += [
-            textwrap.dedent("""\
-                ray.get(futures)
-                sys.stdout.flush()
-                sys.stderr.flush()
-                print(\'SKY INFO: All tasks finished.\',
-                      file=sys.stderr, flush=True)""")
-        ]
+        self._code.append('ray.get(futures)')
 
     def build(self) -> str:
         """Returns the entire generated program."""
@@ -1381,7 +1374,7 @@ class CloudVmRayBackend(backends.Backend):
         fore = colorama.Fore
         style = colorama.Style
         if not teardown:
-            name = global_user_state.get_cluster_name_from_handle(handle)
+            name = handle.cluster_name
             logger.info(
                 f'\n{fore.CYAN}Cluster name: '
                 f'{style.BRIGHT}{name}{style.RESET_ALL}'
