@@ -302,7 +302,12 @@ def cli():
               'then detach from the job\'s execution.')
 def run(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
         detach_run: bool):
-    """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
+    """Launch a task from a YAML or command (rerun setup if cluster exists).
+
+    If entrypoint points to a valid YAML file, it is read in as the task
+    specification. Otherwise, it is interpreted as a bash command to be
+    executed on the head node of the cluster.
+    """
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
             # Treat entrypoint as a yaml.
