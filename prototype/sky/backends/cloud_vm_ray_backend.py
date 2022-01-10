@@ -353,14 +353,7 @@ class RayCodeGen(object):
         assert not self._has_epilogue, 'add_epilogue() called twice?'
         self._has_epilogue = True
 
-        self._code += [
-            textwrap.dedent("""\
-                ray.get(futures)
-                sys.stdout.flush()
-                sys.stderr.flush()
-                print(\'SKY INFO: All tasks finished.\',
-                      file=sys.stderr, flush=True)""")
-        ]
+        self._code.append('ray.get(futures)')
 
     def build(self) -> str:
         """Returns the entire generated program."""
@@ -1230,17 +1223,18 @@ class CloudVmRayBackend(backends.Backend):
             style = colorama.Style
             fore = colorama.Fore
             name = handle.cluster_name
-            logger.info(
-                'NOTE: ctrl-c does not stop the job.\n'
-                f'\n{fore.CYAN}Job ID: '
-                f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
-                '\nTo cancel the job:\t'
-                f'{style.BRIGHT}sky cancel -c {name} {job_id} {style.RESET_ALL}'
-                '\nTo stream logs:\t'
-                f'{style.BRIGHT}sky logs -c {handle.cluster_name} {job_id}'
-                f'{style.RESET_ALL}'
-                '\nTo view the job queue:\t'
-                f'{style.BRIGHT}sky queue -c {name} {style.RESET_ALL}')
+            logger.info('NOTE: ctrl-c does not stop the job.\n'
+                        f'\n{fore.CYAN}Job ID: '
+                        f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                        '\nTo cancel the job:\t'
+                        f'{backend_utils.BOLD}sky cancel -c {name} {job_id}'
+                        f'{backend_utils.RESET_BOLD}'
+                        '\nTo stream the logs:\t'
+                        f'{backend_utils.BOLD}sky logs -c {name} {job_id}'
+                        f'{backend_utils.RESET_BOLD}'
+                        '\nTo view the job queue:\t'
+                        f'{backend_utils.BOLD}sky queue -c {name}'
+                        f'{backend_utils.RESET_BOLD}')
 
     def _add_job(self, handle: ResourceHandle) -> int:
         run_timestamp = os.path.basename(self.log_dir)
@@ -1381,18 +1375,21 @@ class CloudVmRayBackend(backends.Backend):
         fore = colorama.Fore
         style = colorama.Style
         if not teardown:
-            name = global_user_state.get_cluster_name_from_handle(handle)
-            logger.info(
-                f'\n{fore.CYAN}Cluster name: '
-                f'{style.BRIGHT}{name}{style.RESET_ALL}'
-                '\nTo log into the head VM:\t'
-                f'{style.BRIGHT}sky ssh {name} {style.RESET_ALL}'
-                '\nTo submit job to the cluster:'
-                f'\t{style.BRIGHT}sky exec -c {name} yaml_file{style.RESET_ALL}'
-                '\nTo teardown the cluster:'
-                f'\t{style.BRIGHT}sky down {name}{style.RESET_ALL}'
-                '\nTo stop the cluster:'
-                f'\t{style.BRIGHT}sky stop {name}{style.RESET_ALL}')
+            name = handle.cluster_name
+            logger.info(f'\n{fore.CYAN}Cluster name: '
+                        f'{style.BRIGHT}{name}{style.RESET_ALL}'
+                        '\nTo log into the head VM:\t'
+                        f'{backend_utils.BOLD}ssh {name}'
+                        f'{backend_utils.RESET_BOLD}'
+                        '\nTo submit a job:'
+                        f'\t\t{backend_utils.BOLD}sky exec -c {name} yaml_file'
+                        f'{backend_utils.RESET_BOLD}'
+                        '\nTo teardown the cluster:'
+                        f'\t{backend_utils.BOLD}sky down {name}'
+                        f'{backend_utils.RESET_BOLD}'
+                        '\nTo stop the cluster:'
+                        f'\t{backend_utils.BOLD}sky stop {name}'
+                        f'{backend_utils.RESET_BOLD}')
             if handle.tpu_delete_script is not None:
                 logger.info('Tip: `sky down` will delete launched TPU(s) too.')
 
