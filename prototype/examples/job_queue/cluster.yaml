@@ -3,7 +3,7 @@
 # Runs a dummy task that provision a cluster.
 #
 # Usage:
-#   sky run -c jq cluster.yaml
+#   sky launch -c jq cluster.yaml
 #   sky exec -c jq job.yaml
 
 resources:

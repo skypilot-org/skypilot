@@ -14,7 +14,7 @@ with sky.Dag() as dag:
     sky.Task(setup=common_setup).set_resources(resources_to_launch)
 # `detach_run` will only detach the `run` command. The provision and `setup` are
 # still blocking.
-sky.run(dag, cluster_name='hgs', detach_run=True)
+sky.launch(dag, cluster_name='hgs', detach_run=True)
 
 for lr in [1e-5, 2e-5, 3e-5, 4e-5]:
     with sky.Dag() as dag:

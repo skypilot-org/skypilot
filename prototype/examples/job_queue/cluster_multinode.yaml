@@ -3,7 +3,7 @@
 # Runs a dummy task that provision a cluster.
 #
 # Usage:
-#   sky run -c mjq cluster_multinode.yaml
+#   sky launch -c mjq cluster_multinode.yaml
 #   sky exec -c mjq job_multinode.yaml
 #   sky exec -c mjq job.yaml
 
