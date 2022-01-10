@@ -128,7 +128,7 @@ def _ssh_options_list(ssh_private_key: Optional[str],
         'ServerAliveInterval': 5,
         'ServerAliveCountMax': 3,
         # Control path: important optimization as we do multiple ssh in one
-        # sky.run().
+        # sky.launch().
         'ControlMaster': 'auto',
         'ControlPath': '{}/%C'.format(ssh_control_path),
         'ControlPersist': '30s',
@@ -998,7 +998,7 @@ class CloudVmRayBackend(backends.Backend):
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
             'Tip: to reuse an existing cluster, '
             'specify --cluster-name (-c) in the CLI or use '
-            'sky.run(.., cluster_name=..) in the Python API. '
+            'sky.launch(.., cluster_name=..) in the Python API. '
             'Run `sky status` to see existing clusters.')
         return cluster_name, to_provision
 

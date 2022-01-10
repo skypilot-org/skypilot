@@ -2,7 +2,7 @@
 
 Usage:
 
-   >> sky.run(planned_dag)
+   >> sky.launch(planned_dag)
 
 Current resource privisioners:
 
@@ -153,14 +153,14 @@ def _execute(dag: sky.Dag,
             backends.backend_utils.run('sky status')
 
 
-def run(dag: sky.Dag,
-        dryrun: bool = False,
-        teardown: bool = False,
-        stream_logs: bool = True,
-        backend: Optional[backends.Backend] = None,
-        optimize_target: OptimizeTarget = OptimizeTarget.COST,
-        cluster_name: Optional[str] = None,
-        detach_run: bool = False) -> None:
+def launch(dag: sky.Dag,
+           dryrun: bool = False,
+           teardown: bool = False,
+           stream_logs: bool = True,
+           backend: Optional[backends.Backend] = None,
+           optimize_target: OptimizeTarget = OptimizeTarget.COST,
+           cluster_name: Optional[str] = None,
+           detach_run: bool = False) -> None:
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,

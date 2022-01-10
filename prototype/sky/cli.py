@@ -325,7 +325,7 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):
     All setup steps (provisioning, setup commands, file mounts syncing) are
     skipped.  If any of those specifications changed, this command will not
     reflect those changes.  To ensure a cluster's setup is up to date, use `sky
-    run` instead.
+    launch` instead.
 
     Typical workflow:
 
