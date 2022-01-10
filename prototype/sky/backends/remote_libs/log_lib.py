@@ -140,7 +140,7 @@ def _follow_job_logs(file,
                            'pending for the resources...\n')
             elif status != job_lib.JobStatus.RUNNING:
                 return
-            
+
             if sleep_sec:
                 time.sleep(sleep_sec)
             status = job_lib.query_job_status([job_id])[0]
