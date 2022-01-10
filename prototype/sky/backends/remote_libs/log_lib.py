@@ -113,14 +113,13 @@ def run_bash_command_with_log(bash_command: str,
 def _follow_job_logs(file,
                      job_id: int,
                      sleep_sec: float = 0.5,
-                     start_streaming_at='') -> Iterator[str]:
+                     start_streaming_at: str = '') -> Iterator[str]:
     """ Yield each line from a file as they are written.
 
     `sleep_sec` is the time to sleep after empty reads. """
     line = ''
     status = job_lib.query_job_status([job_id])[0]
     start_streaming = False
-    pending_info_logged = False
     while True:
         tmp = file.readline()
         if tmp is not None and tmp != '':
@@ -132,13 +131,14 @@ def _follow_job_logs(file,
                     yield line
                 line = ''
         else:
-            # Check the job status before query again to avoid
-            # unfinished logs.
-            if status == job_lib.JobStatus.PENDING:
-                if not pending_info_logged:
-                    yield (f'SKY INFO: Job {job_id} is still '
-                           'pending for the resources...\n')
-            elif status != job_lib.JobStatus.RUNNING:
+            # Reach the end of the file, check the status or sleep and
+            # retry.
+            
+            # Auto-exit the log tailing, if the job has finished. Check
+            # the job status before query again to avoid unfinished logs.
+            if status not in [
+                    job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
+            ]:
                 return
 
             if sleep_sec:

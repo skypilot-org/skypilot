@@ -484,17 +484,17 @@ def logs(cluster: str, job_id: str):
               is_flag=True,
               required=False,
               help='Show all users\' information in full.')
-@click.option('--waiting-jobs',
-              '-w',
+@click.option('--skip-finished',
+              '-s',
               default=False,
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
 @click.argument('cluster', required=False)
-def queue(cluster: Optional[str], waiting_jobs: bool, all_users: bool):
+def queue(cluster: Optional[str], skip_finished: bool, all_users: bool):
     """Show the job queue for a cluster."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
-    all_jobs = not waiting_jobs
+    all_jobs = not skip_finished
     backend = backends.CloudVmRayBackend()
 
     codegen = backend_utils.JobLibCodeGen()
