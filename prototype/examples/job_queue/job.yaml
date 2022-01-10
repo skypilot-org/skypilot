@@ -3,7 +3,7 @@
 # Runs a task on a existing cluster.
 #
 # Usage:
-#   sky run -c jq cluster.yaml
+#   sky launch -c jq cluster.yaml
 #   sky exec -c jq job.yaml
 
 resources:
