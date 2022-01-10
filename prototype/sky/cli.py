@@ -286,7 +286,7 @@ def cli():
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
 def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
-    """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
+    """Launch task from a YAML spec (re-setup if a cluster exists)."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
 
@@ -313,7 +313,7 @@ def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
               'then detach from the job\'s execution.')
 # pylint: disable=redefined-builtin
 def exec(yaml_path: Path, cluster: str, detach_run: bool):
-    """Execute a task from a YAML spec on a cluster (skip setup).
+    """Execute task from a YAML spec on a cluster (skip setup).
 
     \b
     Actions performed by this command only include:
@@ -350,48 +350,6 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):
 
     click.secho(f'Executing task on cluster {cluster} ...', fg='yellow')
     sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
-
-
-@cli.command()
-@click.option('--cluster',
-              '-c',
-              required=True,
-              type=str,
-              help='Name of the existing cluster to cancel the task.')
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Cancel all task in full.')
-@click.argument('jobs', required=False, type=int, nargs=-1)
-def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
-    """Cancel the job with the given job ID or all the jobs on a cluster."""
-    if len(jobs) == 0 and not all:
-        raise click.UsageError(
-            'sky cancel requires either a job id '
-            f'(see `sky queue {cluster} -aj`) or the --all flag.')
-
-    handle = global_user_state.get_handle_from_cluster_name(cluster)
-    if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster}\' not found'
-                                 ' (see `sky status`).')
-
-    if all:
-        click.secho(f'Cancelling all jobs on cluster {cluster} ...',
-                    fg='yellow')
-        jobs = None
-    else:
-        click.secho(f'Cancelling jobs {jobs} on cluster {cluster} ...',
-                    fg='yellow')
-
-    codegen = backend_utils.JobLibCodeGen()
-    codegen.cancel_jobs(jobs)
-    code = codegen.build()
-
-    # FIXME: Assumes a specific backend.
-    backend = backends.CloudVmRayBackend()
-    backend.run_on_head(handle, code, stream_logs=False)
 
 
 def _readable_time_duration(start_time: int):
@@ -453,31 +411,6 @@ def status(all: bool):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
-@click.option('--cluster',
-              '-c',
-              required=True,
-              type=str,
-              help='Name of the existing cluster to find the job.')
-@click.argument('job_id', required=True, type=str)
-def logs(cluster: str, job_id: str):
-    """Tailing the log of a job."""
-    # TODO: Add an option for downloading logs.
-    cluster_name = cluster
-    backend = backends.CloudVmRayBackend()
-
-    codegen = backend_utils.JobLibCodeGen()
-    codegen.tail_logs(job_id)
-    code = codegen.build()
-
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
-                                 ' (see `sky status`).')
-    click.secho('Start streaming logs...', fg='yellow')
-    backend.run_on_head(handle, code, stream_logs=True)
-
-
-@cli.command()
 @click.option('--all-users',
               '-a',
               default=False,
@@ -520,6 +453,73 @@ def queue(cluster: Optional[str], skip_finished: bool, all_users: bool):
         job_table = backend.run_on_head(handle, code)
         click.echo(
             f'Sky Job Queue of Cluster {handle.cluster_name}\n{job_table}')
+
+
+@cli.command()
+@click.option('--cluster',
+              '-c',
+              required=True,
+              type=str,
+              help='Name of the existing cluster to find the job.')
+@click.argument('job_id', required=True, type=str)
+def logs(cluster: str, job_id: str):
+    """Tailing the log of a job."""
+    # TODO: Add an option for downloading logs.
+    cluster_name = cluster
+    backend = backends.CloudVmRayBackend()
+
+    codegen = backend_utils.JobLibCodeGen()
+    codegen.tail_logs(job_id)
+    code = codegen.build()
+
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
+                                 ' (see `sky status`).')
+    click.secho('Start streaming logs...', fg='yellow')
+    backend.run_on_head(handle, code, stream_logs=True)
+
+
+@cli.command()
+@click.option('--cluster',
+              '-c',
+              required=True,
+              type=str,
+              help='Name of the existing cluster to cancel the task.')
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Cancel all jobs.')
+@click.argument('jobs', required=False, type=int, nargs=-1)
+def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
+    """Cancel the jobs on a cluster."""
+    if len(jobs) == 0 and not all:
+        raise click.UsageError(
+            'sky cancel requires either a job id '
+            f'(see `sky queue {cluster} -aj`) or the --all flag.')
+
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.BadParameter(f'Cluster \'{cluster}\' not found'
+                                 ' (see `sky status`).')
+
+    if all:
+        click.secho(f'Cancelling all jobs on cluster {cluster} ...',
+                    fg='yellow')
+        jobs = None
+    else:
+        click.secho(f'Cancelling jobs {jobs} on cluster {cluster} ...',
+                    fg='yellow')
+
+    codegen = backend_utils.JobLibCodeGen()
+    codegen.cancel_jobs(jobs)
+    code = codegen.build()
+
+    # FIXME: Assumes a specific backend.
+    backend = backends.CloudVmRayBackend()
+    backend.run_on_head(handle, code, stream_logs=False)
 
 
 @cli.command()

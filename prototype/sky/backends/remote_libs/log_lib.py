@@ -133,7 +133,7 @@ def _follow_job_logs(file,
         else:
             # Reach the end of the file, check the status or sleep and
             # retry.
-            
+
             # Auto-exit the log tailing, if the job has finished. Check
             # the job status before query again to avoid unfinished logs.
             if status not in [
