@@ -85,6 +85,7 @@ head_node_type: ray_head_default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
+  "{{sky_remote_libs_remote_path}}": "{{sky_remote_libs_local_path}}",
 {%- if workdir is not none %}
   "~/sky_workdir": "{{workdir}}",
 {%- endif %}
@@ -113,7 +114,7 @@ rsync_filter:
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-  - pip3 install -U ray==1.7.0 && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
+  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && pip3 install pendulum PrettyTable
 {%- if setup_sh_path is not none %}
   - cd ~/sky_workdir && bash /tmp/setup.sh  # FIXME: /tmp is volatile.
 {%- endif %}
