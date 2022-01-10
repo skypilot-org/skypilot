@@ -6,7 +6,7 @@ with sky.Dag() as dag:
     task = sky.Task().set_resources(cluster_resources)
 # `detach_run` will only detach the `run` command. The provision and `setup` are
 # still blocking.
-sky.run(dag, cluster_name='multi_echo', detach_run=True)
+sky.launch(dag, cluster_name='multi_echo', detach_run=True)
 
 # Run the multiple tasks.
 for i in range(16):
