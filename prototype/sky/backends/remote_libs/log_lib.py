@@ -114,7 +114,7 @@ def _follow_job_logs(file,
                      job_id: int,
                      sleep_sec: float = 0.5,
                      start_streaming_at: str = '') -> Iterator[str]:
-    """ Yield each line from a file as they are written.
+    """Yield each line from a file as they are written.
 
     `sleep_sec` is the time to sleep after empty reads. """
     line = ''
