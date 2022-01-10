@@ -10,7 +10,7 @@
 #    commands may require flags to follow symlinks (e.g., ls -H; du -L).
 
 resources:
-  cloud: gcp
+  cloud: aws
 
 # Format for file_mounts:
 #
@@ -67,7 +67,8 @@ file_mounts:
   # Commenting out as this takes a while.
   # /data/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet
 
-setup: 'sudo apt-get install -y tree'
+# FIXME: apt-get install can not get lock /var/lib/dpkg/lock-frontend
+# setup: 'sudo apt-get install -y tree'
 
 run: |
   set -ex
@@ -80,7 +81,7 @@ run: |
   touch /data/checkpoints/last.pt
 
   echo hi >> /tmp/data/new_file
-  tree /tmp/data
+  # tree /tmp/data
 
   ls -lthr ~/.ssh
 
