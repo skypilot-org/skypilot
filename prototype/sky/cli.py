@@ -41,6 +41,7 @@ import tabulate
 
 import sky
 from sky import backends
+from sky import logging
 from sky import global_user_state
 from sky import init as sky_init
 from sky import task as task_lib
@@ -48,6 +49,8 @@ from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
+
+logger = logging.init_logger(__name__)
 
 _CLUSTER_FLAG_HELP = """
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -58,6 +61,8 @@ _INTERACTIVE_NODE_TYPES = ('cpunode', 'gpunode', 'tpunode')
 
 Path = str
 Backend = backends.Backend
+
+SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 
 
 def _truncate_long_string(s: str, max_length: int = 50) -> str:
@@ -276,23 +281,23 @@ def cli():
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
-def run(yaml_path: Path, cluster: str, dryrun: bool):
+@click.option('--detach_run',
+              '-d',
+              default=False,
+              is_flag=True,
+              help='If True, run setup first (blocking), '
+              'then detach from the job\'s execution.')
+def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
     """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
-    # FIXME: --cluster flag semantics has the following bug.  'sky run -c name
-    # x.yml' requiring GCP.  Then change x.yml to requiring AWS.  'sky run -c
-    # name x.yml' again.  The GCP cluster is not down'd but should be.  The
-    # root cause is due to 'ray up' not dealing with this cross-cloud case (but
-    # does correctly deal with in-cloud config changes).
-    #
-    # This bug also means that the old GCP cluster with the same name is
-    # orphaned.  `sky down` would not have an entry pointing to that handle, so
-    # would only down the NEW cluster.
-    #
-    # To fix all of the above, fix/circumvent the bug that 'ray up' not downing
-    # old cloud's cluster with the same name.
-    sky.execute(dag, dryrun=dryrun, stream_logs=True, cluster_name=cluster)
+
+    click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
+    sky.run(dag,
+            dryrun=dryrun,
+            stream_logs=True,
+            cluster_name=cluster,
+            detach_run=detach_run)
 
 
 @cli.command()
@@ -302,7 +307,14 @@ def run(yaml_path: Path, cluster: str, dryrun: bool):
               required=True,
               type=str,
               help='Name of the existing cluster to execute a task on.')
-def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
+@click.option('--detach_run',
+              '-d',
+              default=False,
+              is_flag=True,
+              help='If True, run setup first (blocking), '
+              'then detach from the job\'s execution.')
+# pylint: disable=redefined-builtin
+def exec(yaml_path: Path, cluster: str, detach_run: bool):
     """Execute a task from a YAML spec on a cluster (skip setup).
 
     \b
@@ -335,18 +347,62 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
       >> sky run -c name app.yaml
 
     """
-    handle = global_user_state.get_handle_from_cluster_name(cluster)
-    if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
-                                 'Use `sky run` to provision first.')
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
-    sky.execute(dag,
-                handle=handle,
-                stages=[
-                    sky.execution.Stage.SYNC_WORKDIR,
-                    sky.execution.Stage.EXEC,
-                ])
+
+    click.secho(f'Executing task on cluster {cluster} ...', fg='yellow')
+    sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
+
+
+@cli.command()
+@click.option('--cluster',
+              '-c',
+              required=True,
+              type=str,
+              help='Name of the existing cluster to cancel the task.')
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Cancel all task in full.')
+@click.argument('jobs', required=False, type=int, nargs=-1)
+def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
+    """Cancel the job with the given job ID or all the jobs on a cluster."""
+    if len(jobs) == 0 and not all:
+        raise click.UsageError(
+            'sky cancel requires either a job id '
+            f'(see `sky queue {cluster} -aj`) or the --all flag.')
+
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.BadParameter(f'Cluster \'{cluster}\' not found'
+                                 ' (see `sky status`).')
+
+    if all:
+        click.secho(f'Cancelling all jobs on cluster {cluster} ...',
+                    fg='yellow')
+        jobs = None
+    else:
+        click.secho(f'Cancelling jobs {jobs} on cluster {cluster} ...',
+                    fg='yellow')
+
+    codegen = backend_utils.JobLibCodeGen()
+    codegen.cancel_jobs(jobs)
+    code = codegen.build()
+
+    # FIXME: Assumes a specific backend.
+    backend = backends.CloudVmRayBackend()
+    backend.run_on_head(handle, code, stream_logs=False)
+
+
+def _readable_time_duration(start_time: int):
+    duration = pendulum.now().subtract(seconds=time.time() - start_time)
+    diff = duration.diff_for_humans()
+    diff = diff.replace('second', 'sec')
+    diff = diff.replace('minute', 'min')
+    diff = diff.replace('hour', 'hr')
+    return diff
 
 
 @cli.command()
@@ -356,7 +412,7 @@ def exec(yaml_path: Path, cluster: str):  # pylint: disable=redefined-builtin
               is_flag=True,
               required=False,
               help='Show all information in full.')
-def status(all):  # pylint: disable=redefined-builtin
+def status(all: bool):  # pylint: disable=redefined-builtin
     """Show launched clusters."""
     show_all = all
     clusters_status = global_user_state.get_clusters()
@@ -370,26 +426,23 @@ def status(all):  # pylint: disable=redefined-builtin
     ]
     cluster_table.align['COMMAND'] = 'l'
 
-    def shorten_duration_diff_string(diff):
-        diff = diff.replace('second', 'sec')
-        diff = diff.replace('minute', 'min')
-        diff = diff.replace('hour', 'hr')
-        return diff
-
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
         handle = cluster_status['handle']
-        duration = pendulum.now().subtract(seconds=time.time() - launched_at)
         resources_str = '<initializing>'
-        if (handle.requested_nodes is not None and
+        if (handle.launched_nodes is not None and
                 handle.launched_resources is not None):
-            resources_str = (f'{handle.requested_nodes}x '
-                             f'{handle.launched_resources}')
+            launched_resource_str = str(handle.launched_resources)
+            if not show_all:
+                launched_resource_str = _truncate_long_string(
+                    launched_resource_str)
+            resources_str = (f'{handle.launched_nodes}x '
+                             f'{launched_resource_str}')
         cluster_table.add_row([
             # NAME
             cluster_status['name'],
             # LAUNCHED
-            shorten_duration_diff_string(duration.diff_for_humans()),
+            _readable_time_duration(launched_at),
             # RESOURCES
             resources_str,
             # COMMAND
@@ -399,6 +452,75 @@ def status(all):  # pylint: disable=redefined-builtin
             cluster_status['status'].value,
         ])
     click.echo(f'Sky Clusters\n{cluster_table}')
+
+
+@cli.command()
+@click.option('--cluster',
+              '-c',
+              required=True,
+              type=str,
+              help='Name of the existing cluster to find the job.')
+@click.argument('job_id', required=True, type=str)
+def logs(cluster: str, job_id: str):
+    """Tailing the log of a job."""
+    # TODO: Add an option for downloading logs.
+    cluster_name = cluster
+    backend = backends.CloudVmRayBackend()
+
+    codegen = backend_utils.JobLibCodeGen()
+    codegen.tail_logs(job_id)
+    code = codegen.build()
+
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
+                                 ' (see `sky status`).')
+    click.secho('Start streaming logs...', fg='yellow')
+    backend.run_on_head(handle, code, stream_logs=True)
+
+
+@cli.command()
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all users\' information in full.')
+@click.option('--all-jobs',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all jobs\' information in full.')
+@click.argument('cluster', required=False)
+def queue(cluster: Optional[str], all_jobs: bool, all_users: bool):
+    """Show the job queue for a cluster."""
+    click.secho('Fetching and parsing job queue...', fg='yellow')
+    backend = backends.CloudVmRayBackend()
+
+    codegen = backend_utils.JobLibCodeGen()
+    username = getpass.getuser()
+    if all_users:
+        username = None
+    codegen.show_jobs(username, all_jobs)
+    code = codegen.build()
+
+    if cluster is not None:
+        handle = global_user_state.get_handle_from_cluster_name(cluster)
+        if handle is None:
+            raise click.BadParameter(
+                f'Cluster {cluster} is not found (see `sky status`).')
+
+        job_table = backend.run_on_head(handle, code)
+        click.echo(f'Sky Job Queue of Cluster {cluster}\n{job_table}')
+        return
+
+    clusters_status = global_user_state.get_clusters()
+    for cluster_status in clusters_status:
+        handle = cluster_status['handle']
+        job_table = backend.run_on_head(handle, code)
+        click.echo(
+            f'Sky Job Queue of Cluster {handle.cluster_name}\n{job_table}')
 
 
 @cli.command()
@@ -556,7 +678,7 @@ def start(clusters: Tuple[str]):
         handle = record['handle']
         with sky.Dag():
             dummy_task = sky.Task().set_resources(handle.requested_resources)
-            dummy_task.num_nodes = handle.requested_nodes
+            dummy_task.num_nodes = handle.launched_nodes
         click.secho(f'Starting cluster {name}...', bold=True)
         backend.provision(dummy_task,
                           to_provision=None,

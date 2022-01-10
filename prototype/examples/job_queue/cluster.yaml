@@ -1,0 +1,11 @@
+# A dummy task for cluster creation.
+#
+# Runs a dummy task that provision a cluster.
+#
+# Usage:
+#   sky run -c jq cluster.yaml
+#   sky exec -c jq job.yaml
+
+resources:
+  cloud: gcp
+  accelerators: K80

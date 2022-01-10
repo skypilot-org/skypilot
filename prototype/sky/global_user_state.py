@@ -37,6 +37,7 @@ _CURSOR.execute("""\
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY, value TEXT)""")
+
 _CONN.commit()
 
 
@@ -81,6 +82,7 @@ def add_or_update_cluster(cluster_name: str,
                           cluster_handle: backends.Backend.ResourceHandle,
                           ready: bool):
     """Adds or updates cluster_name -> cluster_handle mapping."""
+    # FIXME: launched_at will be changed when `sky run -c` is called.
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
     last_use = _get_pretty_entry_point()
@@ -132,6 +134,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')
     records = []
     for name, launched_at, handle, last_use, status in rows:
+        # TODO: use namedtuple instead of dict
         records.append({
             'name': name,
             'launched_at': launched_at,

@@ -21,7 +21,7 @@ def _test_resources(monkeypatch, resources, enabled_clouds=clouds.ALL_CLOUDS):
     with sky.Dag() as dag:
         task = sky.Task('test_task')
         task.set_resources({resources})
-    sky.execute(dag, dryrun=True)
+    sky.run(dag, dryrun=True)
     assert True
 
 

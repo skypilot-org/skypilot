@@ -6,9 +6,9 @@ from sky import backends
 from sky import clouds
 from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag, DagContext
-from sky.execution import execute
+from sky.execution import run, exec  # pylint: disable=redefined-builtin
 from sky.resources import Resources
-from sky.task import ParTask, Task
+from sky.task import Task
 from sky.optimizer import Optimizer, OptimizeTarget
 from sky.data import Storage, StorageType
 
@@ -28,11 +28,11 @@ __all__ = [
     'DagContext',
     'Optimizer',
     'OptimizeTarget',
-    'ParTask',
     'Resources',
     'Task',
     'backends',
-    'execute',
+    'run',
+    'exec',
     'list_accelerators',
     '__root_dir__',
     'Storage',
