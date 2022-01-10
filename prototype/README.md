@@ -75,3 +75,14 @@ eval "$(ssh-agent -s)"
 ssh-add -K /path/to/key  # e.g. ~/.ssh/id_ed25519
 ```
 For more information on GitHub authentication and keys, see their [setup tutorial](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent).
+
+## Some general engineering practice suggestions
+
+* Use `TODO(author_name)`/`FIXME(author_name)` instead of blank `TODO/FIXME`. This is critical for tracking down issues.
+* Delete your branch after merging it. This keeps the repo clean and faster to sync.
+* Use modern python features and styles that increases code quality.
+  * Use f-string instead of `.format()` for short expressions to increase readability.
+  * Use `class MyClass:` instead of `class MyClass(object):`. The later one was a workaround for python2.x.
+  * Use `dataclasses` instead of (named)tuples.
+  * Use `abc` module for abstract classes to ensure all abstract methods are implemented.
+  * Use python typing. But you should not import external objects just for typing. Instead, use `if typing.TYPE_CHECKING` for typing-only external objects.

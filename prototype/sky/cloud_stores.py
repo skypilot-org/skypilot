@@ -18,7 +18,7 @@ from sky.backends import backend_utils
 from sky.data import data_utils
 
 
-class CloudStorage(object):
+class CloudStorage:
     """Interface for a cloud object store."""
 
     def is_directory(self, url: str) -> bool:
@@ -157,9 +157,8 @@ def get_storage_from_path(url: str) -> CloudStorage:
     result = urllib.parse.urlsplit(url)
 
     if result.scheme not in _REGISTRY:
-        assert False, ('Scheme {} not found in'
-                       ' supported storage ({}); path {}'.format(
-                           result.scheme, _REGISTRY.keys(), url))
+        assert False, (f'Scheme {result.scheme} not found in'
+                       f' supported storage ({_REGISTRY.keys()}); path {url}')
     return _REGISTRY[result.scheme]
 
 

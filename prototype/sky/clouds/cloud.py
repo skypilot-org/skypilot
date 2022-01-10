@@ -1,12 +1,13 @@
 """Interfaces: clouds, regions, and zones."""
-import collections
+from dataclasses import dataclass, field
 from typing import Dict, Iterator, List, Optional, Tuple
 
 
-class Region(collections.namedtuple('Region', ['name'])):
+@dataclass
+class Region:
     """A region."""
     name: str
-    zones: List['Zone'] = []
+    zones: List['Zone'] = field(default_factory=list)
 
     def set_zones(self, zones: List['Zone']):
         self.zones = zones
@@ -15,13 +16,14 @@ class Region(collections.namedtuple('Region', ['name'])):
         return self
 
 
-class Zone(collections.namedtuple('Zone', ['name'])):
+@dataclass
+class Zone:
     """A zone, typically grouped under a region."""
     name: str
     region: Region
 
 
-class Cloud(object):
+class Cloud:
     """A cloud provider."""
 
     #### Regions/Zones ####
