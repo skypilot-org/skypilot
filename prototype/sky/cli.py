@@ -246,9 +246,9 @@ def _create_and_ssh_into_node(
     else:
         option = f' -c {cluster_name}'
     click.secho(f'sky {node_type}{option}', bold=True)
-    click.echo('To tear down the node:  ', nl=False)
+    click.echo('To tear down the node:\t', nl=False)
     click.secho(f'sky down {cluster_name}', bold=True)
-    click.echo('To stop the node:  ', nl=False)
+    click.echo('To stop the node:\t', nl=False)
     click.secho(f'sky stop {cluster_name}', bold=True)
 
 
@@ -479,21 +479,22 @@ def logs(cluster: str, job_id: str):
 
 @cli.command()
 @click.option('--all-users',
-              '-u',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all users\' information in full.')
-@click.option('--all-jobs',
               '-a',
               default=False,
               is_flag=True,
               required=False,
-              help='Show all jobs\' information in full.')
+              help='Show all users\' information in full.')
+@click.option('--waiting-jobs',
+              '-w',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show only pending/running jobs\' information.')
 @click.argument('cluster', required=False)
-def queue(cluster: Optional[str], all_jobs: bool, all_users: bool):
+def queue(cluster: Optional[str], waiting_jobs: bool, all_users: bool):
     """Show the job queue for a cluster."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
+    all_jobs = not waiting_jobs
     backend = backends.CloudVmRayBackend()
 
     codegen = backend_utils.JobLibCodeGen()
