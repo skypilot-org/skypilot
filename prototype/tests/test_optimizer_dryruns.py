@@ -9,7 +9,6 @@ def _test_resources(resources):
         train = sky.Task('train')
         train.set_resources({resources})
     sky.launch(dag, dryrun=True)
-    assert True
 
 
 def test_resources_aws():
@@ -50,3 +49,30 @@ def test_partial_v100():
     _test_resources(
         sky.Resources(clouds.AWS(), accelerators='V100', use_spot=True))
     _test_resources(sky.Resources(clouds.AWS(), accelerators={'V100': 8}))
+
+
+def test_instance_type_mistmatches_accelerators():
+    bad_instance_and_accs = [
+        # Actual: V100
+        ('p3.2xlarge', 'K80'),
+        # Actual: None
+        ('m4.2xlarge', 'V100'),
+    ]
+    for instance, acc in bad_instance_and_accs:
+        with pytest.raises(ValueError) as e:
+            _test_resources(
+                sky.Resources(clouds.AWS(),
+                              instance_type=instance,
+                              accelerators=acc))
+        assert 'Infeasible resource demands found' in str(e.value)
+
+
+def test_instance_type_matches_accelerators():
+    _test_resources(
+        sky.Resources(clouds.AWS(),
+                      instance_type='p3.2xlarge',
+                      accelerators='V100'))
+    _test_resources(
+        sky.Resources(clouds.GCP(),
+                      instance_type='n1-standard-2',
+                      accelerators='V100'))

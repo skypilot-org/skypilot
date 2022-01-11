@@ -61,6 +61,8 @@ class Resources(object):
         self.accelerator_args = accelerator_args
         self.use_spot = use_spot
 
+        self._clear_redundant_accelerators_field()
+
     def __repr__(self) -> str:
         accelerators = ''
         accelerator_args = ''
@@ -76,6 +78,29 @@ class Resources(object):
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self.instance_type is not None
+
+    def _clear_redundant_accelerators_field(self) -> None:
+        """Try-clears any specified accelerators field for non-GCP."""
+        # GCP must have 'self.accelerators' because it attaches accelerators to
+        # regular VMs.  For other clouds, this field may be
+        # reduandant/inconsistent with the specified instance_type.
+        if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
+            acc_requested = self.accelerators
+            if acc_requested is None:
+                return
+            acc_from_instance_type = (
+                self.cloud.get_accelerators_from_instance_type(
+                    self.instance_type))
+            if acc_from_instance_type != acc_requested:
+                raise ValueError(
+                    'Infeasible resource demands found:\n'
+                    f'  Instance type requested: {self.instance_type}\n'
+                    f'  Accelerators for {self.instance_type}: '
+                    f'{acc_from_instance_type}\n'
+                    f'  Accelerators requested: {acc_requested}\n'
+                    f'To fix: either only specify instance_type, or change '
+                    'the accelerators field to be consistent.')
+            self.accelerators = None
 
     def get_accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.

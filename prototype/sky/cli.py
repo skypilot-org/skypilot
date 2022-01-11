@@ -217,6 +217,10 @@ def _create_and_ssh_into_node(
     task = dag.tasks[0]
     backend.register_info(dag=dag)
 
+    # FIXME(gautam): typing the following seq of cmds:
+    #   sky gpunode -t p3.2xlarge --gpus=V100 --cloud aws
+    #   sky gpunode -t n1-standard-8 --gpus=V100 --cloud gcp
+    # makes the second cmd log into the first VM.  It should error out.
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None or handle.head_ip is None:
         # head_ip would be None if previous provisioning failed.
@@ -780,10 +784,12 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
             f'Cloud \'{cloud}\' is not supported. ' + \
             f'Supported clouds: {list(task_lib.CLOUD_REGISTRY.keys())}'
         )
-    if gpus is None:
-        gpus = {'K80': 1}
-    else:
+    if gpus is not None:
         gpus = _parse_accelerator_options(gpus)
+    elif instance_type is None:
+        # Use this request if both gpus and instance_type are not specified.
+        gpus = {'K80': 1}
+
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
                               accelerators=gpus,
