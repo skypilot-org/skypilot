@@ -250,10 +250,10 @@ def _create_and_ssh_into_node(
     else:
         option = f' -c {cluster_name}'
     click.secho(f'sky {node_type}{option}', bold=True)
-    click.echo('To tear down the node:\t', nl=False)
-    click.secho(f'sky down {cluster_name}', bold=True)
     click.echo('To stop the node:\t', nl=False)
     click.secho(f'sky stop {cluster_name}', bold=True)
+    click.echo('To tear down the node:\t', nl=False)
+    click.secho(f'sky down {cluster_name}', bold=True)
 
 
 class _NaturalOrderGroup(click.Group):
@@ -499,6 +499,7 @@ def logs(cluster: str, job_id: str):
 @click.argument('jobs', required=False, type=int, nargs=-1)
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     """Cancel job(s)."""
+    # FIXME(zhwu): should not allow SUCCEEDED jobs to be turned into CANCELLED.
     if len(jobs) == 0 and not all:
         raise click.UsageError(
             'sky cancel requires either a job id '
@@ -514,7 +515,8 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
                     fg='yellow')
         jobs = None
     else:
-        click.secho(f'Cancelling jobs {jobs} on cluster {cluster} ...',
+        jobs_str = ', '.join(map(str, jobs))
+        click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster} ...',
                     fg='yellow')
 
     codegen = backend_utils.JobLibCodeGen()
