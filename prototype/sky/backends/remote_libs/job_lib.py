@@ -134,8 +134,8 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
         return []
 
     # TODO: if too slow, directly query against redis.
-    test_cmd = [(f'ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
-                 'grep "Job status" || echo "not found"') for job in job_ids]
+    test_cmd = [(f'(ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
+                 'grep "Job status") || echo "not found"') for job in job_ids]
     test_cmd = ' && '.join(test_cmd)
     proc = subprocess.run(test_cmd,
                           shell=True,
@@ -151,10 +151,11 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
     job_status_list = []
     for job_id, res in zip(job_ids, results):
         if res.strip() == 'not found':
-            # The job may be stale, when the instance is restarted (the ray redis is
-            # volatile). We need to reset the status of the task to FAILED if its original
-            # status is RUNNING or PENDING.
-            rows = _CURSOR.execute('SELECT * FROM jobs WHERE job_id=(?)', (job_id,))
+            # The job may be stale, when the instance is restarted (the ray
+            # redis is volatile). We need to reset the status of the task to
+            # FAILED if its original status is RUNNING or PENDING.
+            rows = _CURSOR.execute('SELECT * FROM jobs WHERE job_id=(?)',
+                                   (job_id,))
             for row in rows:
                 status = JobStatus[row[JobInfoLoc.STATUS.value]]
             if status in [JobStatus.RUNNING, JobStatus.PENDING]:

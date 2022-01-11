@@ -438,8 +438,9 @@ def queue(cluster: Optional[List[str]], skip_finished: bool, all_users: bool):
     code = codegen.build()
 
     if cluster:
-        handles = [global_user_state.get_handle_from_cluster_name(c)
-                   for c in cluster]
+        handles = [
+            global_user_state.get_handle_from_cluster_name(c) for c in cluster
+        ]
     else:
         cluster_infos = global_user_state.get_clusters()
         handles = [cluster_info['handle'] for cluster_info in cluster_infos]
@@ -447,7 +448,9 @@ def queue(cluster: Optional[List[str]], skip_finished: bool, all_users: bool):
     for handle in handles:
         _show_job_queue_on_cluster(handle, backend, code)
 
-def _show_job_queue_on_cluster(handle: Any, backend: backend_lib.Backend, code: str):
+
+def _show_job_queue_on_cluster(handle: Any, backend: backend_lib.Backend,
+                               code: str):
     cluster = handle.cluster_name
     if handle is None:
         raise click.BadParameter(
@@ -461,7 +464,7 @@ def _show_job_queue_on_cluster(handle: Any, backend: backend_lib.Backend, code: 
 
     job_table = backend.run_on_head(handle, code)
     click.echo(f'Sky Job Queue of Cluster {cluster}\n{job_table}')
-    
+
 
 @cli.command()
 @click.option('--cluster',
