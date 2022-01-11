@@ -149,9 +149,16 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
 
     # Process the results
     job_status_list = []
-    for res in results:
+    for job_id, res in zip(job_ids, results):
         if res.strip() == 'not found':
-            status = JobStatus.FAILED
+            # The job may be stale, when the instance is restarted (the ray redis is
+            # volatile). We need to reset the status of the task to FAILED if its original
+            # status is RUNNING or PENDING.
+            rows = _CURSOR.execute('SELECT * FROM jobs WHERE job_id=(?)', (job_id,))
+            for row in rows:
+                status = JobStatus[row[JobInfoLoc.STATUS.value]]
+            if status in [JobStatus.RUNNING, JobStatus.PENDING]:
+                status = JobStatus.FAILED
         else:
             ray_status = res.strip().rstrip('.')
             ray_status = ray_status.rpartition(' ')[-1]
