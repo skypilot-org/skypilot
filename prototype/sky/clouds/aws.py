@@ -8,7 +8,7 @@ from sky.clouds.service_catalog import aws_catalog
 
 if TYPE_CHECKING:
     # renaming to avoid shadowing variables
-    from sky import resources as res
+    from sky import resources as resources_lib
 
 
 class AWS(clouds.Cloud):
@@ -136,7 +136,8 @@ class AWS(clouds.Cloud):
     ) -> Optional[Dict[str, int]]:
         return aws_catalog.get_accelerators_from_instance_type(instance_type)
 
-    def make_deploy_resources_variables(self, resources: 'res.Resources'):
+    def make_deploy_resources_variables(self,
+                                        resources: 'resources_lib.Resources'):
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -150,7 +151,8 @@ class AWS(clouds.Cloud):
             'use_spot': r.use_spot,
         }
 
-    def get_feasible_launchable_resources(self, resources: 'res.Resources'):
+    def get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
