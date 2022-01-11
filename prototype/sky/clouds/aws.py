@@ -89,8 +89,7 @@ class AWS(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type: str,
-                                     use_spot: bool):
+    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
         return aws_catalog.get_hourly_cost(instance_type, use_spot=use_spot)
 
     def get_egress_cost(self, num_gigabytes: float):

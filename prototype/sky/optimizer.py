@@ -32,7 +32,8 @@ class Optimizer:
     """The Sky optimizer: assigns best resources to user tasks."""
 
     @staticmethod
-    def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud, gigabytes: float):
+    def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
+                     gigabytes: float):
         if isinstance(src_cloud, DummyCloud) or isinstance(
                 dst_cloud, DummyCloud):
             return 0.0
@@ -47,7 +48,8 @@ class Optimizer:
         return egress_cost
 
     @staticmethod
-    def _egress_time(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud, gigabytes: float):
+    def _egress_time(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
+                     gigabytes: float):
         """Returns estimated egress time in seconds."""
         # FIXME: estimate bandwidth between each cloud-region pair.
         if isinstance(src_cloud, DummyCloud) or isinstance(
