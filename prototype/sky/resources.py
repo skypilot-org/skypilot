@@ -7,7 +7,7 @@ from sky import logging
 logger = logging.init_logger(__name__)
 
 
-class Resources(object):
+class Resources:
     """A cloud resource bundle.
 
     Used
@@ -116,7 +116,7 @@ class Resources(object):
                 self.instance_type)
         return None
 
-    def get_cost(self, seconds):
+    def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
@@ -128,7 +128,7 @@ class Resources(object):
                 self.accelerators)
         return hourly_cost * hours
 
-    def is_same_resources(self, other) -> bool:
+    def is_same_resources(self, other: 'Resources') -> bool:
         """Returns whether two resources are the same.
 
         Returns True if they are the same, False if not.
@@ -160,7 +160,7 @@ class Resources(object):
         # self == other
         return True
 
-    def less_demanding_than(self, other) -> bool:
+    def less_demanding_than(self, other: 'Resources') -> bool:
         """Returns whether this resources is less demanding than the other."""
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
@@ -193,7 +193,7 @@ class Resources(object):
         # self <= other
         return True
 
-    def is_launchable_fuzzy_equal(self, other) -> bool:
+    def is_launchable_fuzzy_equal(self, other: 'Resources') -> bool:
         """Whether the resources are the fuzzily same launchable resources."""
         assert self.cloud is not None and other.cloud is not None
         if not self.cloud.is_same_cloud(other.cloud):
