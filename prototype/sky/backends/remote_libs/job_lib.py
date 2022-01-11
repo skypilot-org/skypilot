@@ -141,7 +141,7 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
 
     # TODO: if too slow, directly query against redis.
     test_cmd = [(f'(ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
-                 'grep "Job status") || echo "not found"') for job in job_ids]
+                 'grep "Job status" || echo "not found")') for job in job_ids]
     test_cmd = ' && '.join(test_cmd)
     proc = subprocess.run(test_cmd,
                           shell=True,

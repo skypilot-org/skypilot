@@ -453,17 +453,18 @@ def _show_job_queue_on_cluster(handle: Any, backend: backend_lib.Backend,
                                code: str):
     cluster = handle.cluster_name
     if handle is None:
-        raise click.BadParameter(
-            f'Cluster {cluster} is not found (see `sky status`).')
+        print(f'Cluster {cluster} was not found. Skipping.')
+        return
+
+    click.echo(f'Sky Job Queue of Cluster {cluster}')
     if handle.head_ip is None:
-        click.echo(f'Sky Job Queue of Cluster {cluster}')
         click.echo(
             f'Cluster {cluster} has been stopped or not properly set up. '
             'Please re-launch it with `sky launch` to view the job queue.')
         return
 
     job_table = backend.run_on_head(handle, code)
-    click.echo(f'Sky Job Queue of Cluster {cluster}\n{job_table}')
+    click.echo(f'{job_table}')
 
 
 @cli.command()
