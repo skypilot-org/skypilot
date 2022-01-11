@@ -31,7 +31,7 @@ import functools
 import getpass
 import os
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 import pandas as pd
@@ -423,9 +423,9 @@ def status(all: bool):  # pylint: disable=redefined-builtin
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
-@click.argument('cluster', required=False)
-def queue(cluster: Optional[str], skip_finished: bool, all_users: bool):
-    """Show the job queue for a cluster."""
+@click.argument('clusters', required=False, type=str, nargs=-1)
+def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
+    """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     all_jobs = not skip_finished
     backend = backends.CloudVmRayBackend()
@@ -437,22 +437,34 @@ def queue(cluster: Optional[str], skip_finished: bool, all_users: bool):
     codegen.show_jobs(username, all_jobs)
     code = codegen.build()
 
-    if cluster is not None:
-        handle = global_user_state.get_handle_from_cluster_name(cluster)
-        if handle is None:
-            raise click.BadParameter(
-                f'Cluster {cluster} is not found (see `sky status`).')
+    if clusters:
+        handles = [
+            global_user_state.get_handle_from_cluster_name(c) for c in clusters
+        ]
+    else:
+        cluster_infos = global_user_state.get_clusters()
+        clusters = [c['name'] for c in cluster_infos]
+        handles = [c['handle'] for c in cluster_infos]
 
-        job_table = backend.run_on_head(handle, code)
-        click.echo(f'Sky Job Queue of Cluster {cluster}\n{job_table}')
+    for cluster, handle in zip(clusters, handles):
+        _show_job_queue_on_cluster(cluster, handle, backend, code)
+
+
+def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
+                               backend: backend_lib.Backend, code: str):
+    if handle is None:
+        print(f'Cluster {cluster} was not found. Skipping.')
         return
 
-    clusters_status = global_user_state.get_clusters()
-    for cluster_status in clusters_status:
-        handle = cluster_status['handle']
-        job_table = backend.run_on_head(handle, code)
+    click.echo(f'\nSky Job Queue of Cluster {cluster}')
+    if handle.head_ip is None:
         click.echo(
-            f'Sky Job Queue of Cluster {handle.cluster_name}\n{job_table}')
+            f'Cluster {cluster} has been stopped or not properly set up. '
+            'Please re-launch it with `sky launch` to view the job queue.')
+        return
+
+    job_table = backend.run_on_head(handle, code)
+    click.echo(f'{job_table}')
 
 
 @cli.command()
@@ -676,7 +688,7 @@ def start(clusters: Tuple[str]):
         name = record['name']
         handle = record['handle']
         with sky.Dag():
-            dummy_task = sky.Task().set_resources(handle.requested_resources)
+            dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
         click.secho(f'Starting cluster {name}...', bold=True)
         backend.provision(dummy_task,

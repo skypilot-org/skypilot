@@ -84,9 +84,7 @@ def run_with_log(cmd: List[str],
             proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
         proc.wait()
         if proc.returncode != 0 and check:
-            raise RuntimeError(
-                f'Command failed with return code {proc.returncode}. '
-                'Please check the logs.')
+            raise RuntimeError('Command failed, please check the logs.')
         if return_none:
             return None
         return proc, stdout, stderr

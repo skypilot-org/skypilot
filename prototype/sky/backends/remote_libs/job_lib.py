@@ -130,12 +130,18 @@ def _get_jobs(username: Optional[str],
 
 
 def query_job_status(job_ids: List[int]) -> List[JobStatus]:
+    """Return the status of the jobs based on the `ray job status` command.
+
+    Though we update job status actively in ray program and job cancelling,
+    we still need this to handle staleness problem, caused by instance
+    restarting and other corner cases (if any).
+    """
     if len(job_ids) == 0:
         return []
 
     # TODO: if too slow, directly query against redis.
-    test_cmd = [(f'ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
-                 'grep "Job status"') for job in job_ids]
+    test_cmd = [(f'(ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
+                 'grep "Job status" || echo "not found")') for job in job_ids]
     test_cmd = ' && '.join(test_cmd)
     proc = subprocess.run(test_cmd,
                           shell=True,
@@ -149,10 +155,21 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
 
     # Process the results
     job_status_list = []
-    for res in results:
-        ray_status = res.strip().rstrip('.')
-        ray_status = ray_status.rpartition(' ')[-1]
-        status = _RAY_TO_JOB_STATUS_MAP[ray_status]
+    for job_id, res in zip(job_ids, results):
+        if res.strip() == 'not found':
+            # The job may be stale, when the instance is restarted (the ray
+            # redis is volatile). We need to reset the status of the task to
+            # FAILED if its original status is RUNNING or PENDING.
+            rows = _CURSOR.execute('SELECT * FROM jobs WHERE job_id=(?)',
+                                   (job_id,))
+            for row in rows:
+                status = JobStatus[row[JobInfoLoc.STATUS.value]]
+            if status in [JobStatus.RUNNING, JobStatus.PENDING]:
+                status = JobStatus.FAILED
+        else:
+            ray_status = res.strip().rstrip('.')
+            ray_status = ray_status.rpartition(' ')[-1]
+            status = _RAY_TO_JOB_STATUS_MAP[ray_status]
         job_status_list.append(status)
     return job_status_list
 
@@ -222,8 +239,9 @@ def cancel_jobs(jobs: Optional[List[str]]) -> None:
     ]
     cancel_cmd = ';'.join(cancel_cmd)
     subprocess.run(cancel_cmd, shell=True, check=True, executable='/bin/bash')
-    for job_id in jobs:
-        set_status(job_id, JobStatus.CANCELLED)
+    for job in job_records:
+        if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
+            set_status(job['job_id'], JobStatus.CANCELLED)
 
 
 def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
