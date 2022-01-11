@@ -467,7 +467,7 @@ def queue(cluster: Optional[str], skip_finished: bool, all_users: bool):
               help='Name of the existing cluster to find the job.')
 @click.argument('job_id', required=True, type=str)
 def logs(cluster: str, job_id: str):
-    """Tailing the log of a job."""
+    """Tail the log of a job."""
     # TODO: Add an option for downloading logs.
     cluster_name = cluster
     backend = backends.CloudVmRayBackend()
@@ -498,7 +498,7 @@ def logs(cluster: str, job_id: str):
               help='Cancel all jobs.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
-    """Cancel the jobs on a cluster."""
+    """Cancel job(s)."""
     if len(jobs) == 0 and not all:
         raise click.UsageError(
             'sky cancel requires either a job id '
@@ -524,41 +524,6 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     # FIXME: Assumes a specific backend.
     backend = backends.CloudVmRayBackend()
     backend.run_on_head(handle, code, stream_logs=False)
-
-
-@cli.command()
-@click.argument('clusters', nargs=-1, required=False)
-@click.option('--all',
-              '-a',
-              default=None,
-              is_flag=True,
-              help='Tear down all existing clusters.')
-def down(
-        clusters: Tuple[str],
-        all: Optional[bool],  # pylint: disable=redefined-builtin
-):
-    """Tear down cluster(s).
-
-    CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
-    are supplied, the latter takes precedence.
-
-    Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
-
-    Examples:
-
-      \b
-      # Tear down a specific cluster.
-      sky down cluster_name
-
-      \b
-      # Tear down multiple clusters.
-      sky down cluster1 cluster2
-
-      \b
-      # Tear down all existing clusters.
-      sky down -a
-    """
-    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
 
 
 @cli.command()
@@ -689,6 +654,41 @@ def start(clusters: Tuple[str]):
                           stream_logs=True,
                           cluster_name=name)
         click.secho(f'Cluster {name} started.', fg='green')
+
+
+@cli.command()
+@click.argument('clusters', nargs=-1, required=False)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Tear down all existing clusters.')
+def down(
+        clusters: Tuple[str],
+        all: Optional[bool],  # pylint: disable=redefined-builtin
+):
+    """Tear down cluster(s).
+
+    CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
+    are supplied, the latter takes precedence.
+
+    Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
+
+    Examples:
+
+      \b
+      # Tear down a specific cluster.
+      sky down cluster_name
+
+      \b
+      # Tear down multiple clusters.
+      sky down cluster1 cluster2
+
+      \b
+      # Tear down all existing clusters.
+      sky down -a
+    """
+    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
 
 
 def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
