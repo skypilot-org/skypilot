@@ -442,6 +442,11 @@ def queue(cluster: Optional[str], skip_finished: bool, all_users: bool):
         if handle is None:
             raise click.BadParameter(
                 f'Cluster {cluster} is not found (see `sky status`).')
+        if handle.head_ip is None:
+            raise click.BadParameter(
+                f'Cluster {cluster} has been stopped or not properly set up. '
+                'Please re-launch it with `sky launch`.')
+            
 
         job_table = backend.run_on_head(handle, code)
         click.echo(f'Sky Job Queue of Cluster {cluster}\n{job_table}')
