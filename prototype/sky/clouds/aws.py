@@ -93,6 +93,12 @@ class AWS(clouds.Cloud):
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
         return aws_catalog.get_hourly_cost(instance_type, use_spot=use_spot)
 
+    def accelerators_to_hourly_cost(self, accelerators):
+        # AWS includes accelerators as part of the instance type.  Implementing
+        # this is also necessary for e.g., the instance may have 4 GPUs, while
+        # the task specifies to use 1 GPU.
+        return 0
+
     def get_egress_cost(self, num_gigabytes: float):
         # In general, query this from the cloud:
         #   https://aws.amazon.com/s3/pricing/

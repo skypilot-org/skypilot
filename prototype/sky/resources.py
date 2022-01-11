@@ -61,7 +61,7 @@ class Resources:
         self.accelerator_args = accelerator_args
         self.use_spot = use_spot
 
-        self._clear_redundant_accelerators_field()
+        self._try_validate_accelerators()
 
     def __repr__(self) -> str:
         accelerators = ''
@@ -79,19 +79,18 @@ class Resources:
     def is_launchable(self) -> bool:
         return self.cloud is not None and self.instance_type is not None
 
-    def _clear_redundant_accelerators_field(self) -> None:
-        """Try-clears any specified accelerators field for non-GCP."""
-        # GCP must have 'self.accelerators' because it attaches accelerators to
-        # regular VMs.  For other clouds, this field may be
-        # reduandant/inconsistent with the specified instance_type.
+    def _try_validate_accelerators(self) -> None:
+        """Try-validates accelerators against the instance type."""
         if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
+            # GCP attaches accelerators to VMs, so no need for this check.
             acc_requested = self.accelerators
             if acc_requested is None:
                 return
             acc_from_instance_type = (
                 self.cloud.get_accelerators_from_instance_type(
                     self.instance_type))
-            if acc_from_instance_type != acc_requested:
+            if not Resources(accelerators=acc_requested).less_demanding_than(
+                    Resources(accelerators=acc_from_instance_type)):
                 raise ValueError(
                     'Infeasible resource demands found:\n'
                     f'  Instance type requested: {self.instance_type}\n'
@@ -100,7 +99,9 @@ class Resources:
                     f'  Accelerators requested: {acc_requested}\n'
                     f'To fix: either only specify instance_type, or change '
                     'the accelerators field to be consistent.')
-            self.accelerators = None
+            # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
+            # because e.g., the instance may have 4 GPUs, while the task
+            # specifies to use 1 GPU.
 
     def get_accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
@@ -141,8 +142,8 @@ class Resources:
             return False
         # self.cloud == other.cloud
 
-        if self.instance_type is not None and \
-            self.instance_type != other.instance_type:
+        if (self.instance_type is not None and
+                self.instance_type != other.instance_type):
             return False
         # self.instance_type == other.instance_type
 
@@ -166,8 +167,8 @@ class Resources:
             return False
         # self.cloud <= other.cloud
 
-        if self.instance_type is not None and \
-            self.instance_type != other.instance_type:
+        if (self.instance_type is not None and
+                self.instance_type != other.instance_type):
             return False
         # self.instance_type <= other.instance_type
 

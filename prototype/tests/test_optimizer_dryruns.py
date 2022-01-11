@@ -76,3 +76,8 @@ def test_instance_type_matches_accelerators():
         sky.Resources(clouds.GCP(),
                       instance_type='n1-standard-2',
                       accelerators='V100'))
+    # Partial use: Instance has 8 V100s, while the task needs 1 of them.
+    _test_resources(
+        sky.Resources(clouds.AWS(),
+                      instance_type='p3.16xlarge',
+                      accelerators={'V100': 1}))

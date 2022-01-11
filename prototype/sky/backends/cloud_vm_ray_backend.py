@@ -991,7 +991,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'  Existing: {handle.launched_nodes}x '
                 f'{handle.launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
-                f'existing cluster first: `sky down {cluster_name}`.')
+                f'existing cluster first: sky down {cluster_name}')
 
     def _check_existing_cluster(self, task: Task, to_provision: Resources,
                                 cluster_name: str) -> Tuple[str, Resources]:

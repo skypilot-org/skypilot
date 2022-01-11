@@ -511,7 +511,6 @@ def logs(cluster: str, job_id: str):
 @click.argument('jobs', required=False, type=int, nargs=-1)
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     """Cancel job(s)."""
-    # FIXME(zhwu): should not allow SUCCEEDED jobs to be turned into CANCELLED.
     if len(jobs) == 0 and not all:
         raise click.UsageError(
             'sky cancel requires either a job id '
