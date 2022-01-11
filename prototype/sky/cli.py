@@ -681,7 +681,7 @@ def start(clusters: Tuple[str]):
         name = record['name']
         handle = record['handle']
         with sky.Dag():
-            dummy_task = sky.Task().set_resources(handle.requested_resources)
+            dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
         click.secho(f'Starting cluster {name}...', bold=True)
         backend.provision(dummy_task,

@@ -353,7 +353,16 @@ class RayCodeGen(object):
         assert not self._has_epilogue, 'add_epilogue() called twice?'
         self._has_epilogue = True
 
-        self._code.append('ray.get(futures)')
+        self._code += [
+            textwrap.dedent(f"""\
+            try:
+                ray.get(futures)
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
+            except ray.exceptions.WorkerCrashedError:
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
+                raise RuntimeError('Command failed, please check the logs.')
+            """)
+        ]
 
     def build(self) -> str:
         """Returns the entire generated program."""
