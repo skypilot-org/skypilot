@@ -130,6 +130,12 @@ def _get_jobs(username: Optional[str],
 
 
 def query_job_status(job_ids: List[int]) -> List[JobStatus]:
+    """Return the status of the jobs based on the `ray job status` command.
+
+    Though we update job status actively in ray program and job cancelling,
+    we still need this to handle staleness problem, caused by instance
+    restarting and other corner cases (if any).
+    """
     if len(job_ids) == 0:
         return []
 
