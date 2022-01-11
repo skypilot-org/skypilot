@@ -972,13 +972,15 @@ class CloudVmRayBackend(backends.Backend):
                      head_ip: Optional[str] = None,
                      launched_nodes: Optional[int] = None,
                      launched_resources: Optional[Resources] = None,
-                     tpu_delete_script: Optional[str] = None) -> None:
+                     tpu_delete_script: Optional[str] = None,
+                     interactive_node_type: Optional[str] = None) -> None:
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
             self.tpu_delete_script = tpu_delete_script
+            self.interactive_node_type = interactive_node_type
 
         def __repr__(self):
             return (f'ResourceHandle('
@@ -988,7 +990,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'{backend_utils.get_rel_path(self.cluster_yaml)}, '
                     f'\n\tlaunched_resources={self.launched_nodes}x '
                     f'{self.launched_resources}, '
-                    f'\n\ttpu_delete_script={self.tpu_delete_script})')
+                    f'\n\ttpu_delete_script={self.tpu_delete_script}, '
+                    f'\n\tinteractive_node_type={self.interactive_node_type})')
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
@@ -1051,7 +1054,8 @@ class CloudVmRayBackend(backends.Backend):
                   to_provision: Resources,
                   dryrun: bool,
                   stream_logs: bool,
-                  cluster_name: Optional[str] = None):
+                  cluster_name: Optional[str] = None,
+                  interactive_node_type: Optional[str] = None):
         """Provisions using 'ray up'."""
         # Try to launch the exiting cluster first
         if cluster_name is None:
@@ -1091,7 +1095,10 @@ class CloudVmRayBackend(backends.Backend):
             launched_nodes=task.num_nodes,
             launched_resources=provisioned_resources,
             # TPU.
-            tpu_delete_script=config_dict.get('tpu-delete-script'))
+            tpu_delete_script=config_dict.get('tpu-delete-script'),
+            # Interactive node type.
+            interactive_node_type=interactive_node_type,
+        )
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True)
