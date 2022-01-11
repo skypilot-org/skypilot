@@ -78,11 +78,13 @@ For more information on GitHub authentication and keys, see their [setup tutoria
 
 ## Some general engineering practice suggestions
 
-* Use `TODO(author_name)`/`FIXME(author_name)` instead of blank `TODO/FIXME`. This is critical for tracking down issues.
+These are suggestions, not strict rules to follow. For general coding style, follow [google style guide](https://google.github.io/styleguide/pyguide.html).
+
+* Use `TODO(author_name)`/`FIXME(author_name)` instead of blank `TODO/FIXME`. This is critical for tracking down issues. You can write TODOs with your name and assign it to others (on github) if it is someone else's issue.
 * Delete your branch after merging it. This keeps the repo clean and faster to sync.
+* Use an exception if this is an error. Only use `assert` for debugging or proof-checking purpose. This is because exception messages usually contain more information.
 * Use modern python features and styles that increases code quality.
   * Use f-string instead of `.format()` for short expressions to increase readability.
   * Use `class MyClass:` instead of `class MyClass(object):`. The later one was a workaround for python2.x.
-  * Use `dataclasses` instead of (named)tuples.
   * Use `abc` module for abstract classes to ensure all abstract methods are implemented.
-  * Use python typing. But you should not import external objects just for typing. Instead, use `if typing.TYPE_CHECKING` for typing-only external objects.
+  * Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.
