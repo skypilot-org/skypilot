@@ -151,8 +151,8 @@ class AWS(clouds.Cloud):
             'use_spot': r.use_spot,
         }
 
-    def get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+    def get_feasible_launchable_resources(self,
+                                          resources: 'resources_lib.Resources'):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
