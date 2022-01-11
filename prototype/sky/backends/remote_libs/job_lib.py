@@ -222,8 +222,9 @@ def cancel_jobs(jobs: Optional[List[str]]) -> None:
     ]
     cancel_cmd = ';'.join(cancel_cmd)
     subprocess.run(cancel_cmd, shell=True, check=True, executable='/bin/bash')
-    for job_id in jobs:
-        set_status(job_id, JobStatus.CANCELLED)
+    for job in job_records:
+        if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
+            set_status(job['job_id'], JobStatus.CANCELLED)
 
 
 def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
