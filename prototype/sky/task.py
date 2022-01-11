@@ -27,7 +27,7 @@ def _is_cloud_store_url(url):
     return result.netloc
 
 
-class Task(object):
+class Task:
     """Task: a coarse-grained stage in an application."""
 
     def __init__(
@@ -232,7 +232,7 @@ class Task(object):
         elif self.inputs.startswith('gs:'):
             return clouds.GCP()
         else:
-            assert False, 'cloud path not supported: {}'.format(self.inputs)
+            raise ValueError(f'cloud path not supported: {self.inputs}')
 
     def set_outputs(self, outputs, estimated_size_gigabytes):
         self.outputs = outputs
@@ -432,12 +432,12 @@ class Task(object):
         else:
             run_msg = '<fn>'
         if len(run_msg) > 20:
-            s = 'Task(run=\'{}...\')'.format(run_msg[:20])
+            s = f'Task(run=\'{run_msg[:20]}...\')'
         else:
-            s = 'Task(run=\'{}\')'.format(run_msg)
+            s = f'Task(run=\'{run_msg}\')'
         if self.inputs is not None:
-            s += '\n  inputs: {}'.format(self.inputs)
+            s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
-            s += '\n  outputs: {}'.format(self.outputs)
-        s += '\n  resources: {}'.format(self.resources)
+            s += f'\n  outputs: {self.outputs}'
+        s += f'\n  resources: {self.resources}'
         return s
