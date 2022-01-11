@@ -1197,6 +1197,7 @@ class CloudVmRayBackend(backends.Backend):
             detach_run: bool = False,
     ) -> None:
         """Executes generated code on the head node."""
+        del stream_logs  # unused
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
             fp.flush()
@@ -1230,9 +1231,8 @@ class CloudVmRayBackend(backends.Backend):
         colorama.init()
         style = colorama.Style
         fore = colorama.Fore
-        logger.info(
-            f'Job submitted with Job ID: {style.BRIGHT}{job_id}{style.RESET_ALL}'
-        )
+        logger.info('Job submitted with Job ID: '
+                    f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
 
         try:
             if not detach_run:
