@@ -423,8 +423,8 @@ def status(all: bool):  # pylint: disable=redefined-builtin
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
-@click.argument('cluster', required=False, type=str, nargs=-1)
-def queue(cluster: Optional[List[str]], skip_finished: bool, all_users: bool):
+@click.argument('clusters', required=False, type=str, nargs=-1)
+def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     all_jobs = not skip_finished
@@ -437,26 +437,26 @@ def queue(cluster: Optional[List[str]], skip_finished: bool, all_users: bool):
     codegen.show_jobs(username, all_jobs)
     code = codegen.build()
 
-    if cluster:
+    if clusters:
         handles = [
-            global_user_state.get_handle_from_cluster_name(c) for c in cluster
+            global_user_state.get_handle_from_cluster_name(c) for c in clusters
         ]
     else:
         cluster_infos = global_user_state.get_clusters()
-        handles = [cluster_info['handle'] for cluster_info in cluster_infos]
+        clusters = [c['name'] for c in cluster_infos]
+        handles = [c['handle'] for c in cluster_infos]
 
-    for handle in handles:
-        _show_job_queue_on_cluster(handle, backend, code)
+    for cluster, handle in zip(clusters, handles):
+        _show_job_queue_on_cluster(cluster, handle, backend, code)
 
 
-def _show_job_queue_on_cluster(handle: Any, backend: backend_lib.Backend,
-                               code: str):
-    cluster = handle.cluster_name
+def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
+                               backend: backend_lib.Backend, code: str):
     if handle is None:
         print(f'Cluster {cluster} was not found. Skipping.')
         return
 
-    click.echo(f'Sky Job Queue of Cluster {cluster}')
+    click.echo(f'\nSky Job Queue of Cluster {cluster}')
     if handle.head_ip is None:
         click.echo(
             f'Cluster {cluster} has been stopped or not properly set up. '
