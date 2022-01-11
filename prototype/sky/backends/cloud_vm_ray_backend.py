@@ -130,10 +130,10 @@ def _ssh_options_list(ssh_private_key: Optional[str],
         # Control path: important optimization as we do multiple ssh in one
         # sky.launch().
         'ControlMaster': 'auto',
-        'ControlPath': '{}/%C'.format(ssh_control_path),
+        'ControlPath': f'{ssh_control_path}/%C',
         'ControlPersist': '30s',
         # ConnectTimeout.
-        'ConnectTimeout': '{}s'.format(timeout),
+        'ConnectTimeout': f'{timeout}s',
         # ForwardAgent (for git credentials).
         'ForwardAgent': 'yes',
     }
@@ -142,7 +142,7 @@ def _ssh_options_list(ssh_private_key: Optional[str],
         ssh_private_key,
     ] if ssh_private_key is not None else []
     return ssh_key_option + [
-        x for y in (['-o', '{}={}'.format(k, v)]
+        x for y in (['-o', f'{k}={v}']
                     for k, v in arg_dict.items()
                     if v is not None) for x in y
     ]
@@ -159,7 +159,7 @@ def _remove_cluster_from_ssh_config(cluster_ip: str,
     backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
 
 
-class RayCodeGen(object):
+class RayCodeGen:
     """Code generator of a Ray program that executes a sky.Task.
 
     Usage:
@@ -236,7 +236,7 @@ class RayCodeGen(object):
             self,
             ip_list: Optional[List[str]],
             accelerator_dict: Dict[str, int],
-    ) -> List[Dict[str, int]]:
+    ) -> None:
         """Create the gang scheduling placement group for a Task."""
         assert self._has_prologue, ('Call add_prologue() before '
                                     'add_gang_scheduling_placement_group().')
@@ -1517,7 +1517,7 @@ class CloudVmRayBackend(backends.Backend):
                 local = remote = port
                 logger.info(
                     f'Forwarding port {local} to port {remote} on localhost.')
-                ssh += ['-L', '{}:localhost:{}'.format(remote, local)]
+                ssh += ['-L', f'{remote}:localhost:{local}']
         return ssh + _ssh_options_list(
             ssh_private_key,
             self._ssh_control_path(handle)) + [f'{ssh_user}@{handle.head_ip}']
