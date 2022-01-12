@@ -116,7 +116,8 @@ class GCP(clouds.Cloud):
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
             acc_count = list(accelerators.values())[0]
-            regions = gcp_catalog.get_region_zones_for_accelerators(acc, acc_count, use_spot)
+            regions = gcp_catalog.get_region_zones_for_accelerators(
+                acc, acc_count, use_spot)
 
         for region in regions:
             for zone in region.zones:
