@@ -109,12 +109,14 @@ class GCP(clouds.Cloud):
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
         del instance_type  # unused
-        # TODO: enable this after GCP catalog completes.
         if accelerators is None:
             # fallback to manually specified region/zones
             regions = cls.regions()
         else:
-            regions = gcp_catalog.get_region_zones_for_accelerators(accelerators, use_spot)
+            assert len(accelerators) == 1, accelerators
+            acc = list(accelerators.keys())[0]
+            acc_count = list(accelerators.values())[0]
+            regions = gcp_catalog.get_region_zones_for_accelerators(acc, acc_count, use_spot)
 
         for region in regions:
             for zone in region.zones:

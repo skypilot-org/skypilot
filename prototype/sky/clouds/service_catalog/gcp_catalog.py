@@ -60,6 +60,6 @@ def get_region_zones_for_accelerators(
         count: int,
         use_spot: bool = False,
 ) -> List[str]:
-    """Returns a list of regions for a given accelerator."""
+    """Returns a list of regions for a given accelerators."""
     df = _get_accelerator(_df, accelerator, count, region=None)
     return common.get_region_zones(df, use_spot)
