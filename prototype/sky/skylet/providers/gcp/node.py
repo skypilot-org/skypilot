@@ -144,6 +144,13 @@ class GCPNode(UserDict, metaclass=abc.ABCMeta):
     def is_terminated(self) -> bool:
         return self.get(self.STATUS_FIELD) not in self.NON_TERMINATED_STATUSES
 
+    def is_stopped(self) -> bool:
+        return self.get(self.STATUS_FIELD) in ("STOPPED", "STOPPING")
+
+    @property
+    def id(self) -> str:
+        return self["name"]
+
     @abc.abstractmethod
     def get_labels(self) -> dict:
         return
@@ -163,7 +170,7 @@ class GCPNode(UserDict, metaclass=abc.ABCMeta):
 class GCPComputeNode(GCPNode):
     """Abstraction around compute nodes"""
 
-    NON_TERMINATED_STATUSES = {"PROVISIONING", "STAGING", "RUNNING"}
+    NON_TERMINATED_STATUSES = {"PROVISIONING", "STAGING", "RUNNING", "STOPPED", "STOPPING"}
     RUNNING_STATUSES = {"RUNNING"}
     STATUS_FIELD = "status"
 
@@ -276,6 +283,16 @@ class GCPResource(metaclass=abc.ABCMeta):
             results = operations
 
         return results
+
+    @abc.abstractmethod
+    def start_instance(self, node_id: str,
+                       wait_for_operation: bool = True) -> dict:
+        """Start an instance and return result."""
+
+    @abc.abstractmethod
+    def stop_instance(self, node_id: str,
+                      wait_for_operation: bool = True) -> dict:
+        """Stop an instance and return result."""
 
     @abc.abstractmethod
     def delete_instance(self, node_id: str,
@@ -466,6 +483,46 @@ class GCPCompute(GCPResource):
 
         return result, name
 
+    def _list_stopped_instances(self):
+        response = self.resource.instances().list(
+            project=self.project_id,
+            zone=self.availability_zone,
+            filter="(status = STOPPED) OR (status = STOPPING)",
+        ).execute()
+
+        instances = response.get("items", [])
+        return [GCPComputeNode(i, self) for i in instances]
+
+    def start_instance(self, node_id: str,
+                       wait_for_operation: bool = True) -> dict:
+        operation = self.resource.instances().start(
+            project=self.project_id,
+            zone=self.availability_zone,
+            instance=node_id,
+        ).execute()
+
+        if wait_for_operation:
+            result = self.wait_for_operation(operation)
+        else:
+            result = operation
+
+        return result
+
+    def stop_instance(self, node_id: str,
+                      wait_for_operation: bool = True) -> dict:
+        operation = self.resource.instances().stop(
+            project=self.project_id,
+            zone=self.availability_zone,
+            instance=node_id,
+        ).execute()
+
+        if wait_for_operation:
+            result = self.wait_for_operation(operation)
+        else:
+            result = operation
+
+        return result
+
     def delete_instance(self, node_id: str,
                         wait_for_operation: bool = True) -> dict:
         operation = self.resource.instances().delete(
@@ -547,6 +604,10 @@ class GCPTPU(GCPResource):
 
         return instances
 
+    def _list_stopped_instances(self):
+        return [instance for instance in self.list_instances()
+                if instance.is_stopped()]
+
     def get_instance(self, node_id: str) -> GCPTPUNode:
         instance = self.resource.projects().locations().nodes().get(
             name=node_id).execute()
@@ -613,6 +674,32 @@ class GCPTPU(GCPResource):
             result = operation
 
         return result, name
+
+    def start_instance(self, node_id: str,
+                       wait_for_operation: bool = True) -> dict:
+        operation = self.resource.projects().locations().nodes().start(
+            name=node_id).execute()
+
+        # No need to increase MAX_POLLS for deletion
+        if wait_for_operation:
+            result = self.wait_for_operation(operation, max_polls=MAX_POLLS)
+        else:
+            result = operation
+
+        return result
+
+    def stop_instance(self, node_id: str,
+                      wait_for_operation: bool = True) -> dict:
+        operation = self.resource.projects().locations().nodes().stop(
+            name=node_id).execute()
+
+        # No need to increase MAX_POLLS for deletion
+        if wait_for_operation:
+            result = self.wait_for_operation(operation, max_polls=MAX_POLLS)
+        else:
+            result = operation
+
+        return result
 
     def delete_instance(self, node_id: str,
                         wait_for_operation: bool = True) -> dict:

@@ -1506,13 +1506,12 @@ class CloudVmRayBackend(backends.Backend):
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
-        if not terminate and not isinstance(cloud, clouds.AWS):
+        if not terminate and not isinstance(cloud, (clouds.AWS, clouds.GCP)):
             # FIXME: no mentions of cache_stopped_nodes in
             # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/_azure/node_provider.py
-            # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/node_provider.py
             raise ValueError(
                 f'Stopping cluster {handle.cluster_name!r}: not supported on '
-                'non-AWS clusters yet. Try manually stopping, or terminate by: '
+                'non-AWS and non-GCP clusters yet. Try manually stopping, or terminate by: '
                 f'sky down {handle.cluster_name}')
         if isinstance(cloud, clouds.Azure):
             # Special handling because `ray down` is buggy with Azure.

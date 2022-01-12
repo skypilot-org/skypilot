@@ -1,4 +1,5 @@
 from typing import Dict
+import copy
 from functools import wraps
 from threading import RLock
 import time
@@ -55,6 +56,8 @@ class GCPNodeProvider(NodeProvider):
         # Cache of node objects from the last nodes() call. This avoids
         # excessive DescribeInstances requests.
         self.cached_nodes: Dict[str, GCPNode] = {}
+        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes",
+                                                       True)
 
     def _construct_clients(self):
         _, _, compute, tpu = construct_clients_from_provider_config(
@@ -150,17 +153,34 @@ class GCPNodeProvider(NodeProvider):
     def create_node(self, base_config: dict, tags: dict, count: int) -> None:
         with self.lock:
             labels = tags  # gcp uses "labels" instead of aws "tags"
+            labels = dict(sorted(copy.deepcopy(labels).items()))
 
             node_type = get_node_type(base_config)
             resource = self.resources[node_type]
 
-            resource.create_instances(base_config, labels, count)
+            # Try to reuse previously stopped nodes with compatible configs
+            if self.cache_stopped_nodes:
+                reuse_nodes = resource.list_instances(labels)[:count]
+                reuse_node_ids = [n.id for n in reuse_nodes]
+                if reuse_nodes:
+                    # TODO(suquark): Some instances could still be stopping.
+                    # We may wait until these instances stop.
+                    for node_id in reuse_node_ids:
+                        resource.start_instance(node_id)
+                    for node_id in reuse_node_ids:
+                        self.set_node_tags(node_id, tags)
+                    count -= len(reuse_node_ids)
+            if count:
+                resource.create_instances(base_config, labels, count)
 
     @_retry
     def terminate_node(self, node_id: str):
         with self.lock:
             resource = self._get_resource_depending_on_node_name(node_id)
-            result = resource.delete_instance(node_id=node_id, )
+            if self.cache_stopped_nodes:
+                result = resource.stop_instance(node_id=node_id)
+            else:
+                result = resource.delete_instance(node_id=node_id)
             return result
 
     @_retry
