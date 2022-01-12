@@ -24,4 +24,4 @@ with sky.Dag() as dag:
     t = sky.Task(run=run_command, setup=setup_cmd)
     t.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
 
-sky.execute(dag)
+sky.launch(dag)

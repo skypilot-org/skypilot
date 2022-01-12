@@ -7,7 +7,7 @@ from sky import logging
 logger = logging.init_logger(__name__)
 
 
-class Resources(object):
+class Resources:
     """A cloud resource bundle.
 
     Used
@@ -61,6 +61,8 @@ class Resources(object):
         self.accelerator_args = accelerator_args
         self.use_spot = use_spot
 
+        self._try_validate_accelerators()
+
     def __repr__(self) -> str:
         accelerators = ''
         accelerator_args = ''
@@ -77,6 +79,30 @@ class Resources(object):
     def is_launchable(self) -> bool:
         return self.cloud is not None and self.instance_type is not None
 
+    def _try_validate_accelerators(self) -> None:
+        """Try-validates accelerators against the instance type."""
+        if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
+            # GCP attaches accelerators to VMs, so no need for this check.
+            acc_requested = self.accelerators
+            if acc_requested is None:
+                return
+            acc_from_instance_type = (
+                self.cloud.get_accelerators_from_instance_type(
+                    self.instance_type))
+            if not Resources(accelerators=acc_requested).less_demanding_than(
+                    Resources(accelerators=acc_from_instance_type)):
+                raise ValueError(
+                    'Infeasible resource demands found:\n'
+                    f'  Instance type requested: {self.instance_type}\n'
+                    f'  Accelerators for {self.instance_type}: '
+                    f'{acc_from_instance_type}\n'
+                    f'  Accelerators requested: {acc_requested}\n'
+                    f'To fix: either only specify instance_type, or change '
+                    'the accelerators field to be consistent.')
+            # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
+            # because e.g., the instance may have 4 GPUs, while the task
+            # specifies to use 1 GPU.
+
     def get_accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
 
@@ -91,7 +117,7 @@ class Resources(object):
                 self.instance_type)
         return None
 
-    def get_cost(self, seconds):
+    def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
@@ -103,7 +129,7 @@ class Resources(object):
                 self.accelerators)
         return hourly_cost * hours
 
-    def is_same_resources(self, other) -> bool:
+    def is_same_resources(self, other: 'Resources') -> bool:
         """Returns whether two resources are the same.
 
         Returns True if they are the same, False if not.
@@ -116,8 +142,8 @@ class Resources(object):
             return False
         # self.cloud == other.cloud
 
-        if self.instance_type is not None and \
-            self.instance_type != other.instance_type:
+        if (self.instance_type is not None and
+                self.instance_type != other.instance_type):
             return False
         # self.instance_type == other.instance_type
 
@@ -135,7 +161,40 @@ class Resources(object):
         # self == other
         return True
 
-    def is_launchable_fuzzy_equal(self, other) -> bool:
+    def less_demanding_than(self, other: 'Resources') -> bool:
+        """Returns whether this resources is less demanding than the other."""
+        if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
+            return False
+        # self.cloud <= other.cloud
+
+        if (self.instance_type is not None and
+                self.instance_type != other.instance_type):
+            return False
+        # self.instance_type <= other.instance_type
+
+        other_accelerators = other.get_accelerators()
+        if self.accelerators is not None and other_accelerators is None:
+            return False
+
+        if self.accelerators is not None:
+            for acc in self.accelerators:
+                if acc not in other_accelerators:
+                    return False
+                if self.accelerators[acc] > other_accelerators[acc]:
+                    return False
+        # self.accelerators <= other.accelerators
+
+        if self.accelerator_args != other.accelerator_args:
+            return False
+        # self.accelerator_args == other.accelerator_args
+
+        if self.use_spot != other.use_spot:
+            return False
+
+        # self <= other
+        return True
+
+    def is_launchable_fuzzy_equal(self, other: 'Resources') -> bool:
         """Whether the resources are the fuzzily same launchable resources."""
         assert self.cloud is not None and other.cloud is not None
         if not self.cloud.is_same_cloud(other.cloud):

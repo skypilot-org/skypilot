@@ -21,7 +21,7 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     region: Region
 
 
-class Cloud(object):
+class Cloud:
     """A cloud provider."""
 
     #### Regions/Zones ####
@@ -86,8 +86,8 @@ class Cloud(object):
     def is_same_cloud(self, other):
         raise NotImplementedError
 
-    def make_deploy_resources_variables(self, task):
-        """Converts a planned sky.Task into cloud-specific resource variables.
+    def make_deploy_resources_variables(self, resources):
+        """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
         any accelerators, etc.) in the cloud's deployment YAML template.

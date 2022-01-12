@@ -1,0 +1,14 @@
+# A dummy task for multinode cluster creation.
+#
+# Runs a dummy task that provision a cluster.
+#
+# Usage:
+#   sky launch -c mjq cluster_multinode.yaml
+#   sky exec -c mjq job_multinode.yaml
+#   sky exec -c mjq job.yaml
+
+resources:
+  cloud: aws
+  accelerators: K80
+
+num_nodes: 2

@@ -1,10 +1,14 @@
 """Amazon Web Services."""
 import copy
 import json
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
 from sky import clouds
 from sky.clouds.service_catalog import aws_catalog
+
+if TYPE_CHECKING:
+    # renaming to avoid shadowing variables
+    from sky import resources as resources_lib
 
 
 class AWS(clouds.Cloud):
@@ -86,10 +90,16 @@ class AWS(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
         return aws_catalog.get_hourly_cost(instance_type, use_spot=use_spot)
 
-    def get_egress_cost(self, num_gigabytes):
+    def accelerators_to_hourly_cost(self, accelerators):
+        # AWS includes accelerators as part of the instance type.  Implementing
+        # this is also necessary for e.g., the instance may have 4 GPUs, while
+        # the task specifies to use 1 GPU.
+        return 0
+
+    def get_egress_cost(self, num_gigabytes: float):
         # In general, query this from the cloud:
         #   https://aws.amazon.com/s3/pricing/
         # NOTE: egress from US East (Ohio).
@@ -115,11 +125,11 @@ class AWS(clouds.Cloud):
     def __repr__(self):
         return AWS._REPR
 
-    def is_same_cloud(self, other):
+    def is_same_cloud(self, other: clouds.Cloud):
         return isinstance(other, AWS)
 
     @classmethod
-    def get_default_instance_type(cls):
+    def get_default_instance_type(cls) -> str:
         # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
         return 'm4.2xlarge'
 
@@ -132,8 +142,9 @@ class AWS(clouds.Cloud):
     ) -> Optional[Dict[str, int]]:
         return aws_catalog.get_accelerators_from_instance_type(instance_type)
 
-    def make_deploy_resources_variables(self, task):
-        r = task.best_resources
+    def make_deploy_resources_variables(self,
+                                        resources: 'resources_lib.Resources'):
+        r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
@@ -143,11 +154,11 @@ class AWS(clouds.Cloud):
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
-            'num_nodes': task.num_nodes,
             'use_spot': r.use_spot,
         }
 
-    def get_feasible_launchable_resources(self, resources):
+    def get_feasible_launchable_resources(self,
+                                          resources: 'resources_lib.Resources'):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).

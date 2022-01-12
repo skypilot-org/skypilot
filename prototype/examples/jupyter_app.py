@@ -30,4 +30,4 @@ def make_application():
 
 
 dag = make_application()
-sky.execute(dag)
+sky.launch(dag)

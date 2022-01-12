@@ -16,6 +16,12 @@ class Azure(clouds.Cloud):
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
         return azure_catalog.get_hourly_cost(instance_type, use_spot=use_spot)
 
+    def accelerators_to_hourly_cost(self, accelerators):
+        # Azure includes accelerators as part of the instance type.
+        # Implementing this is also necessary for e.g., the instance may have 4
+        # GPUs, while the task specifies to use 1 GPU.
+        return 0
+
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
         #   https://azure.microsoft.com/en-us/pricing/details/bandwidth/
@@ -96,8 +102,8 @@ class Azure(clouds.Cloud):
     ) -> Optional[Dict[str, int]]:
         return azure_catalog.get_accelerators_from_instance_type(instance_type)
 
-    def make_deploy_resources_variables(self, task):
-        r = task.best_resources
+    def make_deploy_resources_variables(self, resources):
+        r = resources
         assert not r.use_spot, \
             'Our subscription offer ID does not support spot instances.'
         # r.accelerators is cleared but .instance_type encodes the info.

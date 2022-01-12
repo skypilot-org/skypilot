@@ -25,5 +25,5 @@ run: |
     --per_device_train_batch_size 32 \
     --learning_rate 2e-5 \
     --max_steps 50 \
-    --output_dir /tmp/imdb/ \
+    --output_dir /tmp/imdb/ --overwrite_output_dir \
     --fp16

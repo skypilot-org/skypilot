@@ -2,24 +2,24 @@
 from typing import Any, Callable, Dict, Optional
 
 from sky import resources
-from sky.backends import backend_utils
+from sky import task as task_lib
 
-App = backend_utils.App
+Task = task_lib.Task
 Resources = resources.Resources
 Path = str
 PostSetupFn = Callable[[str], Any]
 
 
-class Backend(object):
+class Backend:
     """Backend interface: handles provisioning, setup, and scheduling."""
 
     # Backend-specific handle to the launched resources (e.g., a cluster).
     # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
-    class ResourceHandle(object):
+    class ResourceHandle:
         pass
 
     def provision(self,
-                  task: App,
+                  task: Task,
                   to_provision: Resources,
                   dryrun: bool,
                   stream_logs: bool,
@@ -37,22 +37,22 @@ class Backend(object):
     ) -> None:
         raise NotImplementedError
 
-    def add_storage_objects(self, task: App) -> None:
+    def add_storage_objects(self, task: Task) -> None:
         raise NotImplementedError
 
     def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
-                       task: App) -> None:
+                       task: Task) -> None:
         raise NotImplementedError
 
-    def execute(self, handle: ResourceHandle, task: App,
-                stream_logs: bool) -> None:
+    def execute(self, handle: ResourceHandle, task: Task, stream_logs: bool,
+                detach_run: bool) -> None:
         raise NotImplementedError
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         """Post execute(): e.g., print helpful inspection messages."""
         raise NotImplementedError
 
-    def teardown_ephemeral_storage(self, task: App) -> None:
+    def teardown_ephemeral_storage(self, task: Task) -> None:
         raise NotImplementedError
 
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:

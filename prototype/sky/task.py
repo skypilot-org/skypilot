@@ -27,7 +27,7 @@ def _is_cloud_store_url(url):
     return result.netloc
 
 
-class Task(object):
+class Task:
     """Task: a coarse-grained stage in an application."""
 
     def __init__(
@@ -35,7 +35,7 @@ class Task(object):
             name: Optional[str] = None,
             *,
             setup: Optional[str] = None,
-            run: CommandOrCommandGen = None,
+            run: Optional[CommandOrCommandGen] = None,
             workdir: Optional[str] = None,
             num_nodes: Optional[int] = None,
             # Advanced:
@@ -46,8 +46,9 @@ class Task(object):
     ):
         """Initializes a Task.
 
-        All fields are optional except 'run': either a shell command to run
-        (str) or a command generator for different nodes (lambda; see below).
+        All fields are optional.  `Task.run` is the actual program: either a
+        shell command to run (str) or a command generator for different nodes
+        (lambda; see below).
 
         Before executing a Task, it is required to call Task.set_resources() to
         assign resource requirements to this task.
@@ -120,12 +121,10 @@ class Task(object):
             config = yaml.safe_load(f)
 
         # TODO: perform more checks on yaml and raise meaningful errors.
-        if 'run' not in config:
-            raise ValueError('The YAML spec should include a \'run\' field.')
 
         task = Task(
             config.get('name'),
-            run=config['run'],  # Required field.
+            run=config.get('run'),
             workdir=config.get('workdir'),
             setup=config.get('setup'),
             num_nodes=config.get('num_nodes'),
@@ -233,7 +232,7 @@ class Task(object):
         elif self.inputs.startswith('gs:'):
             return clouds.GCP()
         else:
-            assert False, 'cloud path not supported: {}'.format(self.inputs)
+            raise ValueError(f'cloud path not supported: {self.inputs}')
 
     def set_outputs(self, outputs, estimated_size_gigabytes):
         self.outputs = outputs
@@ -433,113 +432,12 @@ class Task(object):
         else:
             run_msg = '<fn>'
         if len(run_msg) > 20:
-            s = 'Task(run=\'{}...\')'.format(run_msg[:20])
+            s = f'Task(run=\'{run_msg[:20]}...\')'
         else:
-            s = 'Task(run=\'{}\')'.format(run_msg)
+            s = f'Task(run=\'{run_msg}\')'
         if self.inputs is not None:
-            s += '\n  inputs: {}'.format(self.inputs)
+            s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
-            s += '\n  outputs: {}'.format(self.outputs)
-        s += '\n  resources: {}'.format(self.resources)
-        return s
-
-
-class ParTask(Task):
-    """ParTask: a wrapper of independent Tasks to be run in parallel.
-
-    ParTask enables multiple Tasks to be run in paralel, while sharing the same
-    total resources (VMs).
-
-    Typical usage: use a ParTask to wrap hyperparameter tuning trials.
-
-        per_trial_resources = ...
-        total_resources = ...
-
-        par_task = sky.ParTask([
-            sky.Task(
-                run=f'python app.py -s={i}').set_resources(per_trial_resources)
-            for i in range(10)
-        ])
-
-        # Provision and share a total of this many resources.  Inner Tasks will
-        # be bin-packed and scheduled according to their demands.
-        par_task.set_resources(total_resources)
-
-    Semantics:
-
-    (1) A ParTask inherits the following fields from its inner Tasks:
-
-        setup
-        workdir
-        num_nodes == 1
-
-    Thus, all inner Tasks are required to have identical values for these
-    fields.  This will be checked when constructing the ParTask().
-
-    These fields can be distinct across the inner Tasks:
-
-        resources (e.g., some Tasks requiring more than others)
-
-    TODO: what about
-      convenience func:
-        set_file_mounts()     (in principle we can try to merge)
-      used by optimizer:
-        set_time_estimator()  (in principle we can try to merge)
-        set_inputs()
-        set_outputs()
-
-    (2) ParTask.set_resources(...) must be called, providing the total
-    resources to share among all tasks.
-
-    TODO: allow an option to make this optional, which should have the
-    semantics "use as many resources as required".
-    """
-
-    def __init__(self, tasks: List[Task]):
-        super().__init__()
-        # Validation.
-        assert all(isinstance(task, Task) and
-                   not isinstance(task, ParTask) for task in tasks), \
-                   'ParTask can only wrap base Tasks.'
-        assert all(task.num_nodes == 1 for task in tasks), \
-            'ParTask currently only wraps Tasks with num_nodes == 1.'
-
-        setup = set(task.setup for task in tasks)
-        assert len(setup) == 1, 'Inner Tasks must have the same \'setup\'.'
-        self.setup = list(setup)[0]
-
-        workdir = set(task.workdir for task in tasks)
-        assert len(workdir) == 1, 'Inner Tasks must have the same \'workdir\'.'
-        self.workdir = list(workdir)[0]
-
-        # TODO: No support for these yet.
-        assert all(task.file_mounts is None for task in tasks)
-        assert all(task.inputs is None for task in tasks)
-        assert all(task.outputs is None for task in tasks)
-        assert all(task.time_estimator_func is None for task in tasks)
-
-        dag = sky.DagContext.get_current_dag()
-        for task in tasks:
-            dag.remove(task)
-        self.tasks = tasks
-
-    def get_task_resource_demands(self,
-                                  task_i: int) -> Optional[Dict[str, float]]:
-        """Gets inner Task i's resource demands, useful for scheduling."""
-        task = self.tasks[task_i]
-        r = task.resources
-        if r is None:
-            return None
-        assert len(r) == 1, \
-            'Inner Tasks must not have multiple Resources choices.'
-        r = list(r)[0]
-        # For now we only count accelerators as resource demands.
-        demands = r.get_accelerators()
-        return demands
-
-    def __repr__(self):
-        if self.name:
-            return self.name
-        s = 'ParTask({} tasks)'.format(len(self.tasks))
-        s += '\n  resources: {}'.format(self.resources)
+            s += f'\n  outputs: {self.outputs}'
+        s += f'\n  resources: {self.resources}'
         return s

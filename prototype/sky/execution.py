@@ -2,7 +2,7 @@
 
 Usage:
 
-   >> sky.execute(planned_dag)
+   >> sky.launch(planned_dag)
 
 Current resource privisioners:
 
@@ -19,6 +19,7 @@ from typing import Any, List, Optional
 
 import sky
 from sky import backends
+from sky import global_user_state
 from sky import logging
 from sky import optimizer
 
@@ -39,15 +40,16 @@ class Stage(enum.Enum):
     TEARDOWN = 6
 
 
-def execute(dag: sky.Dag,
-            dryrun: bool = False,
-            teardown: bool = False,
-            stream_logs: bool = True,
-            handle: Any = None,
-            backend: Optional[backends.Backend] = None,
-            optimize_target: OptimizeTarget = OptimizeTarget.COST,
-            stages: Optional[List[Stage]] = None,
-            cluster_name: Optional[str] = None) -> None:
+def _execute(dag: sky.Dag,
+             dryrun: bool = False,
+             teardown: bool = False,
+             stream_logs: bool = True,
+             handle: Any = None,
+             backend: Optional[backends.Backend] = None,
+             optimize_target: OptimizeTarget = OptimizeTarget.COST,
+             stages: Optional[List[Stage]] = None,
+             cluster_name: Optional[str] = None,
+             detach_run: bool = False) -> None:
     """Runs a DAG.
 
     If the DAG has not been optimized yet, this will call sky.optimize() for
@@ -60,8 +62,6 @@ def execute(dag: sky.Dag,
       teardown: bool; whether to teardown the launched resources after
         execution.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
-        Hint: for a ParTask, set this to False to avoid a lot of log outputs;
-        each task's output can be redirected to their own files.
       handle: Any; if provided, execution will use an existing backend cluster
         handle instead of provisioning a new one.
       backend: Backend; backend to use for executing the tasks. Defaults to
@@ -73,6 +73,7 @@ def execute(dag: sky.Dag,
         setup.
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
+      detach_run: bool; whether to detach the process after the job submitted.
     """
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]
@@ -80,6 +81,8 @@ def execute(dag: sky.Dag,
     if stages is None or Stage.OPTIMIZE in stages:
         if task.best_resources is None:
             logger.info(f'Optimizer target is set to {optimize_target.name}.')
+            # TODO: fix this for the situation where number of requested
+            # accelerators is not an integer.
             dag = sky.optimize(dag, minimize=optimize_target)
             task = dag.tasks[0]  # Keep: dag may have been deep-copied.
 
@@ -127,7 +130,7 @@ def execute(dag: sky.Dag,
 
         if stages is None or Stage.EXEC in stages:
             try:
-                backend.execute(handle, task, stream_logs)
+                backend.execute(handle, task, stream_logs, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, teardown)
@@ -148,3 +151,51 @@ def execute(dag: sky.Dag,
         if not status_printed:
             # Needed because this finally doesn't always get executed on errors.
             backends.backend_utils.run('sky status')
+
+
+def launch(dag: sky.Dag,
+           dryrun: bool = False,
+           teardown: bool = False,
+           stream_logs: bool = True,
+           backend: Optional[backends.Backend] = None,
+           optimize_target: OptimizeTarget = OptimizeTarget.COST,
+           cluster_name: Optional[str] = None,
+           detach_run: bool = False) -> None:
+    _execute(dag=dag,
+             dryrun=dryrun,
+             teardown=teardown,
+             stream_logs=stream_logs,
+             handle=None,
+             backend=backend,
+             optimize_target=optimize_target,
+             cluster_name=cluster_name,
+             detach_run=detach_run)
+
+
+def exec(  # pylint: disable=redefined-builtin
+        dag: sky.Dag,
+        dryrun: bool = False,
+        teardown: bool = False,
+        stream_logs: bool = True,
+        backend: Optional[backends.Backend] = None,
+        optimize_target: OptimizeTarget = OptimizeTarget.COST,
+        cluster_name: Optional[str] = None,
+        detach_run: bool = False,
+) -> None:
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise ValueError(f'Cluster \'{cluster_name}\' not found.  '
+                         'Use `sky launch` to provision first.')
+    _execute(dag=dag,
+             dryrun=dryrun,
+             teardown=teardown,
+             stream_logs=stream_logs,
+             handle=handle,
+             backend=backend,
+             optimize_target=optimize_target,
+             stages=[
+                 Stage.SYNC_WORKDIR,
+                 Stage.EXEC,
+             ],
+             cluster_name=cluster_name,
+             detach_run=detach_run)
