@@ -991,7 +991,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'  Existing: {handle.launched_nodes}x '
                 f'{handle.launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
-                f'existing cluster first: `sky down {cluster_name}`.')
+                f'existing cluster first: sky down {cluster_name}')
 
     def _check_existing_cluster(self, task: Task, to_provision: Resources,
                                 cluster_name: str) -> Tuple[str, Resources]:
@@ -1249,7 +1249,7 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky logs -c {name} {job_id}'
                         f'{backend_utils.RESET_BOLD}'
                         '\nTo view the job queue:\t'
-                        f'{backend_utils.BOLD}sky queue -c {name}'
+                        f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
     def _add_job(self, handle: ResourceHandle) -> int:
@@ -1400,11 +1400,11 @@ class CloudVmRayBackend(backends.Backend):
                         '\nTo submit a job:'
                         f'\t\t{backend_utils.BOLD}sky exec -c {name} yaml_file'
                         f'{backend_utils.RESET_BOLD}'
-                        '\nTo teardown the cluster:'
-                        f'\t{backend_utils.BOLD}sky down {name}'
-                        f'{backend_utils.RESET_BOLD}'
                         '\nTo stop the cluster:'
                         f'\t{backend_utils.BOLD}sky stop {name}'
+                        f'{backend_utils.RESET_BOLD}'
+                        '\nTo teardown the cluster:'
+                        f'\t{backend_utils.BOLD}sky down {name}'
                         f'{backend_utils.RESET_BOLD}')
             if handle.tpu_delete_script is not None:
                 logger.info('Tip: `sky down` will delete launched TPU(s) too.')
