@@ -98,7 +98,7 @@ class Task(object):
         self.estimated_inputs_size_gigabytes = None
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
-        self.resources = {sky.Resources()}
+        self.resources = None
         self.time_estimator_func = None
         self.file_mounts = None
         # Filled in by the optimizer.  If None, this Task is not planned.
