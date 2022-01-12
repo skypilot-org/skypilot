@@ -20,7 +20,7 @@ class NewLineFormatter(logging.Formatter):
         return msg
 
 
-def init_logger(name):
+def init_logger(name: str):
     h = logging.StreamHandler(sys.stdout)
     h.flush = sys.stdout.flush
 

@@ -78,5 +78,5 @@ with sky.Dag() as dag:
     # Optionally, specify a time estimator: Resources -> time in seconds.
     # train.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
-# sky.run(dag, dryrun=True)
-sky.run(dag)
+# sky.launch(dag, dryrun=True)
+sky.launch(dag)

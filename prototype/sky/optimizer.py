@@ -30,11 +30,12 @@ class OptimizeTarget(enum.Enum):
     TIME = 1
 
 
-class Optimizer(object):
+class Optimizer:
     """The Sky optimizer: assigns best resources to user tasks."""
 
     @staticmethod
-    def _egress_cost(src_cloud, dst_cloud, gigabytes):
+    def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
+                     gigabytes: float):
         if isinstance(src_cloud, DummyCloud) or isinstance(
                 dst_cloud, DummyCloud):
             return 0.0
@@ -44,12 +45,13 @@ class Optimizer(object):
         else:
             egress_cost = 0.0
         if egress_cost > 0:
-            logger.info('  {} -> {} egress cost: ${} for {:.1f} GB'.format(
-                src_cloud, dst_cloud, egress_cost, gigabytes))
+            logger.info(f'  {src_cloud} -> {dst_cloud} egress cost: '
+                        f'${egress_cost} for {gigabytes:.1f} GB')
         return egress_cost
 
     @staticmethod
-    def _egress_time(src_cloud, dst_cloud, gigabytes):
+    def _egress_time(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
+                     gigabytes: float):
         """Returns estimated egress time in seconds."""
         # FIXME: estimate bandwidth between each cloud-region pair.
         if isinstance(src_cloud, DummyCloud) or isinstance(
@@ -61,8 +63,8 @@ class Optimizer(object):
             # (~128MB per file).
             bandwidth_gbps = 10
             egress_time = gigabytes * 8 / bandwidth_gbps
-            logger.info('  {} -> {} egress time: {} s for {:.1f} GB'.format(
-                src_cloud, dst_cloud, egress_time, gigabytes))
+            logger.info(f'  {src_cloud} -> {dst_cloud} egress time: '
+                        f'{egress_time} s for {gigabytes:.1f} GB')
         else:
             egress_time = 0.0
         return egress_time
@@ -282,7 +284,6 @@ class Optimizer(object):
     def read_optimized_plan(dp_best_cost, topo_order, dp_point_backs,
                             minimize_cost):
         message_data = []
-        overall_best = None
         best_plan = {}
 
         def _walk(node, best_hardware, best_cost):

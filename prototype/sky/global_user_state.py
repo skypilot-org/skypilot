@@ -65,7 +65,7 @@ def _get_pretty_entry_point() -> str:
 
     Example return values:
 
-        $ sky run app.yaml  # 'sky run app.yaml'
+        $ sky launch app.yaml  # 'sky launch app.yaml'
         $ sky gpunode  # 'sky gpunode'
         $ python examples/app.py  # 'app.py'
     """
@@ -82,7 +82,7 @@ def add_or_update_cluster(cluster_name: str,
                           cluster_handle: backends.Backend.ResourceHandle,
                           ready: bool):
     """Adds or updates cluster_name -> cluster_handle mapping."""
-    # FIXME: launched_at will be changed when `sky run -c` is called.
+    # FIXME: launched_at will be changed when `sky launch -c` is called.
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
     last_use = _get_pretty_entry_point()

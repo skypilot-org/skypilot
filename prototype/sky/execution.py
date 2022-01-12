@@ -2,7 +2,7 @@
 
 Usage:
 
-   >> sky.run(planned_dag)
+   >> sky.launch(planned_dag)
 
 Current resource privisioners:
 
@@ -82,6 +82,8 @@ def _execute(dag: sky.Dag,
     if stages is None or Stage.OPTIMIZE in stages:
         if task.best_resources is None:
             logger.info(f'Optimizer target is set to {optimize_target.name}.')
+            # TODO: fix this for the situation where number of requested
+            # accelerators is not an integer.
             dag = sky.optimize(dag, minimize=optimize_target)
             task = dag.tasks[0]  # Keep: dag may have been deep-copied.
 
@@ -154,14 +156,14 @@ def _execute(dag: sky.Dag,
             backends.backend_utils.run('sky status')
 
 
-def run(dag: sky.Dag,
-        dryrun: bool = False,
-        teardown: bool = False,
-        stream_logs: bool = True,
-        backend: Optional[backends.Backend] = None,
-        optimize_target: OptimizeTarget = OptimizeTarget.COST,
-        cluster_name: Optional[str] = None,
-        detach_run: bool = False) -> None:
+def launch(dag: sky.Dag,
+           dryrun: bool = False,
+           teardown: bool = False,
+           stream_logs: bool = True,
+           backend: Optional[backends.Backend] = None,
+           optimize_target: OptimizeTarget = OptimizeTarget.COST,
+           cluster_name: Optional[str] = None,
+           detach_run: bool = False) -> None:
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,
@@ -186,7 +188,7 @@ def exec(  # pylint: disable=redefined-builtin
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster \'{cluster_name}\' not found.  '
-                         'Use `sky run` to provision first.')
+                         'Use `sky launch` to provision first.')
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,

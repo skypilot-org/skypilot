@@ -66,3 +66,25 @@ Resource provisioning
 ## Design notes
 
 *Empower the user to debug things.*  This means exposing SSH access to the launched VMs, saving and priting logs, etc.
+
+
+## SSH Access
+The system currently supports SSH access for launched VMs by modifying your local `~/.ssh/config`. For git credentials to forward seamlessly, users must start their SSH agent and add their GitHub SSH key to it:
+```
+eval "$(ssh-agent -s)"
+ssh-add -K /path/to/key  # e.g. ~/.ssh/id_ed25519
+```
+For more information on GitHub authentication and keys, see their [setup tutorial](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent).
+
+## Some general engineering practice suggestions
+
+These are suggestions, not strict rules to follow. For general coding style, follow [google style guide](https://google.github.io/styleguide/pyguide.html).
+
+* Use `TODO(author_name)`/`FIXME(author_name)` instead of blank `TODO/FIXME`. This is critical for tracking down issues. You can write TODOs with your name and assign it to others (on github) if it is someone else's issue.
+* Delete your branch after merging it. This keeps the repo clean and faster to sync.
+* Use an exception if this is an error. Only use `assert` for debugging or proof-checking purpose. This is because exception messages usually contain more information.
+* Use modern python features and styles that increases code quality.
+  * Use f-string instead of `.format()` for short expressions to increase readability.
+  * Use `class MyClass:` instead of `class MyClass(object):`. The later one was a workaround for python2.x.
+  * Use `abc` module for abstract classes to ensure all abstract methods are implemented.
+  * Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.

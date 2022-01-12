@@ -7,8 +7,8 @@ Example usage:
 
   # Run a task, described in a yaml file.
   # Provisioning, setup, file syncing are handled.
-  >> sky run task.yaml
-  >> sky run [-c cluster_name] task.yaml
+  >> sky launch task.yaml
+  >> sky launch [-c cluster_name] task.yaml
 
   # Show the list of running clusters.
   >> sky status
@@ -31,7 +31,7 @@ import functools
 import getpass
 import os
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 import pandas as pd
@@ -219,6 +219,10 @@ def _create_and_ssh_into_node(
     backend.register_info(dag=dag)
     task.update_file_mounts(sky_init.get_cloud_credential_file_mounts())
 
+    # FIXME(gautam): typing the following seq of cmds:
+    #   sky gpunode -t p3.2xlarge --gpus=V100 --cloud aws
+    #   sky gpunode -t n1-standard-8 --gpus=V100 --cloud gcp
+    # makes the second cmd log into the first VM.  It should error out.
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None or handle.head_ip is None:
         # head_ip would be None if previous provisioning failed.
@@ -248,10 +252,10 @@ def _create_and_ssh_into_node(
     else:
         option = f' -c {cluster_name}'
     click.secho(f'sky {node_type}{option}', bold=True)
-    click.echo('To tear down the node:  ', nl=False)
-    click.secho(f'sky down {cluster_name}', bold=True)
-    click.echo('To stop the node:  ', nl=False)
+    click.echo('To stop the node:\t', nl=False)
     click.secho(f'sky stop {cluster_name}', bold=True)
+    click.echo('To tear down the node:\t', nl=False)
+    click.secho(f'sky down {cluster_name}', bold=True)
 
 
 class _NaturalOrderGroup(click.Group):
@@ -287,17 +291,17 @@ def cli():
               is_flag=True,
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
-def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
-    """Launch a task from a YAML spec (rerun setup if a cluster exists)."""
+def launch(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
+    """Launch task from a YAML spec (re-setup if a cluster exists)."""
     with sky.Dag() as dag:
         sky.Task.from_yaml(yaml_path)
 
     click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
-    sky.run(dag,
-            dryrun=dryrun,
-            stream_logs=True,
-            cluster_name=cluster,
-            detach_run=detach_run)
+    sky.launch(dag,
+               dryrun=dryrun,
+               stream_logs=True,
+               cluster_name=cluster,
+               detach_run=detach_run)
 
 
 @cli.command()
@@ -315,25 +319,25 @@ def run(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
               'then detach from the job\'s execution.')
 # pylint: disable=redefined-builtin
 def exec(yaml_path: Path, cluster: str, detach_run: bool):
-    """Execute a task from a YAML spec on a cluster (skip setup).
+    """Execute task from a YAML spec on a cluster (skip setup).
 
     \b
     Actions performed by this command only include:
       - workdir syncing
       - executing the task's run command
-    `sky exec` is thus typically faster than `sky run`, provided a cluster
+    `sky exec` is thus typically faster than `sky launch`, provided a cluster
     already exists.
 
     All setup steps (provisioning, setup commands, file mounts syncing) are
     skipped.  If any of those specifications changed, this command will not
     reflect those changes.  To ensure a cluster's setup is up to date, use `sky
-    run` instead.
+    launch` instead.
 
     Typical workflow:
 
       # First command: set up the cluster once.
 
-      >> sky run -c name app.yaml
+      >> sky launch -c name app.yaml
 
     \b
       # Starting iterative development...
@@ -342,9 +346,9 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):
 
       >> sky exec -c name app.yaml
 
-      # Simply do "sky run" again if anything other than Task.run is modified:
+      # Do "sky launch" again if anything other than Task.run is modified:
 
-      >> sky run -c name app.yaml
+      >> sky launch -c name app.yaml
 
     """
     with sky.Dag() as dag:
@@ -352,48 +356,6 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):
 
     click.secho(f'Executing task on cluster {cluster} ...', fg='yellow')
     sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
-
-
-@cli.command()
-@click.option('--cluster',
-              '-c',
-              required=True,
-              type=str,
-              help='Name of the existing cluster to cancel the task.')
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Cancel all task in full.')
-@click.argument('jobs', required=False, type=int, nargs=-1)
-def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
-    """Cancel the job with the given job ID or all the jobs on a cluster."""
-    if len(jobs) == 0 and not all:
-        raise click.UsageError(
-            'sky cancel requires either a job id '
-            f'(see `sky queue {cluster} -aj`) or the --all flag.')
-
-    handle = global_user_state.get_handle_from_cluster_name(cluster)
-    if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster}\' not found'
-                                 ' (see `sky status`).')
-
-    if all:
-        click.secho(f'Cancelling all jobs on cluster {cluster} ...',
-                    fg='yellow')
-        jobs = None
-    else:
-        click.secho(f'Cancelling jobs {jobs} on cluster {cluster} ...',
-                    fg='yellow')
-
-    codegen = backend_utils.JobLibCodeGen()
-    codegen.cancel_jobs(jobs)
-    code = codegen.build()
-
-    # FIXME: Assumes a specific backend.
-    backend = backends.CloudVmRayBackend()
-    backend.run_on_head(handle, code, stream_logs=False)
 
 
 def _readable_time_duration(start_time: int):
@@ -455,6 +417,63 @@ def status(all: bool):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
+@click.option('--all-users',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all users\' information in full.')
+@click.option('--skip-finished',
+              '-s',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show only pending/running jobs\' information.')
+@click.argument('clusters', required=False, type=str, nargs=-1)
+def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
+    """Show the job queue for cluster(s)."""
+    click.secho('Fetching and parsing job queue...', fg='yellow')
+    all_jobs = not skip_finished
+    backend = backends.CloudVmRayBackend()
+
+    codegen = backend_utils.JobLibCodeGen()
+    username = getpass.getuser()
+    if all_users:
+        username = None
+    codegen.show_jobs(username, all_jobs)
+    code = codegen.build()
+
+    if clusters:
+        handles = [
+            global_user_state.get_handle_from_cluster_name(c) for c in clusters
+        ]
+    else:
+        cluster_infos = global_user_state.get_clusters()
+        clusters = [c['name'] for c in cluster_infos]
+        handles = [c['handle'] for c in cluster_infos]
+
+    for cluster, handle in zip(clusters, handles):
+        _show_job_queue_on_cluster(cluster, handle, backend, code)
+
+
+def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
+                               backend: backend_lib.Backend, code: str):
+    if handle is None:
+        print(f'Cluster {cluster} was not found. Skipping.')
+        return
+
+    click.echo(f'\nSky Job Queue of Cluster {cluster}')
+    if handle.head_ip is None:
+        click.echo(
+            f'Cluster {cluster} has been stopped or not properly set up. '
+            'Please re-launch it with `sky launch` to view the job queue.')
+        return
+
+    job_table = backend.run_on_head(handle, code)
+    click.echo(f'{job_table}')
+
+
+@cli.command()
 @click.option('--cluster',
               '-c',
               required=True,
@@ -462,7 +481,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
               help='Name of the existing cluster to find the job.')
 @click.argument('job_id', required=True, type=str)
 def logs(cluster: str, job_id: str):
-    """Tailing the log of a job."""
+    """Tail the log of a job."""
     # TODO: Add an option for downloading logs.
     cluster_name = cluster
     backend = backends.CloudVmRayBackend()
@@ -480,82 +499,46 @@ def logs(cluster: str, job_id: str):
 
 
 @cli.command()
-@click.option('--all-users',
-              '-u',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all users\' information in full.')
-@click.option('--all-jobs',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all jobs\' information in full.')
-@click.argument('cluster', required=False)
-def queue(cluster: Optional[str], all_jobs: bool, all_users: bool):
-    """Show the job queue for a cluster."""
-    click.secho('Fetching and parsing job queue...', fg='yellow')
-    backend = backends.CloudVmRayBackend()
-
-    codegen = backend_utils.JobLibCodeGen()
-    username = getpass.getuser()
-    if all_users:
-        username = None
-    codegen.show_jobs(username, all_jobs)
-    code = codegen.build()
-
-    if cluster is not None:
-        handle = global_user_state.get_handle_from_cluster_name(cluster)
-        if handle is None:
-            raise click.BadParameter(
-                f'Cluster {cluster} is not found (see `sky status`).')
-
-        job_table = backend.run_on_head(handle, code)
-        click.echo(f'Sky Job Queue of Cluster {cluster}\n{job_table}')
-        return
-
-    clusters_status = global_user_state.get_clusters()
-    for cluster_status in clusters_status:
-        handle = cluster_status['handle']
-        job_table = backend.run_on_head(handle, code)
-        click.echo(
-            f'Sky Job Queue of Cluster {handle.cluster_name}\n{job_table}')
-
-
-@cli.command()
-@click.argument('clusters', nargs=-1, required=False)
+@click.option('--cluster',
+              '-c',
+              required=True,
+              type=str,
+              help='Name of the existing cluster to cancel the task.')
 @click.option('--all',
               '-a',
-              default=None,
+              default=False,
               is_flag=True,
-              help='Tear down all existing clusters.')
-def down(
-        clusters: Tuple[str],
-        all: Optional[bool],  # pylint: disable=redefined-builtin
-):
-    """Tear down cluster(s).
+              required=False,
+              help='Cancel all jobs.')
+@click.argument('jobs', required=False, type=int, nargs=-1)
+def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
+    """Cancel job(s)."""
+    if len(jobs) == 0 and not all:
+        raise click.UsageError(
+            'sky cancel requires either a job id '
+            f'(see `sky queue {cluster} -aj`) or the --all flag.')
 
-    CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
-    are supplied, the latter takes precedence.
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.BadParameter(f'Cluster \'{cluster}\' not found'
+                                 ' (see `sky status`).')
 
-    Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
+    if all:
+        click.secho(f'Cancelling all jobs on cluster {cluster} ...',
+                    fg='yellow')
+        jobs = None
+    else:
+        jobs_str = ', '.join(map(str, jobs))
+        click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster} ...',
+                    fg='yellow')
 
-    Examples:
+    codegen = backend_utils.JobLibCodeGen()
+    codegen.cancel_jobs(jobs)
+    code = codegen.build()
 
-      \b
-      # Tear down a specific cluster.
-      sky down cluster_name
-
-      \b
-      # Tear down multiple clusters.
-      sky down cluster1 cluster2
-
-      \b
-      # Tear down all existing clusters.
-      sky down -a
-    """
-    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
+    # FIXME: Assumes a specific backend.
+    backend = backends.CloudVmRayBackend()
+    backend.run_on_head(handle, code, stream_logs=False)
 
 
 @cli.command()
@@ -677,7 +660,7 @@ def start(clusters: Tuple[str]):
         name = record['name']
         handle = record['handle']
         with sky.Dag():
-            dummy_task = sky.Task().set_resources(handle.requested_resources)
+            dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
         click.secho(f'Starting cluster {name}...', bold=True)
         backend.provision(dummy_task,
@@ -686,6 +669,41 @@ def start(clusters: Tuple[str]):
                           stream_logs=True,
                           cluster_name=name)
         click.secho(f'Cluster {name} started.', fg='green')
+
+
+@cli.command()
+@click.argument('clusters', nargs=-1, required=False)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Tear down all existing clusters.')
+def down(
+        clusters: Tuple[str],
+        all: Optional[bool],  # pylint: disable=redefined-builtin
+):
+    """Tear down cluster(s).
+
+    CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
+    are supplied, the latter takes precedence.
+
+    Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
+
+    Examples:
+
+      \b
+      # Tear down a specific cluster.
+      sky down cluster_name
+
+      \b
+      # Tear down multiple clusters.
+      sky down cluster1 cluster2
+
+      \b
+      # Tear down all existing clusters.
+      sky down -a
+    """
+    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
 
 
 def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
@@ -781,10 +799,12 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
             f'Cloud \'{cloud}\' is not supported. ' + \
             f'Supported clouds: {list(task_lib.CLOUD_REGISTRY.keys())}'
         )
-    if gpus is None:
-        gpus = {'K80': 1}
-    else:
+    if gpus is not None:
         gpus = _parse_accelerator_options(gpus)
+    elif instance_type is None:
+        # Use this request if both gpus and instance_type are not specified.
+        gpus = {'K80': 1}
+
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
                               accelerators=gpus,

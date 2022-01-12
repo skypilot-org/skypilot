@@ -21,7 +21,7 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     region: Region
 
 
-class Cloud(object):
+class Cloud:
     """A cloud provider."""
 
     #### Regions/Zones ####

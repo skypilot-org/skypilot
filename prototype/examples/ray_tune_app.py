@@ -36,4 +36,4 @@ with sky.Dag() as dag:
         sky.Resources(clouds.AWS(), 'p3.2xlarge'),
     })
 
-sky.run(dag)
+sky.launch(dag)
