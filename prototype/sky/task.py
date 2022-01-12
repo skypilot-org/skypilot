@@ -97,7 +97,8 @@ class Task:
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
         self.estimated_outputs_size_gigabytes = None
-        self.resources = None
+        # Default to CPUNode
+        self.resources = {sky.Resources()}
         self.time_estimator_func = None
         self.file_mounts = None
         # Filled in by the optimizer.  If None, this Task is not planned.
@@ -193,15 +194,19 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources = config.get('resources')
-        if resources.get('cloud') is not None:
-            resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
-        if resources.get('accelerators') is not None:
-            resources['accelerators'] = resources['accelerators']
-        if resources.get('accelerator_args') is not None:
-            resources['accelerator_args'] = dict(resources['accelerator_args'])
-        if resources.get('use_spot') is not None:
-            resources['use_spot'] = resources['use_spot']
-        resources = sky.Resources(**resources)
+        if resources is not None:
+            if resources.get('cloud') is not None:
+                resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
+            if resources.get('accelerators') is not None:
+                resources['accelerators'] = resources['accelerators']
+            if resources.get('accelerator_args') is not None:
+                resources['accelerator_args'] = dict(
+                    resources['accelerator_args'])
+            if resources.get('use_spot') is not None:
+                resources['use_spot'] = resources['use_spot']
+            resources = sky.Resources(**resources)
+        else:
+            resources = sky.Resources()
         task.set_resources({resources})
         return task
 

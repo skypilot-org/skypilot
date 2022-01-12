@@ -31,7 +31,8 @@ import functools
 import getpass
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+import yaml
 
 import click
 import pandas as pd
@@ -256,6 +257,20 @@ def _create_and_ssh_into_node(
     click.secho(f'sky down {cluster_name}', bold=True)
 
 
+def _check_yaml(entrypoint: str) -> bool:
+    """Checks if entrypoint is a readable YAML file"""
+    is_yaml = True
+    try:
+        with open(entrypoint, 'r') as f:
+            try:
+                yaml.safe_load(f)
+            except yaml.YAMLError:
+                is_yaml = False
+    except OSError:
+        is_yaml = False
+    return is_yaml
+
+
 class _NaturalOrderGroup(click.Group):
     """Lists commands in the order they are defined in this script.
 
@@ -272,7 +287,7 @@ def cli():
 
 
 @cli.command()
-@click.argument('yaml_path', required=True, type=str)
+@click.argument('entrypoint', required=True, type=str, nargs=-1)
 @click.option('--cluster',
               '-c',
               default=None,
@@ -289,10 +304,25 @@ def cli():
               is_flag=True,
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
-def launch(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
-    """Launch task from a YAML spec (re-setup if a cluster exists)."""
+def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
+           detach_run: bool):
+    """Launch a task from a YAML or command (rerun setup if cluster exists).
+
+    If entrypoint points to a valid YAML file, it is read in as the task
+    specification. Otherwise, it is interpreted as a bash command to be
+    executed on the head node of the cluster.
+    """
+    entrypoint = ' '.join(entrypoint)
     with sky.Dag() as dag:
-        sky.Task.from_yaml(yaml_path)
+        if _check_yaml(entrypoint):
+            # Treat entrypoint as a yaml.
+            click.secho(f'Detected YAML file: {entrypoint}', fg='blue')
+            sky.Task.from_yaml(entrypoint)
+        else:
+            # Treat entrypoint as a bash command.
+            click.secho(f'Detected Bash Command: \'{entrypoint}\'', fg='blue')
+            task = sky.Task(name='<cmd>', run=entrypoint)
+            task.set_resources({sky.Resources()})
 
     click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
     sky.launch(dag,
@@ -303,7 +333,7 @@ def launch(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
 
 
 @cli.command()
-@click.argument('yaml_path', required=True, type=str)
+@click.argument('entrypoint', required=True, type=str, nargs=-1)
 @click.option('--cluster',
               '-c',
               required=True,
@@ -316,13 +346,18 @@ def launch(yaml_path: Path, cluster: str, dryrun: bool, detach_run: bool):
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
 # pylint: disable=redefined-builtin
-def exec(yaml_path: Path, cluster: str, detach_run: bool):
-    """Execute task from a YAML spec on a cluster (skip setup).
+def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
+    """Execute a task or a command on a cluster (skip setup).
+
+    If entrypoint points to a valid YAML file, it is read in as the task
+    specification. Otherwise, it is interpreted as a bash command to be
+    executed on the head node of the cluster.
 
     \b
     Actions performed by this command only include:
       - workdir syncing
-      - executing the task's run command
+      - executing the task's run command (if entrypoint is a yaml; if specified,
+      executed on all nodes) or a bash command (only on the cluster's head node)
     `sky exec` is thus typically faster than `sky launch`, provided a cluster
     already exists.
 
@@ -348,9 +383,29 @@ def exec(yaml_path: Path, cluster: str, detach_run: bool):
 
       >> sky launch -c name app.yaml
 
+    Advanced use cases:
+
+      #  Pass in commands for execution
+
+      >> sky exec -c name -- echo Hello World
+
     """
+    entrypoint = ' '.join(entrypoint)
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
+                                 'Use `sky run` to provision first.')
+
     with sky.Dag() as dag:
-        sky.Task.from_yaml(yaml_path)
+        if _check_yaml(entrypoint):
+            # Treat entrypoint as a yaml file
+            click.secho(f'Detected YAML file: {entrypoint}', fg='blue')
+            sky.Task.from_yaml(entrypoint)
+        else:
+            # Treat entrypoint as a bash command.
+            click.secho(f'Detected Bash Command: \'{entrypoint}\'', fg='blue')
+            task = sky.Task(name='<cmd>', run=entrypoint)
+            task.set_resources({sky.Resources()})
 
     click.secho(f'Executing task on cluster {cluster} ...', fg='yellow')
     sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
