@@ -55,7 +55,7 @@ def list_accelerators(
     return common.list_accelerators_impl('GCP', _df, gpus_only, name_filter)
 
 
-def get_region_zones_for_accelerator(
+def get_region_zones_for_accelerators(
         accelerator: str,
         count: int,
         use_spot: bool = False,
