@@ -159,6 +159,7 @@ def launch(dag: sky.Dag,
            stream_logs: bool = True,
            backend: Optional[backends.Backend] = None,
            optimize_target: OptimizeTarget = OptimizeTarget.COST,
+           stages: Optional[List[Stage]] = None,
            cluster_name: Optional[str] = None,
            detach_run: bool = False) -> None:
     _execute(dag=dag,
@@ -168,6 +169,7 @@ def launch(dag: sky.Dag,
              handle=None,
              backend=backend,
              optimize_target=optimize_target,
+             stages=stages,
              cluster_name=cluster_name,
              detach_run=detach_run)
 

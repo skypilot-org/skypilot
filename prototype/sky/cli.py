@@ -214,9 +214,6 @@ def _create_and_ssh_into_node(
         task.set_resources(resources)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
-    dag = sky.optimize(dag)
-    task = dag.tasks[0]
-    backend.register_info(dag=dag)
 
     # FIXME(gautam): typing the following seq of cmds:
     #   sky gpunode -t p3.2xlarge --gpus=V100 --cloud aws
@@ -224,6 +221,9 @@ def _create_and_ssh_into_node(
     # makes the second cmd log into the first VM.  It should error out.
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None or handle.head_ip is None:
+        dag = sky.optimize(dag)
+        task = dag.tasks[0]
+        backend.register_info(dag=dag)
         # head_ip would be None if previous provisioning failed.
         handle = backend.provision(task,
                                    task.best_resources,
@@ -323,6 +323,10 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
             click.secho(f'Detected Bash Command: \'{entrypoint}\'', fg='blue')
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
+
+    # if cluster is not None:
+    #     handle = global_user_state.get_handle_from_cluster_name(cluster)
+    #     if handle is not None:
 
     click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
     sky.launch(dag,
