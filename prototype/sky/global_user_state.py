@@ -112,6 +112,7 @@ def remove_cluster(cluster_name: str, terminate: bool):
 
 def get_handle_from_cluster_name(cluster_name: str
                                 ) -> Optional[backends.Backend.ResourceHandle]:
+    assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _CURSOR.execute('SELECT handle FROM clusters WHERE name=(?)',
                            (cluster_name,))
     for (handle,) in rows:
