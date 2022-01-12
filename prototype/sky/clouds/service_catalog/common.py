@@ -157,12 +157,11 @@ def list_accelerators_impl(
     return {k: make_list_from_df(v) for k, v in grouped}
 
 
-def get_region_zones_for_instance_type(df: pd.DataFrame, instance_type: str,
-                                       use_spot: bool
-                                      ) -> List[cloud_lib.Region]:
-    """Returns a list of regions for a given instance type."""
+def get_region_zones(df: pd.DataFrame,
+                     use_spot: bool) -> List[cloud_lib.Region]:
+    """Returns a list of regions/zones from a dataframe."""
     price_str = 'SpotPrice' if use_spot else 'Price'
-    df = df[df['InstanceType'] == instance_type].sort_values(price_str)
+    df = df.dropna(subset=[price_str]).sort_values(price_str)
     regions = [cloud_lib.Region(region) for region in df['Region'].unique()]
     if 'AvailabilityZone' in df.columns:
         zones_in_region = df.groupby('Region')['AvailabilityZone'].apply(
