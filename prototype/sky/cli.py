@@ -1188,6 +1188,10 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
     resources = sky.Resources(cloud=sky.GCP(),
                               instance_type=instance_type,
                               accelerators=tpus,
+                              accelerator_args={
+                                'tf_version': '2.5.0',
+                                'tpu_name': 'sky_tpu',
+                              },
                               use_spot=spot)
 
     _create_and_ssh_into_node(
