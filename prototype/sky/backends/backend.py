@@ -10,12 +10,12 @@ Path = str
 PostSetupFn = Callable[[str], Any]
 
 
-class Backend(object):
+class Backend:
     """Backend interface: handles provisioning, setup, and scheduling."""
 
     # Backend-specific handle to the launched resources (e.g., a cluster).
     # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
-    class ResourceHandle(object):
+    class ResourceHandle:
         pass
 
     def provision(self,

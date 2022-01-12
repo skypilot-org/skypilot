@@ -130,10 +130,10 @@ def _ssh_options_list(ssh_private_key: Optional[str],
         # Control path: important optimization as we do multiple ssh in one
         # sky.launch().
         'ControlMaster': 'auto',
-        'ControlPath': '{}/%C'.format(ssh_control_path),
+        'ControlPath': f'{ssh_control_path}/%C',
         'ControlPersist': '30s',
         # ConnectTimeout.
-        'ConnectTimeout': '{}s'.format(timeout),
+        'ConnectTimeout': f'{timeout}s',
         # ForwardAgent (for git credentials).
         'ForwardAgent': 'yes',
     }
@@ -142,7 +142,7 @@ def _ssh_options_list(ssh_private_key: Optional[str],
         ssh_private_key,
     ] if ssh_private_key is not None else []
     return ssh_key_option + [
-        x for y in (['-o', '{}={}'.format(k, v)]
+        x for y in (['-o', f'{k}={v}']
                     for k, v in arg_dict.items()
                     if v is not None) for x in y
     ]
@@ -159,7 +159,7 @@ def _remove_cluster_from_ssh_config(cluster_ip: str,
     backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
 
 
-class RayCodeGen(object):
+class RayCodeGen:
     """Code generator of a Ray program that executes a sky.Task.
 
     Usage:
@@ -236,7 +236,7 @@ class RayCodeGen(object):
             self,
             ip_list: Optional[List[str]],
             accelerator_dict: Dict[str, int],
-    ) -> List[Dict[str, int]]:
+    ) -> None:
         """Create the gang scheduling placement group for a Task."""
         assert self._has_prologue, ('Call add_prologue() before '
                                     'add_gang_scheduling_placement_group().')
@@ -353,7 +353,16 @@ class RayCodeGen(object):
         assert not self._has_epilogue, 'add_epilogue() called twice?'
         self._has_epilogue = True
 
-        self._code.append('ray.get(futures)')
+        self._code += [
+            textwrap.dedent(f"""\
+            try:
+                ray.get(futures)
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
+            except ray.exceptions.WorkerCrashedError:
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
+                raise RuntimeError('Command failed, please check the logs.')
+            """)
+        ]
 
     def build(self) -> str:
         """Returns the entire generated program."""
@@ -982,7 +991,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'  Existing: {handle.launched_nodes}x '
                 f'{handle.launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
-                f'existing cluster first: `sky down {cluster_name}`.')
+                f'existing cluster first: sky down {cluster_name}')
 
     def _check_existing_cluster(self, task: Task, to_provision: Resources,
                                 cluster_name: str) -> Tuple[str, Resources]:
@@ -1188,6 +1197,7 @@ class CloudVmRayBackend(backends.Backend):
             detach_run: bool = False,
     ) -> None:
         """Executes generated code on the head node."""
+        del stream_logs  # unused
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
             fp.flush()
@@ -1212,16 +1222,22 @@ class CloudVmRayBackend(backends.Backend):
             f'--address=127.0.0.1:8265 --job-id {job_id} -- '
             f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
-        self._run_command_on_head_via_ssh(handle, f'{cd} && {job_submit_cmd}',
-                                          job_log_path, stream_logs)
+        self._run_command_on_head_via_ssh(handle,
+                                          f'{cd} && {job_submit_cmd}',
+                                          job_log_path,
+                                          stream_logs=False,
+                                          check=True)
+
+        colorama.init()
+        style = colorama.Style
+        fore = colorama.Fore
+        logger.info('Job submitted with Job ID: '
+                    f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
 
         try:
             if not detach_run:
                 backend_utils.run(f'sky logs -c {handle.cluster_name} {job_id}')
         finally:
-            colorama.init()
-            style = colorama.Style
-            fore = colorama.Fore
             name = handle.cluster_name
             logger.info('NOTE: ctrl-c does not stop the job.\n'
                         f'\n{fore.CYAN}Job ID: '
@@ -1233,7 +1249,7 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky logs -c {name} {job_id}'
                         f'{backend_utils.RESET_BOLD}'
                         '\nTo view the job queue:\t'
-                        f'{backend_utils.BOLD}sky queue -c {name}'
+                        f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
     def _add_job(self, handle: ResourceHandle) -> int:
@@ -1248,7 +1264,7 @@ class CloudVmRayBackend(backends.Backend):
                               r'(\d+)', job_id_str)
         job_id = int(re_match[0])
 
-        logger.info(f'Job_id: {job_id}')
+        logger.info(f'Reserved Job ID: {job_id}')
         job_id = int(job_id)
         return job_id
 
@@ -1384,11 +1400,11 @@ class CloudVmRayBackend(backends.Backend):
                         '\nTo submit a job:'
                         f'\t\t{backend_utils.BOLD}sky exec -c {name} yaml_file'
                         f'{backend_utils.RESET_BOLD}'
-                        '\nTo teardown the cluster:'
-                        f'\t{backend_utils.BOLD}sky down {name}'
-                        f'{backend_utils.RESET_BOLD}'
                         '\nTo stop the cluster:'
                         f'\t{backend_utils.BOLD}sky stop {name}'
+                        f'{backend_utils.RESET_BOLD}'
+                        '\nTo teardown the cluster:'
+                        f'\t{backend_utils.BOLD}sky down {name}'
                         f'{backend_utils.RESET_BOLD}')
             if handle.tpu_delete_script is not None:
                 logger.info('Tip: `sky down` will delete launched TPU(s) too.')
@@ -1517,12 +1533,17 @@ class CloudVmRayBackend(backends.Backend):
                 local = remote = port
                 logger.info(
                     f'Forwarding port {local} to port {remote} on localhost.')
-                ssh += ['-L', '{}:localhost:{}'.format(remote, local)]
+                ssh += ['-L', f'{remote}:localhost:{local}']
         return ssh + _ssh_options_list(
             ssh_private_key,
             self._ssh_control_path(handle)) + [f'{ssh_user}@{handle.head_ip}']
 
-    def _run_command_on_head_via_ssh(self, handle, cmd, log_path, stream_logs):
+    def _run_command_on_head_via_ssh(self,
+                                     handle: ResourceHandle,
+                                     cmd: str,
+                                     log_path: str,
+                                     stream_logs: bool,
+                                     check=False):
         """Uses 'ssh' to run 'cmd' on a cluster's head node."""
         base_ssh_command = self.ssh_head_command(handle)
         command = base_ssh_command + [
@@ -1533,7 +1554,10 @@ class CloudVmRayBackend(backends.Backend):
             shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
         ]
-        return backend_utils.run_with_log(command, log_path, stream_logs)
+        return backend_utils.run_with_log(command,
+                                          log_path,
+                                          stream_logs,
+                                          check=check)
 
     def run_on_head(self,
                     handle: ResourceHandle,

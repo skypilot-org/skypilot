@@ -31,7 +31,7 @@ import functools
 import getpass
 import os
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import yaml
 
 import click
@@ -218,6 +218,10 @@ def _create_and_ssh_into_node(
     task = dag.tasks[0]
     backend.register_info(dag=dag)
 
+    # FIXME(gautam): typing the following seq of cmds:
+    #   sky gpunode -t p3.2xlarge --gpus=V100 --cloud aws
+    #   sky gpunode -t n1-standard-8 --gpus=V100 --cloud gcp
+    # makes the second cmd log into the first VM.  It should error out.
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None or handle.head_ip is None:
         # head_ip would be None if previous provisioning failed.
@@ -247,10 +251,10 @@ def _create_and_ssh_into_node(
     else:
         option = f' -c {cluster_name}'
     click.secho(f'sky {node_type}{option}', bold=True)
-    click.echo('To tear down the node:\t', nl=False)
-    click.secho(f'sky down {cluster_name}', bold=True)
     click.echo('To stop the node:\t', nl=False)
     click.secho(f'sky stop {cluster_name}', bold=True)
+    click.echo('To tear down the node:\t', nl=False)
+    click.secho(f'sky down {cluster_name}', bold=True)
 
 
 def _check_yaml(entrypoint: str) -> bool:
@@ -478,9 +482,9 @@ def status(all: bool):  # pylint: disable=redefined-builtin
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
-@click.argument('cluster', required=False)
-def queue(cluster: Optional[str], skip_finished: bool, all_users: bool):
-    """Show the job queue for a cluster."""
+@click.argument('clusters', required=False, type=str, nargs=-1)
+def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
+    """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     all_jobs = not skip_finished
     backend = backends.CloudVmRayBackend()
@@ -492,22 +496,34 @@ def queue(cluster: Optional[str], skip_finished: bool, all_users: bool):
     codegen.show_jobs(username, all_jobs)
     code = codegen.build()
 
-    if cluster is not None:
-        handle = global_user_state.get_handle_from_cluster_name(cluster)
-        if handle is None:
-            raise click.BadParameter(
-                f'Cluster {cluster} is not found (see `sky status`).')
+    if clusters:
+        handles = [
+            global_user_state.get_handle_from_cluster_name(c) for c in clusters
+        ]
+    else:
+        cluster_infos = global_user_state.get_clusters()
+        clusters = [c['name'] for c in cluster_infos]
+        handles = [c['handle'] for c in cluster_infos]
 
-        job_table = backend.run_on_head(handle, code)
-        click.echo(f'Sky Job Queue of Cluster {cluster}\n{job_table}')
+    for cluster, handle in zip(clusters, handles):
+        _show_job_queue_on_cluster(cluster, handle, backend, code)
+
+
+def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
+                               backend: backend_lib.Backend, code: str):
+    if handle is None:
+        print(f'Cluster {cluster} was not found. Skipping.')
         return
 
-    clusters_status = global_user_state.get_clusters()
-    for cluster_status in clusters_status:
-        handle = cluster_status['handle']
-        job_table = backend.run_on_head(handle, code)
+    click.echo(f'\nSky Job Queue of Cluster {cluster}')
+    if handle.head_ip is None:
         click.echo(
-            f'Sky Job Queue of Cluster {handle.cluster_name}\n{job_table}')
+            f'Cluster {cluster} has been stopped or not properly set up. '
+            'Please re-launch it with `sky launch` to view the job queue.')
+        return
+
+    job_table = backend.run_on_head(handle, code)
+    click.echo(f'{job_table}')
 
 
 @cli.command()
@@ -518,7 +534,7 @@ def queue(cluster: Optional[str], skip_finished: bool, all_users: bool):
               help='Name of the existing cluster to find the job.')
 @click.argument('job_id', required=True, type=str)
 def logs(cluster: str, job_id: str):
-    """Tailing the log of a job."""
+    """Tail the log of a job."""
     # TODO: Add an option for downloading logs.
     cluster_name = cluster
     backend = backends.CloudVmRayBackend()
@@ -549,7 +565,7 @@ def logs(cluster: str, job_id: str):
               help='Cancel all jobs.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
-    """Cancel the jobs on a cluster."""
+    """Cancel job(s)."""
     if len(jobs) == 0 and not all:
         raise click.UsageError(
             'sky cancel requires either a job id '
@@ -565,7 +581,8 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
                     fg='yellow')
         jobs = None
     else:
-        click.secho(f'Cancelling jobs {jobs} on cluster {cluster} ...',
+        jobs_str = ', '.join(map(str, jobs))
+        click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster} ...',
                     fg='yellow')
 
     codegen = backend_utils.JobLibCodeGen()
@@ -575,41 +592,6 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     # FIXME: Assumes a specific backend.
     backend = backends.CloudVmRayBackend()
     backend.run_on_head(handle, code, stream_logs=False)
-
-
-@cli.command()
-@click.argument('clusters', nargs=-1, required=False)
-@click.option('--all',
-              '-a',
-              default=None,
-              is_flag=True,
-              help='Tear down all existing clusters.')
-def down(
-        clusters: Tuple[str],
-        all: Optional[bool],  # pylint: disable=redefined-builtin
-):
-    """Tear down cluster(s).
-
-    CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
-    are supplied, the latter takes precedence.
-
-    Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
-
-    Examples:
-
-      \b
-      # Tear down a specific cluster.
-      sky down cluster_name
-
-      \b
-      # Tear down multiple clusters.
-      sky down cluster1 cluster2
-
-      \b
-      # Tear down all existing clusters.
-      sky down -a
-    """
-    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
 
 
 @cli.command()
@@ -731,7 +713,7 @@ def start(clusters: Tuple[str]):
         name = record['name']
         handle = record['handle']
         with sky.Dag():
-            dummy_task = sky.Task().set_resources(handle.requested_resources)
+            dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
         click.secho(f'Starting cluster {name}...', bold=True)
         backend.provision(dummy_task,
@@ -740,6 +722,41 @@ def start(clusters: Tuple[str]):
                           stream_logs=True,
                           cluster_name=name)
         click.secho(f'Cluster {name} started.', fg='green')
+
+
+@cli.command()
+@click.argument('clusters', nargs=-1, required=False)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Tear down all existing clusters.')
+def down(
+        clusters: Tuple[str],
+        all: Optional[bool],  # pylint: disable=redefined-builtin
+):
+    """Tear down cluster(s).
+
+    CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
+    are supplied, the latter takes precedence.
+
+    Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
+
+    Examples:
+
+      \b
+      # Tear down a specific cluster.
+      sky down cluster_name
+
+      \b
+      # Tear down multiple clusters.
+      sky down cluster1 cluster2
+
+      \b
+      # Tear down all existing clusters.
+      sky down -a
+    """
+    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
 
 
 def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
@@ -835,10 +852,12 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
             f'Cloud \'{cloud}\' is not supported. ' + \
             f'Supported clouds: {list(task_lib.CLOUD_REGISTRY.keys())}'
         )
-    if gpus is None:
-        gpus = {'K80': 1}
-    else:
+    if gpus is not None:
         gpus = _parse_accelerator_options(gpus)
+    elif instance_type is None:
+        # Use this request if both gpus and instance_type are not specified.
+        gpus = {'K80': 1}
+
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
                               accelerators=gpus,

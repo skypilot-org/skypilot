@@ -3,7 +3,7 @@ import networkx as nx
 import pprint
 
 
-class DagContext(object):
+class DagContext:
     """A global stack of Dags.
 
     Currently, we only use one sky.Dag.
@@ -31,7 +31,7 @@ class DagContext(object):
         return cls._current_dag
 
 
-class Dag(object):
+class Dag:
     """Dag: a user application, represented as a DAG of Tasks."""
 
     _PREVIOUS_DAGS = []
@@ -66,7 +66,7 @@ class Dag(object):
 
     def __repr__(self):
         pformat = pprint.pformat(self.tasks)
-        return 'DAG:\n{}'.format(pformat)
+        return f'DAG:\n{pformat}'
 
     def get_graph(self):
         return self.graph
