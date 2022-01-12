@@ -1,4 +1,3 @@
-# Ray patch file from https://github.com/ray-project/ray/pull/20816
 import argparse
 import errno
 import glob
