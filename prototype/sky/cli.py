@@ -312,9 +312,11 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
             # Treat entrypoint as a yaml.
+            click.secho(f'Detected YAML file: {entrypoint}', fg='blue')
             sky.Task.from_yaml(entrypoint)
         else:
             # Treat entrypoint as a bash command.
+            click.secho(f'Detected Bash Command: \'{entrypoint}\'', fg='blue')
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
 
@@ -393,9 +395,11 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
             # Treat entrypoint as a yaml file
+            click.secho(f'Detected YAML file: {entrypoint}', fg='blue')
             sky.Task.from_yaml(entrypoint)
         else:
             # Treat entrypoint as a bash command.
+            click.secho(f'Detected Bash Command: \'{entrypoint}\'', fg='blue')
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
 
