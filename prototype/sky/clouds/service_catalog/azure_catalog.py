@@ -24,8 +24,7 @@ def get_hourly_cost(instance_type: str,
 
 def get_accelerators_from_instance_type(instance_type: str
                                        ) -> Optional[Dict[str, int]]:
-    df = _df[_df['InstanceType'] == instance_type]
-    return common.get_accelerators_from_instance_type_impl(df, instance_type)
+    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
 def get_instance_type_for_accelerator(acc_name: str,

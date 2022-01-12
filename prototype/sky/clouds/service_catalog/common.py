@@ -159,7 +159,7 @@ def list_accelerators_impl(
 
 def get_region_zones(df: pd.DataFrame,
                      use_spot: bool) -> List[cloud_lib.Region]:
-    """Returns a list of regions from a dataframe."""
+    """Returns a list of regions/zones from a dataframe."""
     price_str = 'SpotPrice' if use_spot else 'Price'
     df = df.dropna(subset=[price_str]).sort_values(price_str)
     regions = [cloud_lib.Region(region) for region in df['Region'].unique()]
