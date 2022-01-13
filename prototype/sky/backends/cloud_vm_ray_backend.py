@@ -28,7 +28,7 @@ from sky import optimizer
 from sky import resources as resources_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.backends.remote_libs import log_lib
+from sky.backends.remote_libs import job_lib, log_lib
 
 Dag = dag_lib.Dag
 OptimizeTarget = optimizer.OptimizeTarget
@@ -37,9 +37,10 @@ Task = task_lib.Task
 
 Path = str
 PostSetupFn = Callable[[str], Any]
-SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
-SKY_LOGS_DIRECTORY = backend_utils.SKY_LOGS_DIRECTORY
+SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
+SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
+SKY_REMOTE_LOGS_ROOT = job_lib.SKY_REMOTE_LOGS_ROOT
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
 SKY_REMOTE_LIB_PATH = backend_utils.SKY_REMOTE_LIB_PATH
 
@@ -1211,7 +1212,7 @@ class CloudVmRayBackend(backends.Backend):
                             with_outputs=False)
 
         job_log_path = os.path.join(self.log_dir, 'job_submit.log')
-        remote_log_dir = os.path.join(SKY_REMOTE_WORKDIR, self.log_dir)
+        remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, self.log_dir)
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         assert executable == 'python3', executable
@@ -1480,8 +1481,11 @@ class CloudVmRayBackend(backends.Backend):
 
     def _ssh_control_path(self, handle: ResourceHandle) -> str:
         """Returns a temporary path to be used as the ssh control path."""
-        path = '/tmp/sky_ssh/{}'.format(
-            hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10])
+        username = getpass.getuser()
+        path = (
+            f'/tmp/sky_ssh_{username}/'
+            f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'
+        )
         os.makedirs(path, exist_ok=True)
         return path
 
