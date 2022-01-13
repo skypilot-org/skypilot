@@ -114,6 +114,7 @@ rsync_filter:
 
 # List of shell commands to run to set up nodes.
 setup_commands:
+  # _gang_schedule_ray_up() requires this line; do not modify.
   - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
   - pip3 install pendulum PrettyTable && python3 -c "import os; import shutil; from ray._private import log_monitor; path = os.path.expanduser('{{sky_remote_libs_remote_path}}'); shutil.copyfile(path + '/ray_patches/log_monitor.py', log_monitor.__file__)" # patch the buggy ray file
 {%- if setup_sh_path is not none %}
