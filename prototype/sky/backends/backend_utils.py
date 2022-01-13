@@ -19,18 +19,17 @@ from sky import logging
 from sky import resources
 from sky import task as task_lib
 from sky.backends import remote_libs
-from sky.backends.remote_libs import job_lib, log_lib
+from sky.backends.remote_libs import log_lib
 
 logger = logging.init_logger(__name__)
 
 Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_WORKDIR = job_lib.SKY_REMOTE_WORKDIR
+SKY_REMOTE_WORKDIR = '~/sky_workdir'
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
-SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
-SKY_REMOTE_RAY_VERSION = '1.9.1'
+SKY_REMOTE_RAY_VERSION = '1.9.2'
 SKY_REMOTE_LIB_PATH = '~/.sky/remote_libs'
 
 BOLD = '\033[1m'
