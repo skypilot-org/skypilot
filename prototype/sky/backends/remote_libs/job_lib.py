@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import pendulum
 import prettytable
 
-SKY_REMOTE_WORKDIR = '~/sky_workdir'
 SKY_LOGS_DIRECTORY = 'sky_logs'
+SKY_REMOTE_LOGS_ROOT = '~'
 
 
 class JobStatus(enum.Enum):
@@ -204,7 +204,7 @@ def _show_job_queue(jobs) -> None:
             job['username'],
             _readable_time_duration(job['submitted_at']),
             job['status'].value,
-            os.path.join('sky_logs', job['run_timestamp']),
+            os.path.join(SKY_LOGS_DIRECTORY, job['run_timestamp']),
         ])
     print(job_table)
 
@@ -257,5 +257,5 @@ def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
         status = row[JobInfoLoc.STATUS.value]
         status = JobStatus[status]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-    return os.path.join(SKY_REMOTE_WORKDIR, SKY_LOGS_DIRECTORY,
+    return os.path.join(SKY_REMOTE_LOGS_ROOT, SKY_LOGS_DIRECTORY,
                         run_timestamp), status
