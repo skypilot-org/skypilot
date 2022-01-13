@@ -11,9 +11,7 @@ import time
 import tempfile
 from typing import Iterator, List, Optional
 
-# Need this to make `job_lib` visible to this file, when imported as a module
-sys.path.append(os.path.dirname(__file__))
-import job_lib  # pylint: disable=wrong-import-position
+from skylet import job_lib
 
 
 def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):

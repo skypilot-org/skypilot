@@ -18,8 +18,8 @@ from sky import clouds
 from sky import logging
 from sky import resources
 from sky import task as task_lib
-from sky.backends import remote_libs
-from sky.backends.remote_libs import log_lib
+import skylet
+from skylet import log_lib
 
 logger = logging.init_logger(__name__)
 
@@ -30,7 +30,9 @@ SKY_REMOTE_WORKDIR = '~/sky_workdir'
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.2'
-SKY_REMOTE_LIB_PATH = '~/.sky/remote_libs'
+SKYLET_REMOTE_PATH = '~/.sky/skylet'
+SKYLET_LOCAL_PATH = os.path.abspath(
+    os.path.dirname(os.path.dirname(skylet.__file__)))
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
@@ -405,9 +407,8 @@ def write_cluster_config(task: task_lib.Task,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Sky remote utils.
-                'sky_remote_libs_remote_path': SKY_REMOTE_LIB_PATH,
-                'sky_remote_libs_local_path': os.path.abspath(
-                    os.path.dirname(remote_libs.__file__)),
+                'skylet_remote_path': SKYLET_REMOTE_PATH,
+                'skylet_local_path': SKYLET_LOCAL_PATH,
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -602,14 +603,7 @@ class JobLibCodeGen(object):
     """
 
     def __init__(self) -> None:
-        self._code = [
-            'import sys',
-            'import os',
-            f'lib_path = os.path.expanduser({SKY_REMOTE_LIB_PATH!r})',
-            'sys.path.append(lib_path)',
-            'import job_lib',
-            'import log_lib',
-        ]
+        self._code = ['from skylet import job_lib, log_lib']
 
     def add_job(self, username: str, run_timestamp: str) -> None:
         self._code += [
