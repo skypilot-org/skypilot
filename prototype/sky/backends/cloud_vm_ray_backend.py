@@ -1261,7 +1261,7 @@ class CloudVmRayBackend(backends.Backend):
             stream_logs: bool,
             detach_run: bool,
     ) -> None:
-        del stream_logs # unused
+        del stream_logs  # unused
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self._check_task_resources_smaller_than_cluster(handle, task)
@@ -1288,7 +1288,8 @@ class CloudVmRayBackend(backends.Backend):
             f'Task(run=...) should be a string (found {type(task.run)}).'
         script = backend_utils.make_task_bash_script(task.run)
 
-        log_dir = os.path.join(f'{SKY_REMOTE_LOGS_ROOT}', f'{self.log_dir}', 'tasks')
+        log_dir = os.path.join(f'{SKY_REMOTE_LOGS_ROOT}', f'{self.log_dir}',
+                               'tasks')
         log_path = os.path.join(log_dir, 'run.log')
 
         accelerator_dict = _get_task_demands_dict(task)
