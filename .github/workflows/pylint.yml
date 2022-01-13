@@ -29,7 +29,6 @@ jobs:
         # https://github.com/edaniszewski/pylint-quotes
         pip install pylint-quotes
         pip install -e "prototype[all]"
-        pip install -e prototype/skylet 
     - name: Analysing the code with pylint
       run: |
         pylint --load-plugins pylint_quotes prototype/sky

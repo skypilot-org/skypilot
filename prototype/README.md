@@ -10,7 +10,6 @@
 # You can just install the dependencies for
 # certain clouds, e.g., ".[aws,azure,gcp]"
 pip install -e ".[all]"
-pip install -e skylet
 
 python examples/resnet_app.py
 

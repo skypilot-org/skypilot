@@ -19,6 +19,8 @@ install_requires = [
     'ray[default]',
     'tabulate',
     'docker',
+    # pip >= 19.1
+    f'skylet @ file://localhost/{os.path.join(ROOT_DIR, "skylet")}#egg=skylet',
 ]
 
 extras_require = {
