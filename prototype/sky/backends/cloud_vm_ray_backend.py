@@ -1482,10 +1482,8 @@ class CloudVmRayBackend(backends.Backend):
     def _ssh_control_path(self, handle: ResourceHandle) -> str:
         """Returns a temporary path to be used as the ssh control path."""
         username = getpass.getuser()
-        path = (
-            f'/tmp/sky_ssh_{username}/'
-            f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'
-        )
+        path = (f'/tmp/sky_ssh_{username}/'
+                f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}')
         os.makedirs(path, exist_ok=True)
         return path
 

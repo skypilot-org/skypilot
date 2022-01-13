@@ -19,7 +19,7 @@ from sky import logging
 from sky import resources
 from sky import task as task_lib
 from sky.backends import remote_libs
-from sky.backends.remote_libs import job_lib, log_lib
+from sky.backends.remote_libs import log_lib
 
 logger = logging.init_logger(__name__)
 
