@@ -120,7 +120,7 @@ class LocalDockerBackend(backends.Backend):
         logger.warning(
             'Post setup is currently not supported in LocalDockerBackend')
 
-    def execute(self, handle: ResourceHandle, task: Task, stream_logs: bool,
+    def execute(self, handle: ResourceHandle, task: Task,
                 detach_run: bool) -> None:
         """ Launches the container."""
 

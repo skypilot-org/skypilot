@@ -1258,10 +1258,8 @@ class CloudVmRayBackend(backends.Backend):
             self,
             handle: ResourceHandle,
             task: Task,
-            stream_logs: bool,
             detach_run: bool,
     ) -> None:
-        del stream_logs  # unused
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self._check_task_resources_smaller_than_cluster(handle, task)

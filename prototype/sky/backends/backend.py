@@ -44,7 +44,7 @@ class Backend:
                        task: Task) -> None:
         raise NotImplementedError
 
-    def execute(self, handle: ResourceHandle, task: Task, stream_logs: bool,
+    def execute(self, handle: ResourceHandle, task: Task,
                 detach_run: bool) -> None:
         raise NotImplementedError
 
