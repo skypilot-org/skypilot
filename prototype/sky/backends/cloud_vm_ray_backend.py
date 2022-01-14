@@ -28,7 +28,7 @@ from sky import optimizer
 from sky import resources as resources_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.backends.remote_libs import job_lib, log_lib
+from skylet import job_lib, log_lib
 
 Dag = dag_lib.Dag
 OptimizeTarget = optimizer.OptimizeTarget
@@ -42,7 +42,7 @@ SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 SKY_REMOTE_LOGS_ROOT = job_lib.SKY_REMOTE_LOGS_ROOT
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
-SKY_REMOTE_LIB_PATH = backend_utils.SKY_REMOTE_LIB_PATH
+SKYLET_REMOTE_PATH = backend_utils.SKYLET_REMOTE_PATH
 
 logger = logging.init_logger(__name__)
 
@@ -202,9 +202,7 @@ class RayCodeGen:
             import ray
             import ray.util as ray_util
 
-            lib_path = os.path.expanduser({SKY_REMOTE_LIB_PATH!r})
-            sys.path.append(lib_path)
-            import job_lib
+            from skylet import job_lib
 
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 

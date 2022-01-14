@@ -63,7 +63,7 @@ head_node_type: ray.head.default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-  "{{sky_remote_libs_remote_path}}": "{{sky_remote_libs_local_path}}",
+  "{{skylet_remote_path}}": "{{skylet_local_path}}",
 {%- if workdir is not none %}
   "~/sky_workdir": "{{workdir}}",
 {%- endif %}
@@ -95,7 +95,7 @@ setup_commands:
   # This AMI's system Python is version 2+.
   # _gang_schedule_ray_up() requires this line; do not modify.
   - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful
-  - pip3 install pendulum PrettyTable && python3 -c "import os; import shutil; from ray._private import log_monitor; path = os.path.expanduser('{{sky_remote_libs_remote_path}}'); shutil.copyfile(path + '/ray_patches/log_monitor.py', log_monitor.__file__)" # patch the buggy ray file
+  - pip3 install -e {{skylet_remote_path}} && python3 -c "import os; import shutil; from ray._private import log_monitor; path = os.path.expanduser('{{skylet_remote_path}}'); shutil.copyfile(path + '/ray_patches/log_monitor.py', log_monitor.__file__)" # patch the buggy ray file
 {%- if setup_sh_path is not none %}
   - cd ~/sky_workdir && bash /tmp/setup.sh  # FIXME: /tmp is volatile.
 {%- endif %}
