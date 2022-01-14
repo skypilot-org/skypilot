@@ -29,7 +29,6 @@ each other.
 """
 import functools
 import getpass
-import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 import yaml
