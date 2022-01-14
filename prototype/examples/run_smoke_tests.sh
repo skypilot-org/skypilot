@@ -13,9 +13,9 @@ python "$DIR"/example_app.py
 
 # Simple apps.
 time sky launch -c min "$DIR"/minimal.yaml
-sky down min &
+sky down -c min &
 time sky launch -c fm "$DIR"/using_file_mounts.yaml
-sky down fm &
+sky down -c fm &
 
 # Task(), 1 node.
 # 17:25.60 total
@@ -23,7 +23,7 @@ sky down fm &
 # 13.770 total
 # time sky exec -c resnet "$DIR"/resnet_app.yaml
 # time python "$DIR"/resnet_app.py
-# sky down resnet &
+# sky down -c resnet &
 # If concurrently running two runs of resnet, the second run will be
 # waiting for the first run.
 
@@ -48,12 +48,12 @@ sky down -c tpu &
 time sky launch -c mh "$DIR"/multi_hostname.yaml
 # real    0m50.811s
 time sky exec -c mh "$DIR"/multi_hostname.yaml
-sky down mh &
+sky down -c mh &
 
 # Task(), n nodes with setups.
 time python "$DIR"/resnet_distributed_tf_app.py
 time python "$DIR"/resnet_distributed_tf_app.py
-sky down dtf &
+sky down -c dtf &
 
 # Submitting multiple tasks to the same cluster.
 # 6:23.58 total
