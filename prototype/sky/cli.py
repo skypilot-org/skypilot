@@ -120,12 +120,6 @@ def _interactive_node_cli_command(cli_func):
                                type=str,
                                required=False,
                                help=_CLUSTER_FLAG_HELP)
-    sync_workdir_option = click.option(
-        '--sync',
-        '-s',
-        default=False,
-        is_flag=True,
-        help='If true, syncs the curent working directory.')
     port_forward_option = click.option(
         '--port-forward',
         '-p',
@@ -172,7 +166,6 @@ def _interactive_node_cli_command(cli_func):
     click_decorators = [
         cli.command(),
         cluster_arg,
-        sync_workdir_option,
         port_forward_option,
 
         # Resource options
@@ -233,7 +226,6 @@ def _create_and_ssh_into_node(
         resources: Resources to attach to VM.
         cluster_name: a cluster name to identify the interactive node.
         backend: the Backend to use (currently only CloudVmRayBackend).
-        sync_workdir: If true, syncs the curent working directory.
         port_forward: List of ports to forward.
         session_manager: Attach session manager: { 'screen', 'tmux' }.
         user_requested_resources: If true, user requested resources explicitly.
@@ -978,10 +970,10 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
 
 
 @_interactive_node_cli_command
-def gpunode(cluster: str, sync: Optional[bool],
-            port_forward: Optional[List[int]], cloud: Optional[str],
-            instance_type: Optional[str], gpus: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
+def gpunode(cluster: str, port_forward: Optional[List[int]],
+            cloud: Optional[str], instance_type: Optional[str],
+            gpus: Optional[str], spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool]):
     """Launch or attach to an interactive GPU node.
 
     Example:
@@ -1048,7 +1040,6 @@ def gpunode(cluster: str, sync: Optional[bool],
         'gpunode',
         resources,
         cluster_name=name,
-        sync_workdir=sync,
         port_forward=port_forward,
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
@@ -1056,10 +1047,9 @@ def gpunode(cluster: str, sync: Optional[bool],
 
 
 @_interactive_node_cli_command
-def cpunode(cluster: str, sync: Optional[bool],
-            port_forward: Optional[List[int]], cloud: Optional[str],
-            instance_type: Optional[str], spot: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool]):
+def cpunode(cluster: str, port_forward: Optional[List[int]],
+            cloud: Optional[str], instance_type: Optional[str],
+            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
     """Launch or attach to an interactive CPU node.
 
     Example:
@@ -1120,7 +1110,6 @@ def cpunode(cluster: str, sync: Optional[bool],
         'cpunode',
         resources,
         cluster_name=name,
-        sync_workdir=sync,
         port_forward=port_forward,
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
@@ -1128,10 +1117,9 @@ def cpunode(cluster: str, sync: Optional[bool],
 
 
 @_interactive_node_cli_command
-def tpunode(cluster: str, sync: Optional[bool],
-            port_forward: Optional[List[int]], instance_type: Optional[str],
-            tpus: Optional[str], spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool]):
+def tpunode(cluster: str, port_forward: Optional[List[int]],
+            instance_type: Optional[str], tpus: Optional[str],
+            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
     """Launch or attach to an interactive TPU node.
 
     Example:
@@ -1191,7 +1179,6 @@ def tpunode(cluster: str, sync: Optional[bool],
         'tpunode',
         resources,
         cluster_name=name,
-        sync_workdir=sync,
         port_forward=port_forward,
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
