@@ -628,11 +628,11 @@ def queue(skip_finished: bool, all_users: bool, cluster: Tuple[str]):
         username = None
     codegen.show_jobs(username, all_jobs)
     code = codegen.build()
+    clusters = cluster  # pylint: disable=redefined-outer-name
 
-    if cluster:
-        clusters = cluster  # pylint: disable=redefined-outer-name
+    if clusters:
         handles = [
-            global_user_state.get_handle_from_cluster_name(c) for c in cluster
+            global_user_state.get_handle_from_cluster_name(c) for c in clusters
         ]
     else:
         cluster_infos = global_user_state.get_clusters()
