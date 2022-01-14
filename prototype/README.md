@@ -5,7 +5,7 @@
 ## Setup
 
 ```bash
-# Sky requires python version >= 3.6 and pip >= 19.1
+# Sky requires python version >= 3.6
 
 # You can just install the dependencies for
 # certain clouds, e.g., ".[aws,azure,gcp]"
