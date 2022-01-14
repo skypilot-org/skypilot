@@ -32,4 +32,4 @@ jobs:
         pip install -e "prototype[all]"
     - name: Analysing the code with pylint
       run: |
-        pylint --load-plugins pylint_quotes prototype/sky
+        pylint --load-plugins pylint_quotes prototype/sky prototype/setup.py
