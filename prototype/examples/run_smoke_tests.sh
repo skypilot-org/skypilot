@@ -21,7 +21,7 @@ sky down fm &
 # 17:25.60 total
 # time sky launch -c resnet "$DIR"/resnet_app.yaml
 # 13.770 total
-# time sky exec "$DIR"/resnet_app.yaml resnet
+# time sky exec -c resnet "$DIR"/resnet_app.yaml
 # time python "$DIR"/resnet_app.py
 # sky down resnet &
 # If concurrently running two runs of resnet, the second run will be
@@ -31,23 +31,23 @@ sky down fm &
 # 6:47.90 total
 time sky launch -c huggingface "$DIR"/huggingface_glue_imdb_app.yaml
 # real    1m49.532s
-time sky exec "$DIR"/huggingface_glue_imdb_app.yaml huggingface
+time sky exec -c huggingface "$DIR"/huggingface_glue_imdb_app.yaml
 # time python "$DIR"/huggingface_glue_imdb_app.py
-sky down huggingface &
+sky down -c huggingface &
 
 # Task(), 1 node, TPU.
 # real    10m9.219s
 time sky launch -c tpu "$DIR"/tpu_app.yaml
 # real    3m26.997s
-# time sky exec "$DIR"/tpu_app.yaml tpu
+# time sky exec -c tpu "$DIR"/tpu_app.yaml
 # python "$DIR"/tpu_app.py
-sky down tpu &
+sky down -c tpu &
 
 # Task(), n nodes.
 # real    4m17.406s
 time sky launch -c mh "$DIR"/multi_hostname.yaml
 # real    0m50.811s
-time sky exec "$DIR"/multi_hostname.yaml mh
+time sky exec -c mh "$DIR"/multi_hostname.yaml
 sky down mh &
 
 # Task(), n nodes with setups.
