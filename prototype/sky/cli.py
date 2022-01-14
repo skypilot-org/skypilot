@@ -14,7 +14,7 @@ Example usage:
   >> sky status
 
   # Tear down a specific cluster.
-  >> sky down cluster_name
+  >> sky down -c cluster_name
 
   # Tear down all existing clusters.
   >> sky down -a

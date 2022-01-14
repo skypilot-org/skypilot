@@ -1472,10 +1472,10 @@ class CloudVmRayBackend(backends.Backend):
                         f'\t\t{backend_utils.BOLD}sky exec -c {name} yaml_file'
                         f'{backend_utils.RESET_BOLD}'
                         '\nTo stop the cluster:'
-                        f'\t{backend_utils.BOLD}sky stop {name}'
+                        f'\t{backend_utils.BOLD}sky stop -c {name}'
                         f'{backend_utils.RESET_BOLD}'
                         '\nTo teardown the cluster:'
-                        f'\t{backend_utils.BOLD}sky down {name}'
+                        f'\t{backend_utils.BOLD}sky down -c {name}'
                         f'{backend_utils.RESET_BOLD}')
             if handle.tpu_delete_script is not None:
                 logger.info('Tip: `sky down` will delete launched TPU(s) too.')
