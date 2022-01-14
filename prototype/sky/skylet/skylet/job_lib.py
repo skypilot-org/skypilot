@@ -128,6 +128,27 @@ def _get_jobs(username: Optional[str],
         })
     return records
 
+def _get_jobs_by_id(job_ids: List[int]):
+    rows = _CURSOR.execute(
+        f"""\
+        SELECT * FROM jobs
+        WHERE job_id IN ({','.join(['?'] * len(job_ids))})
+        ORDER BY job_id DESC""",
+        (*job_ids,),
+    )
+    records = []
+    for row in rows:
+        if row[0] is None:
+            break
+        records.append({
+            'job_id': row[JobInfoLoc.JOB_ID.value],
+            'username': row[JobInfoLoc.USERNAME.value],
+            'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
+            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
+            'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
+        })
+    return records
+
 
 def query_job_status(job_ids: List[int]) -> List[JobStatus]:
     """Return the status of the jobs based on the `ray job status` command.
@@ -225,7 +246,7 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
     _show_job_queue(jobs)
 
 
-def cancel_jobs(jobs: Optional[List[str]]) -> None:
+def cancel_jobs(jobs: Optional[List[int]]) -> None:
     """Cancel the jobs.
 
     Args:
@@ -233,7 +254,9 @@ def cancel_jobs(jobs: Optional[List[str]]) -> None:
     """
     if jobs is None:
         job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
-        jobs = [job['job_id'] for job in job_records]
+    else:
+        job_records = _get_jobs_by_id(jobs)
+    jobs = [job['job_id'] for job in job_records]
     cancel_cmd = [
         f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
     ]
