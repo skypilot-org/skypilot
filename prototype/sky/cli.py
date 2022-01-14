@@ -114,12 +114,12 @@ def _interactive_node_cli_command(cli_func):
     """Click command decorator for interactive node commands."""
     assert cli_func.__name__ in _INTERACTIVE_NODE_TYPES, cli_func.__name__
 
-    cluster_arg = click.option('--cluster',
-                               '-c',
-                               default=None,
-                               type=str,
-                               required=False,
-                               help=_CLUSTER_FLAG_HELP)
+    cluster_option = click.option('--cluster',
+                                  '-c',
+                                  default=None,
+                                  type=str,
+                                  required=False,
+                                  help=_CLUSTER_FLAG_HELP)
     port_forward_option = click.option(
         '--port-forward',
         '-p',
@@ -165,7 +165,7 @@ def _interactive_node_cli_command(cli_func):
 
     click_decorators = [
         cli.command(),
-        cluster_arg,
+        cluster_option,
         port_forward_option,
 
         # Resource options
@@ -990,7 +990,8 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
       $ sky gpunode
 
       \b
-      # Alternatively, create multiple interactive nodes by specifying names.
+      # Alternatively, create multiple interactive nodes by specifying names
+      # via --cluster (-c).
       $ sky gpunode -c node0
       $ sky gpunode -c node1
 
@@ -1066,7 +1067,8 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
       $ sky cpunode
 
       \b
-      # Alternatively, create multiple interactive nodes by specifying names.
+      # Alternatively, create multiple interactive nodes by specifying names
+      # via --cluster (-c).
       $ sky cpunode -c node0
       $ sky cpunode -c node1
 
@@ -1136,7 +1138,8 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
       $ sky tpunode
 
       \b
-      # Alternatively, create multiple interactive nodes by specifying names.
+      # Alternatively, create multiple interactive nodes by specifying names
+      # via --cluster (-c).
       $ sky tpunode -c node0
       $ sky tpunode -c node1
 
