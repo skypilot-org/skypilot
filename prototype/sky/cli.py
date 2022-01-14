@@ -247,8 +247,8 @@ def _create_and_ssh_into_node(
     default_resources_match = resources.is_same_resources(default_resources)
     launched_resources_match = handle.launched_resources.is_same_resources(
         task.best_resources)
-    if not node_type_match or not (default_resources_match or
-                                   launched_resources_match):
+    if not (node_type_match and
+            (default_resources_match or launched_resources_match)):
         raise click.UsageError(
             'Resources cannot change for an existing cluster. '
             f'Existing: {handle.launched_resources}, '
