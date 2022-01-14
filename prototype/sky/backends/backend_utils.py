@@ -18,7 +18,6 @@ from sky import clouds
 from sky import logging
 from sky import resources
 from sky import task as task_lib
-import skylet
 from skylet import log_lib
 
 logger = logging.init_logger(__name__)
@@ -32,7 +31,7 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.2'
 SKYLET_REMOTE_PATH = '~/.sky/skylet'
 SKYLET_LOCAL_PATH = os.path.abspath(
-    os.path.dirname(os.path.dirname(skylet.__file__)))
+    os.path.join(os.path.dirname(sky.__file__), 'skylet'))
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'

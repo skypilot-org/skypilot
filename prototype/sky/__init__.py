@@ -1,5 +1,10 @@
 """The Sky package."""
 import os
+import sys
+
+__root_dir__ = os.path.dirname(os.path.abspath(__file__))
+# Expose skylet.
+sys.path.append(os.path.join(__root_dir__, 'skylet'))
 
 # Keep this order to avoid cyclic imports
 from sky import backends
@@ -13,7 +18,6 @@ from sky.registry import fill_in_launchable_resources
 from sky.optimizer import Optimizer, OptimizeTarget
 from sky.data import Storage, StorageType
 
-__root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 # Aliases.
 AWS = clouds.AWS
