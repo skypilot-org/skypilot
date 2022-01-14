@@ -325,25 +325,12 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
 
-    stages = None
     if cluster is not None:
-        handle = global_user_state.get_handle_from_cluster_name(cluster)
-        if handle is not None:
-            stages = [
-                # Skip Stage.OPTIMIZE if cluster exists.
-                execution.Stage.PROVISION,  # Required to update setup, etc.
-                execution.Stage.SYNC_WORKDIR,
-                execution.Stage.SYNC_FILE_MOUNTS,
-                execution.Stage.PRE_EXEC,
-                execution.Stage.EXEC,
-                execution.Stage.TEARDOWN,
-            ]
         click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
 
     sky.launch(dag,
                dryrun=dryrun,
                stream_logs=True,
-               stages=stages,
                cluster_name=cluster,
                detach_run=detach_run)
 
