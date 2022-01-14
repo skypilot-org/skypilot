@@ -55,7 +55,7 @@ time python "$DIR"/resnet_distributed_tf_app.py
 time python "$DIR"/resnet_distributed_tf_app.py
 sky down dtf &
 
-# ParTask.
+# Submitting multiple tasks to the same cluster.
 # 6:23.58 total
 time python "$DIR"/multi_echo.py
 # python "$DIR"/huggingface_glue_imdb_grid_search_app.py
@@ -72,7 +72,7 @@ time sky launch -c mjq "$DIR"/job_queue/multinode.yaml
 time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml -d
 time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml -d
 time sky exec -c mjq -d "$DIR"/job_queue/multinode_job.yaml -d
-# The job id is automatically increment from 1.
+# The job id is automatically incremented from 1 (inclusive).
 sky cancel -c mjq 1
 sky logs -c mjq 2
 sky queue mjq
