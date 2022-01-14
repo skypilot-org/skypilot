@@ -90,6 +90,22 @@ def set_status(job_id: int, status: JobStatus) -> None:
     _CONN.commit()
 
 
+def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
+    records = []
+    for row in rows:
+        if row[0] is None:
+            break
+        # TODO: use namedtuple instead of dict
+        records.append({
+            'job_id': row[JobInfoLoc.JOB_ID.value],
+            'username': row[JobInfoLoc.USERNAME.value],
+            'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
+            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
+            'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
+        })
+    return records
+
+
 def _get_jobs(username: Optional[str],
               status_list: Optional[List[JobStatus]] = None
              ) -> List[Dict[str, Any]]:
@@ -114,21 +130,11 @@ def _get_jobs(username: Optional[str],
             (*status_str_list, username),
         )
 
-    records = []
-    for row in rows:
-        if row[0] is None:
-            break
-        # TODO: use namedtuple instead of dict
-        records.append({
-            'job_id': row[JobInfoLoc.JOB_ID.value],
-            'username': row[JobInfoLoc.USERNAME.value],
-            'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
-            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
-            'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
-        })
+    records = _get_records_from_rows(rows)
     return records
 
-def _get_jobs_by_id(job_ids: List[int]):
+
+def _get_jobs_by_id(job_ids: List[int]) -> List[Dict[str, Any]]:
     rows = _CURSOR.execute(
         f"""\
         SELECT * FROM jobs
@@ -136,17 +142,7 @@ def _get_jobs_by_id(job_ids: List[int]):
         ORDER BY job_id DESC""",
         (*job_ids,),
     )
-    records = []
-    for row in rows:
-        if row[0] is None:
-            break
-        records.append({
-            'job_id': row[JobInfoLoc.JOB_ID.value],
-            'username': row[JobInfoLoc.USERNAME.value],
-            'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
-            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
-            'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
-        })
+    records = _get_records_from_rows(rows)
     return records
 
 
