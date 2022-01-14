@@ -1,6 +1,7 @@
 **/.DS_Store
 **/*.log
 **/*.pyc
+**/.ipynb_checkpoints
 
 plotting/*.pdf
 plotting/*.png
