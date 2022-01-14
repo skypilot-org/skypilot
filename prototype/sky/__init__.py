@@ -18,7 +18,6 @@ from sky.registry import fill_in_launchable_resources
 from sky.optimizer import Optimizer, OptimizeTarget
 from sky.data import Storage, StorageType
 
-
 # Aliases.
 AWS = clouds.AWS
 Azure = clouds.Azure
