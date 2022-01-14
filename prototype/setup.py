@@ -1,3 +1,4 @@
+"""Setup file for Sky."""
 import os
 from setuptools import setup
 
