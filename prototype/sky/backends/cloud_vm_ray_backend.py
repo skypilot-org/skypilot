@@ -10,7 +10,7 @@ import shlex
 import subprocess
 import tempfile
 import textwrap
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
 
 import colorama
@@ -876,7 +876,7 @@ class RetryingVmProvisioner(object):
         if proc.returncode == 0:
             return
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
-        proc, stdout, stderr = backend_utils.run_with_log(
+        backend_utils.run_with_log(
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
             stream_logs=True)
