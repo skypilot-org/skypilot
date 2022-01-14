@@ -609,8 +609,23 @@ def status(all: bool):  # pylint: disable=redefined-builtin
               type=str,
               multiple=True,
               help=_CLUSTER_FLAG_MULTIPLE_HELP)
-def queue(skip_finished: bool, all_users: bool, cluster: Tuple[str]):
+@click.argument('named_clusters', required=False, type=str, nargs=-1)
+def queue(skip_finished: bool, all_users: bool, cluster: Tuple[str],
+          named_clusters: Tuple[str]):
     """Show the job queue for cluster(s)."""
+    clusters = ()
+    if cluster and named_clusters:
+        all_names = cluster + named_clusters
+        option_variant = ' '.join([f'-c {c}' for c in all_names])
+        arg_variant = ' '.join(all_names)
+        raise click.UsageError('Use one of the following commands: \n'
+                               f'sky queue {option_variant}\n'
+                               f'sky queue {arg_variant}')
+    elif cluster:
+        clusters = cluster  # pylint: disable=redefined-outer-name
+    elif named_clusters:
+        clusters = named_clusters  # pylint: disable=redefined-outer-name
+
     click.secho('Fetching and parsing job queue...', fg='yellow')
     all_jobs = not skip_finished
 
@@ -620,7 +635,6 @@ def queue(skip_finished: bool, all_users: bool, cluster: Tuple[str]):
         username = None
     codegen.show_jobs(username, all_jobs)
     code = codegen.build()
-    clusters = cluster  # pylint: disable=redefined-outer-name
 
     if clusters:
         handles = [
@@ -756,14 +770,16 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
+@click.argument('named_clusters', required=False, type=str, nargs=-1)
 def stop(
-        cluster: Tuple[str],
+        cluster: Optional[Tuple[str]],
         all: Optional[bool],  # pylint: disable=redefined-builtin
+        named_clusters: Optional[Tuple[str]],
 ):
     """Stop cluster(s).
 
-    --cluster is the name of the cluster to stop.  If both --cluster and --all are
-    supplied, the latter takes precedence.
+    --cluster is the name of the cluster to stop.  If both --cluster and --all
+    are supplied, the latter takes precedence.
 
     Limitation: this currently only works for AWS clusters.
 
@@ -781,7 +797,20 @@ def stop(
       # Stop all existing clusters.
       sky stop -a
     """
-    _terminate_or_stop_clusters(cluster, apply_to_all=all, terminate=False)
+    clusters = ()
+    if cluster and named_clusters:
+        all_names = cluster + named_clusters
+        option_variant = ' '.join([f'-c {c}' for c in all_names])
+        arg_variant = ' '.join(all_names)
+        raise click.UsageError('Use one of the following commands: \n'
+                               f'sky stop {option_variant}\n'
+                               f'sky stop {arg_variant}')
+    elif cluster:
+        clusters = cluster  # pylint: disable=redefined-outer-name
+    elif named_clusters:
+        clusters = named_clusters  # pylint: disable=redefined-outer-name
+
+    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=False)
 
 
 @cli.command()
@@ -790,9 +819,10 @@ def stop(
               default=None,
               multiple=True,
               type=str,
-              required=True,
+              required=False,
               help=_CLUSTER_FLAG_MULTIPLE_HELP)
-def start(cluster: Tuple[str]):
+@click.argument('named_clusters', required=False, type=str, nargs=-1)
+def start(cluster: Optional[Tuple[str]], named_clusters: Optional[Tuple[str]]):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status == STOPPED) or failed in
@@ -812,8 +842,21 @@ def start(cluster: Tuple[str]):
       # Restart multiple clusters.
       sky start -c cluster1 -c cluster2
     """
+    clusters = ()
+    if cluster and named_clusters:
+        all_names = cluster + named_clusters
+        option_variant = ' '.join([f'-c {c}' for c in all_names])
+        arg_variant = ' '.join(all_names)
+        raise click.UsageError('Use one of the following commands: \n'
+                               f'sky start {option_variant}\n'
+                               f'sky start {arg_variant}')
+    elif cluster:
+        clusters = cluster  # pylint: disable=redefined-outer-name
+    elif named_clusters:
+        clusters = named_clusters  # pylint: disable=redefined-outer-name
+
     to_start = []
-    if cluster:
+    if clusters:
 
         def _filter(name, all_clusters):
             for cluster_record in all_clusters:
@@ -822,7 +865,7 @@ def start(cluster: Tuple[str]):
             return None
 
         all_clusters = global_user_state.get_clusters()
-        for name in cluster:
+        for name in clusters:
             record = _filter(name, all_clusters)
             if record is None:
                 print(f'Cluster {name} was not found.')
@@ -898,14 +941,16 @@ def start(cluster: Tuple[str]):
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
+@click.argument('named_clusters', required=False, type=str, nargs=-1)
 def down(
-        cluster: Tuple[str],
+        cluster: Optional[Tuple[str]],
         all: Optional[bool],  # pylint: disable=redefined-builtin
+        named_clusters: Optional[Tuple[str]],
 ):
     """Tear down cluster(s).
 
-    --cluster is the name of the cluster to tear down.  If both --cluster and --all
-    are supplied, the latter takes precedence.
+    --cluster is the name of the cluster to tear down.  If both --cluster and
+    --all are supplied, the latter takes precedence.
 
     Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
 
@@ -923,7 +968,20 @@ def down(
       # Tear down all existing clusters.
       sky down -a
     """
-    _terminate_or_stop_clusters(cluster, apply_to_all=all, terminate=True)
+    clusters = ()
+    if cluster and named_clusters:
+        all_names = cluster + named_clusters
+        option_variant = ' '.join([f'-c {c}' for c in all_names])
+        arg_variant = ' '.join(all_names)
+        raise click.UsageError('Use one of the following commands: \n'
+                               f'sky down {option_variant}\n'
+                               f'sky down {arg_variant}')
+    elif cluster:
+        clusters = cluster  # pylint: disable=redefined-outer-name
+    elif named_clusters:
+        clusters = named_clusters  # pylint: disable=redefined-outer-name
+
+    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
 
 
 def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
