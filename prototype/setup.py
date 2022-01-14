@@ -33,6 +33,7 @@ setup(
     name='sky',
     version='0.1.dev0',
     packages=['sky'],
+    setup_requires=["wheel"],
     install_requires=install_requires,
     extras_require=extras_require,
     entry_points={
