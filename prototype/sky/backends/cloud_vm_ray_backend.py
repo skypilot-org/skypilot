@@ -1,5 +1,7 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
+import click
+import contextlib
 import getpass
 import hashlib
 import inspect
@@ -942,8 +944,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
     def __init__(self):
-        run_timestamp = backend_utils.get_run_timestamp()
-        self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
+        self.run_timestamp = backend_utils.get_run_timestamp()
+        self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, self.run_timestamp)
         # Do not make directories to avoid create folder for commands that
         # do not need it (`sky status`, `sky logs` ...)
         # os.makedirs(self.log_dir, exist_ok=True)
@@ -1151,27 +1153,52 @@ class CloudVmRayBackend(backends.Backend):
                                                         task.container_name,
                                                         ssh_user=ssh_user)
 
-    def _rsync_down_logs(self,
-                         handle: ResourceHandle,
-                         log_dir: str,
-                         ips: List[str] = None):
-        local_log_dir = os.path.join(f'{self.log_dir}', 'tasks')
+    def sync_down_logs(self, handle: ResourceHandle, job_id: str) -> None:
+        codegen = backend_utils.JobLibCodeGen()
+        codegen.get_log_path(job_id, self.run_timestamp)
+        code = codegen.build()
+        encoded_log_dir = self.run_on_head(handle, code, stream_logs=False)
+        log_dir = log_lib.decode_skylet_output(encoded_log_dir,
+                                               self.run_timestamp)
+        local_log_dir = log_dir
+        remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, log_dir)
+
         style = colorama.Style
-        logger.info('Syncing down logs to '
-                    f'{style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
+        logger.info(f'{style.BRIGHT}\t{local_log_dir}{style.RESET_ALL}')
+
         os.makedirs(local_log_dir, exist_ok=True)
-        # Call the ray sdk to rsync the logs back to local.
-        # FIXME: can we make rsync not verbose here (-v)?
-        for ip in ips:
+        ips = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+
+        def rsync_down(ip: str, log_pattern: str) -> None:
+            local_log_pattern = log_pattern.rstrip('*')
             sdk.rsync(
                 handle.cluster_yaml,
-                source=f'{log_dir}/*',
-                target=f'{local_log_dir}',
+                source=f'{remote_log_dir}/{log_pattern}',
+                target=f'{local_log_dir}/{local_log_pattern}',
                 down=True,
                 ip_address=ip,
                 use_internal_ip=False,
                 should_bootstrap=False,
             )
+
+        local_tasks_dir = os.path.join(local_log_dir, 'tasks')
+        os.makedirs(local_tasks_dir, exist_ok=True)
+        # Call the ray sdk to rsync the logs back to local.
+        # FIXME: can we make rsync not verbose here (-v)?
+        for i, ip in enumerate(ips):
+            try:
+                # Disable the output of rsync.
+                with open(os.devnull, 'w') as f, contextlib.redirect_stderr(
+                        f), contextlib.redirect_stdout(f):
+                    rsync_down(ip, '*')
+                logger.info(f'Downloaded logs from node-{i} ({ip})')
+            except click.exceptions.ClickException as e:
+                # Remote log dir may not exist, since the job can be run on
+                # some part of the nodes.
+                if 'SSH command failed' in str(e):
+                    logger.debug(f'{ip} does not have the tasks/*.')
+                else:
+                    raise e
 
     def _exec_code_on_head(
             self,
@@ -1237,16 +1264,13 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.RESET_BOLD}')
 
     def _add_job(self, handle: ResourceHandle) -> int:
-        run_timestamp = os.path.basename(self.log_dir)
         codegen = backend_utils.JobLibCodeGen()
         username = getpass.getuser()
-        codegen.add_job(username, run_timestamp)
+        codegen.add_job(username, self.run_timestamp)
         code = codegen.build()
-        job_id_str = self.run_on_head(handle, code, stream_logs=False)
-        # To avoid the job_id_str being corrupted by the input from keyboard.
-        re_match = re.findall(f'__sky__job__id__{run_timestamp}: '
-                              r'(\d+)', job_id_str)
-        job_id = int(re_match[0])
+        encoded_job_id = self.run_on_head(handle, code, stream_logs=True)
+        job_id = int(
+            log_lib.decode_skylet_output(encoded_job_id, self.run_timestamp))
 
         logger.info(f'Reserved Job ID: {job_id}')
         job_id = int(job_id)
@@ -1538,6 +1562,8 @@ class CloudVmRayBackend(backends.Backend):
                                           stream_logs,
                                           check=check)
 
+    # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
+    # can support its own command runner.
     def run_on_head(self,
                     handle: ResourceHandle,
                     cmd: str,

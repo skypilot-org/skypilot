@@ -257,5 +257,4 @@ def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
         status = row[JobInfoLoc.STATUS.value]
         status = JobStatus[status]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-    return os.path.join(SKY_REMOTE_LOGS_ROOT, SKY_LOGS_DIRECTORY,
-                        run_timestamp), status
+    return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp), status
