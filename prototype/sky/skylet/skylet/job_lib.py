@@ -216,7 +216,7 @@ def _readable_time_duration(start: int) -> str:
 
 def _show_job_queue(jobs) -> None:
     job_table = prettytable.PrettyTable()
-    job_table.field_names = ['JOB', 'DESC', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
+    job_table.field_names = ['ID', 'DESC', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
     job_table.align['LOG'] = 'l'
 
     for job in jobs:
