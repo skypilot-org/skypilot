@@ -597,7 +597,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
     # FIXME: Assumes a specific backend.
     backend = backends.CloudVmRayBackend()
-    backend.run_on_head(handle, code, stream_logs=False)
+    backend.run_on_head(handle, code, stream_logs=False, check=True)
 
 
 @cli.command()

@@ -1607,6 +1607,7 @@ class CloudVmRayBackend(backends.Backend):
             cmd: str,
             stream_logs: bool = False,
             use_cached_head_ip: bool = True,
+            check: bool = False,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Runs 'cmd' on the cluster's head node."""
         return self._run_command_on_head_via_ssh(
@@ -1614,4 +1615,5 @@ class CloudVmRayBackend(backends.Backend):
             cmd,
             '/dev/null',
             stream_logs=stream_logs,
-            use_cached_head_ip=use_cached_head_ip)
+            use_cached_head_ip=use_cached_head_ip,
+            check=check)
