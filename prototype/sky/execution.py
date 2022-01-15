@@ -78,7 +78,13 @@ def _execute(dag: sky.Dag,
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]
 
-    if stages is None or Stage.OPTIMIZE in stages:
+    cluster_exists = False
+    if cluster_name is not None:
+        existing_handle = global_user_state.get_handle_from_cluster_name(
+            cluster_name)
+        cluster_exists = existing_handle is not None
+
+    if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
         if task.best_resources is None:
             logger.info(f'Optimizer target is set to {optimize_target.name}.')
             # TODO: fix this for the situation where number of requested
