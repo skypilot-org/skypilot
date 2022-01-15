@@ -1321,7 +1321,6 @@ class CloudVmRayBackend(backends.Backend):
         job_id = int(
             log_lib.decode_skylet_output(encoded_job_id, self.run_timestamp))
 
-        logger.info(f'Reserved Job ID: {job_id}')
         job_id = int(job_id)
         return job_id
 
