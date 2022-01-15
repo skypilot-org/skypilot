@@ -539,7 +539,7 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
               type=str,
               help='Name of the existing cluster to find the job.')
 @click.option(
-    '--sync_down',
+    '--sync-down',
     '-s',
     is_flag=True,
     default=False,
