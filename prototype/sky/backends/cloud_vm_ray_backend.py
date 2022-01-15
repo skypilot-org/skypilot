@@ -1541,9 +1541,11 @@ class CloudVmRayBackend(backends.Backend):
     def run_on_head(self,
                     handle: ResourceHandle,
                     cmd: str,
-                    stream_logs: bool = False) -> str:
+                    stream_logs: bool = False,
+                    check: bool = False) -> str:
         """Runs 'cmd' on the cluster's head node."""
         return self._run_command_on_head_via_ssh(handle,
                                                  cmd,
                                                  '/dev/null',
-                                                 stream_logs=stream_logs)[1]
+                                                 stream_logs=stream_logs,
+                                                 check=check)[1]

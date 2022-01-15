@@ -134,7 +134,7 @@ def _get_jobs(username: Optional[str],
     return records
 
 
-def _get_jobs_by_id(job_ids: List[int]) -> List[Dict[str, Any]]:
+def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     rows = _CURSOR.execute(
         f"""\
         SELECT * FROM jobs
@@ -251,13 +251,13 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
     if jobs is None:
         job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
     else:
-        job_records = _get_jobs_by_id(jobs)
+        job_records = _get_jobs_by_ids(jobs)
     jobs = [job['job_id'] for job in job_records]
     cancel_cmd = [
         f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
     ]
     cancel_cmd = ';'.join(cancel_cmd)
-    subprocess.run(cancel_cmd, shell=True, check=True, executable='/bin/bash')
+    subprocess.run(cancel_cmd, shell=True, check=False, executable='/bin/bash')
     for job in job_records:
         if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
             set_status(job['job_id'], JobStatus.CANCELLED)
