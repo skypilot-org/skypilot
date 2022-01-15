@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 import tempfile
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional, Tuple, Union
 
 from skylet import job_lib
 
@@ -62,13 +62,15 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
     return stdout, stderr
 
 
-def run_with_log(cmd: List[str],
-                 log_path: str,
-                 stream_logs: bool = False,
-                 start_streaming_at: str = '',
-                 return_none: bool = False,
-                 check: bool = False,
-                 **kwargs):
+def run_with_log(
+        cmd: List[str],
+        log_path: str,
+        stream_logs: bool = False,
+        start_streaming_at: str = '',
+        return_none: bool = False,
+        check: bool = False,
+        **kwargs,
+) -> Union[None, Tuple[subprocess.Popen, str, str]]:
     """Runs a command and logs its output to a file.
 
     Retruns the process, stdout and stderr of the command.
