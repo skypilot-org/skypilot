@@ -1213,7 +1213,7 @@ class CloudVmRayBackend(backends.Backend):
         remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, log_dir)
 
         style = colorama.Style
-        logger.info(f'{style.BRIGHT}\t{local_log_dir}{style.RESET_ALL}')
+        print(f'Logs Directory: {style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
 
         os.makedirs(local_log_dir, exist_ok=True)
         ips = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
