@@ -1233,7 +1233,6 @@ class CloudVmRayBackend(backends.Backend):
         local_tasks_dir = os.path.join(local_log_dir, 'tasks')
         os.makedirs(local_tasks_dir, exist_ok=True)
         # Call the ray sdk to rsync the logs back to local.
-        # FIXME: can we make rsync not verbose here (-v)?
         for i, ip in enumerate(ips):
             try:
                 # Disable the output of rsync.
