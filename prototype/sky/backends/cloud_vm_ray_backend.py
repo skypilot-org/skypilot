@@ -1553,7 +1553,7 @@ class CloudVmRayBackend(backends.Backend):
             if handle.head_ip is None:
                 # This happens for INIT clusters (e.g., exit 1 in setup).
                 raise ValueError(
-                    'Cluster\'s head_ip not found. To fix: '
+                    'Cluster\'s head IP not found; is it up? To fix: '
                     'run a successful launch first (`sky launch`) to ensure'
                     ' the cluster status is UP (`sky status`).')
             head_ip = handle.head_ip
