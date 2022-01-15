@@ -605,6 +605,8 @@ class JobLibCodeGen(object):
         self._code = ['from skylet import job_lib, log_lib']
 
     def add_job(self, job_name, username: str, run_timestamp: str) -> None:
+        if job_name is None:
+            job_name = '-'
         self._code += [
             'job_id = job_lib.add_job('
             f'{job_name!r}, {username!r}, {run_timestamp!r})',
