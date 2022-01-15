@@ -1231,7 +1231,7 @@ class CloudVmRayBackend(backends.Backend):
                 use_internal_ip=False,
                 should_bootstrap=False,
             )
-        
+
         # Call the ray sdk to rsync the logs back to local.
         for i, ip in enumerate(ips):
             try:
