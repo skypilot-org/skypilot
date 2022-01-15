@@ -90,6 +90,22 @@ def set_status(job_id: int, status: JobStatus) -> None:
     _CONN.commit()
 
 
+def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
+    records = []
+    for row in rows:
+        if row[0] is None:
+            break
+        # TODO: use namedtuple instead of dict
+        records.append({
+            'job_id': row[JobInfoLoc.JOB_ID.value],
+            'username': row[JobInfoLoc.USERNAME.value],
+            'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
+            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
+            'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
+        })
+    return records
+
+
 def _get_jobs(username: Optional[str],
               status_list: Optional[List[JobStatus]] = None
              ) -> List[Dict[str, Any]]:
@@ -114,18 +130,19 @@ def _get_jobs(username: Optional[str],
             (*status_str_list, username),
         )
 
-    records = []
-    for row in rows:
-        if row[0] is None:
-            break
-        # TODO: use namedtuple instead of dict
-        records.append({
-            'job_id': row[JobInfoLoc.JOB_ID.value],
-            'username': row[JobInfoLoc.USERNAME.value],
-            'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
-            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
-            'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
-        })
+    records = _get_records_from_rows(rows)
+    return records
+
+
+def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
+    rows = _CURSOR.execute(
+        f"""\
+        SELECT * FROM jobs
+        WHERE job_id IN ({','.join(['?'] * len(job_ids))})
+        ORDER BY job_id DESC""",
+        (*job_ids,),
+    )
+    records = _get_records_from_rows(rows)
     return records
 
 
@@ -225,20 +242,24 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
     _show_job_queue(jobs)
 
 
-def cancel_jobs(jobs: Optional[List[str]]) -> None:
+def cancel_jobs(jobs: Optional[List[int]]) -> None:
     """Cancel the jobs.
 
     Args:
         jobs: The job ids to cancel. If None, cancel all the jobs.
     """
+    # Update the status of the jobs to avoid setting the status of staled jobs to CANCELLED.
+    _update_status()
     if jobs is None:
         job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
-        jobs = [job['job_id'] for job in job_records]
+    else:
+        job_records = _get_jobs_by_ids(jobs)
+    jobs = [job['job_id'] for job in job_records]
     cancel_cmd = [
         f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
     ]
     cancel_cmd = ';'.join(cancel_cmd)
-    subprocess.run(cancel_cmd, shell=True, check=True, executable='/bin/bash')
+    subprocess.run(cancel_cmd, shell=True, check=False, executable='/bin/bash')
     for job in job_records:
         if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
             set_status(job['job_id'], JobStatus.CANCELLED)
