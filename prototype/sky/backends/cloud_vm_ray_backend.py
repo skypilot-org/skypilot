@@ -1202,7 +1202,7 @@ class CloudVmRayBackend(backends.Backend):
                                                         task.container_name,
                                                         ssh_user=ssh_user)
 
-    def sync_down_logs(self, handle: ResourceHandle, job_id: str) -> None:
+    def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()
         codegen.get_log_path(job_id, self.run_timestamp)
         code = codegen.build()
@@ -1211,38 +1211,38 @@ class CloudVmRayBackend(backends.Backend):
                                                self.run_timestamp)
         local_log_dir = log_dir
         remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, log_dir)
+        local_tasks_dir = os.path.join(local_log_dir, 'tasks')
+        os.makedirs(local_tasks_dir, exist_ok=True)
 
         style = colorama.Style
-        print(f'Logs Directory: {style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
+        fore = colorama.Fore
+        logger.info(f'{fore.CYAN}Logs Directory: '
+                    f'{style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
 
-        os.makedirs(local_log_dir, exist_ok=True)
         ips = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
 
-        def rsync_down(ip: str, log_pattern: str) -> None:
-            local_log_pattern = log_pattern.rstrip('*')
+        def rsync_down(ip: str) -> None:
             sdk.rsync(
                 handle.cluster_yaml,
-                source=f'{remote_log_dir}/{log_pattern}',
-                target=f'{local_log_dir}/{local_log_pattern}',
+                source=f'{remote_log_dir}/*',
+                target=f'{local_log_dir}/',
                 down=True,
                 ip_address=ip,
                 use_internal_ip=False,
                 should_bootstrap=False,
             )
-
-        local_tasks_dir = os.path.join(local_log_dir, 'tasks')
-        os.makedirs(local_tasks_dir, exist_ok=True)
+        
         # Call the ray sdk to rsync the logs back to local.
         for i, ip in enumerate(ips):
             try:
                 # Disable the output of rsync.
                 with open(os.devnull, 'w') as f, contextlib.redirect_stderr(
                         f), contextlib.redirect_stdout(f):
-                    rsync_down(ip, '*')
+                    rsync_down(ip)
                 logger.info(f'Downloaded logs from node-{i} ({ip})')
             except click.exceptions.ClickException as e:
-                # Remote log dir may not exist, since the job can be run on
-                # some part of the nodes.
+                # Raised by rsync_down. Remote log dir may not exist, since
+                # the job can be run on some part of the nodes.
                 if 'SSH command failed' in str(e):
                     logger.debug(f'{ip} does not have the tasks/*.')
                 else:

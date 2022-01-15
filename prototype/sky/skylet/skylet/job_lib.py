@@ -216,7 +216,7 @@ def _readable_time_duration(start: int) -> str:
 
 def _show_job_queue(jobs) -> None:
     job_table = prettytable.PrettyTable()
-    job_table.field_names = ['ID', 'DESC', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
+    job_table.field_names = ['ID', 'NAME', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
     job_table.align['LOG'] = 'l'
 
     for job in jobs:
@@ -271,7 +271,7 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
 
 
 def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
-    """Returns the path to the log file for a job and the status."""
+    """Returns the relative path to the log file for a job and the status."""
     _update_status()
     rows = _CURSOR.execute(
         """\
