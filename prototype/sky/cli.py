@@ -230,6 +230,8 @@ def _create_and_ssh_into_node(
                                    stream_logs=True,
                                    cluster_name=cluster_name)
 
+    # Use ssh rather than 'ray attach' to suppress ray messages, speed up
+    # connection, and for allowing adding 'cd workdir' in the future.
     # Disable check, since the returncode could be non-zero if the user Ctrl-D.
     commands = backend.ssh_head_command(handle, port_forward=port_forward)
     if session_manager == 'screen':
