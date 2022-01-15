@@ -197,7 +197,7 @@ class RayCodeGen:
             import subprocess
             import tempfile
             import time
-            from typing import Dict, List, Optional, Union
+            from typing import Dict, List, Optional, Tuple, Union
 
             import ray
             import ray.util as ray_util
@@ -436,8 +436,8 @@ class RetryingVmProvisioner(object):
                 logger.info('====== stderr ======')
                 for s in splits:
                     print(s)
-                raise ValueError(
-                    'Errors occurred during file_mounts/setup command; '
+                raise RuntimeError(
+                    'Errors occurred during provision/file_mounts/setup; '
                     'check logs above.')
 
     def _update_blocklist_on_aws_error(self, region, zones, stdout, stderr):
@@ -469,8 +469,8 @@ class RetryingVmProvisioner(object):
             logger.info('====== stderr ======')
             for s in stderr_splits:
                 print(s)
-            raise ValueError(
-                'Errors occurred during file_mounts/setup command; '
+            raise RuntimeError(
+                'Errors occurred during provision/file_mounts/setup; '
                 'check logs above.')
         # The underlying ray autoscaler / boto3 will try all zones of a region
         # at once.
@@ -498,8 +498,9 @@ class RetryingVmProvisioner(object):
             logger.info('====== stderr ======')
             for s in stderr_splits:
                 print(s)
-            assert False, \
-                'Errors occurred during setup command; check logs above.'
+            raise RuntimeError(
+                'Errors occurred during provision/file_mounts/setup; '
+                'check logs above.')
 
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
@@ -673,7 +674,15 @@ class RetryingVmProvisioner(object):
                 if gang_failed:
                     # There exist partial nodes (e.g., head node) so we must
                     # down before moving on to other regions.
-                    # TODO: this signals refactoring opportunities?
+                    # FIXME(zongheng): terminating a potentially live cluster
+                    # is scary.  Say: users have an existing cluster, do sky
+                    # launch, gang failed, then we are terminating it here.
+                    logger.error('*** Failed provisioning the cluster. ***')
+                    logger.error('====== stdout ======')
+                    logger.error(stdout)
+                    logger.error('====== stderr ======')
+                    logger.error(stderr)
+                    logger.error('*** Tearing down the failed cluster. ***')
                     CloudVmRayBackend().teardown(handle, terminate=True)
                     self._update_blocklist_on_error(
                         to_provision.cloud,
@@ -687,6 +696,11 @@ class RetryingVmProvisioner(object):
                                                     zones, stdout, stderr)
             else:
                 # Success.
+
+                # However, ray processes may not be up due to 'ray up
+                # --no-restart' flag.  Ensure so.
+                self._ensure_cluster_ray_started(handle, log_abs_path)
+
                 if tpu_name is not None:
                     # TODO: refactor to a cleaner design, so that tpu code and
                     # ray up logic are not mixed up.
@@ -811,6 +825,9 @@ class RetryingVmProvisioner(object):
         logger.info(f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing head VM. Waiting for workers.{style.RESET_ALL}')
 
+        # FIXME(zongheng): the below requires ray processes are up on head. To
+        # repro it failing: launch a 2-node cluster, log into head and ray
+        # stop, then launch again.
         # TODO: if requesting a large amount (say 32) of expensive VMs, this
         # may loop for a long time.  Use timeouts and treat as gang_failed.
         cluster_ready = backend_utils.wait_until_ray_cluster_ready(
@@ -823,7 +840,8 @@ class RetryingVmProvisioner(object):
         # Step 2: ray up the full config (file mounts, setup).
         config.update(existing_fields)
         backend_utils.dump_yaml(cluster_config_file, config)
-        logger.info('Starting to set up the cluster.')
+        logger.info(
+            f'{style.BRIGHT}Starting to set up the cluster.{style.RESET_ALL}')
         proc, stdout, stderr = ray_up(
             # FIXME: Not ideal. The setup log (pip install) will be streamed
             # first, before the ray autoscaler's step-by-step output (<1/1>
@@ -833,6 +851,35 @@ class RetryingVmProvisioner(object):
             start_streaming_at='Shared connection to')
 
         return False, proc, stdout, stderr
+
+    def _ensure_cluster_ray_started(self,
+                                    handle: 'CloudVmRayBackend.ResourceHandle',
+                                    log_abs_path) -> None:
+        """Ensures ray processes are up on a just-provisioned cluster."""
+        if handle.launched_nodes > 1:
+            # FIXME(zongheng): this has NOT been tested with multinode
+            # clusters; mainly because this function will not be reached in
+            # that case.  See #140 for details.  If it were reached, the
+            # following logic might work:
+            #   - get all node ips
+            #   - for all nodes: ray stop
+            #   - ray up --restart-only
+            return
+        backend = CloudVmRayBackend()
+        proc, _, _ = backend.run_on_head(
+            handle,
+            'ray status',
+            # At this state, an erroneous cluster may not have cached
+            # handle.head_ip (global_user_state.add_or_update_cluster(...,
+            # ready=True)).
+            use_cached_head_ip=False)
+        if proc.returncode == 0:
+            return
+        backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
+        backend_utils.run_with_log(
+            ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
+            log_abs_path,
+            stream_logs=True)
 
     def provision_with_retries(self, task: Task, to_provision: Resources,
                                dryrun: bool, stream_logs: bool,
@@ -911,7 +958,7 @@ class CloudVmRayBackend(backends.Backend):
         - (required) Path to a cluster.yaml file.
         - (optional) A cached head node public IP.  Filled in after a
             successful provision().
-        - (optional) Requested num nodes
+        - (optional) Launched num nodes
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
@@ -1023,6 +1070,8 @@ class CloudVmRayBackend(backends.Backend):
             config_dict = provisioner.provision_with_retries(
                 task, to_provision, dryrun, stream_logs, cluster_name)
         except exceptions.ResourcesUnavailableError as e:
+            # Clean up the cluster's entry in `sky status`.
+            global_user_state.remove_cluster(cluster_name, terminate=True)
             raise exceptions.ResourcesUnavailableError(
                 'Failed to provision all possible launchable resources. '
                 f'Relax the task\'s resource requirements:\n {task.num_nodes}x '
@@ -1242,7 +1291,7 @@ class CloudVmRayBackend(backends.Backend):
         username = getpass.getuser()
         codegen.add_job(username, run_timestamp)
         code = codegen.build()
-        job_id_str = self.run_on_head(handle, code, stream_logs=False)
+        job_id_str = self.run_on_head(handle, code, stream_logs=False)[1]
         # To avoid the job_id_str being corrupted by the input from keyboard.
         re_match = re.findall(f'__sky__job__id__{run_timestamp}: '
                               r'(\d+)', job_id_str)
@@ -1497,10 +1546,20 @@ class CloudVmRayBackend(backends.Backend):
 
     def ssh_head_command(self,
                          handle: ResourceHandle,
-                         port_forward: Optional[List[int]] = None) -> List[str]:
+                         port_forward: Optional[List[int]] = None,
+                         use_cached_head_ip: bool = True) -> List[str]:
         """Returns a 'ssh' command that logs into a cluster's head node."""
-        assert handle.head_ip is not None, \
-            f'provision() should have cached head ip: {handle}'
+        if use_cached_head_ip:
+            if handle.head_ip is None:
+                # This happens for INIT clusters (e.g., exit 1 in setup).
+                raise ValueError(
+                    'Cluster\'s head IP not found; is it up? To fix: '
+                    'run a successful launch first (`sky launch`) to ensure'
+                    ' the cluster status is UP (`sky status`).')
+            head_ip = handle.head_ip
+        else:
+            head_ip = self._get_node_ips(handle.cluster_yaml,
+                                         handle.launched_nodes)[0]
         config = backend_utils.read_yaml(handle.cluster_yaml)
         auth = config['auth']
         ssh_user = auth['ssh_user']
@@ -1515,16 +1574,20 @@ class CloudVmRayBackend(backends.Backend):
                 ssh += ['-L', f'{remote}:localhost:{local}']
         return ssh + _ssh_options_list(
             ssh_private_key,
-            self._ssh_control_path(handle)) + [f'{ssh_user}@{handle.head_ip}']
+            self._ssh_control_path(handle)) + [f'{ssh_user}@{head_ip}']
 
-    def _run_command_on_head_via_ssh(self,
-                                     handle: ResourceHandle,
-                                     cmd: str,
-                                     log_path: str,
-                                     stream_logs: bool,
-                                     check=False):
+    def _run_command_on_head_via_ssh(
+            self,
+            handle: ResourceHandle,
+            cmd: str,
+            log_path: str,
+            stream_logs: bool,
+            check: bool = False,
+            use_cached_head_ip: bool = True,
+    ) -> Tuple[subprocess.Popen, str, str]:
         """Uses 'ssh' to run 'cmd' on a cluster's head node."""
-        base_ssh_command = self.ssh_head_command(handle)
+        base_ssh_command = self.ssh_head_command(
+            handle, use_cached_head_ip=use_cached_head_ip)
         command = base_ssh_command + [
             'bash',
             '--login',
@@ -1538,14 +1601,19 @@ class CloudVmRayBackend(backends.Backend):
                                           stream_logs,
                                           check=check)
 
-    def run_on_head(self,
-                    handle: ResourceHandle,
-                    cmd: str,
-                    stream_logs: bool = False,
-                    check: bool = False) -> str:
+    def run_on_head(
+            self,
+            handle: ResourceHandle,
+            cmd: str,
+            stream_logs: bool = False,
+            use_cached_head_ip: bool = True,
+            check: bool = False,
+    ) -> Tuple[subprocess.Popen, str, str]:
         """Runs 'cmd' on the cluster's head node."""
-        return self._run_command_on_head_via_ssh(handle,
-                                                 cmd,
-                                                 '/dev/null',
-                                                 stream_logs=stream_logs,
-                                                 check=check)[1]
+        return self._run_command_on_head_via_ssh(
+            handle,
+            cmd,
+            '/dev/null',
+            stream_logs=stream_logs,
+            use_cached_head_ip=use_cached_head_ip,
+            check=check)
