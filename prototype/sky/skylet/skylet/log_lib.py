@@ -178,6 +178,5 @@ def encode_skylet_output(output: str, run_timestamp: str) -> str:
 def decode_skylet_output(output: str, run_timestamp: str) -> str:
     pattern = f'<skylet-{run_timestamp}>' r'(.*)' f'</skylet-{run_timestamp}>'
     re_match = re.findall(pattern, output)
-    # TODO: raise error if not found
     assert len(re_match) == 1, re_match
     return re_match[0]
