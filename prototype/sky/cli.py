@@ -316,16 +316,18 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
             # Treat entrypoint as a yaml.
-            click.secho(f'Detected YAML file: {entrypoint}', fg='blue')
+            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+            click.secho(entrypoint, bold=True)
             sky.Task.from_yaml(entrypoint)
         else:
             # Treat entrypoint as a bash command.
-            click.secho(f'Detected Bash Command: \'{entrypoint}\'', fg='blue')
+            click.secho('Task from command: ', fg='yellow', nl=False)
+            click.secho(entrypoint, bold=True)
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
 
     if cluster is not None:
-        click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
+        click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
     sky.launch(dag,
                dryrun=dryrun,
@@ -401,15 +403,17 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
             # Treat entrypoint as a yaml file
-            click.secho(f'Detected YAML file: {entrypoint}', fg='blue')
+            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+            click.secho(entrypoint, bold=True)
             sky.Task.from_yaml(entrypoint)
         else:
             # Treat entrypoint as a bash command.
-            click.secho(f'Detected Bash Command: \'{entrypoint}\'', fg='blue')
+            click.secho('Task from command: ', fg='yellow', nl=False)
+            click.secho(entrypoint, bold=True)
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
 
-    click.secho(f'Executing task on cluster {cluster} ...', fg='yellow')
+    click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
 
 
@@ -524,7 +528,7 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
             'Please re-launch it with `sky launch` to view the job queue.')
         return
 
-    job_table = backend.run_on_head(handle, code)
+    job_table = backend.run_on_head(handle, code)[1]
     click.echo(f'{job_table}')
 
 
@@ -589,12 +593,11 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
                                  ' (see `sky status`).')
 
     if all:
-        click.secho(f'Cancelling all jobs on cluster {cluster} ...',
-                    fg='yellow')
+        click.secho(f'Cancelling all jobs on cluster {cluster}...', fg='yellow')
         jobs = None
     else:
         jobs_str = ', '.join(map(str, jobs))
-        click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster} ...',
+        click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster}...',
                     fg='yellow')
 
     codegen = backend_utils.JobLibCodeGen()
@@ -603,7 +606,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
     # FIXME: Assumes a specific backend.
     backend = backends.CloudVmRayBackend()
-    backend.run_on_head(handle, code, stream_logs=False)
+    backend.run_on_head(handle, code, stream_logs=False, check=True)
 
 
 @cli.command()
