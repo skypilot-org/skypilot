@@ -12,7 +12,7 @@ import time
 import tempfile
 from typing import Iterator, List, Optional, Tuple, Union
 
-from skylet import job_lib
+from sky.skylet import job_lib
 
 
 def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):

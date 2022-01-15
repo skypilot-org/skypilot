@@ -1,6 +1,6 @@
 """Setup file for Sky."""
 import os
-from setuptools import setup
+import setuptools
 
 ROOT_DIR = os.path.dirname(__file__)
 
@@ -12,13 +12,14 @@ install_requires = [
     'networkx',
     'oauth2client',
     'pandas',
-    'pycryptodome==3.4.3',
+    'pycryptodome==3.12.0',
     'pendulum',
     'PrettyTable',
     'pytest',
     'ray[default]',
     'tabulate',
     'docker',
+    'wheel',
 ]
 
 extras_require = {
@@ -29,10 +30,10 @@ extras_require = {
 
 extras_require['all'] = sum(extras_require.values(), [])
 
-setup(
+setuptools.setup(
     name='sky',
     version='0.1.dev0',
-    packages=['sky'],
+    packages=setuptools.find_packages(),
     setup_requires=['wheel'],
     install_requires=install_requires,
     extras_require=extras_require,
