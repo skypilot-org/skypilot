@@ -583,8 +583,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
                                  ' (see `sky status`).')
 
     if all:
-        click.secho(f'Cancelling all jobs on cluster {cluster}...',
-                    fg='yellow')
+        click.secho(f'Cancelling all jobs on cluster {cluster}...', fg='yellow')
         jobs = None
     else:
         jobs_str = ', '.join(map(str, jobs))
