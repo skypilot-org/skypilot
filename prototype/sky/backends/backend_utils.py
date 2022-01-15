@@ -604,9 +604,9 @@ class JobLibCodeGen(object):
     def __init__(self) -> None:
         self._code = ['from skylet import job_lib, log_lib']
 
-    def add_job(self, username: str, run_timestamp: str) -> None:
+    def add_job(self, job_name, username: str, run_timestamp: str) -> None:
         self._code += [
-            f'job_id = job_lib.add_job({username!r}, {run_timestamp!r})',
+            f'job_id = job_lib.add_job({job_name!r}, {username!r}, {run_timestamp!r})',
             'encoded_out = '
             f'log_lib.encode_skylet_output(job_id, {run_timestamp!r})',
             'print(encoded_out, flush=True)',

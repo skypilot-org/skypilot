@@ -1312,10 +1312,10 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
-    def _add_job(self, handle: ResourceHandle) -> int:
+    def _add_job(self, handle: ResourceHandle, job_name: str) -> int:
         codegen = backend_utils.JobLibCodeGen()
         username = getpass.getuser()
-        codegen.add_job(username, self.run_timestamp)
+        codegen.add_job(job_name, username, self.run_timestamp)
         code = codegen.build()
         encoded_job_id = self.run_on_head(handle, code, stream_logs=False)[1]
         job_id = int(
@@ -1339,7 +1339,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'Nothing to run; run command not specified:\n{task}')
             return
 
-        job_id = self._add_job(handle)
+        job_id = self._add_job(handle, task.name)
 
         # Case: Task(run, num_nodes=1)
         if task.num_nodes == 1:
