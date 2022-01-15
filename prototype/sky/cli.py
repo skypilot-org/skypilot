@@ -29,7 +29,6 @@ each other.
 """
 import functools
 import getpass
-import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 import yaml
@@ -207,7 +206,7 @@ def _create_and_ssh_into_node(
         # && conda env create -f environment.yml
         task = sky.Task(
             node_type,
-            workdir=os.getcwd(),
+            workdir=None,
             setup=None,
             run='',
         )
@@ -231,9 +230,6 @@ def _create_and_ssh_into_node(
                                    stream_logs=True,
                                    cluster_name=cluster_name)
 
-    # TODO: cd into workdir immediately on the VM
-    # TODO: Delete the temporary cluster config yml (or figure out a way to
-    # re-use it)
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
     # Disable check, since the returncode could be non-zero if the user Ctrl-D.
@@ -255,6 +251,10 @@ def _create_and_ssh_into_node(
     click.secho(f'sky stop {cluster_name}', bold=True)
     click.echo('To tear down the node:\t', nl=False)
     click.secho(f'sky down {cluster_name}', bold=True)
+    click.echo('To upload a folder:\t', nl=False)
+    click.secho(f'rsync -r /local/path {cluster_name}:/remote/path', bold=True)
+    click.echo('To download a folder:\t', nl=False)
+    click.secho(f'rsync -r {cluster_name}:/remote/path /local/path', bold=True)
 
 
 def _check_yaml(entrypoint: str) -> bool:
@@ -815,8 +815,6 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
             tmux: Optional[bool]):
     """Launch or attach to an interactive GPU node.
 
-    Automatically syncs the current working directory.
-
     Example:
 
       \b
@@ -840,6 +838,10 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
       # Port forward.
       sky gpunode --port-forward 8080 --port-forward 4650 -c cluster_name
       sky gpunode -p 8080 -p 4650 -c cluster_name
+
+      \b
+      # Sync current working directory to ~/workdir on the node.
+      rsync -r . cluster_name:~/workdir
     """
     if screen and tmux:
         raise click.UsageError('Cannot use both screen and tmux.')
@@ -883,8 +885,6 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
             spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
     """Launch or attach to an interactive CPU node.
 
-    Automatically syncs the current working directory.
-
     Example:
 
       \b
@@ -908,6 +908,10 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
       # Port forward.
       sky cpunode --port-forward 8080 --port-forward 4650 -c cluster_name
       sky cpunode -p 8080 -p 4650 -c cluster_name
+
+      \b
+      # Sync current working directory to ~/workdir on the node.
+      rsync -r . cluster_name:~/workdir
     """
     if screen and tmux:
         raise click.UsageError('Cannot use both screen and tmux.')
@@ -944,8 +948,6 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
             spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
     """Launch or attach to an interactive TPU node.
 
-    Automatically syncs the current working directory.
-
     Example:
 
       \b
@@ -969,6 +971,10 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
       # Port forward.
       sky tpunode --port-forward 8080 --port-forward 4650 -c cluster_name
       sky tpunode -p 8080 -p 4650 -c cluster_name
+
+      \b
+      # Sync current working directory to ~/workdir on the node.
+      rsync -r . cluster_name:~/workdir
     """
     if screen and tmux:
         raise click.UsageError('Cannot use both screen and tmux.')
