@@ -4,6 +4,7 @@ This is a remote utility module that provides logging functionality.
 """
 import io
 import os
+import re
 import selectors
 import subprocess
 import sys
@@ -150,7 +151,7 @@ def tail_logs(job_id: int, log_dir: Optional[str],
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
 
-    log_path = os.path.join(log_dir, 'run.log')
+    log_path = os.path.join(job_lib.SKY_REMOTE_LOGS_ROOT, log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
@@ -167,3 +168,19 @@ def tail_logs(job_id: int, log_dir: Optional[str],
     else:
         with open(log_path, 'r') as f:
             print(f.read())
+
+
+# To avoid the skylet output being corrupted by the input from keyboard.
+# If the user type in 'llh', when the program is fetching the job id 1, there
+# will be an error message:
+#   ValueError: invalid literal for int() with base 10: 'llh1\r\n'
+# TODO(zhwu): Remove this workaround.
+def encode_skylet_output(output: str, run_timestamp: str) -> str:
+    return f'<skylet-{run_timestamp}>{output}</skylet-{run_timestamp}>'
+
+
+def decode_skylet_output(output: str, run_timestamp: str) -> str:
+    pattern = f'<skylet-{run_timestamp}>' r'(.*)' f'</skylet-{run_timestamp}>'
+    re_match = re.findall(pattern, output)
+    assert len(re_match) == 1, re_match
+    return re_match[0]
