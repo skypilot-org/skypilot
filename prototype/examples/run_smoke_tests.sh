@@ -65,6 +65,8 @@ time sky launch -c jq "$DIR"/job_queue/cluster.yaml
 time sky exec -c jq "$DIR"/job_queue/job.yaml -d
 time sky exec -c jq "$DIR"/job_queue/job.yaml -d
 time sky exec -c jq "$DIR"/job_queue/job.yaml -d
+# TODO(suquark): wait all jobs to be terminated. use 'sleep' as a workaround now
+sleep 150
 sky queue jq
 sky down jq &
 
@@ -75,6 +77,8 @@ time sky exec -c mjq -d "$DIR"/job_queue/job_multinode.yaml -d
 # The job id is automatically incremented from 1 (inclusive).
 sky cancel -c mjq 1
 sky logs -c mjq 2
+# TODO(suquark): wait all jobs to be terminated. use 'sleep' as a workaround now
+sleep 150
 sky queue mjq
 sky down mjq &
 
