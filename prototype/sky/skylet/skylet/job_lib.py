@@ -38,10 +38,11 @@ _RAY_TO_JOB_STATUS_MAP = {
 class JobInfoLoc(enum.IntEnum):
     """Job Info's Location in the DB record"""
     JOB_ID = 0
-    USERNAME = 1
-    SUBMITTED_AT = 2
-    STATUS = 3
-    RUN_TIMESTAMP = 4
+    JOB_NAME = 1
+    USERNAME = 2
+    SUBMITTED_AT = 3
+    STATUS = 4
+    RUN_TIMESTAMP = 5
 
 
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
@@ -57,6 +58,7 @@ except sqlite3.OperationalError:
     _CURSOR.execute("""\
       CREATE TABLE jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_name TEXT,
         username TEXT,
         submitted_at INTEGER,
         status TEXT,
@@ -65,11 +67,12 @@ except sqlite3.OperationalError:
 _CONN.commit()
 
 
-def add_job(username: str, run_timestamp: str) -> int:
+def add_job(job_name: str, username: str, run_timestamp: str) -> int:
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     # job_id will autoincrement with the null value
-    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?)', (
+    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?)', (
+        job_name,
         username,
         job_submitted_at,
         JobStatus.INIT.value,
@@ -98,6 +101,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
         # TODO: use namedtuple instead of dict
         records.append({
             'job_id': row[JobInfoLoc.JOB_ID.value],
+            'job_name': row[JobInfoLoc.JOB_NAME.value],
             'username': row[JobInfoLoc.USERNAME.value],
             'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
             'status': JobStatus[row[JobInfoLoc.STATUS.value]],
@@ -212,12 +216,13 @@ def _readable_time_duration(start: int) -> str:
 
 def _show_job_queue(jobs) -> None:
     job_table = prettytable.PrettyTable()
-    job_table.field_names = ['JOB', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
+    job_table.field_names = ['ID', 'NAME', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
     job_table.align['LOG'] = 'l'
 
     for job in jobs:
         job_table.add_row([
             job['job_id'],
+            job['job_name'],
             job['username'],
             _readable_time_duration(job['submitted_at']),
             job['status'].value,
@@ -266,7 +271,7 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
 
 
 def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
-    """Returns the path to the log file for a job and the status."""
+    """Returns the relative path to the log file for a job and the status."""
     _update_status()
     rows = _CURSOR.execute(
         """\
@@ -278,5 +283,4 @@ def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
         status = row[JobInfoLoc.STATUS.value]
         status = JobStatus[status]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-    return os.path.join(SKY_REMOTE_LOGS_ROOT, SKY_LOGS_DIRECTORY,
-                        run_timestamp), status
+    return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp), status

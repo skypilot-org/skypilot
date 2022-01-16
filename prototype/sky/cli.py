@@ -538,23 +538,33 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
               required=True,
               type=str,
               help='Name of the existing cluster to find the job.')
+@click.option(
+    '--sync-down',
+    '-s',
+    is_flag=True,
+    default=False,
+    help='Sync down the logs of the job (This is useful for distributed jobs to'
+    'download separate log for each job from all the workers).')
 @click.argument('job_id', required=True, type=str)
-def logs(cluster: str, job_id: str):
+def logs(cluster: str, job_id: str, sync_down: bool):
     """Tail the log of a job."""
     # TODO: Add an option for downloading logs.
     cluster_name = cluster
     backend = backends.CloudVmRayBackend()
 
-    codegen = backend_utils.JobLibCodeGen()
-    codegen.tail_logs(job_id)
-    code = codegen.build()
-
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
                                  ' (see `sky status`).')
-    click.secho('Start streaming logs...', fg='yellow')
-    backend.run_on_head(handle, code, stream_logs=True)
+    if sync_down:
+        click.secho('Syncing down logs to local...', fg='yellow')
+        backend.sync_down_logs(handle, job_id)
+    else:
+        codegen = backend_utils.JobLibCodeGen()
+        codegen.tail_logs(job_id)
+        code = codegen.build()
+        click.secho('Start streaming logs...', fg='yellow')
+        backend.run_on_head(handle, code, stream_logs=True)
 
 
 @cli.command()

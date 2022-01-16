@@ -6,6 +6,8 @@
 #   sky launch -c jq cluster.yaml
 #   sky exec -c jq job.yaml
 
+name: job
+
 resources:
   accelerators:
     K80: 0.5

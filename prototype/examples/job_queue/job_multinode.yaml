@@ -7,6 +7,8 @@
 #   sky exec -c mjq job_multinode.yaml
 #   sky exec -c mjq job.yaml
 
+name: job_multinode
+
 resources:
   accelerators:
     K80: 0.5
