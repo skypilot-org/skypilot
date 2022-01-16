@@ -171,6 +171,10 @@ def tail_logs(job_id: int, log_dir: Optional[str],
 
 
 # To avoid the skylet output being corrupted by the input from keyboard.
+# If the user type in 'llh', when the program is fetching the job id 1, there
+# will be an error message:
+#   ValueError: invalid literal for int() with base 10: 'llh1\r\n'
+# TODO(zhwu): Remove this workaround.
 def encode_skylet_output(output: str, run_timestamp: str) -> str:
     return f'<skylet-{run_timestamp}>{output}</skylet-{run_timestamp}>'
 
