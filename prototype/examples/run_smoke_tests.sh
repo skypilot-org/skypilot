@@ -70,7 +70,7 @@ sleep 150
 sky queue jq
 sky down jq &
 
-time sky launch -c mjq "$DIR"/job_queue/multinode.yaml
+time sky launch -c mjq "$DIR"/job_queue/cluster_multinode.yaml
 time sky exec -c mjq -d "$DIR"/job_queue/job_multinode.yaml -d
 time sky exec -c mjq -d "$DIR"/job_queue/job_multinode.yaml -d
 time sky exec -c mjq -d "$DIR"/job_queue/job_multinode.yaml -d
