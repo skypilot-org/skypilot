@@ -1204,7 +1204,7 @@ class CloudVmRayBackend(backends.Backend):
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()
-        codegen.get_log_path(job_id, self.run_timestamp)
+        codegen.get_log_path(job_id)
         code = codegen.build()
         log_dir = self.run_on_head(handle, code, stream_logs=False)[1]
 
@@ -1316,8 +1316,6 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_job(job_name, username, self.run_timestamp)
         code = codegen.build()
         job_id = self.run_on_head(handle, code, stream_logs=False)[1]
-        job_id = int(job_id)
-
         job_id = int(job_id)
         return job_id
 
@@ -1588,9 +1586,12 @@ class CloudVmRayBackend(backends.Backend):
         # Build command.  Imitating ray here.
         ssh = ['ssh']
         if interactive:
-            # Only use the -tt flag if we're in interactive mode. Otherwise,
-            # the output of the ssh will be corrupted by the user's input.
+            # Force pseudo-terminal allocation for interactive mode.
             ssh += ['-tt']
+        else:
+            # Disable pseudo-terminal allocation. Otherwise, the output of
+            # ssh will be corrupted by the user's input.
+            ssh += ['-T']
         if port_forward is not None:
             for port in port_forward:
                 local = remote = port

@@ -625,7 +625,7 @@ class JobLibCodeGen(object):
             f'log_lib.tail_logs({job_id}, log_dir, status)',
         ]
 
-    def get_log_path(self, job_id: int, run_timestamp: str) -> None:
+    def get_log_path(self, job_id: int) -> None:
         self._code += [
             f'log_dir, _ = job_lib.log_dir({job_id})',
             'print(log_dir, flush=True)',
