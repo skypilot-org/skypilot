@@ -1206,9 +1206,8 @@ class CloudVmRayBackend(backends.Backend):
         codegen = backend_utils.JobLibCodeGen()
         codegen.get_log_path(job_id, self.run_timestamp)
         code = codegen.build()
-        encoded_log_dir = self.run_on_head(handle, code, stream_logs=False)[1]
-        log_dir = log_lib.decode_skylet_output(encoded_log_dir,
-                                               self.run_timestamp)
+        log_dir = self.run_on_head(handle, code, stream_logs=False)[1]
+
         local_log_dir = log_dir
         remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, log_dir)
         local_tasks_dir = os.path.join(local_log_dir, 'tasks')
@@ -1316,9 +1315,8 @@ class CloudVmRayBackend(backends.Backend):
         username = getpass.getuser()
         codegen.add_job(job_name, username, self.run_timestamp)
         code = codegen.build()
-        encoded_job_id = self.run_on_head(handle, code, stream_logs=False)[1]
-        job_id = int(
-            log_lib.decode_skylet_output(encoded_job_id, self.run_timestamp))
+        job_id = self.run_on_head(handle, code, stream_logs=False)[1]
+        job_id = int(job_id)
 
         job_id = int(job_id)
         return job_id
@@ -1569,7 +1567,8 @@ class CloudVmRayBackend(backends.Backend):
     def ssh_head_command(self,
                          handle: ResourceHandle,
                          port_forward: Optional[List[int]] = None,
-                         use_cached_head_ip: bool = True) -> List[str]:
+                         use_cached_head_ip: bool = True,
+                         interactive: bool = False) -> List[str]:
         """Returns a 'ssh' command that logs into a cluster's head node."""
         if use_cached_head_ip:
             if handle.head_ip is None:
@@ -1587,7 +1586,11 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
         # Build command.  Imitating ray here.
-        ssh = ['ssh', '-tt']
+        ssh = ['ssh']
+        if interactive:
+            # Only use the -tt flag if we're in interactive mode. Otherwise,
+            # the output of the ssh will be corrupted by the user's input.
+            ssh += ['-tt']
         if port_forward is not None:
             for port in port_forward:
                 local = remote = port
