@@ -42,14 +42,14 @@ import tabulate
 import sky
 from sky import backends
 from sky import global_user_state
-from sky import logging
+from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 _CLUSTER_FLAG_HELP = """
 A cluster name. If provided, either reuse an existing cluster with that name or
