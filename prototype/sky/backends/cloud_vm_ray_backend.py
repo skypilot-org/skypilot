@@ -25,7 +25,7 @@ from sky import cloud_stores
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
-from sky import logging
+from sky import sky_logging
 from sky import optimizer
 from sky import resources as resources_lib
 from sky import task as task_lib
@@ -46,7 +46,7 @@ SKY_REMOTE_LOGS_ROOT = job_lib.SKY_REMOTE_LOGS_ROOT
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
 SKYLET_REMOTE_PATH = backend_utils.SKYLET_REMOTE_PATH
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
