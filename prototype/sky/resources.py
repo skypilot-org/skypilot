@@ -147,7 +147,9 @@ class Resources:
             return False
         # self.instance_type == other.instance_type
 
-        if self.accelerators != other.accelerators:
+        other_accelerators = other.get_accelerators()
+        accelerators = self.get_accelerators()
+        if accelerators != other_accelerators:
             return False
         # self.accelerators == other.accelerators
 

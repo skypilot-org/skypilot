@@ -189,6 +189,21 @@ def _default_interactive_node_name(node_type: str):
     return f'sky-{node_type}-{getpass.getuser()}'
 
 
+def _infer_interactive_node_type(resources: sky.Resources):
+    """Determine interactive node type from resources."""
+    accelerators = resources.get_accelerators()
+    cloud = resources.get_cloud()
+    if accelerators:
+        # We only support homogenous accelerators for now.
+        assert len(accelerators) == 1, resources
+        acc, _ = list(accelerators.items())[0]
+        is_gcp = cloud is not None and cloud.is_same_cloud(sky.GCP())
+        if is_gcp and 'tpu' in acc:
+            return 'tpunode'
+        return 'gpunode'
+    return 'cpunode'
+
+
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
         node_type: str,
@@ -234,8 +249,7 @@ def _create_and_ssh_into_node(
                                    task.best_resources,
                                    dryrun=False,
                                    stream_logs=True,
-                                   cluster_name=cluster_name,
-                                   interactive_node_type=node_type)
+                                   cluster_name=cluster_name)
 
     # Raise exception if requested resources do not match launched resources
     # for an existing cluster. The only exception is when [cpu|tpu|gpu]node -c
@@ -243,16 +257,17 @@ def _create_and_ssh_into_node(
     # TODO: Check for same number of launched_nodes if multi-node support is
     # added for gpu/cpu/tpunode.
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES[node_type]
-    node_type_match = handle.interactive_node_type == node_type
+    inferred_node_type = _infer_interactive_node_type(handle.launched_resources)
+    node_type_match = inferred_node_type == node_type
     default_resources_match = resources.is_same_resources(default_resources)
-    launched_resources_match = handle.launched_resources.is_same_resources(
-        task.best_resources)
+    launched_resources_match = resources.is_same_resources(
+        handle.launched_resources)
     if not (node_type_match and
             (default_resources_match or launched_resources_match)):
         raise click.UsageError(
             'Resources cannot change for an existing cluster. '
             f'Existing: {handle.launched_resources}, '
-            f'Requested: {task.best_resources}')
+            f'Requested: {resources}')
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
