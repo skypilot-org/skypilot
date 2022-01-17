@@ -154,7 +154,7 @@ def _interactive_node_cli_command(cli_func):
         help='Type and number of TPUs to use (e.g. tpu-v3-8:4 or tpu-v3-8).')
 
     spot_option = click.option('--spot',
-                               default=False,
+                               default=None,
                                is_flag=True,
                                help='If true, use spot instances.')
 
@@ -192,7 +192,7 @@ def _default_interactive_node_name(node_type: str):
 def _infer_interactive_node_type(resources: sky.Resources):
     """Determine interactive node type from resources."""
     accelerators = resources.get_accelerators()
-    cloud = resources.get_cloud()
+    cloud = resources.cloud
     if accelerators:
         # We only support homogenous accelerators for now.
         assert len(accelerators) == 1, resources
@@ -212,6 +212,7 @@ def _create_and_ssh_into_node(
         backend: Optional[backend_lib.Backend] = None,
         port_forward: Optional[List[int]] = None,
         session_manager: Optional[str] = None,
+        user_requested_resources: Optional[bool] = False,
 ):
     """Creates and attaches to an interactive node.
 
@@ -222,6 +223,7 @@ def _create_and_ssh_into_node(
         backend: the Backend to use (currently only CloudVmRayBackend).
         port_forward: List of ports to forward.
         session_manager: Attach session manager: { 'screen', 'tmux' }.
+        user_requested_resources: If true, user requested resources explicitly.
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
@@ -259,15 +261,15 @@ def _create_and_ssh_into_node(
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES[node_type]
     inferred_node_type = _infer_interactive_node_type(handle.launched_resources)
     node_type_match = inferred_node_type == node_type
-    default_resources_match = resources.is_same_resources(default_resources)
     launched_resources_match = resources.is_same_resources(
         handle.launched_resources)
+    no_resource_requests = not user_requested_resources  # e.g. sky gpunode
     if not (node_type_match and
-            (default_resources_match or launched_resources_match)):
+            (no_resource_requests or launched_resources_match)):
         raise click.UsageError(
-            'Resources cannot change for an existing cluster. '
-            f'Existing: {handle.launched_resources}, '
-            f'Requested: {resources}')
+            'Resources cannot change for an existing cluster.\n'
+            f'Existing: {inferred_node_type} with {handle.launched_resources}\n'
+            f'Requested: {node_type} with {resources}\n')
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
@@ -905,6 +907,8 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
+    user_requested_resources = not (cloud is None and instance_type is None and
+                                    gpus is None and spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = task_lib.CLOUD_REGISTRY.get(cloud, default_resources.cloud)
     if cloud is not None and cloud not in task_lib.CLOUD_REGISTRY:
@@ -931,6 +935,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
         cluster_name=name,
         port_forward=port_forward,
         session_manager=session_manager,
+        user_requested_resources=user_requested_resources,
     )
 
 
@@ -978,6 +983,8 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('cpunode')
 
+    user_requested_resources = not (cloud is None and instance_type is None and
+                                    spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = task_lib.CLOUD_REGISTRY.get(cloud, None)
     if cloud is not None and cloud not in task_lib.CLOUD_REGISTRY:
@@ -999,6 +1006,7 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
         cluster_name=name,
         port_forward=port_forward,
         session_manager=session_manager,
+        user_requested_resources=user_requested_resources,
     )
 
 
@@ -1046,6 +1054,8 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('tpunode')
 
+    user_requested_resources = not (instance_type is None and tpus is None and
+                                    spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     if instance_type is None:
         instance_type = default_resources.instance_type
@@ -1066,6 +1076,7 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
         cluster_name=name,
         port_forward=port_forward,
         session_manager=session_manager,
+        user_requested_resources=user_requested_resources,
     )
 
 
