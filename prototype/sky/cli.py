@@ -879,6 +879,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
       # Sync current working directory to ~/workdir on the node.
       rsync -r . cluster_name:~/workdir
     """
+    # TODO: Factor out the shared logic below for [gpu|cpu|tpu]node.
     if screen and tmux:
         raise click.UsageError('Cannot use both screen and tmux.')
 
