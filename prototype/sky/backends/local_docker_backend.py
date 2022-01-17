@@ -5,7 +5,7 @@ import colorama
 import docker
 
 from sky import backends
-from sky import logging
+from sky import sky_logging
 from sky import resources
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -16,7 +16,7 @@ Resources = resources.Resources
 Path = str
 PostSetupFn = Callable[[str], Any]
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
 class LocalDockerBackend(backends.Backend):
