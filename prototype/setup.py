@@ -7,7 +7,6 @@ ROOT_DIR = os.path.dirname(__file__)
 install_requires = [
     'Click',
     'absl-py',
-    'boto3',
     'colorama',
     'jinja2',
     'networkx',
@@ -23,7 +22,7 @@ install_requires = [
 ]
 
 extras_require = {
-    'aws': ['awscli==1.22.17'],
+    'aws': ['awscli==1.22.17', 'boto3'],
     'azure': ['azure-cli'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
 }

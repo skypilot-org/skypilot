@@ -1,6 +1,6 @@
 """Module to enable a single Sky key for all Sky VMs in each cloud."""
-import boto3
 import copy
+import functools
 import hashlib
 import os
 import pathlib
@@ -11,8 +11,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from Crypto.PublicKey import RSA
-from functools import partial
-from googleapiclient import discovery
+
+from sky.cloud_adaptors import aws, gcp
+
 # TODO: Should tolerate if gcloud is not installed. Also,
 # https://pypi.org/project/google-api-python-client/ recommends
 # using Cloud Client Libraries for Python, where possible, for new code
@@ -45,7 +46,7 @@ def save_key_pair(private_key_path, public_key_path, private_key, public_key):
     with open(
             private_key_path,
             'w',
-            opener=partial(os.open, mode=0o600),
+            opener=functools.partial(os.open, mode=0o600),
     ) as f:
         f.write(private_key)
 
@@ -83,7 +84,7 @@ def setup_aws_authentication(config):
         public_key = open(public_key_path, 'rb').read().decode('utf-8')
         private_key = None
 
-    ec2 = boto3.client('ec2', config['provider']['region'])
+    ec2 = aws.client('ec2', config['provider']['region'])
     key_pairs = ec2.describe_key_pairs()['KeyPairs']
     key_name = None
     all_key_names = set()
@@ -142,10 +143,10 @@ def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
 
     project_id = config['provider']['project_id']
-    compute = discovery.build('compute',
-                              'v1',
-                              credentials=None,
-                              cache_discovery=False)
+    compute = gcp.build('compute',
+                        'v1',
+                        credentials=None,
+                        cache_discovery=False)
     user = config['auth']['ssh_user']
     project = compute.projects().get(project=project_id).execute()
     project_keys = next(
