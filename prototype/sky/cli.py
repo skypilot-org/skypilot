@@ -411,6 +411,16 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
             click.secho(entrypoint, bold=True)
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
+            # TODO(zhwu): If resources is set, we should submit the task to
+            # job queue.
+            # Run on head directly if the resources is not set. User should
+            # take the responsibility to not overload the cluster.
+            click.secho('Resources are not specified, not using job queue', 
+                        fg='yellow')
+            backend = backends.CloudVmRayBackend()
+            backend.run_on_head(handle, entrypoint, stream_logs=True)
+            return
+
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
