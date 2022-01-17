@@ -1091,8 +1091,7 @@ class CloudVmRayBackend(backends.Backend):
             launched_nodes=task.num_nodes,
             launched_resources=provisioned_resources,
             # TPU.
-            tpu_delete_script=config_dict.get('tpu-delete-script'),
-        )
+            tpu_delete_script=config_dict.get('tpu-delete-script'))
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True)
