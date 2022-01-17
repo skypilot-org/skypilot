@@ -3,6 +3,7 @@
 
 # pylint: disable=import-outside-toplevel
 
+
 def client(service_name: str, **kwargs):
     import boto3
     return boto3.client(service_name, **kwargs)
