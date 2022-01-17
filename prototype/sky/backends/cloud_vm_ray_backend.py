@@ -1610,15 +1610,23 @@ class CloudVmRayBackend(backends.Backend):
             stream_logs: bool,
             check: bool = False,
             use_cached_head_ip: bool = True,
+            interactive: bool = False,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Uses 'ssh' to run 'cmd' on a cluster's head node."""
         base_ssh_command = self.ssh_head_command(
             handle, use_cached_head_ip=use_cached_head_ip)
+        # We need this to correctly run the cmd, and get the output.
         command = base_ssh_command + [
             'bash',
             '--login',
             '-c',
-            '-i',
+        ]
+        if interactive:
+            # Adding this in non-interactive mode will cause the bash error
+            # `bash: cannot set terminal process group (-1): Inappropriate ioctl
+            # for device` and `bash: no job control in this shell`
+            command += ['-i']
+        command += [
             shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
         ]
