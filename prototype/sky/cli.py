@@ -258,7 +258,6 @@ def _create_and_ssh_into_node(
     # cluster_name is used with no additional arguments, then login succeeds.
     # TODO: Check for same number of launched_nodes if multi-node support is
     # added for gpu/cpu/tpunode.
-    default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES[node_type]
     inferred_node_type = _infer_interactive_node_type(handle.launched_resources)
     node_type_match = inferred_node_type == node_type
     launched_resources_match = resources.is_same_resources(
