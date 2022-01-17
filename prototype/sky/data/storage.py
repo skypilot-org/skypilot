@@ -434,7 +434,7 @@ class GcsStore(AbstractStore):
         try:
             bucket = self.client.get_bucket(self.name)
             return bucket, False
-        except gcs_exceptions.NotFound as e:
+        except gcp.not_found_exception() as e:
             if self.source.startswith('gs://'):
                 raise ValueError(
                     'Attempted to connect to a non-existent bucket.') from e

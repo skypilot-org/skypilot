@@ -1,9 +1,11 @@
 """GCP cloud adaptors"""
 
 
-def build(serviceName: str, version: str, *args, **kwargs):
+# pylint: disable=import-outside-toplevel
+
+def build(service_name: str, version: str, *args, **kwargs):
     from googleapiclient import discovery
-    return discovery.build(serviceName, version, *args, **kwargs)
+    return discovery.build(service_name, version, *args, **kwargs)
 
 
 def storage_client():
