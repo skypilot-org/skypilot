@@ -2,9 +2,7 @@
 """
 from typing import Any, Tuple
 
-import boto3
-from google.api_core import exceptions as gcs_exceptions
-from google.cloud import storage
+from sky.cloud_adaptors import aws, gcp
 
 Client = Any
 
@@ -39,17 +37,7 @@ def create_s3_client(region: str = 'us-east-2') -> Client:
     Args:
       region: str; Region name, e.g. us-west-1, us-east-2
     """
-    return boto3.client('s3', region_name=region)
-
-
-def create_gcs_client() -> Client:
-    """Helper method that connects to GCS Storage Client for
-    GCS Bucket
-
-    Args:
-      region: str; Region name, e.g. us-central1, us-west1
-    """
-    return storage.Client()
+    return aws.client('s3', region_name=region)
 
 
 def verify_s3_bucket(name: str) -> bool:
@@ -58,7 +46,7 @@ def verify_s3_bucket(name: str) -> bool:
     Args:
       name: str; Name of S3 Bucket (without s3:// prefix)
     """
-    s3 = boto3.resource('s3')
+    s3 = aws.resource('s3')
     bucket = s3.Bucket(name)
     return bucket in s3.buckets.all()
 
@@ -70,7 +58,7 @@ def verify_gcs_bucket(name: str) -> bool:
       name: str; Name of GCS Bucket (without gs:// prefix)
     """
     try:
-        create_gcs_client().get_bucket(name)
+        gcp.storage_client().get_bucket(name)
         return True
-    except gcs_exceptions.NotFound:
+    except gcp.not_found_exception():
         return False
