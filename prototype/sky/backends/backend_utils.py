@@ -318,11 +318,11 @@ def _build_sky_wheel() -> pathlib.Path:
                        stdout=subprocess.DEVNULL,
                        check=True)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError("Fail to build pip wheel for Sky.") from e
+        raise RuntimeError('Fail to build pip wheel for Sky.') from e
     try:
         latest_wheel = max(wheel_dir.glob('sky-*.whl'), key=os.path.getctime)
     except ValueError:
-        raise FileNotFoundError("Could not find built Sky wheels.") from None
+        raise FileNotFoundError('Could not find built Sky wheels.') from None
     # cleanup older wheels
     for f in wheel_dir.iterdir():
         if f != latest_wheel:
