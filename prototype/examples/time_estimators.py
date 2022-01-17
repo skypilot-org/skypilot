@@ -1,7 +1,7 @@
 import sky
-from sky.logging import init_logger
+from sky import sky_logging
 
-logger = init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
 def resnet50_estimate_runtime(resources):

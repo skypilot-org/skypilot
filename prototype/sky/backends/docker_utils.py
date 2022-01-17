@@ -7,10 +7,10 @@ import tempfile
 import colorama
 import docker
 
-from sky import logging
+from sky import sky_logging
 from sky import task as task_mod
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 # Add docker-cli from official docker image to support docker-in-docker.
 # We copy instead of installing docker-cli to keep the image builds fast.

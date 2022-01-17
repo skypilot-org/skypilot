@@ -25,7 +25,7 @@ from sky import cloud_stores
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
-from sky import logging
+from sky import sky_logging
 from sky import optimizer
 from sky import resources as resources_lib
 from sky import task as task_lib
@@ -46,7 +46,7 @@ SKY_REMOTE_LOGS_ROOT = job_lib.SKY_REMOTE_LOGS_ROOT
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
 SKYLET_REMOTE_PATH = backend_utils.SKYLET_REMOTE_PATH
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -1204,11 +1204,10 @@ class CloudVmRayBackend(backends.Backend):
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()
-        codegen.get_log_path(job_id, self.run_timestamp)
+        codegen.get_log_path(job_id)
         code = codegen.build()
-        encoded_log_dir = self.run_on_head(handle, code, stream_logs=False)[1]
-        log_dir = log_lib.decode_skylet_output(encoded_log_dir,
-                                               self.run_timestamp)
+        log_dir = self.run_on_head(handle, code, stream_logs=False)[1]
+
         local_log_dir = log_dir
         remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, log_dir)
         local_tasks_dir = os.path.join(local_log_dir, 'tasks')
@@ -1316,10 +1315,7 @@ class CloudVmRayBackend(backends.Backend):
         username = getpass.getuser()
         codegen.add_job(job_name, username, self.run_timestamp)
         code = codegen.build()
-        encoded_job_id = self.run_on_head(handle, code, stream_logs=False)[1]
-        job_id = int(
-            log_lib.decode_skylet_output(encoded_job_id, self.run_timestamp))
-
+        job_id = self.run_on_head(handle, code, stream_logs=False)[1]
         job_id = int(job_id)
         return job_id
 
@@ -1569,7 +1565,8 @@ class CloudVmRayBackend(backends.Backend):
     def ssh_head_command(self,
                          handle: ResourceHandle,
                          port_forward: Optional[List[int]] = None,
-                         use_cached_head_ip: bool = True) -> List[str]:
+                         use_cached_head_ip: bool = True,
+                         interactive: bool = False) -> List[str]:
         """Returns a 'ssh' command that logs into a cluster's head node."""
         if use_cached_head_ip:
             if handle.head_ip is None:
@@ -1587,7 +1584,14 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
         # Build command.  Imitating ray here.
-        ssh = ['ssh', '-tt']
+        ssh = ['ssh']
+        if interactive:
+            # Force pseudo-terminal allocation for interactive mode.
+            ssh += ['-tt']
+        else:
+            # Disable pseudo-terminal allocation. Otherwise, the output of
+            # ssh will be corrupted by the user's input.
+            ssh += ['-T']
         if port_forward is not None:
             for port in port_forward:
                 local = remote = port
@@ -1606,15 +1610,23 @@ class CloudVmRayBackend(backends.Backend):
             stream_logs: bool,
             check: bool = False,
             use_cached_head_ip: bool = True,
+            interactive: bool = False,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Uses 'ssh' to run 'cmd' on a cluster's head node."""
         base_ssh_command = self.ssh_head_command(
             handle, use_cached_head_ip=use_cached_head_ip)
+        # We need this to correctly run the cmd, and get the output.
         command = base_ssh_command + [
             'bash',
             '--login',
             '-c',
-            '-i',
+        ]
+        if interactive:
+            # Adding this in non-interactive mode will cause the bash error
+            # `bash: cannot set terminal process group (-1): Inappropriate ioctl
+            # for device` and `bash: no job control in this shell`
+            command += ['-i']
+        command += [
             shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
         ]

@@ -10,9 +10,9 @@ from botocore import exceptions as s3_exceptions
 from google.api_core import exceptions as gcs_exceptions
 
 from sky.data import data_utils, data_transfer
-from sky import logging
+from sky import sky_logging
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 Path = str
 StorageHandle = Any
