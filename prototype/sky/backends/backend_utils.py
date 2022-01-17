@@ -610,9 +610,7 @@ class JobLibCodeGen(object):
         self._code += [
             'job_id = job_lib.add_job('
             f'{job_name!r}, {username!r}, {run_timestamp!r})',
-            'encoded_out = '
-            f'log_lib.encode_skylet_output(job_id, {run_timestamp!r})',
-            'print(encoded_out, flush=True)',
+            'print(job_id, flush=True)',
         ]
 
     def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:
@@ -627,12 +625,10 @@ class JobLibCodeGen(object):
             f'log_lib.tail_logs({job_id}, log_dir, status)',
         ]
 
-    def get_log_path(self, job_id: int, run_timestamp: str) -> None:
+    def get_log_path(self, job_id: int) -> None:
         self._code += [
             f'log_dir, _ = job_lib.log_dir({job_id})',
-            'encoded_out = '
-            f'log_lib.encode_skylet_output(log_dir, {run_timestamp!r})',
-            'print(encoded_out, flush=True)',
+            'print(log_dir, flush=True)',
         ]
 
     def build(self) -> str:
