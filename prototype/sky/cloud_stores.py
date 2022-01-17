@@ -12,10 +12,9 @@ TODO:
 import subprocess
 import urllib.parse
 
-import boto3
-
 from sky.backends import backend_utils
 from sky.data import data_utils
+from sky.cloud_adaptors import aws
 
 
 class CloudStorage:
@@ -52,7 +51,7 @@ class S3CloudStorage(CloudStorage):
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        s3 = boto3.resource('s3')
+        s3 = aws.resource('s3')
         bucket_name, path = data_utils.split_s3_path(url)
         bucket = s3.Bucket(bucket_name)
 

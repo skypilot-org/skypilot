@@ -9,6 +9,9 @@ prototype/**/*.yml
 prototype/config/**/*.sh
 prototype/**/*.egg-info/
 prototype/**/*.tmp
+prototype/build
+prototype/.eggs
+prototype/*.whl
 
 logs
 sky_logs

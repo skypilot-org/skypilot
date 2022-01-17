@@ -253,7 +253,8 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
     Args:
         jobs: The job ids to cancel. If None, cancel all the jobs.
     """
-    # Update the status of the jobs to avoid setting the status of staled jobs to CANCELLED.
+    # Update the status of the jobs to avoid setting the status of staled
+    # jobs to CANCELLED.
     _update_status()
     if jobs is None:
         job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])

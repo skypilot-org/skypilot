@@ -18,7 +18,7 @@ from sky import clouds
 from sky import sky_logging
 from sky import resources
 from sky import task as task_lib
-from skylet import log_lib
+from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -29,9 +29,7 @@ SKY_REMOTE_WORKDIR = '~/sky_workdir'
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.2'
-SKYLET_REMOTE_PATH = '~/.sky/skylet'
-SKYLET_LOCAL_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(sky.__file__), 'skylet'))
+SKY_REMOTE_PATH = '~/.sky/sky_wheels'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
@@ -296,6 +294,42 @@ class SSHConfigHelper(object):
             f.writelines(config)
 
 
+# TODO(suquark): once we have sky on PYPI, we should directly install sky
+# from PYPI
+def _build_sky_wheel() -> pathlib.Path:
+    """Build a wheel for sky. This works correctly only when sky is installed
+    with development/editable mode."""
+    # check if sky is installed under development mode.
+    package_root = pathlib.Path(sky.__file__).parent.parent
+    if package_root.name == 'site-packages':
+        raise EnvironmentError('We can only build wheels for Sky when Sky is '
+                               'installed under development/editable mode.')
+    # It is important to normalize the path, otherwise 'pip wheel' would treat
+    # the directory as a file and generate an empty wheel.
+    norm_path = str(package_root) + os.sep
+    wheel_dir = pathlib.Path(tempfile.gettempdir()) / 'sky_wheels'
+    try:
+        # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
+        # the output.
+        subprocess.run([
+            'pip', 'wheel', '--no-deps', norm_path, '--wheel-dir',
+            str(wheel_dir)
+        ],
+                       stdout=subprocess.DEVNULL,
+                       check=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError('Fail to build pip wheel for Sky.') from e
+    try:
+        latest_wheel = max(wheel_dir.glob('sky-*.whl'), key=os.path.getctime)
+    except ValueError:
+        raise FileNotFoundError('Could not find built Sky wheels.') from None
+    # cleanup older wheels
+    for f in wheel_dir.iterdir():
+        if f != latest_wheel:
+            f.unlink()
+    return wheel_dir.absolute()
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 def write_cluster_config(task: task_lib.Task,
                          to_provision: Resources,
@@ -384,6 +418,9 @@ def write_cluster_config(task: task_lib.Task,
                 source=remote, target=wrapped_remote)
             initialization_commands.append(command)
 
+    # TODO(suquark): Cache built wheels to prevent rebuilding.
+    # This may not be necessary because it's fast to build the wheel.
+    local_wheel_path = _build_sky_wheel()
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
@@ -406,8 +443,8 @@ def write_cluster_config(task: task_lib.Task,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Sky remote utils.
-                'skylet_remote_path': SKYLET_REMOTE_PATH,
-                'skylet_local_path': SKYLET_LOCAL_PATH,
+                'sky_remote_path': SKY_REMOTE_PATH,
+                'sky_local_path': str(local_wheel_path),
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -602,7 +639,7 @@ class JobLibCodeGen(object):
     """
 
     def __init__(self) -> None:
-        self._code = ['from skylet import job_lib, log_lib']
+        self._code = ['from sky.skylet import job_lib, log_lib']
 
     def add_job(self, job_name: str, username: str, run_timestamp: str) -> None:
         if job_name is None:
