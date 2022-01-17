@@ -1,6 +1,5 @@
 """GCP cloud adaptors"""
 
-
 # pylint: disable=import-outside-toplevel
 
 
