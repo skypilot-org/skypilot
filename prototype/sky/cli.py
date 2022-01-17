@@ -230,7 +230,9 @@ def _create_and_ssh_into_node(
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
     # Disable check, since the returncode could be non-zero if the user Ctrl-D.
-    commands = backend.ssh_head_command(handle, port_forward=port_forward)
+    commands = backend.ssh_head_command(handle,
+                                        port_forward=port_forward,
+                                        interactive=True)
     if session_manager == 'screen':
         commands += ['screen', '-D', '-R']
     elif session_manager == 'tmux':

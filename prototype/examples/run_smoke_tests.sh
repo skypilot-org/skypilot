@@ -72,9 +72,9 @@ sky queue jq
 sky down jq &
 
 time sky launch -c mjq "$DIR"/job_queue/cluster_multinode.yaml
-time sky exec -c mjq -d "$DIR"/job_queue/job_multinode.yaml -d
-time sky exec -c mjq -d "$DIR"/job_queue/job_multinode.yaml -d
-time sky exec -c mjq -d "$DIR"/job_queue/job_multinode.yaml -d
+time sky exec -c mjq -d "$DIR"/job_queue/job_multinode.yaml
+time sky exec -c mjq -d "$DIR"/job_queue/job_multinode.yaml
+time sky exec -c mjq -d "$DIR"/job_queue/job_multinode.yaml
 # The job id is automatically incremented from 1 (inclusive).
 sky cancel -c mjq 1
 sky logs -c mjq 2
