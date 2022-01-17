@@ -12,11 +12,11 @@ import sky
 from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
-from sky import logging
+from sky import sky_logging
 from sky import resources as resources_lib
 from sky import task
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 Dag = dag_lib.Dag
 Resources = resources_lib.Resources

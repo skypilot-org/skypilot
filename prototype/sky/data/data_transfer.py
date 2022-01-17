@@ -25,9 +25,9 @@ from googleapiclient import discovery
 from google.cloud import storage
 from oauth2client.client import GoogleCredentials
 
-from sky import logging
+from sky import sky_logging
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 S3Store = Any
 GcsStore = Any

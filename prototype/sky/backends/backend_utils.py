@@ -15,12 +15,12 @@ import jinja2
 import sky
 from sky import authentication as auth
 from sky import clouds
-from sky import logging
+from sky import sky_logging
 from sky import resources
 from sky import task as task_lib
 from skylet import log_lib
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 Resources = resources.Resources
 

@@ -2,9 +2,9 @@
 from typing import Dict, Optional, Union
 
 from sky import clouds
-from sky import logging
+from sky import sky_logging
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
 class Resources:
