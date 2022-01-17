@@ -4,7 +4,6 @@ This is a remote utility module that provides logging functionality.
 """
 import io
 import os
-import re
 import selectors
 import subprocess
 import sys

@@ -84,7 +84,7 @@ def setup_aws_authentication(config):
         public_key = open(public_key_path, 'rb').read().decode('utf-8')
         private_key = None
 
-    ec2 = aws.client('ec2', config['provider']['region'])
+    ec2 = aws.client('ec2', region_name=config['provider']['region'])
     key_pairs = ec2.describe_key_pairs()['KeyPairs']
     key_name = None
     all_key_names = set()
