@@ -5,12 +5,9 @@ import glob
 from multiprocessing import pool
 from typing import Any, Dict, Optional, Tuple
 
-import boto3
-from botocore import exceptions as s3_exceptions
-from google.api_core import exceptions as gcs_exceptions
-
 from sky.data import data_utils, data_transfer
 from sky import sky_logging
+from sky.cloud_adaptors import aws, gcp
 
 logger = sky_logging.init_logger(__name__)
 
@@ -276,7 +273,7 @@ class S3Store(AbstractStore):
         return self._delete_s3_bucket(self.name)
 
     def get_handle(self) -> StorageHandle:
-        return boto3.resource('s3').Bucket(self.name)
+        return aws.resource('s3').Bucket(self.name)
 
     def sync_local_dir(self) -> None:
         """Syncs Local folder with S3 Bucket. This method is called after
@@ -301,7 +298,7 @@ class S3Store(AbstractStore):
           1) Raise an error if the bucket source starts with s3://
           2) Create a new bucket otherwise
         """
-        s3 = boto3.resource('s3')
+        s3 = aws.resource('s3')
         bucket = s3.Bucket(self.name)
         if bucket in s3.buckets.all():
             return bucket, False
@@ -352,10 +349,10 @@ class S3Store(AbstractStore):
                 s3_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
-        except s3_exceptions.ClientError as e:
+        except aws.client_exception() as e:
             logger.info(e)
             return None
-        return boto3.resource('s3').Bucket(bucket_name)
+        return aws.resource('s3').Bucket(bucket_name)
 
     def _delete_s3_bucket(self, bucket_name: str) -> None:
         """Deletes S3 bucket, including all objects in bucket
@@ -363,7 +360,7 @@ class S3Store(AbstractStore):
         Args:
           bucket_name: str; Name of bucket
         """
-        s3 = boto3.resource('s3')
+        s3 = aws.resource('s3')
         bucket = s3.Bucket(bucket_name)
         bucket.objects.all().delete()
         bucket.delete()
@@ -389,7 +386,7 @@ class GcsStore(AbstractStore):
                 'GCS Bucket is specified as path, the name should be the '
                 'same as GCS bucket!')
 
-        self.client = data_utils.create_gcs_client()
+        self.client = gcp.storage_client()
         self.region = region
         self.bucket, is_new_bucket = self._get_bucket()
         assert not is_new_bucket or self.source
