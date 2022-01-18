@@ -483,6 +483,7 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
 
             # Run inline commands directly on head node if the resources is not
             # set. User should take the responsibility to not overload cluster.
+            # TODO(zhwu): Fix this when we support CPU in resources.
             if gpus is None:
                 click.secho('Resources are not specified, not using job queue.',
                             fg='yellow')
