@@ -486,6 +486,7 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
             if gpus is None:
                 click.secho('Resources are not specified, not using job queue.',
                             fg='yellow')
+                # FIXME(zhwu): Assumes a specific backend.
                 backend = backends.CloudVmRayBackend()
                 if workdir is not None:
                     backend.sync_workdir(handle, workdir)
