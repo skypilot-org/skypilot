@@ -1150,17 +1150,6 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
     other_table.align['Other GPUs'] = 'l'
     other_table.align['AVAILABLE QUANTITIES'] = 'l'
 
-
-    # detailed info per accelerator
-    accelerator_table = prettytable.PrettyTable()
-    accelerator_table.field_names = [
-        'GPU',
-        'QTY',
-        'CLOUD',
-        'INSTANCE TYPE',
-        'HOST MEMORY',
-    ]
-
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
 
@@ -1185,26 +1174,31 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                 for gpu, qty in sorted(result.items()):
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
+            else:
+                return
 
-        else:
-            result = service_catalog.list_accelerators(gpus_only=True,
-                                                       name_filter=gpu_name)
-            show_gcp_msg = False
-            for gpu, items in result.items():
-                headers = ['GPU', 'Qty', 'Cloud', 'Instance Type', 'Host Memory']
-                data = []
-                for item in items:
-                    if item.cloud == 'GCP':
-                        show_gcp_msg = True
-                    instance_type_str = item.instance_type if not pd.isna(
-                        item.instance_type) else '(*)'
-                    mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '(*)'
-                    data.append([
-                        item.accelerator_name, item.accelerator_count, item.cloud,
-                        instance_type_str, mem_str
-                    ])
-                yield tabulate.tabulate(data, headers)
+        result = service_catalog.list_accelerators(gpus_only=True,
+                                                   name_filter=gpu_name)
+        for gpu, items in result.items():
+            accelerator_table = prettytable.PrettyTable()
+            accelerator_table.field_names = [
+                'GPU',
+                'QTY',
+                'CLOUD',
+                'INSTANCE TYPE',
+                'HOST MEMORY',
+            ]
+            for item in items:
+                instance_type_str = item.instance_type if not pd.isna(
+                    item.instance_type) else '(*)'
+                mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '(*)'
+                accelerator_table.add_row([
+                    item.accelerator_name, item.accelerator_count, item.cloud,
+                    instance_type_str, mem_str
+                ])
+            if gpu_name is None:
                 yield '\n\n'
+            yield from accelerator_table.get_string()
 
     if show_all:
         click.echo_via_pager(_output())
