@@ -250,6 +250,10 @@ def _create_and_ssh_into_node(
                                    dryrun=False,
                                    stream_logs=True,
                                    cluster_name=cluster_name)
+        if node_type == 'tpunode':
+            env_var_sh = f'{backend_utils.SKY_REMOTE_APP_DIR}/sky_env_var.sh'
+            backend_utils.run(f'ray exec {handle.cluster_yaml} "'
+                              f'echo \". {env_var_sh}\" >> ~/.bashrc"')
 
     # Raise exception if requested resources do not match launched resources
     # for an existing cluster. The only exception is when [cpu|tpu|gpu]node -c
@@ -1188,10 +1192,6 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
     resources = sky.Resources(cloud=sky.GCP(),
                               instance_type=instance_type,
                               accelerators=tpus,
-                              accelerator_args={
-                                'tf_version': '2.5.0',
-                                'tpu_name': 'sky_tpu',
-                              },
                               use_spot=spot)
 
     _create_and_ssh_into_node(
