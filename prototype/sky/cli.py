@@ -207,13 +207,13 @@ def _infer_interactive_node_type(resources: sky.Resources):
 
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
-        node_type: str,
-        resources: sky.Resources,
-        cluster_name: str,
-        backend: Optional[backend_lib.Backend] = None,
-        port_forward: Optional[List[int]] = None,
-        session_manager: Optional[str] = None,
-        user_requested_resources: Optional[bool] = False,
+    node_type: str,
+    resources: sky.Resources,
+    cluster_name: str,
+    backend: Optional[backend_lib.Backend] = None,
+    port_forward: Optional[List[int]] = None,
+    session_manager: Optional[str] = None,
+    user_requested_resources: Optional[bool] = False,
 ):
     """Creates and attaches to an interactive node.
 

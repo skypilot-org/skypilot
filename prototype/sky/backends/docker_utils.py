@@ -27,11 +27,11 @@ CONDA_SETUP_PREFIX = """. $(conda info --base)/etc/profile.d/conda.sh || true"""
 
 
 def create_dockerfile(
-        base_image: str,
-        setup_command: str,
-        copy_path: str,
-        output_path: str = None,
-        run_command: str = None,
+    base_image: str,
+    setup_command: str,
+    copy_path: str,
+    output_path: str = None,
+    run_command: str = None,
 ) -> str:
     """Writes a valid dockerfile to the specified path.
 

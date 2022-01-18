@@ -110,8 +110,8 @@ def remove_cluster(cluster_name: str, terminate: bool):
     _CONN.commit()
 
 
-def get_handle_from_cluster_name(cluster_name: str
-                                ) -> Optional[backends.Backend.ResourceHandle]:
+def get_handle_from_cluster_name(
+        cluster_name: str) -> Optional[backends.Backend.ResourceHandle]:
     assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _CURSOR.execute('SELECT handle FROM clusters WHERE name=(?)',
                            (cluster_name,))
@@ -120,7 +120,7 @@ def get_handle_from_cluster_name(cluster_name: str
 
 
 def get_cluster_name_from_handle(
-        cluster_handle: backends.Backend.ResourceHandle,) -> Optional[str]:
+    cluster_handle: backends.Backend.ResourceHandle,) -> Optional[str]:
     handle = pickle.dumps(cluster_handle)
     rows = _CURSOR.execute('SELECT name FROM clusters WHERE handle=(?)',
                            (handle,))

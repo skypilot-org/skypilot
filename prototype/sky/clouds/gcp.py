@@ -101,11 +101,11 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def region_zones_provision_loop(
-            cls,
-            *,
-            instance_type: Optional[str] = None,
-            accelerators: Optional[Dict[str, int]] = None,
-            use_spot: Optional[bool] = False,
+        cls,
+        *,
+        instance_type: Optional[str] = None,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
         del instance_type  # unused
@@ -211,8 +211,8 @@ class GCP(clouds.Cloud):
         return [r]
 
     def get_accelerators_from_instance_type(
-            self,
-            instance_type: str,
+        self,
+        instance_type: str,
     ) -> Optional[Dict[str, int]]:
         # GCP handles accelerators separately from regular instance types,
         # hence return none here.

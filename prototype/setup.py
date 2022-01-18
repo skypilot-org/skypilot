@@ -38,9 +38,7 @@ setuptools.setup(
     install_requires=install_requires,
     extras_require=extras_require,
     entry_points={
-        'console_scripts': [
-            'sky = sky.cli:cli',
-        ],
+        'console_scripts': ['sky = sky.cli:cli',],
     },
     include_package_data=True,
     classifiers=[
