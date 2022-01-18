@@ -62,9 +62,9 @@ time python "$DIR"/multi_echo.py
 
 # Job Queue.
 time sky launch -c jq "$DIR"/job_queue/cluster.yaml
-time sky exec -c jq "$DIR"/job_queue/job.yaml -d
-time sky exec -c jq "$DIR"/job_queue/job.yaml -d
-time sky exec -c jq "$DIR"/job_queue/job.yaml -d
+time sky exec -c jq -d "$DIR"/job_queue/job.yaml
+time sky exec -c jq -d "$DIR"/job_queue/job.yaml
+time sky exec -c jq -d "$DIR"/job_queue/job.yaml
 sky logs -c jq 2
 # TODO(suquark): wait all jobs to complete. use 'sleep' as a workaround now
 sleep 30
