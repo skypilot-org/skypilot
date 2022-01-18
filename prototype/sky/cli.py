@@ -27,7 +27,6 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
-from code import interact
 import functools
 import getpass
 import time
@@ -416,12 +415,14 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
             # job queue.
             # Run on head directly if the resources is not set. User should
             # take the responsibility to not overload the cluster.
-            click.secho('Resources are not specified, not using job queue', 
+            click.secho('Resources are not specified, not using job queue',
                         fg='yellow')
             backend = backends.CloudVmRayBackend()
-            backend.run_on_head(handle, entrypoint, stream_logs=True, interactive=True)
+            backend.run_on_head(handle,
+                                entrypoint,
+                                stream_logs=True,
+                                interactive=True)
             return
-
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
