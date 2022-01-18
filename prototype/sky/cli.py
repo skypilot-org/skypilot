@@ -29,7 +29,6 @@ each other.
 """
 import functools
 import getpass
-from re import A
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 import yaml
@@ -38,7 +37,6 @@ import click
 import pandas as pd
 import pendulum
 import prettytable
-import tabulate
 
 import sky
 from sky import backends
