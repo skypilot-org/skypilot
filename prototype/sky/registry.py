@@ -10,7 +10,8 @@ Resources = resources_lib.Resources
 
 _CLOUDS = [
     clouds.AWS(),
-    clouds.Azure(),
+    # FIXME(zongheng): as of 1/16/2022, our Azure subscriptions are disabled.
+    # clouds.Azure(),
     clouds.GCP(),
 ]
 
@@ -41,8 +42,8 @@ def _filter_out_blocked_launchable_resources(
 
 
 def fill_in_launchable_resources(
-        task: sky.Task,
-        blocked_launchable_resources: Optional[List[Resources]],
+    task: sky.Task,
+    blocked_launchable_resources: Optional[List[Resources]],
 ):
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []

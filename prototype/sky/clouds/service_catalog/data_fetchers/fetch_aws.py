@@ -7,12 +7,12 @@ from typing import Tuple
 
 from absl import app
 from absl import logging
-import boto3
 import numpy as np
 import pandas as pd
 import ray
 
 from sky.clouds.service_catalog import common
+from sky.cloud_adaptors import aws
 
 REGIONS = ['us-west-1', 'us-west-2', 'us-east-1', 'us-east-2']
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -22,7 +22,7 @@ PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws
 
 @ray.remote
 def get_instance_types(region: str) -> pd.DataFrame:
-    client = boto3.client('ec2', region_name=region)
+    client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_types')
     items = []
     for i, resp in enumerate(paginator.paginate()):
@@ -34,7 +34,7 @@ def get_instance_types(region: str) -> pd.DataFrame:
 
 @ray.remote
 def get_availability_zones(region: str) -> pd.DataFrame:
-    client = boto3.client('ec2', region_name=region)
+    client = aws.client('ec2', region_name=region)
     zones = []
     response = client.describe_availability_zones()
     for resp in response['AvailabilityZones']:
@@ -58,7 +58,7 @@ def get_pricing_table(region: str) -> pd.DataFrame:
 @ray.remote
 def get_spot_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading spot pricing table')
-    client = boto3.client('ec2', region_name=region)
+    client = aws.client('ec2', region_name=region)
     response = client.describe_spot_price_history(
         ProductDescriptions=['Linux/UNIX'],
         StartTime=datetime.datetime.utcnow(),

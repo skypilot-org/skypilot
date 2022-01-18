@@ -33,7 +33,7 @@ tool_version_check() {
     fi
 }
 
-tool_version_check "yapf" $YAPF_VERSION "0.27.0"
+tool_version_check "yapf" $YAPF_VERSION "0.32.0"
 tool_version_check "pylint" $PYLINT_VERSION "2.8.2"
 tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "0.2.3"
 

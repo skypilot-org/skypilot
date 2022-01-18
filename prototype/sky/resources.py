@@ -32,12 +32,12 @@ class Resources:
     """
 
     def __init__(
-            self,
-            cloud: Optional[clouds.Cloud] = None,
-            instance_type: Optional[str] = None,
-            accelerators: Union[None, str, Dict[str, int]] = None,
-            accelerator_args: Optional[Dict[str, str]] = None,
-            use_spot: bool = False,
+        self,
+        cloud: Optional[clouds.Cloud] = None,
+        instance_type: Optional[str] = None,
+        accelerators: Union[None, str, Dict[str, int]] = None,
+        accelerator_args: Optional[Dict[str, str]] = None,
+        use_spot: bool = False,
     ):
         self.cloud = cloud
         self.instance_type = instance_type
@@ -147,7 +147,9 @@ class Resources:
             return False
         # self.instance_type == other.instance_type
 
-        if self.accelerators != other.accelerators:
+        other_accelerators = other.get_accelerators()
+        accelerators = self.get_accelerators()
+        if accelerators != other_accelerators:
             return False
         # self.accelerators == other.accelerators
 

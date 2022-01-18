@@ -20,12 +20,10 @@ import json
 import os
 from typing import Any
 
-import boto3
-from googleapiclient import discovery
-from google.cloud import storage
 from oauth2client.client import GoogleCredentials
 
 from sky import sky_logging
+from sky.cloud_adaptors import aws, gcp
 
 logger = sky_logging.init_logger(__name__)
 
@@ -42,11 +40,11 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
     credentials = GoogleCredentials.get_application_default()
-    storagetransfer = discovery.build(serviceName='storagetransfer',
-                                      version='v1',
-                                      credentials=credentials)
+    storagetransfer = gcp.build('storagetransfer',
+                                'v1',
+                                credentials=credentials)
 
-    session = boto3.Session()
+    session = aws.session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
 
     with open(os.environ['GOOGLE_APPLICATION_CREDENTIALS'], 'r') as fp:
@@ -109,7 +107,7 @@ def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
 
 
 def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:
-    storage_client = storage.Client()
+    storage_client = gcp.storage_client()
     bucket = storage_client.bucket(bucket_name)
 
     policy = bucket.get_iam_policy(requested_policy_version=3)

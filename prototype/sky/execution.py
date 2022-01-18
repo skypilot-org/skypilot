@@ -179,14 +179,14 @@ def launch(dag: sky.Dag,
 
 
 def exec(  # pylint: disable=redefined-builtin
-        dag: sky.Dag,
-        dryrun: bool = False,
-        teardown: bool = False,
-        stream_logs: bool = True,
-        backend: Optional[backends.Backend] = None,
-        optimize_target: OptimizeTarget = OptimizeTarget.COST,
-        cluster_name: Optional[str] = None,
-        detach_run: bool = False,
+    dag: sky.Dag,
+    dryrun: bool = False,
+    teardown: bool = False,
+    stream_logs: bool = True,
+    backend: Optional[backends.Backend] = None,
+    optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    cluster_name: Optional[str] = None,
+    detach_run: bool = False,
 ) -> None:
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:

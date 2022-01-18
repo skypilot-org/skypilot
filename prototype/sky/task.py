@@ -31,18 +31,18 @@ class Task:
     """Task: a coarse-grained stage in an application."""
 
     def __init__(
-            self,
-            name: Optional[str] = None,
-            *,
-            setup: Optional[str] = None,
-            run: Optional[CommandOrCommandGen] = None,
-            workdir: Optional[str] = None,
-            num_nodes: Optional[int] = None,
-            # Advanced:
-            post_setup_fn: Optional[CommandGen] = None,
-            docker_image: Optional[str] = None,
-            container_name: Optional[str] = None,
-            private_key: Optional[str] = '~/.ssh/sky-key',
+        self,
+        name: Optional[str] = None,
+        *,
+        setup: Optional[str] = None,
+        run: Optional[CommandOrCommandGen] = None,
+        workdir: Optional[str] = None,
+        num_nodes: Optional[int] = None,
+        # Advanced:
+        post_setup_fn: Optional[CommandGen] = None,
+        docker_image: Optional[str] = None,
+        container_name: Optional[str] = None,
+        private_key: Optional[str] = '~/.ssh/sky-key',
     ):
         """Initializes a Task.
 
@@ -279,8 +279,10 @@ class Task:
                 'call set_time_estimator() first'.format(self))
         return self.time_estimator_func(resources)
 
-    def set_storage_mounts(self,
-                           storage_mounts: Dict[storage_lib.Storage, str]):
+    def set_storage_mounts(
+        self,
+        storage_mounts: Dict[storage_lib.Storage, str],
+    ):
         """Sets the storage mounts for this Task
 
         Advanced method for users. Storage mounts map a Storage object
