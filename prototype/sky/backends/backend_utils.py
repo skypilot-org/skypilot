@@ -183,8 +183,12 @@ class SSHConfigHelper(object):
         return codegen
 
     @classmethod
-    def add_cluster(cls, cluster_name: str, ip: str, auth_config: Dict[str,
-                                                                       str]):
+    def add_cluster(
+        cls,
+        cluster_name: str,
+        ip: str,
+        auth_config: Dict[str, str],
+    ):
         """Add authentication information for cluster to local SSH config file.
 
         If a host with `cluster_name` already exists and the configuration was

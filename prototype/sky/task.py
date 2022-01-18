@@ -279,8 +279,10 @@ class Task:
                 'call set_time_estimator() first'.format(self))
         return self.time_estimator_func(resources)
 
-    def set_storage_mounts(self, storage_mounts: Dict[storage_lib.Storage,
-                                                      str]):
+    def set_storage_mounts(
+        self,
+        storage_mounts: Dict[storage_lib.Storage, str],
+    ):
         """Sets the storage mounts for this Task
 
         Advanced method for users. Storage mounts map a Storage object

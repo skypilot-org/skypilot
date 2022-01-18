@@ -295,9 +295,9 @@ def _create_and_ssh_into_node(
     click.echo('To tear down the node:\t', nl=False)
     click.secho(f'sky down {cluster_name}', bold=True)
     click.echo('To upload a folder:\t', nl=False)
-    click.secho(f'rsync -r /local/path {cluster_name}:/remote/path', bold=True)
+    click.secho(f'rsync -rP /local/path {cluster_name}:/remote/path', bold=True)
     click.echo('To download a folder:\t', nl=False)
-    click.secho(f'rsync -r {cluster_name}:/remote/path /local/path', bold=True)
+    click.secho(f'rsync -rP {cluster_name}:/remote/path /local/path', bold=True)
 
 
 def _check_yaml(entrypoint: str) -> bool:
