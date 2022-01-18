@@ -88,6 +88,7 @@ def preprocessing_fn(inputs):
 
 
 from transformers import BertTokenizerFast
+
 tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
 

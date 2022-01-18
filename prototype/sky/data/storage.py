@@ -332,7 +332,8 @@ class S3Store(AbstractStore):
         for obj in self.bucket.objects.filter():
             yield obj.key
 
-    def _create_s3_bucket(self, bucket_name: str,
+    def _create_s3_bucket(self,
+                          bucket_name: str,
                           region='us-east-2') -> StorageHandle:
         """Creates S3 bucket with specific name in specific region
 
@@ -472,7 +473,8 @@ class GcsStore(AbstractStore):
             except StopIteration:
                 break
 
-    def _create_gcs_bucket(self, bucket_name: str,
+    def _create_gcs_bucket(self,
+                           bucket_name: str,
                            region='us-central1') -> StorageHandle:
         """Creates GCS bucket with specific name in specific region
 
