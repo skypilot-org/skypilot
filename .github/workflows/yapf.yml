@@ -24,7 +24,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install yapf==0.27.0
+        pip install yapf==0.32.0
     - name: Running yapf
       run: |
         yapf --diff --style .style.yapf --recursive prototype/ --exclude prototype/ray_patches/**

@@ -42,8 +42,8 @@ def _filter_out_blocked_launchable_resources(
 
 
 def fill_in_launchable_resources(
-        task: sky.Task,
-        blocked_launchable_resources: Optional[List[Resources]],
+    task: sky.Task,
+    blocked_launchable_resources: Optional[List[Resources]],
 ):
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []

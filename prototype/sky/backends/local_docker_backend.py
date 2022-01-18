@@ -89,10 +89,10 @@ class LocalDockerBackend(backends.Backend):
                     'sync_workdir is a NoOp.')
 
     def sync_file_mounts(
-            self,
-            handle: ResourceHandle,
-            all_file_mounts: Dict[Path, Path],
-            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        self,
+        handle: ResourceHandle,
+        all_file_mounts: Dict[Path, Path],
+        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         """File mounts in Docker are implemented with volume mounts (-v)."""
         assert not cloud_to_remote_file_mounts, \

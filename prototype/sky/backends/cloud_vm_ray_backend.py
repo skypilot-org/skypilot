@@ -221,9 +221,9 @@ class RayCodeGen:
         ]
 
     def add_gang_scheduling_placement_group(
-            self,
-            ip_list: Optional[List[str]],
-            accelerator_dict: Dict[str, int],
+        self,
+        ip_list: Optional[List[str]],
+        accelerator_dict: Dict[str, int],
     ) -> None:
         """Create the gang scheduling placement group for a Task."""
         assert self._has_prologue, ('Call add_prologue() before '
@@ -279,12 +279,12 @@ class RayCodeGen:
         ]
 
     def add_ray_task(
-            self,
-            bash_script: str,
-            task_name: Optional[str],
-            ray_resources_dict: Optional[Dict[str, float]],
-            log_path: str,
-            gang_scheduling_ip: Optional[str] = None,
+        self,
+        bash_script: str,
+        task_name: Optional[str],
+        ray_resources_dict: Optional[Dict[str, float]],
+        log_path: str,
+        gang_scheduling_ip: Optional[str] = None,
     ) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
@@ -1110,10 +1110,10 @@ class CloudVmRayBackend(backends.Backend):
                         with_outputs=True)
 
     def sync_file_mounts(
-            self,
-            handle: ResourceHandle,
-            all_file_mounts: Dict[Path, Path],
-            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        self,
+        handle: ResourceHandle,
+        all_file_mounts: Dict[Path, Path],
+        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         # TODO: this function currently only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
@@ -1248,12 +1248,12 @@ class CloudVmRayBackend(backends.Backend):
                     raise e
 
     def _exec_code_on_head(
-            self,
-            handle: ResourceHandle,
-            codegen: str,
-            job_id: int,
-            executable: str,
-            detach_run: bool = False,
+        self,
+        handle: ResourceHandle,
+        codegen: str,
+        job_id: int,
+        executable: str,
+        detach_run: bool = False,
     ) -> None:
         """Executes generated code on the head node."""
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
@@ -1320,10 +1320,10 @@ class CloudVmRayBackend(backends.Backend):
         return job_id
 
     def execute(
-            self,
-            handle: ResourceHandle,
-            task: Task,
-            detach_run: bool,
+        self,
+        handle: ResourceHandle,
+        task: Task,
+        detach_run: bool,
     ) -> None:
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
@@ -1603,14 +1603,14 @@ class CloudVmRayBackend(backends.Backend):
             self._ssh_control_path(handle)) + [f'{ssh_user}@{head_ip}']
 
     def _run_command_on_head_via_ssh(
-            self,
-            handle: ResourceHandle,
-            cmd: str,
-            log_path: str,
-            stream_logs: bool,
-            check: bool = False,
-            use_cached_head_ip: bool = True,
-            interactive: bool = False,
+        self,
+        handle: ResourceHandle,
+        cmd: str,
+        log_path: str,
+        stream_logs: bool,
+        check: bool = False,
+        use_cached_head_ip: bool = True,
+        interactive: bool = False,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Uses 'ssh' to run 'cmd' on a cluster's head node."""
         base_ssh_command = self.ssh_head_command(
@@ -1638,12 +1638,12 @@ class CloudVmRayBackend(backends.Backend):
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
     def run_on_head(
-            self,
-            handle: ResourceHandle,
-            cmd: str,
-            stream_logs: bool = False,
-            use_cached_head_ip: bool = True,
-            check: bool = False,
+        self,
+        handle: ResourceHandle,
+        cmd: str,
+        stream_logs: bool = False,
+        use_cached_head_ip: bool = True,
+        check: bool = False,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Runs 'cmd' on the cluster's head node."""
         return self._run_command_on_head_via_ssh(

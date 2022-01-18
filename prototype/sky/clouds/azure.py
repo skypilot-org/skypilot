@@ -76,11 +76,11 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def region_zones_provision_loop(
-            cls,
-            *,
-            instance_type: Optional[str] = None,
-            accelerators: Optional[Dict[str, int]] = None,
-            use_spot: bool,
+        cls,
+        *,
+        instance_type: Optional[str] = None,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: bool,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         del accelerators  # unused
 
@@ -97,8 +97,8 @@ class Azure(clouds.Cloud):
     # between Azure and AWS.
 
     def get_accelerators_from_instance_type(
-            self,
-            instance_type: str,
+        self,
+        instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return azure_catalog.get_accelerators_from_instance_type(instance_type)
 
