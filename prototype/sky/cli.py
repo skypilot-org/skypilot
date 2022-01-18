@@ -91,8 +91,8 @@ def _truncate_long_string(s: str, max_length: int = 50) -> str:
     return ' '.join(splits[:i]) + ' ...'
 
 
-def _parse_accelerator_options(accelerator_options: str) -> Dict[str, int]:
-    """Parses accelerator options. e.g. V100:8 into {'V100': 8}."""
+def _parse_accelerator_options(accelerator_options: str) -> Dict[str, float]:
+    """Parses accelerator options: e.g., V100:8 into {'V100': 8}."""
     accelerators = {}
     accelerator_options = accelerator_options.split(':')
     if len(accelerator_options) == 1:
@@ -100,7 +100,7 @@ def _parse_accelerator_options(accelerator_options: str) -> Dict[str, int]:
         accelerators[accelerator_type] = 1
     elif len(accelerator_options) == 2:
         accelerator_type = accelerator_options[0]
-        accelerator_count = int(accelerator_options[1])
+        accelerator_count = float(accelerator_options[1])
         accelerators[accelerator_type] = accelerator_count
     else:
         raise ValueError(f'Invalid accelerator option: {accelerator_options}')
@@ -142,16 +142,17 @@ def _interactive_node_cli_command(cli_func):
                                         default=None,
                                         type=str,
                                         help='Instance type to use.')
-    gpus = click.option(
-        '--gpus',
-        default=None,
-        type=str,
-        help='Type and number of GPUs to use (e.g. V100:8 or V100).')
+    gpus = click.option('--gpus',
+                        default=None,
+                        type=str,
+                        help=('Type and number of GPUs to use '
+                              '(e.g., --gpus=V100:8 or --gpus=V100).'))
     tpus = click.option(
         '--tpus',
         default=None,
         type=str,
-        help='Type and number of TPUs to use (e.g. tpu-v3-8:4 or tpu-v3-8).')
+        help=('Type and number of TPUs to use (e.g., --tpus=tpu-v3-8:4 or '
+              '--tpus=tpu-v3-8).'))
 
     spot_option = click.option('--spot',
                                default=None,
@@ -391,8 +392,31 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
               is_flag=True,
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
+@click.option(
+    '--workdir',
+    required=False,
+    type=click.Path(exists=True, file_okay=False),
+    help=('If specified, sync this dir to the remote working directory, '
+          'where the task will be invoked. '
+          'Overrides the "workdir" config in the YAML if both are supplied.'))
+@click.option(
+    '--gpus',
+    required=False,
+    type=str,
+    help=('Task demands: Type and number of GPUs to use. Example values: '
+          '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
+          '(fractional counts are supported by the scheduling framework). Must '
+          'fit the cluster\'s total resources. Overrides the "accelerators" '
+          'config in the YAML if both are supplied.'))
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help=('Task name. Overrides the "name" '
+                    'config in the YAML if both are supplied.'))
 # pylint: disable=redefined-builtin
-def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
+def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
+         workdir: Optional[str], gpus: Optional[str], name: Optional[str]):
     """Execute a task or a command on a cluster (skip setup).
 
     If entrypoint points to a valid YAML file, it is read in as the task
@@ -401,9 +425,11 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
 
     \b
     Actions performed by this command only include:
-      - workdir syncing
-      - executing the task's run command (if entrypoint is a yaml; if specified,
-      executed on all nodes) or a bash command (only on the cluster's head node)
+    - workdir syncing (optional; specified in the YAML spec or via --workdir)
+    - executing the task's run command (if entrypoint is a yaml; executed
+      either on the cluster's head node or optionally on all nodes), or a
+      bash command (only executed on the head node)
+
     `sky exec` is thus typically faster than `sky launch`, provided a cluster
     already exists.
 
@@ -416,24 +442,24 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
 
       # First command: set up the cluster once.
 
-      >> sky launch -c name app.yaml
+      >> sky launch -c mycluster app.yaml
 
     \b
       # Starting iterative development...
       # For example, modify local workdir code.
       # Future commands: simply execute the task on the launched cluster.
 
-      >> sky exec -c name app.yaml
+      >> sky exec -c mycluster app.yaml
 
       # Do "sky launch" again if anything other than Task.run is modified:
 
-      >> sky launch -c name app.yaml
+      >> sky launch -c mycluster app.yaml
 
     Advanced use cases:
 
       #  Pass in commands for execution
 
-      >> sky exec -c name -- echo Hello World
+      >> sky exec -c mycluster -- echo Hello World
 
     """
     entrypoint = ' '.join(entrypoint)
@@ -447,13 +473,21 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool):
             # Treat entrypoint as a yaml file
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
-            sky.Task.from_yaml(entrypoint)
+            task = sky.Task.from_yaml(entrypoint)
         else:
             # Treat entrypoint as a bash command.
             click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
+        # Override.
+        if workdir is not None:
+            task.workdir = workdir
+        if gpus is not None:
+            task.set_resources(
+                sky.Resources(accelerators=_parse_accelerator_options(gpus)))
+        if name is not None:
+            task.name = name
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(dag, cluster_name=cluster, detach_run=detach_run)
