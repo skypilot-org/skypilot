@@ -480,9 +480,9 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
             click.secho(entrypoint, bold=True)
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
-            
+
             # Run inline commands directly on head node if the resources is not
-            # set. User should take the responsibility to not overload the cluster.
+            # set. User should take the responsibility to not overload cluster.
             if gpus is None:
                 click.secho('Resources are not specified, not using job queue.',
                             fg='yellow')

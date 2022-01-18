@@ -1640,13 +1640,13 @@ class CloudVmRayBackend(backends.Backend):
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
     def run_on_head(
-            self,
-            handle: ResourceHandle,
-            cmd: str,
-            stream_logs: bool = False,
-            use_cached_head_ip: bool = True,
-            check: bool = False,
-            interactive: bool = False,
+        self,
+        handle: ResourceHandle,
+        cmd: str,
+        stream_logs: bool = False,
+        use_cached_head_ip: bool = True,
+        check: bool = False,
+        interactive: bool = False,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Runs 'cmd' on the cluster's head node."""
         return self._run_command_on_head_via_ssh(
