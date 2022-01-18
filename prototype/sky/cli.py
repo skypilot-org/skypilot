@@ -29,6 +29,7 @@ each other.
 """
 import functools
 import getpass
+from re import A
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 import yaml
@@ -1132,7 +1133,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         'AVAILABLE QUANTITIES',
     ]
     gpu_table.align['NVIDIA GPUs'] = 'l'
-    gpu_table.align['AVAILABLE QUANTITIES'] = 'l'
+    gpu_table.align['AVAILABLE QUANTITIES'] = 'r'
 
     tpu_table = prettytable.PrettyTable()
     tpu_table.field_names = [
@@ -1140,7 +1141,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         'AVAILABLE QUANTITIES',
     ]
     tpu_table.align['Google TPUs'] = 'l'
-    tpu_table.align['AVAILABLE QUANTITIES'] = 'l'
+    tpu_table.align['AVAILABLE QUANTITIES'] = 'r'
 
     other_table = prettytable.PrettyTable()
     other_table.field_names = [
@@ -1148,7 +1149,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         'AVAILABLE QUANTITIES',
     ]
     other_table.align['Other GPUs'] = 'l'
-    other_table.align['AVAILABLE QUANTITIES'] = 'l'
+    other_table.align['AVAILABLE QUANTITIES'] = 'r'
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
@@ -1180,7 +1181,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name)
-        for gpu, items in result.items():
+        for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = prettytable.PrettyTable()
             accelerator_table.field_names = [
                 'GPU',
@@ -1189,6 +1190,12 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                 'INSTANCE TYPE',
                 'HOST MEMORY',
             ]
+            accelerator_table.align['GPUs'] = 'l'
+            accelerator_table.align['QTY'] = 'r'
+            accelerator_table.align['CLOUD'] = 'c'
+            accelerator_table.align['INSTANCE TYPE'] = 'l'
+            accelerator_table.align['HOST MEMORY'] = 'r'
+
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(*)'
@@ -1197,7 +1204,8 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                     item.accelerator_name, item.accelerator_count, item.cloud,
                     instance_type_str, mem_str
                 ])
-            if gpu_name is None:
+
+            if i != 0 or gpu_name is None:
                 yield '\n\n'
             yield from accelerator_table.get_string()
 
