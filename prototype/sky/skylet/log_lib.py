@@ -63,13 +63,13 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
 
 
 def run_with_log(
-        cmd: List[str],
-        log_path: str,
-        stream_logs: bool = False,
-        start_streaming_at: str = '',
-        return_none: bool = False,
-        check: bool = False,
-        **kwargs,
+    cmd: List[str],
+    log_path: str,
+    stream_logs: bool = False,
+    start_streaming_at: str = '',
+    return_none: bool = False,
+    check: bool = False,
+    **kwargs,
 ) -> Union[None, Tuple[subprocess.Popen, str, str]]:
     """Runs a command and logs its output to a file.
 

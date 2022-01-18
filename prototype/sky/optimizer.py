@@ -159,9 +159,9 @@ class Optimizer:
 
     @staticmethod
     def _optimize_cost(
-            dag: Dag,
-            minimize_cost: bool = True,
-            blocked_launchable_resources: Optional[List[Resources]] = None,
+        dag: Dag,
+        minimize_cost: bool = True,
+        blocked_launchable_resources: Optional[List[Resources]] = None,
     ):
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
@@ -172,8 +172,8 @@ class Optimizer:
         # node -> {resources -> best estimated cost}
         dp_best_cost = collections.defaultdict(dict)
         # d[node][resources][parent] = (best parent resources, best parent cost)
-        dp_point_backs = collections.defaultdict(lambda: collections.
-                                                 defaultdict(dict))
+        dp_point_backs = collections.defaultdict(
+            lambda: collections.defaultdict(dict))
 
         for node_i, node in enumerate(topo_order):
             # Base case: a special source node.

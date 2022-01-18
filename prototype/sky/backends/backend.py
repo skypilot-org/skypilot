@@ -30,10 +30,10 @@ class Backend:
         raise NotImplementedError
 
     def sync_file_mounts(
-            self,
-            handle: ResourceHandle,
-            all_file_mounts: Dict[Path, Path],
-            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        self,
+        handle: ResourceHandle,
+        all_file_mounts: Dict[Path, Path],
+        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         raise NotImplementedError
 

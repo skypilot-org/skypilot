@@ -110,9 +110,9 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
     return records
 
 
-def _get_jobs(username: Optional[str],
-              status_list: Optional[List[JobStatus]] = None
-             ) -> List[Dict[str, Any]]:
+def _get_jobs(
+        username: Optional[str],
+        status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [status.value for status in status_list]
