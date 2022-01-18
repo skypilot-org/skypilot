@@ -178,8 +178,8 @@ class SSHConfigHelper(object):
               IdentityFile {ssh_key_path}
               IdentitiesOnly yes
               ForwardAgent yes
-              Port 22
-              """)
+              StrictHostKeyChecking no
+              Port 22""")
         return codegen
 
     @classmethod
@@ -246,7 +246,7 @@ class SSHConfigHelper(object):
                 f.write('\n')
         else:
             with open(config_path, 'a') as f:
-                f.write('\n')
+                f.write('\n\n')
                 f.write(codegen)
 
     @classmethod
