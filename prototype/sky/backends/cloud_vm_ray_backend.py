@@ -610,7 +610,7 @@ class RetryingVmProvisioner(object):
 
             if 'RESOURCE_EXHAUSTED' in stderr:
                 logger.warning(f'TPU {tpu_name} creation failed '
-                               'due to resource exhaustion.')
+                               'due to quota exhaustion.')
                 return False
 
             if 'PERMISSION_DENIED' in stderr:
