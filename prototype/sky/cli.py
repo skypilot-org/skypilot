@@ -252,8 +252,8 @@ def _create_and_ssh_into_node(
                                    cluster_name=cluster_name)
         if node_type == 'tpunode':
             env_var_sh = f'{backend_utils.SKY_REMOTE_APP_DIR}/sky_env_var.sh'
-            backend_utils.run(f'ray exec {handle.cluster_yaml} "'
-                              f'echo \". {env_var_sh}\" >> ~/.bashrc"')
+            backend_utils.run(f'ray exec {handle.cluster_yaml} '
+                              f'\'echo ". {env_var_sh}" >> ~/.bashrc\'')
 
     # Raise exception if requested resources do not match launched resources
     # for an existing cluster. The only exception is when [cpu|tpu|gpu]node -c

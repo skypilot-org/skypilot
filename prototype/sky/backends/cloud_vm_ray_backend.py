@@ -608,6 +608,11 @@ class RetryingVmProvisioner(object):
                 logger.info(f'TPU {tpu_name} already exists; skipped creation.')
                 return True
 
+            if 'RESOURCE_EXHAUSTED' in stderr:
+                logger.warning(f'TPU {tpu_name} creation failed '
+                               'due to resource exhaustion.')
+                return False
+
             if 'PERMISSION_DENIED' in stderr:
                 logger.info('TPUs are not available in this zone.')
                 return False
