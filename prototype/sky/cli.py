@@ -323,6 +323,17 @@ class _NaturalOrderGroup(click.Group):
         return self.commands.keys()
 
 
+def _create_table(field_names):
+    """Creates table with default style."""
+    table = prettytable.PrettyTable()
+    table.field_names = field_names
+    table.border = False
+    table.left_padding_width = 0
+    table.right_padding_width = 2
+    table.align = 'l'
+    return table
+
+
 @click.group(cls=_NaturalOrderGroup)
 def cli():
     pass
@@ -512,18 +523,13 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     """Show launched clusters."""
     show_all = all
     clusters_status = global_user_state.get_clusters()
-    cluster_table = prettytable.PrettyTable()
-    cluster_table.border = False
-    cluster_table.left_padding_width = 0
-    cluster_table.right_padding_width = 2
-    cluster_table.field_names = [
+    cluster_table = _create_table([
         'NAME',
         'LAUNCHED',
         'RESOURCES',
         'COMMAND',
         'STATUS',
-    ]
-    cluster_table.align = 'l'
+    ])
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
@@ -1134,35 +1140,9 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
     if show_all and gpu_name is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
-    gpu_table = prettytable.PrettyTable()
-    gpu_table.field_names = [
-        'NVIDIA GPUs',
-        'AVAILABLE QUANTITIES',
-    ]
-    gpu_table.border = False
-    gpu_table.left_padding_width = 0
-    gpu_table.right_padding_width = 2
-    gpu_table.align = 'l'
-
-    tpu_table = prettytable.PrettyTable()
-    tpu_table.field_names = [
-        'GOOGLE TPUs',
-        'AVAILABLE QUANTITIES',
-    ]
-    tpu_table.border = False
-    tpu_table.left_padding_width = 0
-    tpu_table.right_padding_width = 2
-    tpu_table.align = 'l'
-
-    other_table = prettytable.PrettyTable()
-    other_table.field_names = [
-        'OTHER GPUs',
-        'AVAILABLE QUANTITIES',
-    ]
-    other_table.border = False
-    other_table.left_padding_width = 0
-    other_table.right_padding_width = 2
-    other_table.align = 'l'
+    gpu_table = _create_table(['NVIDIA GPUs', 'AVAILABLE QUANTITIES'])
+    tpu_table = _create_table(['GOOGLE TPUs', 'AVAILABLE QUANTITIES'])
+    other_table = _create_table(['OTHER GPUs', 'AVAILABLE QUANTITIES'])
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
@@ -1195,19 +1175,13 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name)
         for i, (gpu, items) in enumerate(result.items()):
-            accelerator_table = prettytable.PrettyTable()
-            accelerator_table.field_names = [
+            accelerator_table = _create_table([
                 'GPU',
                 'QTY',
                 'CLOUD',
                 'INSTANCE TYPE',
                 'HOST MEMORY',
-            ]
-            accelerator_table.border = False
-            accelerator_table.left_padding_width = 0
-            accelerator_table.right_padding_width = 2
-            accelerator_table.align = 'l'
-
+            ])
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(*)'
