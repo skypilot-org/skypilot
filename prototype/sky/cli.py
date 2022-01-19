@@ -1140,14 +1140,14 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
     if show_all and gpu_name is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
-    gpu_table = _create_table(['NVIDIA GPUs', 'AVAILABLE QUANTITIES'])
-    tpu_table = _create_table(['GOOGLE TPUs', 'AVAILABLE QUANTITIES'])
-    other_table = _create_table(['OTHER GPUs', 'AVAILABLE QUANTITIES'])
-
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
 
     def _output():
+        gpu_table = _create_table(['NVIDIA GPUs', 'AVAILABLE QUANTITIES'])
+        tpu_table = _create_table(['GOOGLE TPUs', 'AVAILABLE QUANTITIES'])
+        other_table = _create_table(['OTHER GPUs', 'AVAILABLE QUANTITIES'])
+
         if gpu_name is None:
             result = service_catalog.list_accelerator_counts(gpus_only=True)
 
