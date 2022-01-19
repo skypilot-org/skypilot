@@ -7,7 +7,7 @@ import pandas as pd
 from sky.clouds import cloud as cloud_lib
 
 catalog_config = {
-    "_faster_retry_by_catalog": True,
+    "_faster_retry_by_catalog": False,
 }
 
 class InstanceTypeInfo(NamedTuple):
@@ -168,7 +168,7 @@ def get_region_zones(df: pd.DataFrame,
         df = df.dropna(subset=[price_str]).sort_values(price_str)
     regions = [cloud_lib.Region(region) for region in df['Region'].unique()]
     if 'AvailabilityZone' in df.columns:
-        zones_in_region = df.groupby('Region')['AvailabilityZone'].apply(
+        zones_in_region = df.groupby('Region')['AvailabilityZone'].unique().apply(
             lambda x: [cloud_lib.Zone(zone) for zone in x])
         for region in regions:
             region.set_zones(zones_in_region[region.name])
