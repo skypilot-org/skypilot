@@ -421,7 +421,9 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
 
     If entrypoint points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command to be
-    executed on the head node of the cluster.
+    executed on the head node of the cluster. The task will be submitted to
+    the job queue of the cluster, except if the bash command is used without
+    providing --gpus.
 
     \b
     Actions performed by this command only include:
@@ -480,6 +482,21 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
             click.secho(entrypoint, bold=True)
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
+
+            # Run inline commands directly on head node if the resources is not
+            # set. User should take the responsibility to not overload cluster.
+            # TODO(zhwu): Fix this when we support CPU in resources.
+            if gpus is None:
+                # FIXME(zhwu): Assumes a specific backend.
+                backend = backends.CloudVmRayBackend()
+                if workdir is not None:
+                    backend.sync_workdir(handle, workdir)
+                backend.run_on_head(handle,
+                                    entrypoint,
+                                    stream_logs=True,
+                                    interactive=True)
+                return
+
         # Override.
         if workdir is not None:
             task.workdir = workdir

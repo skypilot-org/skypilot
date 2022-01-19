@@ -1614,7 +1614,9 @@ class CloudVmRayBackend(backends.Backend):
     ) -> Tuple[subprocess.Popen, str, str]:
         """Uses 'ssh' to run 'cmd' on a cluster's head node."""
         base_ssh_command = self.ssh_head_command(
-            handle, use_cached_head_ip=use_cached_head_ip)
+            handle,
+            use_cached_head_ip=use_cached_head_ip,
+            interactive=interactive)
         # We need this to correctly run the cmd, and get the output.
         command = base_ssh_command + [
             'bash',
@@ -1644,6 +1646,7 @@ class CloudVmRayBackend(backends.Backend):
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
         check: bool = False,
+        interactive: bool = False,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Runs 'cmd' on the cluster's head node."""
         return self._run_command_on_head_via_ssh(
@@ -1652,4 +1655,6 @@ class CloudVmRayBackend(backends.Backend):
             '/dev/null',
             stream_logs=stream_logs,
             use_cached_head_ip=use_cached_head_ip,
-            check=check)
+            check=check,
+            interactive=interactive,
+        )
