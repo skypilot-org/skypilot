@@ -577,8 +577,7 @@ class RetryingVmProvisioner(object):
                 message = (
                     'Failed to acquire resources to restart the stopped '
                     f'cluster {cluster_name} on {region}. Please retry again '
-                    'later.'
-                )
+                    'later.')
                 logger.error(message)
                 raise exceptions.ResourcesUnavailableError()
 
