@@ -514,6 +514,8 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     clusters_status = global_user_state.get_clusters()
     cluster_table = prettytable.PrettyTable()
     cluster_table.border = False
+    cluster_table.left_padding_width = 0
+    cluster_table.right_padding_width = 2
     cluster_table.field_names = [
         'NAME',
         'LAUNCHED',
@@ -1138,6 +1140,8 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         'AVAILABLE QUANTITIES',
     ]
     gpu_table.border = False
+    gpu_table.left_padding_width = 0
+    gpu_table.right_padding_width = 2
     gpu_table.align = 'l'
 
     tpu_table = prettytable.PrettyTable()
@@ -1146,6 +1150,8 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         'AVAILABLE QUANTITIES',
     ]
     tpu_table.border = False
+    tpu_table.left_padding_width = 0
+    tpu_table.right_padding_width = 2
     tpu_table.align = 'l'
 
     other_table = prettytable.PrettyTable()
@@ -1154,6 +1160,8 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         'AVAILABLE QUANTITIES',
     ]
     other_table.border = False
+    other_table.left_padding_width = 0
+    other_table.right_padding_width = 2
     other_table.align = 'l'
 
     def _list_to_str(lst):
@@ -1196,6 +1204,8 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                 'HOST MEMORY',
             ]
             accelerator_table.border = False
+            accelerator_table.left_padding_width = 0
+            accelerator_table.right_padding_width = 2
             accelerator_table.align = 'l'
 
             for item in items:
