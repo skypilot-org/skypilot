@@ -179,7 +179,8 @@ class SSHConfigHelper(object):
               IdentitiesOnly yes
               ForwardAgent yes
               StrictHostKeyChecking no
-              Port 22""")
+              Port 22
+            """)
         return codegen
 
     @classmethod
@@ -237,14 +238,18 @@ class SSHConfigHelper(object):
         # Add (or overwrite) the new config.
         if overwrite:
             assert overwrite_begin_idx is not None
-            updated_lines = codegen.splitlines(keepends=True) + ['\n\n']
+            updated_lines = codegen.splitlines(keepends=True) + ['\n']
             config[overwrite_begin_idx:overwrite_begin_idx +
                    len(updated_lines)] = updated_lines
             with open(config_path, 'w') as f:
                 f.write(''.join(config).strip())
+                f.write('\n')
         else:
             with open(config_path, 'a') as f:
-                f.write('\n\n')
+                if not config[-1].endswith('\n'):
+                    # Add trailing newline if it doesn't exist.
+                    f.write('\n')
+                f.write('\n')
                 f.write(codegen)
 
         # Add git credential forwarding
@@ -305,6 +310,7 @@ class SSHConfigHelper(object):
         ] if end_line_idx is not None else []
         with open(config_path, 'w') as f:
             f.write(''.join(config).strip())
+            f.write('\n')
 
 
 class GitCredentialsHelper(object):
@@ -318,7 +324,8 @@ class GitCredentialsHelper(object):
         """Find SSH key used for git authentication."""
         out = run(f'ssh -T {cls.git_remote_url} -v',
                   check=False,
-                  capture_output=True)
+                  stderr=subprocess.PIPE,
+                  stdout=subprocess.PIPE)
         ssh_log = out.stderr.decode('utf-8').splitlines()
 
         # scan for the key
