@@ -243,12 +243,23 @@ def _create_and_ssh_into_node(
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None or handle.head_ip is None:
-        dag = sky.optimize(dag)
-        task = dag.tasks[0]
-        backend.register_info(dag=dag)
         # head_ip would be None if previous provisioning failed.
+
+        # This handles stopped interactive nodes where they are restarted by
+        # skipping sky start and directly calling sky [cpu|tpu|gpu]node.
+        if handle is not None and handle.launched_resources is not None:
+            to_provision = None
+            task.set_resources(handle.launched_resources)
+            task.num_nodes = handle.launched_nodes
+            click.secho(f'Starting cluster {cluster_name}...', bold=True)
+        else:
+            dag = sky.optimize(dag)
+            task = dag.tasks[0]
+            backend.register_info(dag=dag)
+            to_provision = task.best_resources
+
         handle = backend.provision(task,
-                                   task.best_resources,
+                                   to_provision=to_provision,
                                    dryrun=False,
                                    stream_logs=True,
                                    cluster_name=cluster_name)
