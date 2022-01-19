@@ -178,8 +178,9 @@ class SSHConfigHelper(object):
               IdentityFile {ssh_key_path}
               IdentitiesOnly yes
               ForwardAgent yes
+              StrictHostKeyChecking no
               Port 22
-              """)
+            """)
         return codegen
 
     @classmethod
@@ -237,17 +238,22 @@ class SSHConfigHelper(object):
         # Add (or overwrite) the new config.
         if overwrite:
             assert overwrite_begin_idx is not None
-            updated_lines = codegen.splitlines(keepends=True)
+            updated_lines = codegen.splitlines(keepends=True) + ['\n']
             config[overwrite_begin_idx:overwrite_begin_idx +
                    len(updated_lines)] = updated_lines
             with open(config_path, 'w') as f:
-                f.write('\n')
-                f.writelines(config)
+                f.write(''.join(config).strip())
                 f.write('\n')
         else:
             with open(config_path, 'a') as f:
+                if not config[-1].endswith('\n'):
+                    # Add trailing newline if it doesn't exist.
+                    f.write('\n')
                 f.write('\n')
                 f.write(codegen)
+
+        # Add git credential forwarding
+        GitCredentialsHelper.start_agent()
 
     @classmethod
     def remove_cluster(cls, ip: str, auth_config: Dict[str, str]):
@@ -281,6 +287,12 @@ class SSHConfigHelper(object):
         if start_line_idx is None:  # No config to remove.
             return
 
+        # Scan for end of previous config.
+        cursor = start_line_idx
+        while cursor > 0 and len(config[cursor].strip()) > 0:
+            cursor -= 1
+        prev_end_line_idx = cursor
+
         # Scan for end of the cluster config.
         end_line_idx = None
         cursor = start_line_idx + 1
@@ -293,9 +305,54 @@ class SSHConfigHelper(object):
             cursor += 1
 
         # Remove sky-generated config and update the file.
-        config[start_line_idx:end_line_idx] = []
+        config[prev_end_line_idx:end_line_idx] = [
+            '\n'
+        ] if end_line_idx is not None else []
         with open(config_path, 'w') as f:
-            f.writelines(config)
+            f.write(''.join(config).strip())
+            f.write('\n')
+
+
+class GitCredentialsHelper(object):
+    """Helper for handling local git SSH credentials."""
+
+    # TODO: Add support for other remotes (e.g. Bitbucket)
+    git_remote_url = 'git@github.com'
+
+    @classmethod
+    def _get_ssh_key(cls) -> Optional[str]:
+        """Find SSH key used for git authentication."""
+        out = run(f'ssh -T {cls.git_remote_url} -v',
+                  check=False,
+                  stderr=subprocess.PIPE,
+                  stdout=subprocess.PIPE)
+        ssh_log = out.stderr.decode('utf-8').splitlines()
+
+        # scan for the key
+        key_path = None
+        cursor = 0
+        while cursor < len(ssh_log):
+            line = ssh_log[cursor]
+            if 'Server accepts key' in line:
+                key_path = [e for e in line.split() if '.ssh' in e][0]
+                logger.info(f'Found git key: {key_path}')
+                break
+            if 'Permission denied (publickey)' in line:
+                logger.info('Git SSH key not configured.'
+                            'Git credential forwarding will not work over SSH.')
+                break
+            cursor += 1
+
+        return key_path
+
+    @classmethod
+    def start_agent(cls) -> None:
+        """Start SSH agent for credential forwarding."""
+        key_path = cls._get_ssh_key()
+        if key_path is not None:
+            logger.info('Starting local SSH agent and adding GitHub SSH key.')
+            run('eval "$(ssh-agent -s)" && '
+                f'ssh-add -K {key_path} || ssh-add {key_path}')
 
 
 # TODO(suquark): once we have sky on PYPI, we should directly install sky
