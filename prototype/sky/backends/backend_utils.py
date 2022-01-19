@@ -237,13 +237,11 @@ class SSHConfigHelper(object):
         # Add (or overwrite) the new config.
         if overwrite:
             assert overwrite_begin_idx is not None
-            updated_lines = codegen.splitlines(keepends=True)
+            updated_lines = codegen.splitlines(keepends=True) + ['\n\n']
             config[overwrite_begin_idx:overwrite_begin_idx +
                    len(updated_lines)] = updated_lines
             with open(config_path, 'w') as f:
-                f.write('\n')
-                f.writelines(config)
-                f.write('\n')
+                f.write(''.join(config).strip())
         else:
             with open(config_path, 'a') as f:
                 f.write('\n\n')
@@ -284,6 +282,12 @@ class SSHConfigHelper(object):
         if start_line_idx is None:  # No config to remove.
             return
 
+        # Scan for end of previous config.
+        cursor = start_line_idx
+        while cursor > 0 and len(config[cursor].strip()) > 0:
+            cursor -= 1
+        prev_end_line_idx = cursor
+
         # Scan for end of the cluster config.
         end_line_idx = None
         cursor = start_line_idx + 1
@@ -296,20 +300,21 @@ class SSHConfigHelper(object):
             cursor += 1
 
         # Remove sky-generated config and update the file.
-        config[start_line_idx:end_line_idx] = []
+        config[prev_end_line_idx:end_line_idx] = [
+            '\n'
+        ] if end_line_idx is not None else []
         with open(config_path, 'w') as f:
-            f.writelines(config)
+            f.write(''.join(config).strip())
 
 
 class GitCredentialsHelper(object):
     """Helper for handling local git SSH credentials."""
 
-    git_conf_path = '~/.gitconfig'
     # TODO: Add support for other remotes (e.g. Bitbucket)
     git_remote_url = 'git@github.com'
 
     @classmethod
-    def get_ssh_key(cls) -> Optional[str]:
+    def _get_ssh_key(cls) -> Optional[str]:
         """Find SSH key used for git authentication."""
         out = run(f'ssh -T {cls.git_remote_url} -v',
                   check=False,
@@ -336,7 +341,7 @@ class GitCredentialsHelper(object):
     @classmethod
     def start_agent(cls) -> None:
         """Start SSH agent for credential forwarding."""
-        key_path = cls.get_ssh_key()
+        key_path = cls._get_ssh_key()
         if key_path is not None:
             logger.info('Starting local SSH agent and adding GitHub SSH key.')
             run('eval "$(ssh-agent -s)" && '
