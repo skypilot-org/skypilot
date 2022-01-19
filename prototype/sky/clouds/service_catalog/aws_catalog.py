@@ -37,6 +37,11 @@ def get_instance_type_for_accelerator(
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List[cloud.Region]:
     df = _df
+    # filter the area of the instances, e.g. us or eu
+    areas = common.catalog_config["_retry_area"]
+    filter_str = '|'.join(areas)
+    df = df[df['Region'].str.contains(filter_str)]
+    
     if common.catalog_config['_faster_retry_by_catalog']:
         df = df[df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)

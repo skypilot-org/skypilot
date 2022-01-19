@@ -7,7 +7,10 @@ import pandas as pd
 from sky.clouds import cloud as cloud_lib
 
 catalog_config = {
-    "_faster_retry_by_catalog": False,
+    # Only retry the region/zones that has the resources.
+    "_faster_retry_by_catalog": True,
+    # Only retry the region/zones that is in the area. This is cloud specific.
+    "_retry_area": ["us", "america"], # us, eu, ap
 }
 
 class InstanceTypeInfo(NamedTuple):
@@ -158,7 +161,6 @@ def list_accelerators_impl(
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}
-
 
 def get_region_zones(df: pd.DataFrame,
                      use_spot: bool) -> List[cloud_lib.Region]:
