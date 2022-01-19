@@ -8,7 +8,6 @@ import docker
 
 from sky import backends
 from sky import global_user_state
-from sky import logging
 from sky import sky_logging
 from sky import resources
 from sky import task as task_lib
@@ -262,7 +261,7 @@ class LocalDockerBackend(backends.Backend):
                                                 cluster_handle=handle,
                                                 ready=True)
 
-    def execute(self, handle: ResourceHandle, task: Task, stream_logs: bool,
+    def execute(self, handle: ResourceHandle, task: Task,
                 detach_run: bool) -> None:
         """ Launches the container."""
 

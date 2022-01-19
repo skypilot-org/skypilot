@@ -501,20 +501,18 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
             task = sky.Task(name='<cmd>', run=entrypoint)
             task.set_resources({sky.Resources()})
 
-            # TODO(romilb): Fix this
-            # Run inline commands directly on head node if the resources is not
-            # set. User should take the responsibility to not overload cluster.
-            # TODO(zhwu): Fix this when we support CPU in resources.
-            if gpus is None:
-                # FIXME(zhwu): Assumes a specific backend.
-                backend = backends.CloudVmRayBackend()
-                if workdir is not None:
-                    backend.sync_workdir(handle, workdir)
-                backend.run_on_head(handle,
-                                    entrypoint,
-                                    stream_logs=True,
-                                    interactive=True)
-                return
+            if isinstance(backend, backends.CloudVmRayBackend):
+                # Run inline commands directly on head node if the resources are
+                # not set. User should take the responsibility to not overload
+                # the cluster.
+                if gpus is None:
+                    if workdir is not None:
+                        backend.sync_workdir(handle, workdir)
+                    backend.run_on_head(handle,
+                                        entrypoint,
+                                        stream_logs=True,
+                                        interactive=True)
+                    return
 
         # Override.
         if workdir is not None:
