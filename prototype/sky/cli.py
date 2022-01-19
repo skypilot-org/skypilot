@@ -421,7 +421,9 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
 
     If entrypoint points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command to be
-    executed on the head node of the cluster.
+    executed on the head node of the cluster. The task will be submitted to
+    the job queue of the cluster, except if the bash command is used without
+    providing --gpus.
 
     \b
     Actions performed by this command only include:
@@ -485,8 +487,6 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
             # set. User should take the responsibility to not overload cluster.
             # TODO(zhwu): Fix this when we support CPU in resources.
             if gpus is None:
-                click.secho('Resources are not specified, not using job queue.',
-                            fg='yellow')
                 # FIXME(zhwu): Assumes a specific backend.
                 backend = backends.CloudVmRayBackend()
                 if workdir is not None:
