@@ -128,6 +128,13 @@ def get_cluster_name_from_handle(
         return name
 
 
+def get_status_from_cluster_name(cluster_name: str) -> ClusterStatus:
+    rows = _CURSOR.execute('SELECT status FROM clusters WHERE name=(?)',
+                           (cluster_name,))
+    for (status,) in rows:
+        return ClusterStatus[status]
+
+
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')
     records = []

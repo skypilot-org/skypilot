@@ -547,6 +547,7 @@ class RetryingVmProvisioner(object):
             try:
                 config = backend_utils.read_yaml(handle.cluster_yaml)
                 prev_resources = handle.launched_resources
+
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
                     if type(cloud) in (clouds.AWS, clouds.GCP):
@@ -566,6 +567,21 @@ class RetryingVmProvisioner(object):
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
                 region.set_zones(zones)
             yield (region, zones)  # Ok to yield again in the next loop.
+
+            # Check the cluster status. If the cluster is previously stopped,
+            # we should not retry other regions, since the previously attached
+            # volumes are not visible on another region.
+            cluster_status = global_user_state.get_status_from_cluster_name(
+                cluster_name)
+            if cluster_status == global_user_state.ClusterStatus.STOPPED:
+                message = (
+                    'Failed to acquire resources to restart the stopped '
+                    f'cluster {cluster_name} on {region}. Please retry again '
+                    'later.'
+                )
+                logger.error(message)
+                raise exceptions.ResourcesUnavailableError()
+
         for region, zones in cloud.region_zones_provision_loop(
                 instance_type=to_provision.instance_type,
                 accelerators=to_provision.accelerators,
