@@ -547,6 +547,7 @@ class RetryingVmProvisioner(object):
             try:
                 config = backend_utils.read_yaml(handle.cluster_yaml)
                 prev_resources = handle.launched_resources
+
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
                     if type(cloud) in (clouds.AWS, clouds.GCP):
@@ -566,6 +567,21 @@ class RetryingVmProvisioner(object):
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
                 region.set_zones(zones)
             yield (region, zones)  # Ok to yield again in the next loop.
+
+            # Check the cluster status. If the cluster is previously stopped,
+            # we should not retry other regions, since the previously attached
+            # volumes are not visible on another region.
+            cluster_status = global_user_state.get_status_from_cluster_name(
+                cluster_name)
+            if cluster_status == global_user_state.ClusterStatus.STOPPED:
+                message = (
+                    'Failed to acquire resources to restart the stopped '
+                    f'cluster {cluster_name} on {region}. Please retry again '
+                    'later.')
+                logger.error(message)
+                raise exceptions.ResourcesUnavailableError(message,
+                                                           no_retry=True)
+
         for region, zones in cloud.region_zones_provision_loop(
                 instance_type=to_provision.instance_type,
                 accelerators=to_provision.accelerators,
@@ -917,6 +933,8 @@ class RetryingVmProvisioner(object):
                     return
                 config_dict['launched_resources'] = to_provision
             except exceptions.ResourcesUnavailableError as e:
+                if e.no_retry:
+                    raise e
                 if launchable_retries_disabled:
                     logger.warning(
                         'DAG and optimize_target needs to be registered first '
@@ -1072,6 +1090,10 @@ class CloudVmRayBackend(backends.Backend):
             config_dict = provisioner.provision_with_retries(
                 task, to_provision, dryrun, stream_logs, cluster_name)
         except exceptions.ResourcesUnavailableError as e:
+            # Do not remove the stopped cluster from the global state if failed
+            # to start.
+            if e.no_retry:
+                raise e
             # Clean up the cluster's entry in `sky status`.
             global_user_state.remove_cluster(cluster_name, terminate=True)
             raise exceptions.ResourcesUnavailableError(
