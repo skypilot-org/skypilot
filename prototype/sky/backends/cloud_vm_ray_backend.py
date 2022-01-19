@@ -579,7 +579,8 @@ class RetryingVmProvisioner(object):
                     f'cluster {cluster_name} on {region}. Please retry again '
                     'later.')
                 logger.error(message)
-                raise exceptions.ResourcesUnavailableError(message, no_retry=True)
+                raise exceptions.ResourcesUnavailableError(message,
+                                                           no_retry=True)
 
         for region, zones in cloud.region_zones_provision_loop(
                 instance_type=to_provision.instance_type,
