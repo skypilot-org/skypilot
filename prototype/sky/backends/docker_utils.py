@@ -33,11 +33,11 @@ SKY_DOCKER_RUN_SCRIPT = 'sky_run.sh'
 
 
 def create_dockerfile(
-        base_image: str,
-        setup_command: str,
-        copy_path: str,
-        build_dir: str,
-        run_command: str = None,
+    base_image: str,
+    setup_command: str,
+    copy_path: str,
+    build_dir: str,
+    run_command: str = None,
 ) -> str:
     """Writes a valid dockerfile to the specified path.
 
