@@ -513,6 +513,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     show_all = all
     clusters_status = global_user_state.get_clusters()
     cluster_table = prettytable.PrettyTable()
+    cluster_table.border = False
     cluster_table.field_names = [
         'NAME',
         'LAUNCHED',
@@ -520,7 +521,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         'COMMAND',
         'STATUS',
     ]
-    cluster_table.align['COMMAND'] = 'l'
+    cluster_table.align = 'l'
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
@@ -1136,24 +1137,24 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         'NVIDIA GPUs',
         'AVAILABLE QUANTITIES',
     ]
-    gpu_table.align['NVIDIA GPUs'] = 'l'
-    gpu_table.align['AVAILABLE QUANTITIES'] = 'r'
+    gpu_table.border = False
+    gpu_table.align = 'l'
 
     tpu_table = prettytable.PrettyTable()
     tpu_table.field_names = [
-        'Google TPUs',
+        'GOOGLE TPUs',
         'AVAILABLE QUANTITIES',
     ]
-    tpu_table.align['Google TPUs'] = 'l'
-    tpu_table.align['AVAILABLE QUANTITIES'] = 'r'
+    tpu_table.border = False
+    tpu_table.align = 'l'
 
     other_table = prettytable.PrettyTable()
     other_table.field_names = [
-        'Other GPUs',
+        'OTHER GPUs',
         'AVAILABLE QUANTITIES',
     ]
-    other_table.align['Other GPUs'] = 'l'
-    other_table.align['AVAILABLE QUANTITIES'] = 'r'
+    other_table.border = False
+    other_table.align = 'l'
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
@@ -1194,11 +1195,8 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                 'INSTANCE TYPE',
                 'HOST MEMORY',
             ]
-            accelerator_table.align['GPUs'] = 'l'
-            accelerator_table.align['QTY'] = 'r'
-            accelerator_table.align['CLOUD'] = 'c'
-            accelerator_table.align['INSTANCE TYPE'] = 'l'
-            accelerator_table.align['HOST MEMORY'] = 'r'
+            accelerator_table.border = False
+            accelerator_table.align = 'l'
 
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
