@@ -579,7 +579,7 @@ class RetryingVmProvisioner(object):
                     f'cluster {cluster_name} on {region}. Please retry again '
                     'later.')
                 logger.error(message)
-                raise exceptions.ResourcesUnavailableError()
+                raise exceptions.ResourcesUnavailableError(message, no_retry=True)
 
         for region, zones in cloud.region_zones_provision_loop(
                 instance_type=to_provision.instance_type,
@@ -932,6 +932,8 @@ class RetryingVmProvisioner(object):
                     return
                 config_dict['launched_resources'] = to_provision
             except exceptions.ResourcesUnavailableError as e:
+                if e.no_retry:
+                    raise e
                 if launchable_retries_disabled:
                     logger.warning(
                         'DAG and optimize_target needs to be registered first '
@@ -1087,6 +1089,10 @@ class CloudVmRayBackend(backends.Backend):
             config_dict = provisioner.provision_with_retries(
                 task, to_provision, dryrun, stream_logs, cluster_name)
         except exceptions.ResourcesUnavailableError as e:
+            # Do not remove the stopped cluster from the global state if failed
+            # to start.
+            if e.no_retry:
+                raise e
             # Clean up the cluster's entry in `sky status`.
             global_user_state.remove_cluster(cluster_name, terminate=True)
             raise exceptions.ResourcesUnavailableError(
