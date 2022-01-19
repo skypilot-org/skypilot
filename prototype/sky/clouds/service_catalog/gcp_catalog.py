@@ -61,5 +61,7 @@ def get_region_zones_for_accelerators(
     use_spot: bool = False,
 ) -> List[cloud.Region]:
     """Returns a list of regions for a given accelerators."""
-    df = _get_accelerator(_df, accelerator, count, region=None)
+    df = _df
+    if common.catalog_config['_faster_retry_by_catalog']:
+        df = _get_accelerator(df, accelerator, count, region=None)
     return common.get_region_zones(df, use_spot)
