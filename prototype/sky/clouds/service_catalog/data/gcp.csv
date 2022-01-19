@@ -65,6 +65,9 @@ InstanceType,AcceleratorName,AcceleratorCount,MemoryGiB,GpuInfo,Price,SpotPrice,
 ,T4,1,0,T4,0.35,0.11,us-east4,us-east4-b
 ,T4,2,0,T4,0.7,0.22,us-east4,us-east4-b
 ,T4,4,0,T4,1.4,0.44,us-east4,us-east4-b
+,T4,1,0,T4,0.48,0.11,southamerica-east1,southamerica-east1-c
+,T4,2,0,T4,0.96,0.22,southamerica-east1,southamerica-east1-c
+,T4,4,0,T4,1.92,0.44,southamerica-east1,southamerica-east1-c
 ,P4,1,0,P4,0.6,0.216,us-central1,us-central1-a
 ,P4,1,0,P4,0.6,0.216,us-central1,us-central1-c
 ,P4,2,0,P4,1.2,0.432,us-central1,us-central1-a
@@ -92,6 +95,15 @@ InstanceType,AcceleratorName,AcceleratorCount,MemoryGiB,GpuInfo,Price,SpotPrice,
 ,P4,4,0,P4,2.4,0.864,us-east4,us-east4-a
 ,P4,4,0,P4,2.4,0.864,us-east4,us-east4-b
 ,P4,4,0,P4,2.4,0.864,us-east4,us-east4-c
+,P4,1,0,P4,0.6,0.072,northamerica-northeast1,northamerica-northeast1-a
+,P4,1,0,P4,0.6,0.072,northamerica-northeast1,northamerica-northeast1-b
+,P4,1,0,P4,0.6,0.072,northamerica-northeast1,northamerica-northeast1-c
+,P4,2,0,P4,1.2,0.144,northamerica-northeast1,northamerica-northeast1-a
+,P4,2,0,P4,1.2,0.144,northamerica-northeast1,northamerica-northeast1-b
+,P4,2,0,P4,1.2,0.144,northamerica-northeast1,northamerica-northeast1-c
+,P4,4,0,P4,2.4,0.288,northamerica-northeast1,northamerica-northeast1-a
+,P4,4,0,P4,2.4,0.288,northamerica-northeast1,northamerica-northeast1-b
+,P4,4,0,P4,2.4,0.288,northamerica-northeast1,northamerica-northeast1-c
 ,V100,1,0,V100,2.48,0.74,us-central1,us-central1-a
 ,V100,1,0,V100,2.48,0.74,us-central1,us-central1-b
 ,V100,1,0,V100,2.48,0.74,us-central1,us-central1-c
