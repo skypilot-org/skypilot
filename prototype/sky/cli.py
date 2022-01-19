@@ -550,7 +550,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
             # STATUS
             cluster_status['status'].value,
         ])
-    click.echo(f'Sky Clusters\n{cluster_table}')
+    click.echo(cluster_table)
 
 
 @cli.command()
