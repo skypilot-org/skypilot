@@ -216,7 +216,8 @@ def _readable_time_duration(start: int) -> str:
 
 
 def _show_job_queue(jobs) -> None:
-    job_table = util_lib.create_table(['ID', 'NAME', 'USER', 'SUBMITTED', 'STATUS', 'LOG'])
+    job_table = util_lib.create_table(
+        ['ID', 'NAME', 'USER', 'SUBMITTED', 'STATUS', 'LOG'])
 
     for job in jobs:
         job_table.add_row([
