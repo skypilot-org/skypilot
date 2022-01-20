@@ -36,7 +36,6 @@ import yaml
 import click
 import pandas as pd
 import pendulum
-import prettytable
 
 import sky
 from sky import backends
@@ -47,6 +46,7 @@ from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
+from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -323,17 +323,6 @@ class _NaturalOrderGroup(click.Group):
         return self.commands.keys()
 
 
-def _create_table(field_names):
-    """Creates table with default style."""
-    table = prettytable.PrettyTable()
-    table.field_names = field_names
-    table.border = False
-    table.left_padding_width = 0
-    table.right_padding_width = 2
-    table.align = 'l'
-    return table
-
-
 @click.group(cls=_NaturalOrderGroup)
 def cli():
     pass
@@ -523,7 +512,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     """Show launched clusters."""
     show_all = all
     clusters_status = global_user_state.get_clusters()
-    cluster_table = _create_table([
+    cluster_table = util_lib.create_table([
         'NAME',
         'LAUNCHED',
         'RESOURCES',
@@ -1144,9 +1133,12 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         return ', '.join([str(e) for e in lst])
 
     def _output():
-        gpu_table = _create_table(['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
-        tpu_table = _create_table(['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
-        other_table = _create_table(['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
+        gpu_table = util_lib.create_table(
+            ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
+        tpu_table = util_lib.create_table(
+            ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
+        other_table = util_lib.create_table(
+            ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         if gpu_name is None:
             result = service_catalog.list_accelerator_counts(gpus_only=True)
@@ -1175,7 +1167,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name)
         for i, (gpu, items) in enumerate(result.items()):
-            accelerator_table = _create_table([
+            accelerator_table = util_lib.create_table([
                 'GPU',
                 'QTY',
                 'CLOUD',
