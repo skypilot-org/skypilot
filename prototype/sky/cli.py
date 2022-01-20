@@ -36,8 +36,6 @@ import yaml
 import click
 import pandas as pd
 import pendulum
-import prettytable
-import tabulate
 
 import sky
 from sky import backends
@@ -48,6 +46,7 @@ from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
+from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -530,15 +529,13 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     """Show launched clusters."""
     show_all = all
     clusters_status = global_user_state.get_clusters()
-    cluster_table = prettytable.PrettyTable()
-    cluster_table.field_names = [
+    cluster_table = util_lib.create_table([
         'NAME',
         'LAUNCHED',
         'RESOURCES',
         'COMMAND',
         'STATUS',
-    ]
-    cluster_table.align['COMMAND'] = 'l'
+    ])
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
@@ -565,7 +562,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
             # STATUS
             cluster_status['status'].value,
         ])
-    click.echo(f'Sky Clusters\n{cluster_table}')
+    click.echo(cluster_table)
 
 
 @cli.command()
@@ -1138,77 +1135,74 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
               default=False,
               help='Show details of all GPU/TPU/accelerator offerings.')
 def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-builtin
-    """Show all GPU/TPU/accelerator offerings that Sky supports."""
+    """List GPU/TPU/accelerators supported by Sky.
+
+    To show what cloud offers a GPU/TPU type, use `sky show-gpus <gpu>`.
+
+    To show all GPUs, including less common ones and their detailed
+    information, use `sky show-gpus --all`.
+    """
     show_all = all
     if show_all and gpu_name is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
+    def _list_to_str(lst):
+        return ', '.join([str(e) for e in lst])
+
     def _output():
+        gpu_table = util_lib.create_table(
+            ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
+        tpu_table = util_lib.create_table(
+            ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
+        other_table = util_lib.create_table(
+            ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
+
         if gpu_name is None:
             result = service_catalog.list_accelerator_counts(gpus_only=True)
-            ordered = [('Common Nvidia GPUs\n------------------', [])]
+
+            # NVIDIA GPUs
             for gpu in service_catalog.get_common_gpus():
-                ordered.append((gpu, result.pop(gpu)))
-            ordered.append(('-----------\nGoogle TPUs\n-----------', []))
+                gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+            yield from gpu_table.get_string()
+            yield '\n\n'
+
+            # Google TPUs
             for tpu in service_catalog.get_tpus():
-                ordered.append((tpu, result.pop(tpu)))
+                tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+            yield from tpu_table.get_string()
+
+            # Other GPUs
             if show_all:
-                ordered.append(('----------\nOther GPUs\n----------', []))
-                ordered.extend(sorted(result.items()))
-
-            data = [(gpu, str(counts)[1:-1]) for gpu, counts in ordered]
-            yield tabulate.tabulate(data, ['GPU', 'Available Quantities'])
-            yield '\n' + '-' * 42 + '\n'
-            if not show_all:
-                yield ('To specify a GPU/TPU in your task YAML, '
-                       'use `<gpu>: <qty>`. Example:\n'
-                       '    resources:\n'
-                       '      accelerators:\n'
-                       '        V100: 8\n\n'
-                       'To show what cloud offers a GPU/TPU type, use '
-                       '`sky show-gpus <gpu>`. To show all GPUs, including '
-                       'less common ones, and their detailed information, '
-                       'use `sky show-gpus --all`.')
+                yield '\n\n'
+                for gpu, qty in sorted(result.items()):
+                    other_table.add_row([gpu, _list_to_str(qty)])
+                yield from other_table.get_string()
+            else:
                 return
-            yield ('Each table below shows the detailed offerings '
-                   'of a GPU/TPU.\n\n')
 
+        # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name)
-        show_gcp_msg = False
-        for gpu, items in result.items():
-            headers = ['GPU', 'Qty', 'Cloud', 'Instance Type', 'Host Memory']
-            data = []
+        for i, (gpu, items) in enumerate(result.items()):
+            accelerator_table = util_lib.create_table([
+                'GPU',
+                'QTY',
+                'CLOUD',
+                'INSTANCE_TYPE',
+                'HOST_MEMORY',
+            ])
             for item in items:
-                if item.cloud == 'GCP':
-                    show_gcp_msg = True
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(*)'
                 mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '(*)'
-                data.append([
+                accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
                     instance_type_str, mem_str
                 ])
-            yield tabulate.tabulate(data, headers)
-            yield '\n\n'
 
-        if show_gcp_msg:
-            yield (
-                '(*) By default Sky uses GCP n1-highmem-8 (52GB memory) and '
-                'attaches GPU/TPUs to it. If you need more memory, specify an '
-                'instance type according to '
-                'https://cloud.google.com/compute/docs/'
-                'general-purpose-machines#n1_machines.\n\n')
-
-        yield ('To specify a GPU/TPU in your task YAML, use `<gpu>: <qty>`. '
-               'Example:\n'
-               '    resources:\n'
-               '      accelerators:\n'
-               '        V100: 8\n\n'
-               'Alternatively, specify a cloud and instance type. Example:\n'
-               '    resources:\n'
-               '      cloud: aws\n'
-               '      instance_type: p3.16xlarge\n')
+            if i != 0 or gpu_name is None:
+                yield '\n\n'
+            yield from accelerator_table.get_string()
 
     if show_all:
         click.echo_via_pager(_output())

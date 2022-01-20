@@ -11,7 +11,8 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import pendulum
-import prettytable
+
+from sky.skylet import util_lib
 
 SKY_LOGS_DIRECTORY = 'sky_logs'
 SKY_REMOTE_LOGS_ROOT = '~'
@@ -215,9 +216,8 @@ def _readable_time_duration(start: int) -> str:
 
 
 def _show_job_queue(jobs) -> None:
-    job_table = prettytable.PrettyTable()
-    job_table.field_names = ['ID', 'NAME', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
-    job_table.align['LOG'] = 'l'
+    job_table = util_lib.create_table(
+        ['ID', 'NAME', 'USER', 'SUBMITTED', 'STATUS', 'LOG'])
 
     for job in jobs:
         job_table.add_row([
