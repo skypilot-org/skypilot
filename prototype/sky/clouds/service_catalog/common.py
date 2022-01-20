@@ -1,16 +1,17 @@
 """Common utilities for service catalog."""
 import os
 from typing import Dict, List, NamedTuple, Optional
-
 import pandas as pd
+import random
 
 from sky.clouds import cloud as cloud_lib
 
 catalog_config = {
     # Only retry the region/zones that has the resources.
-    "_faster_retry_by_catalog": True,
+    "_faster_retry_by_catalog": False,
     # Only retry the region/zones that is in the area. This is cloud specific.
     "_retry_area": ["us", "america"], # us, eu, ap
+    "_shuffle_regions": True,
 }
 
 class InstanceTypeInfo(NamedTuple):
@@ -173,5 +174,8 @@ def get_region_zones(df: pd.DataFrame,
         zones_in_region = df.groupby('Region')['AvailabilityZone'].unique().apply(
             lambda x: [cloud_lib.Zone(zone) for zone in x])
         for region in regions:
-            region.set_zones(zones_in_region[region.name])
+            zones = zones_in_region[region.name]
+            region.set_zones(zones)
+    if catalog_config['_shuffle_regions']:
+        random.shuffle(regions)
     return regions
