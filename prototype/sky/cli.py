@@ -1144,9 +1144,9 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         return ', '.join([str(e) for e in lst])
 
     def _output():
-        gpu_table = _create_table(['NVIDIA GPUs', 'AVAILABLE QUANTITIES'])
-        tpu_table = _create_table(['GOOGLE TPUs', 'AVAILABLE QUANTITIES'])
-        other_table = _create_table(['OTHER GPUs', 'AVAILABLE QUANTITIES'])
+        gpu_table = _create_table(['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
+        tpu_table = _create_table(['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
+        other_table = _create_table(['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         if gpu_name is None:
             result = service_catalog.list_accelerator_counts(gpus_only=True)
@@ -1179,8 +1179,8 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                 'GPU',
                 'QTY',
                 'CLOUD',
-                'INSTANCE TYPE',
-                'HOST MEMORY',
+                'INSTANCE_TYPE',
+                'HOST_MEMORY',
             ])
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
