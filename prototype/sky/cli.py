@@ -247,11 +247,12 @@ def _create_and_ssh_into_node(
 
         # This handles stopped interactive nodes where they are restarted by
         # skipping sky start and directly calling sky [cpu|tpu|gpu]node.
+
+        # cluster_state = global_user_state.get_
         if handle is not None and handle.launched_resources is not None:
             to_provision = None
             task.set_resources(handle.launched_resources)
             task.num_nodes = handle.launched_nodes
-            click.secho(f'Starting cluster {cluster_name}...', bold=True)
         else:
             dag = sky.optimize(dag)
             task = dag.tasks[0]
