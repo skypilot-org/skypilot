@@ -3,6 +3,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+import textwrap
+from typing import Optional
 
 import colorama
 import docker
@@ -23,14 +25,18 @@ DOCKERFILE_SETUPCMD = """RUN {setup_command}"""
 DOCKERFILE_COPYCMD = """COPY {copy_command}"""
 DOCKERFILE_RUNCMD = """CMD {run_command}"""
 
-CONDA_SETUP_PREFIX = """. $(conda info --base)/etc/profile.d/conda.sh || true"""
+CONDA_SETUP_PREFIX = '. $(conda info --base)/etc/profile.d/conda.sh 2> ' \
+                     '/dev/null || true '
+
+SKY_DOCKER_SETUP_SCRIPT = 'sky_setup.sh'
+SKY_DOCKER_RUN_SCRIPT = 'sky_run.sh'
 
 
 def create_dockerfile(
     base_image: str,
     setup_command: str,
     copy_path: str,
-    output_path: str = None,
+    build_dir: str,
     run_command: str = None,
 ) -> str:
     """Writes a valid dockerfile to the specified path.
@@ -48,14 +54,16 @@ def create_dockerfile(
             install htop"
         copy_path: local path to copy into the image. these are placed in the
             root of the container.
-        output_path: if specified - where to write the dockerfile. else
-            dockerfile is not written to disk.
+        build_dir: Where to write the dockerfile and setup scripts
         run_command: cmd argument to the dockerfile. optional - can also be
             specified at runtime.
 
     Returns:
-        String containing contents of the dockerfile
+        Tuple[dockerfile_contents(str), img_metadata(Dict[str, str])]
+        dockerfile_contents: contents of the dockerfile
+        img_metadata: metadata related to the image, propagated to the backend
     """
+    img_metadata = {}
     dockerfile_contents = DOCKERFILE_TEMPLATE.format(base_image=base_image)
 
     # Copy workdir to image
@@ -67,29 +75,44 @@ def create_dockerfile(
         dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
             copy_command=copy_docker_cmd)
 
-    # Add setup commands (if they exist) after initializing conda
-    if setup_command:
-        setup_command_append = f' && {setup_command}'
-    else:
-        setup_command_append = ''
-    # cd to workdir and prepend conda init commands
-    cmd = f'/bin/bash -c "cd /{workdir_name} && \
-            {CONDA_SETUP_PREFIX + setup_command_append}"'
+    def add_script_to_dockerfile(dockerfile_contents: str, multiline_cmds: str,
+                                 out_filename: str):
+        # Converts multiline commands to a script and adds the script to the
+        # dockerfile. You still need to add the docker command to run the
+        # script (either as CMD or RUN).
+        script_path = os.path.join(build_dir, out_filename)
+        bash_codegen(workdir_name, multiline_cmds, script_path)
 
+        # Add CMD to run setup
+        copy_cmd = f'{out_filename} /sky/{out_filename}'
+
+        # Set permissions and add to dockerfile
+        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
+            copy_command=copy_cmd)
+        dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(
+            setup_command=f'chmod +x ./sky/{out_filename}')
+        return dockerfile_contents
+
+    # ===== SETUP ======
+    dockerfile_contents = add_script_to_dockerfile(dockerfile_contents,
+                                                   setup_command,
+                                                   SKY_DOCKER_SETUP_SCRIPT)
+    cmd = f'./sky/{SKY_DOCKER_SETUP_SCRIPT}'
     dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(setup_command=cmd)
 
-    # Add run commands to Dockerfile
-    if run_command:
-        # Source .bashrc since it's not done on non-interactive shells
-        cmd = f'/bin/bash -c "{CONDA_SETUP_PREFIX} && cd /{workdir_name} && \
-                {run_command}"'
+    # ===== RUN ======
+    dockerfile_contents = add_script_to_dockerfile(dockerfile_contents,
+                                                   run_command,
+                                                   SKY_DOCKER_RUN_SCRIPT)
+    cmd = f'./sky/{SKY_DOCKER_RUN_SCRIPT}'
+    dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=cmd)
 
-        dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=cmd)
+    # Write Dockerfile
+    with open(os.path.join(build_dir, 'Dockerfile'), 'w') as f:
+        f.write(dockerfile_contents)
 
-    if output_path:
-        with open(output_path, 'w') as f:
-            f.write(dockerfile_contents)
-    return dockerfile_contents
+    img_metadata['workdir_name'] = workdir_name
+    return dockerfile_contents, img_metadata
 
 
 def _execute_build(tag, context_path):
@@ -97,6 +120,8 @@ def _execute_build(tag, context_path):
     Executes a dockerfile build with the given context.
     The context path must contain the dockerfile and all dependencies.
     """
+    assert tag is not None, 'Image tag cannot be None - have you specified a ' \
+                            'task name? '
     docker_client = docker.from_env()
     try:
         unused_image, unused_build_logs = docker_client.images.build(
@@ -116,9 +141,9 @@ def _execute_build(tag, context_path):
         raise
 
 
-def build_dockerimage(dockerfile_contents, copy_path, tag):
+def build_dockerimage(task, tag):
     """
-    Builds a docker image for the given dockerfile and paths to add in context.
+    Builds a docker image for the given task.
 
     This method is responsible for:
     1. Create a temp directory to set the build context.
@@ -126,18 +151,23 @@ def build_dockerimage(dockerfile_contents, copy_path, tag):
     3. Run the dockerbuild
     """
     # Get tempdir
-    temp_dir = tempfile.mkdtemp(prefix='sky_')
+    temp_dir = tempfile.mkdtemp(prefix='sky_local_')
 
-    # Write dockerfile to tempdir.
-    dockerfile_path = os.path.join(temp_dir, 'Dockerfile')
-    with open(dockerfile_path, 'w') as f:
-        f.write(dockerfile_contents)
+    # Add trailing slash to workdir if missing
+    copy_path = os.path.join(task.workdir, '') if task.workdir else task.workdir
+
+    # Create dockerfile
+    _, img_metadata = create_dockerfile(base_image=task.docker_image,
+                                        setup_command=task.setup,
+                                        copy_path=copy_path,
+                                        run_command=task.run,
+                                        build_dir=temp_dir)
 
     # Copy copy_path contents to tempdir
     if copy_path:
         copy_dir_name = os.path.basename(os.path.dirname(copy_path))
         dst = os.path.join(temp_dir, copy_dir_name)
-        shutil.copytree(copy_path, dst)
+        shutil.copytree(os.path.expanduser(copy_path), dst)
     logger.info(f'Using tempdir {temp_dir} for docker build.')
 
     # Run docker image build
@@ -146,19 +176,48 @@ def build_dockerimage(dockerfile_contents, copy_path, tag):
     # Clean up temp dir
     subprocess.run(['rm', '-rf', temp_dir], check=False)
 
-    return tag
+    return tag, img_metadata
 
 
 def build_dockerimage_from_task(task: task_mod.Task):
     """ Builds a docker image from a Task"""
-    copy_path = os.path.join(task.workdir, '')  # Add trailing slash if missing
-    dockerfile_contents = create_dockerfile(base_image=task.docker_image,
-                                            setup_command=task.setup,
-                                            copy_path=copy_path,
-                                            run_command=task.run)
-    tag = build_dockerimage(dockerfile_contents, copy_path, tag=task.name)
-    return tag
+    tag, img_metadata = build_dockerimage(task, tag=task.name)
+    return tag, img_metadata
 
 
 def push_dockerimage(local_tag, remote_name):
     raise NotImplementedError('Pushing images is not yet implemented.')
+
+
+def make_bash_from_multiline(codegen: str) -> str:
+    """
+    Makes a bash script from a multi-line string of commands.
+    Automatically includes conda setup prefixes.
+    Args:
+        codegen: str: multiline commands to be converted to a shell script
+
+    Returns:
+        script: str: str of shell script that can be written to a file
+    """
+    script = [
+        textwrap.dedent(f"""\
+        #!/bin/bash
+        {CONDA_SETUP_PREFIX}"""),
+        codegen,
+    ]
+    script = '\n'.join(script)
+    return script
+
+
+def bash_codegen(workdir_name: str,
+                 multiline_cmds: Optional[str],
+                 out_path: Optional[str] = None):
+    # Generate commands (if they exist) script and write to file
+    if not multiline_cmds:
+        multiline_cmds = ''
+    multiline_cmds = f'cd /{workdir_name}\n{multiline_cmds}'
+    script_contents = make_bash_from_multiline(multiline_cmds)
+    if out_path:
+        with open(out_path, 'w') as fp:
+            fp.write(script_contents)
+    return script_contents

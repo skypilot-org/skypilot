@@ -13,6 +13,9 @@ PostSetupFn = Callable[[str], Any]
 class Backend:
     """Backend interface: handles provisioning, setup, and scheduling."""
 
+    # NAME is used to identify the backend class from cli/yaml.
+    NAME = 'backend'
+
     # Backend-specific handle to the launched resources (e.g., a cluster).
     # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
     class ResourceHandle:
