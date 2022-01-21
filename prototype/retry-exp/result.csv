@@ -1,0 +1,2 @@
+cloud,gpu,gpu_count,spot,retry_count,status,detailed_error_count
+aws,K80,1,True,1,SUCCEEDED,{'InsufficientInstanceCapacity': 1}

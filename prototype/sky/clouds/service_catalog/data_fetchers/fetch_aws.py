@@ -14,7 +14,24 @@ import ray
 from sky.clouds.service_catalog import common
 from sky.cloud_adaptors import aws
 
-REGIONS = ['us-west-1', 'us-west-2', 'us-east-1', 'us-east-2']
+REGIONS = [
+    'us-east-1',
+    'us-east-2',
+    'us-west-1',
+    'us-west-2',
+    'us-central-1',
+    'eu-west-1',
+    'eu-west-2',
+    'eu-west-3',
+    'eu-north-1',
+    'eu-south-1',
+    'eu-central-1',
+    'ap-northeast-1',
+    'ap-northeast-2',
+    'ap-southeast-1',
+    'ap-southeast-2',
+    'ap-east-1',
+]
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
 # only available in this region, but it serves pricing information for all regions.
 PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'

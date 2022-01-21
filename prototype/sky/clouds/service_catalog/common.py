@@ -8,10 +8,10 @@ from sky.clouds import cloud as cloud_lib
 
 catalog_config = {
     # Only retry the region/zones that has the resources.
-    "_faster_retry_by_catalog": False,
+    '_faster_retry_by_catalog': False,
     # Only retry the region/zones that is in the area. This is cloud specific.
-    "_retry_area": ["us", "america"], # us, eu, ap
-    "_shuffle_regions": True,
+    '_retry_area': ['us', 'america'], # us, eu, ap or more specific us-east, us-west-1, etc.
+    '_shuffle_regions': True,
 }
 
 class InstanceTypeInfo(NamedTuple):
