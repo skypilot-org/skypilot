@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import os
+import re
 from typing import Callable, Dict, List, Optional, Set, Union
 from urllib import parse
 import yaml
@@ -20,11 +21,45 @@ CLOUD_REGISTRY = {
     'azure': clouds.Azure(),
 }
 
+_VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
+_VALID_NAME_DESCR = 'ASCII characters and may contain lowercase and' \
+                    ' uppercase letters, digits, underscores, periods,' \
+                    ' and dashes. No triple dashes or underscores.' \
+                    ' Must start and end with alphanumeric characters.' \
+                    ' No triple dashes or underscores.'
+
 
 def _is_cloud_store_url(url):
     result = parse.urlsplit(url)
     # '' means non-cloud URLs.
     return result.netloc
+
+
+def _check_name(name: str) -> bool:
+    """
+    Checks if the task name is valid.
+
+    Valid is defined as either NoneType or str with ASCII characters which may
+    contain lowercase and uppercase letters, digits, underscores, periods,
+    and dashes. Must start and end with alphanumeric characters.
+    No triple dashes or underscores.
+
+    Examples:
+        some_name_here
+        some-name-here
+        some__name__here
+        some--name--here
+        some__name--here
+        some.name.here
+        some-name_he.re
+        this---shouldnt--work
+        this___shouldnt_work
+        _thisshouldntwork
+        thisshouldntwork_
+    """
+    if name is None:
+        return True
+    return bool(re.fullmatch(_VALID_NAME_REGEX, name))
 
 
 class Task:
@@ -80,6 +115,8 @@ class Task:
           container_name: Unused?
           private_key: Unused?
         """
+        assert _check_name(name), f'Invalid task name {name}. Valid name: ' \
+                                  f'{_VALID_NAME_DESCR}'
         self.name = name
         self.run = run
         self.storage_mounts = {}

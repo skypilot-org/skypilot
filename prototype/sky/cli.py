@@ -372,13 +372,11 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
             # Treat entrypoint as a bash command.
             click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
-            task = sky.Task(name='<cmd>', run=entrypoint)
+            task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
 
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
-
-    click.secho(f'Running task on cluster {cluster} ...', fg='yellow')
 
     if backend_name == backends.LocalDockerBackend.NAME:
         backend = backends.LocalDockerBackend()
