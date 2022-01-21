@@ -120,10 +120,10 @@ def get_instance_type_for_accelerator_impl(
                     its[0] + '_Promo' == its[1]), its
         elif len(instance_types) == 4:
             its = sorted(instance_types)
-            assert its == [
+            assert its in ([
                 'Standard_NV12s_v3', 'Standard_NV6', 'Standard_NV6_Promo',
                 'Standard_NV6s_v2'
-            ], its
+            ], ['g5g.2xlarge', 'g5g.4xlarge', 'g5g.8xlarge', 'g5g.xlarge']), its
         else:
             # - T4, offered by AWS g4dn.{1,2,4,8,16}xl
             # - T4, offered by Azure Standard_NC{4,8,16}as_T4_v3

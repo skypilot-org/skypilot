@@ -18,14 +18,16 @@ instance_series = {
     'g': {
         'T4': [1, 4, 8],
         'M60': [1, 2, 4],
-        'A10G': [1, 4, 8],
         'K520': [1, 4],
-        'T4g': [1, 2]
+        # 'T4g': [1, 2], # Need Arm64 AMI
+        # 'A10G': [1, 4, 8],
     }
 }
 
 SELECTED_REGIONS = {
-    'zhwu_g_regions': ['us-east-2', 'us-west-2', 'eu-west-2', 'eu-central-1'],
+    'zhwu_g_regions': [
+        'us-east-2', 'us-west-2', 'eu-west-2', 'eu-central-1', 'ca-central-1'
+    ],
     'all_regions': [],
 }
 
@@ -39,7 +41,8 @@ TEST_SERIES = 'g'
 RETRY_UNTIL_SUCCEEDED = True
 RETRY_UNTIL_SUCCEEDED_GAP = 60
 # Catalog configs
-TEST_REGIONS = 'all_regions'
+# TEST_REGIONS = 'all_regions'
+TEST_REGIONS = 'zhwu_g_regions'
 catalog_config = dict(
     _faster_retry_by_catalog=False,
     # Only retry the region/zones that are in the area. This is cloud specific.
