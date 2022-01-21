@@ -6,6 +6,8 @@
 #   sky launch -c min minimal.yaml
 #   sky down -c min
 
+name: minimal
+
 resources:
   cloud: aws
 
