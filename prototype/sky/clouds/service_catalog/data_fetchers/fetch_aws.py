@@ -20,17 +20,19 @@ REGIONS = [
     'us-west-1',
     'us-west-2',
     'ca-central-1',
+    # eu
+    'eu-central-1',
     'eu-west-1',
     'eu-west-2',
-    # 'eu-west-3', # credential fails
-    'eu-north-1',
-    # 'eu-south-1',  # credential fails
-    'eu-central-1',
-    'ap-northeast-1',
+    'eu-west-3',
+    #ap
+    # 'ap-east-1': 'TODO: not found',
+    'ap-south-1',
+    'ap-northeast-3',
     'ap-northeast-2',
     'ap-southeast-1',
     'ap-southeast-2',
-    'ap-east-1',
+    'ap-northeast-1',
 ]
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
 # only available in this region, but it serves pricing information for all regions.
