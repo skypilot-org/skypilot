@@ -80,10 +80,26 @@ class AWS(clouds.Cloud):
         # AWS Deep Learning AMI (Ubuntu 18.04), version 50.0
         # https://aws.amazon.com/marketplace/pp/prodview-x5nivojpquy6y
         amis = {
+            # us
             'us-east-1': 'ami-0e3c68b57d50caf64',
             'us-east-2': 'ami-0ae79682024fe31cd',
             # 'us-west-1': 'TODO: cannot launch',
             'us-west-2': 'ami-0050625d58fa27b6d',
+            # ca
+            'ca-central-1': 'ami-00681419ff1614111',
+            # eu
+            'eu-central-1': 'ami-030544fb939a57d47',
+            'eu-west-1': 'ami-050232e50c0e4c717',
+            'eu-west-2': 'ami-04784f7a629cfc417',
+            'eu-west-3': 'ami-0487529c03a579d26',
+            #ap
+            # 'ap-east-1': 'TODO: not found',
+            'ap-south-1': 'ami-010f0b376694126ea',
+            'ap-northeast-3': 'ami-0ecf814036c4efe9f',
+            'ap-northeast-2': 'ami-0b740f27ce3f0e5c7',
+            'ap-southeast-1': 'ami-03cd4f13212437f05',
+            'ap-southeast-2': 'ami-0187cfc974691fa71',
+            'ap-northeast-1': 'ami-038b35bb6d9b45de3',
         }
         assert region_name in amis, region_name
         return amis[region_name]

@@ -42,7 +42,7 @@ catalog_config = dict(
     # Shuffle the order of regions to be tried
     _shuffle_regions=True,
 )
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 # Override the catalog configs
