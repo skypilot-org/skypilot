@@ -19,12 +19,12 @@ REGIONS = [
     'us-east-2',
     'us-west-1',
     'us-west-2',
-    'us-central-1',
+    # 'us-central-1', # Could not connect to the endpoint URL: "https://ec2.us-central-1.amazonaws.com/"
     'eu-west-1',
     'eu-west-2',
-    'eu-west-3',
+    # 'eu-west-3', # credential fails
     'eu-north-1',
-    'eu-south-1',
+    # 'eu-south-1',  # credential fails
     'eu-central-1',
     'ap-northeast-1',
     'ap-northeast-2',
@@ -100,7 +100,7 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
         try:
             return pricing_df.loc[t]['PricePerUnit']
         except KeyError:
-            print(f'{region} WARNING: cannot find pricing for {t}')
+            # print(f'{region} WARNING: cannot find pricing for {t}')
             return np.nan
 
     def get_spot_price(row):
@@ -109,9 +109,9 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
         try:
             return spot_pricing_df.loc[(instance, zone)]['SpotPrice']
         except KeyError:
-            print(
-                f'{region} WARNING: cannot find spot pricing for {instance} {zone}'
-            )
+            # print(
+            #     f'{region} WARNING: cannot find spot pricing for {instance} {zone}'
+            # )
             return np.nan
 
     def get_acc_info(row) -> Tuple[str, float]:
