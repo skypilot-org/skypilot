@@ -10,9 +10,20 @@ catalog_config = {
     # Only retry the region/zones that has the resources.
     '_faster_retry_by_catalog': False,
     # Only retry the region/zones that is in the area. This is cloud specific.
-    '_retry_area': ['us', 'america'], # us, eu, ap or more specific us-east, us-west-1, etc.
+    # us, eu, ap or more specific us-east, us-west-1, etc.
+    '_retry_area': ['us', 'america'],
     '_shuffle_regions': True,
 }
+try:
+    # Load customized catalog_config if it exists.
+    import json
+    file_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(file_dir, '_catalog_config.json')
+    with open(config_path, 'r') as f:
+        catalog_config = json.load(f)
+    # print("Loaded customized catalog_config.", catalog_config)
+except:
+    pass
 
 class InstanceTypeInfo(NamedTuple):
     """Instance type information.

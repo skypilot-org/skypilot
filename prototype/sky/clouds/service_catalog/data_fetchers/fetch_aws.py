@@ -19,7 +19,7 @@ REGIONS = [
     'us-east-2',
     'us-west-1',
     'us-west-2',
-    # 'us-central-1', # Could not connect to the endpoint URL: "https://ec2.us-central-1.amazonaws.com/"
+    'ca-central-1',
     'eu-west-1',
     'eu-west-2',
     # 'eu-west-3', # credential fails
