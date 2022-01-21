@@ -495,7 +495,7 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
             # Treat entrypoint as a bash command.
             click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
-            task = sky.Task(name='<cmd>', run=entrypoint)
+            task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
 
             if isinstance(backend, backends.CloudVmRayBackend):
