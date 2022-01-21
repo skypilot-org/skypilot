@@ -23,7 +23,11 @@ instance_series = {
         'T4g': [1, 2]
     }
 }
-ZHWU_G_SERIES_REGIONS = ['us-east-2', 'us-west-2', 'eu-west-2', 'eu-central-1']
+
+SELECTED_REGIONS = {
+    'zhwu_g_regions': ['us-east-2', 'us-west-2', 'eu-west-2', 'eu-central-1'],
+    'all_regions': [],
+}
 
 PATTERN = r'Got (.*) in '
 SECOND_ERR_PATTERN = r'An error occurred \((.*?)\)'
@@ -35,23 +39,23 @@ TEST_SERIES = 'g'
 RETRY_UNTIL_SUCCEEDED = True
 RETRY_UNTIL_SUCCEEDED_GAP = 60
 # Catalog configs
+TEST_REGIONS = 'all_regions'
 catalog_config = dict(
     _faster_retry_by_catalog=False,
     # Only retry the region/zones that are in the area. This is cloud specific.
-    _retry_area=ZHWU_G_SERIES_REGIONS,
+    _retry_area=SELECTED_REGIONS[TEST_REGIONS],
     # Shuffle the order of regions to be tried
     _shuffle_regions=True,
 )
-DEBUG_MODE = False
-
+DEBUG_MODE = True
 
 # Override the catalog configs
 from sky.clouds.service_catalog import common
+
 file_dir = os.path.dirname(common.__file__)
 config_path = os.path.join(file_dir, '_catalog_config.json')
 with open(config_path, 'w') as f:
     json.dump(catalog_config, f)
-
 
 launch_yaml = """
 resources:
@@ -60,7 +64,7 @@ resources:
     {gpu}: {cnt}
   use_spot: true
 """
-RESULT_PATH = f'result_{TEST_SERIES}'
+RESULT_PATH = f'result_{TEST_SERIES}_{TEST_REGIONS}'
 if RETRY_UNTIL_SUCCEEDED:
     RESULT_PATH += '_retry'
 RESULT_PATH += '.csv'
@@ -78,7 +82,6 @@ if os.path.exists(RESULT_PATH):
 def parse_outputs(lines: str, exp_status: dict):
     error_count = collections.defaultdict(int)
 
-    succeeded = True
     fetch_error_in_next_line = False
     for line in lines:
         if fetch_error_in_next_line:
@@ -94,11 +97,8 @@ def parse_outputs(lines: str, exp_status: dict):
                 fetch_error_in_next_line = True
             else:
                 error_count[error] += 1
-        if 'sky.exceptions.ResourcesUnavailableError' in line:
-            succeeded = False
     exp_status['retry_count'] = sum(error_count.values())
     exp_status['detailed_error_count'] = dict(error_count)
-    exp_status['status'] = 'SUCCEEDED' if succeeded else 'FAILED'
     return exp_status
 
 
@@ -129,14 +129,15 @@ for gpu, cnt_list in TEST_INSTANCE_SERIES.items():
                                     stderr=subprocess.STDOUT,
                                     shell=True,
                                     preexec_fn=os.setsid)
-
+            succeeded = False
             lines = []
             for line in io.TextIOWrapper(proc.stdout, encoding='utf-8'):
+                lines.append(line)
                 if 'Shared connection to ' in line:
+                    succeeded = True
                     break
                 if DEBUG_MODE:
                     print(line, end='')
-                lines.append(line)
 
             down_cmd = 'sky down retry-exp'
             proc = subprocess.run(down_cmd,
@@ -145,6 +146,7 @@ for gpu, cnt_list in TEST_INSTANCE_SERIES.items():
                                   shell=True)
 
             exp_status = parse_outputs(lines, exp_status)
+            exp_status['status'] = 'SUCCEEDED' if succeeded else 'FAILED'
             if exp_status['status'] == 'SUCCEEDED':
                 break
             print("\nFailed to launch.")

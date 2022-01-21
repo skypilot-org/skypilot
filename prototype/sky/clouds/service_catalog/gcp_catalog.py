@@ -62,12 +62,6 @@ def get_region_zones_for_accelerators(
 ) -> List[cloud.Region]:
     """Returns a list of regions for a given accelerators."""
     df = _df
-    
-    # filter the area of the instances, e.g. us or eu
-    areas = common.catalog_config["_retry_area"]
-    filter_str = '|'.join(areas)
-    df = df[df['Region'].str.contains(filter_str)]
-    
     if common.catalog_config['_faster_retry_by_catalog']:
         df = _get_accelerator(df, accelerator, count, region=None)
     return common.get_region_zones(df, use_spot)
