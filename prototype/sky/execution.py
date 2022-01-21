@@ -131,8 +131,7 @@ def _execute(dag: sky.Dag,
                                      task.get_cloud_to_remote_file_mounts())
 
         if stages is None or Stage.PRE_EXEC in stages:
-            if task.post_setup_fn is not None:
-                backend.run_post_setup(handle, task.post_setup_fn, task)
+            backend.run_post_setup(handle, task.post_setup_fn, task)
 
         if stages is None or Stage.EXEC in stages:
             try:
