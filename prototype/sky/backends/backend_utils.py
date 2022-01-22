@@ -255,9 +255,6 @@ class SSHConfigHelper(object):
                 f.write('\n')
                 f.write(codegen)
 
-        # Add git credential forwarding
-        GitCredentialsHelper.start_agent()
-
     @classmethod
     def remove_cluster(cls, ip: str, auth_config: Dict[str, str]):
         """Remove authentication information for cluster from local SSH config.
@@ -314,48 +311,6 @@ class SSHConfigHelper(object):
         with open(config_path, 'w') as f:
             f.write(''.join(config).strip())
             f.write('\n')
-
-
-class GitCredentialsHelper(object):
-    """Helper for handling local git SSH credentials."""
-
-    # TODO: Add support for other remotes (e.g. Bitbucket)
-    git_remote_url = 'git@github.com'
-
-    @classmethod
-    def _get_ssh_key(cls) -> Optional[str]:
-        """Find SSH key used for git authentication."""
-        out = run(f'ssh -T {cls.git_remote_url} -v',
-                  check=False,
-                  stderr=subprocess.PIPE,
-                  stdout=subprocess.PIPE)
-        ssh_log = out.stderr.decode('utf-8').splitlines()
-
-        # scan for the key
-        key_path = None
-        cursor = 0
-        while cursor < len(ssh_log):
-            line = ssh_log[cursor]
-            if 'Server accepts key' in line:
-                key_path = [e for e in line.split() if '.ssh' in e][0]
-                logger.info(f'Found git key: {key_path}')
-                break
-            if 'Permission denied (publickey)' in line:
-                logger.info('Git SSH key not configured.'
-                            'Git credential forwarding will not work over SSH.')
-                break
-            cursor += 1
-
-        return key_path
-
-    @classmethod
-    def start_agent(cls) -> None:
-        """Start SSH agent for credential forwarding."""
-        key_path = cls._get_ssh_key()
-        if key_path is not None:
-            logger.info('Starting local SSH agent and adding GitHub SSH key.')
-            run('eval "$(ssh-agent -s)" && '
-                f'ssh-add -K {key_path} || ssh-add {key_path}')
 
 
 # TODO(suquark): once we have sky on PYPI, we should directly install sky
