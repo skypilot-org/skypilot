@@ -5,7 +5,6 @@ This is a remote utility module that provides logging functionality.
 import io
 import os
 import selectors
-import signal
 import subprocess
 import sys
 import time
@@ -99,7 +98,8 @@ def run_with_log(
         # The proc can be defunct if the python program is killed. Here we
         # manually check the status of the process when exitted and kill it,
         # if necessary. Open a new subprocess to kill the process, SIGKILL
-        # the process group and exit.
+        # the process group and exit. Adapted from
+        # ray/dashboard/modules/job/job_manager.py#L154
         subprocess.Popen(
             f'kill -9 -{proc_pid}',
             shell=True,
