@@ -88,12 +88,12 @@ def add_or_update_cluster(cluster_name: str,
         'INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?, ?)',
         (cluster_name, cluster_launched_at, handle, last_use, status.value))
     _CONN.commit()
-    
+
+
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
-    _CURSOR.execute(
-        'UPDATE clusters SET last_use=(?) WHERE name=(?)',
-        (_get_pretty_entry_point(), cluster_name))
+    _CURSOR.execute('UPDATE clusters SET last_use=(?) WHERE name=(?)',
+                    (_get_pretty_entry_point(), cluster_name))
     _CONN.commit()
 
 

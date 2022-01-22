@@ -1302,7 +1302,7 @@ class CloudVmRayBackend(backends.Backend):
             f'mkdir -p {remote_log_dir} && ray job submit '
             f'--address=127.0.0.1:8265 --job-id {job_id} -- '
             f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
-        
+
         self._run_command_on_head_via_ssh(handle,
                                           f'{cd} && {job_submit_cmd}',
                                           job_log_path,

@@ -74,14 +74,9 @@ def add_job(job_name: str, username: str, run_timestamp: str) -> int:
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     # job_id will autoincrement with the null value
-    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?)', (
-        job_name,
-        username,
-        job_submitted_at,
-        JobStatus.INIT.value,
-        run_timestamp,
-        None
-    ))
+    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?)',
+                    (job_name, username, job_submitted_at, JobStatus.INIT.value,
+                     run_timestamp, None))
     _CONN.commit()
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
@@ -95,11 +90,13 @@ def set_status(job_id: int, status: JobStatus) -> None:
     _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
                     (status.value, job_id))
     _CONN.commit()
-    
+
+
 def start_job(job_id: int) -> None:
     _CURSOR.execute('UPDATE jobs SET status=(?), start_at=(?) WHERE job_id=(?)',
                     (JobStatus.RUNNING.value, int(time.time()), job_id))
     _CONN.commit()
+
 
 def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
     records = []
