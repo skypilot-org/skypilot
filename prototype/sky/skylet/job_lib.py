@@ -87,8 +87,6 @@ def add_job(job_name: str, username: str, run_timestamp: str) -> int:
 
 
 def set_status(job_id: int, status: JobStatus) -> None:
-    assert status != JobStatus.RUNNING, (
-        'Please use set_job_started() to set job status to RUNNING')
     _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
                     (status.value, job_id))
     _CONN.commit()
