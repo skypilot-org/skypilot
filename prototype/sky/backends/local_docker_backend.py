@@ -84,6 +84,9 @@ class LocalDockerBackend(backends.Backend):
             else:
                 prefixed_str = _DOCKER_HANDLE_PREFIX + s
             return str.__new__(cls, prefixed_str, **kw)
+        
+        def get_cluster_name(self):
+            return self
 
     # Define the Docker-in-Docker mount
     _dind_mount = {
@@ -273,7 +276,6 @@ class LocalDockerBackend(backends.Backend):
             raise NotImplementedError(
                 'Tasks with num_nodes > 1 is currently not supported in '
                 'LocalDockerBackend.')
-        global_user_state.update_last_use(handle)
 
         # Handle a basic task
         if task.run is None:

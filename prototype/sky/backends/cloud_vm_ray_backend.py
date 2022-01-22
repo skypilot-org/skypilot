@@ -1008,6 +1008,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'\n\tlaunched_resources={self.launched_nodes}x '
                     f'{self.launched_resources}, '
                     f'\n\ttpu_delete_script={self.tpu_delete_script})')
+        def get_cluster_name(self):
+            return self.cluster_name
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
@@ -1358,7 +1360,6 @@ class CloudVmRayBackend(backends.Backend):
             return
 
         job_id = self._add_job(handle, task.name)
-        global_user_state.update_last_use(handle.cluster_name)
 
         # Case: Task(run, num_nodes=1)
         if task.num_nodes == 1:

@@ -19,7 +19,8 @@ class Backend:
     # Backend-specific handle to the launched resources (e.g., a cluster).
     # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
     class ResourceHandle:
-        pass
+        def get_cluster_name(self) -> str:
+            raise NotImplementedError
 
     def provision(self,
                   task: Task,
