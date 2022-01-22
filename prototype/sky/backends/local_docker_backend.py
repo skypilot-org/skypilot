@@ -273,6 +273,7 @@ class LocalDockerBackend(backends.Backend):
             raise NotImplementedError(
                 'Tasks with num_nodes > 1 is currently not supported in '
                 'LocalDockerBackend.')
+        global_user_state.update_last_use(handle)
 
         # Handle a basic task
         if task.run is None:
