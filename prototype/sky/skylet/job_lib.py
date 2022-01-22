@@ -87,12 +87,14 @@ def add_job(job_name: str, username: str, run_timestamp: str) -> int:
 
 
 def set_status(job_id: int, status: JobStatus) -> None:
+    assert status != JobStatus.RUNNING, (
+        'Please use set_job_started() to set job status to RUNNING')
     _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
                     (status.value, job_id))
     _CONN.commit()
 
 
-def start_job(job_id: int) -> None:
+def set_job_started(job_id: int) -> None:
     _CURSOR.execute('UPDATE jobs SET status=(?), start_at=(?) WHERE job_id=(?)',
                     (JobStatus.RUNNING.value, int(time.time()), job_id))
     _CONN.commit()

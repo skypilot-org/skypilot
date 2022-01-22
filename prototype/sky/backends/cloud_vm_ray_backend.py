@@ -273,7 +273,7 @@ class RayCodeGen:
                 print(\'SKY INFO: All task slots reserved.\',
                       file=sys.stderr,
                       flush=True)
-                job_lib.start_job({self.job_id!r})
+                job_lib.set_job_started({self.job_id!r})
                 """),
         ]
 
@@ -1008,6 +1008,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'\n\tlaunched_resources={self.launched_nodes}x '
                     f'{self.launched_resources}, '
                     f'\n\ttpu_delete_script={self.tpu_delete_script})')
+
         def get_cluster_name(self):
             return self.cluster_name
 
