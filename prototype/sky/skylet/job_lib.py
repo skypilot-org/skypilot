@@ -87,6 +87,8 @@ def add_job(job_name: str, username: str, run_timestamp: str) -> int:
 
 
 def set_status(job_id: int, status: JobStatus) -> None:
+    assert status != JobStatus.RUNNING, (
+        'Please use set_job_started() to set job status to RUNNING')
     _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
                     (status.value, job_id))
     _CONN.commit()
@@ -208,7 +210,8 @@ def _update_status() -> None:
     job_status = query_job_status(running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
-        set_status(job['job_id'], status)
+        if status != JobStatus.RUNNING:
+            set_status(job['job_id'], status)
 
 
 def _readable_time_duration(start: Optional[int]) -> str:
