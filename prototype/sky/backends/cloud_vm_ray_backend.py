@@ -273,7 +273,7 @@ class RayCodeGen:
                 print(\'SKY INFO: All task slots reserved.\',
                       file=sys.stderr,
                       flush=True)
-                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.RUNNING)
+                job_lib.start_job({self.job_id!r})
                 """),
         ]
 
@@ -345,9 +345,9 @@ class RayCodeGen:
             try:
                 ray.get(futures)
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
-            except ray.exceptions.WorkerCrashedError:
+            except ray.exceptions.WorkerCrashedError as e:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
-                raise RuntimeError('Command failed, please check the logs.')
+                raise RuntimeError('Command failed, please check the logs.') from e
             """)
         ]
 
@@ -1302,7 +1302,7 @@ class CloudVmRayBackend(backends.Backend):
             f'mkdir -p {remote_log_dir} && ray job submit '
             f'--address=127.0.0.1:8265 --job-id {job_id} -- '
             f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
-
+        
         self._run_command_on_head_via_ssh(handle,
                                           f'{cd} && {job_submit_cmd}',
                                           job_log_path,
@@ -1358,6 +1358,7 @@ class CloudVmRayBackend(backends.Backend):
             return
 
         job_id = self._add_job(handle, task.name)
+        global_user_state.update_last_use(handle.cluster_name)
 
         # Case: Task(run, num_nodes=1)
         if task.num_nodes == 1:
