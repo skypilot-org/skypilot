@@ -21,8 +21,8 @@ logger = sky_logging.init_logger(__name__)
 Dag = dag_lib.Dag
 Resources = resources_lib.Resources
 
-_DUMMY_SOURCE_NAME = 'dummy-source'
-_DUMMY_SINK_NAME = 'dummy-sink'
+_DUMMY_SOURCE_NAME = 'sky-dummy-source'
+_DUMMY_SINK_NAME = 'sky-dummy-sink'
 
 
 # Constants: minimize what target?

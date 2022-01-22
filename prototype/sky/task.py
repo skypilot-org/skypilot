@@ -35,7 +35,7 @@ def _is_cloud_store_url(url):
     return result.netloc
 
 
-def _check_name(name: str) -> bool:
+def _is_valid_name(name: str) -> bool:
     """
     Checks if the task name is valid.
 
@@ -115,8 +115,9 @@ class Task:
           container_name: Unused?
           private_key: Unused?
         """
-        assert _check_name(name), f'Invalid task name {name}. Valid name: ' \
-                                  f'{_VALID_NAME_DESCR}'
+        if not _is_valid_name(name):
+            raise ValueError(f'Invalid task name {name}. Valid name: ' \
+                             f'{_VALID_NAME_DESCR}')
         self.name = name
         self.run = run
         self.storage_mounts = {}
