@@ -85,6 +85,9 @@ class LocalDockerBackend(backends.Backend):
                 prefixed_str = _DOCKER_HANDLE_PREFIX + s
             return str.__new__(cls, prefixed_str, **kw)
 
+        def get_cluster_name(self):
+            return self
+
     # Define the Docker-in-Docker mount
     _dind_mount = {
         '/var/run/docker.sock': {

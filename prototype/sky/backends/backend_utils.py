@@ -371,12 +371,13 @@ def _build_sky_wheel() -> pathlib.Path:
     # It is important to normalize the path, otherwise 'pip wheel' would treat
     # the directory as a file and generate an empty wheel.
     norm_path = str(package_root) + os.sep
-    wheel_dir = pathlib.Path(tempfile.gettempdir()) / 'sky_wheels'
+    username = getpass.getuser()
+    wheel_dir = pathlib.Path(tempfile.gettempdir()) / f'sky_wheels_{username}'
     try:
         # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
         # the output.
         subprocess.run([
-            'pip', 'wheel', '--no-deps', norm_path, '--wheel-dir',
+            'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
             str(wheel_dir)
         ],
                        stdout=subprocess.DEVNULL,

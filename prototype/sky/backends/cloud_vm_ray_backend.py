@@ -273,7 +273,7 @@ class RayCodeGen:
                 print(\'SKY INFO: All task slots reserved.\',
                       file=sys.stderr,
                       flush=True)
-                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.RUNNING)
+                job_lib.set_job_started({self.job_id!r})
                 """),
         ]
 
@@ -345,9 +345,9 @@ class RayCodeGen:
             try:
                 ray.get(futures)
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
-            except ray.exceptions.WorkerCrashedError:
+            except ray.exceptions.WorkerCrashedError as e:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
-                raise RuntimeError('Command failed, please check the logs.')
+                raise RuntimeError('Command failed, please check the logs.') from e
             """)
         ]
 
@@ -1008,6 +1008,9 @@ class CloudVmRayBackend(backends.Backend):
                     f'\n\tlaunched_resources={self.launched_nodes}x '
                     f'{self.launched_resources}, '
                     f'\n\ttpu_delete_script={self.tpu_delete_script})')
+
+        def get_cluster_name(self):
+            return self.cluster_name
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
