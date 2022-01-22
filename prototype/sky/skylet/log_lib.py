@@ -96,10 +96,8 @@ def run_with_log(
             return proc, stdout, stderr
     finally:
         # The proc can be defunct if the python program is killed. Here we
-        # manually check the status of the process when exitted and kill it,
-        # if necessary. Open a new subprocess to kill the process, SIGKILL
-        # the process group and exit. Adapted from
-        # ray/dashboard/modules/job/job_manager.py#L154
+        # open a new subprocess to kill the process, SIGKILL the process group.
+        # Adapted from ray/dashboard/modules/job/job_manager.py#L154
         subprocess.Popen(
             f'kill -9 -{proc_pid}',
             shell=True,
