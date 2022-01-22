@@ -135,6 +135,7 @@ def _execute(dag: sky.Dag,
 
         if stages is None or Stage.EXEC in stages:
             try:
+                global_user_state.update_last_use(handle.get_cluster_name())
                 backend.execute(handle, task, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
