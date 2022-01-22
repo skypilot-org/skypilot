@@ -5,6 +5,7 @@ This is a remote utility module that provides logging functionality.
 import io
 import os
 import selectors
+import signal
 import subprocess
 import sys
 import time
@@ -76,10 +77,12 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-    with subprocess.Popen(cmd,
-                          stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE,
-                          **kwargs) as proc:
+    proc = subprocess.Popen(cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        preexec_fn=os.setsid,
+                        **kwargs)
+    try:
         stdout, stderr = redirect_process_output(
             proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
         proc.wait()
@@ -88,6 +91,11 @@ def run_with_log(
         if return_none:
             return None
         return proc, stdout, stderr
+    finally:
+        poll = proc.poll()
+        if poll is None:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            proc.wait()
 
 
 def run_bash_command_with_log(bash_command: str,
