@@ -24,9 +24,8 @@ CLOUD_REGISTRY = {
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
 _VALID_NAME_DESCR = 'ASCII characters and may contain lowercase and' \
                     ' uppercase letters, digits, underscores, periods,' \
-                    ' and dashes. No triple dashes or underscores.' \
-                    ' Must start and end with alphanumeric characters.' \
-                    ' No triple dashes or underscores.'
+                    ' and dashes. Must start and end with alphanumeric' \
+                    ' characters. No triple dashes or underscores.'
 
 
 def _is_cloud_store_url(url):
