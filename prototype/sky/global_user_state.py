@@ -90,6 +90,13 @@ def add_or_update_cluster(cluster_name: str,
     _CONN.commit()
 
 
+def update_last_use(cluster_name: str):
+    """Updates the last used command for the cluster."""
+    _CURSOR.execute('UPDATE clusters SET last_use=(?) WHERE name=(?)',
+                    (_get_pretty_entry_point(), cluster_name))
+    _CONN.commit()
+
+
 def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
     if terminate:
