@@ -37,7 +37,7 @@ class Resources:
         instance_type: Optional[str] = None,
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
-        use_spot: bool = False,
+        use_spot: Optional[bool] = None,
     ):
         self.cloud = cloud
         self.instance_type = instance_type
@@ -59,7 +59,9 @@ class Resources:
             accelerators = {accelerators: 1}
         self.accelerators = accelerators
         self.accelerator_args = accelerator_args
-        self.use_spot = use_spot
+
+        self._use_spot_specified = use_spot is not None
+        self.use_spot = use_spot if use_spot is not None else False
 
         self._try_validate_accelerators()
 
@@ -206,3 +208,13 @@ class Resources:
         # For GCP, when a accelerator type fails to launch, it should be blocked
         # regardless of the count, since the larger number will fail either.
         return self.accelerators.keys() == other.accelerators.keys()
+
+    def is_empty(self) -> bool:
+        """Is this Resources an empty request (all fields None)?"""
+        return all([
+            self.cloud is None,
+            self.instance_type is None,
+            self.accelerators is None,
+            self.accelerator_args is None,
+            not self._use_spot_specified,
+        ])
