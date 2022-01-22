@@ -35,8 +35,7 @@ def _is_cloud_store_url(url):
 
 
 def _is_valid_name(name: str) -> bool:
-    """
-    Checks if the task name is valid.
+    """Checks if the task name is valid.
 
     Valid is defined as either NoneType or str with ASCII characters which may
     contain lowercase and uppercase letters, digits, underscores, periods,
