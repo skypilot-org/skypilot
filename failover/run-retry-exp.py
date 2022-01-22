@@ -28,6 +28,7 @@ SELECTED_REGIONS = {
     'zhwu_g_regions': [
         'us-east-2', 'us-west-2', 'eu-west-2', 'eu-central-1', 'ca-central-1'
     ],
+    'zhwu_p_regions': ['us-east-2', 'us-west-2', 'eu-west-3'],
     'all_regions': [],
 }
 
@@ -36,13 +37,13 @@ SECOND_ERR_PATTERN = r'An error occurred \((.*?)\)'
 
 # Configs
 cloud = 'aws'
-TEST_SERIES = 'g'
+TEST_SERIES = 'p'
 # Whether to keep retry until succeed.
 RETRY_UNTIL_SUCCEEDED = True
 RETRY_UNTIL_SUCCEEDED_GAP = 60
 # Catalog configs
 # TEST_REGIONS = 'all_regions'
-TEST_REGIONS = 'zhwu_g_regions'
+TEST_REGIONS = 'zhwu_p_regions'
 catalog_config = dict(
     _faster_retry_by_catalog=False,
     # Only retry the region/zones that are in the area. This is cloud specific.
