@@ -14,7 +14,13 @@ import ray
 from sky.clouds.service_catalog import common
 from sky.cloud_adaptors import aws
 
-REGIONS = ['us-west-1', 'us-west-2', 'us-east-1', 'us-east-2']
+
+REGIONS = [
+    'us-east-1',
+    'us-east-2',
+    'us-west-1',
+    'us-west-2'
+]
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
 # only available in this region, but it serves pricing information for all regions.
 PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'
@@ -59,12 +65,13 @@ def get_pricing_table(region: str) -> pd.DataFrame:
 def get_spot_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading spot pricing table')
     client = aws.client('ec2', region_name=region)
-    response = client.describe_spot_price_history(
-        ProductDescriptions=['Linux/UNIX'],
-        StartTime=datetime.datetime.utcnow(),
-    )
-    df = pd.DataFrame(response['SpotPriceHistory']).set_index(
-        ['InstanceType', 'AvailabilityZone'])
+    paginator = client.get_paginator('describe_spot_price_history')
+    response_iterator = paginator.paginate(ProductDescriptions=['Linux/UNIX'],
+                                           StartTime=datetime.datetime.utcnow())
+    ret = []
+    for response in response_iterator:
+        ret = ret + response['SpotPriceHistory']
+    df = pd.DataFrame(ret).set_index(['InstanceType', 'AvailabilityZone'])
     return df
 
 
@@ -83,7 +90,7 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
         try:
             return pricing_df.loc[t]['PricePerUnit']
         except KeyError:
-            print(f'{region} WARNING: cannot find pricing for {t}')
+            # print(f'{region} WARNING: cannot find pricing for {t}')
             return np.nan
 
     def get_spot_price(row):
@@ -92,9 +99,9 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
         try:
             return spot_pricing_df.loc[(instance, zone)]['SpotPrice']
         except KeyError:
-            print(
-                f'{region} WARNING: cannot find spot pricing for {instance} {zone}'
-            )
+            # print(
+            #     f'{region} WARNING: cannot find spot pricing for {instance} {zone}'
+            # )
             return np.nan
 
     def get_acc_info(row) -> Tuple[str, float]:
