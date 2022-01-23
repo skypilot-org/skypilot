@@ -82,7 +82,7 @@ def run_with_log(
                               stderr=subprocess.PIPE,
                               start_new_session=True,
                               **kwargs) as proc:
-            proc_pid = os.getpgid(proc.pid)
+            proc_pgid = os.getpgid(proc.pid)
             stdout, stderr = redirect_process_output(
                 proc,
                 log_path,
@@ -99,7 +99,7 @@ def run_with_log(
         # open a new subprocess to kill the process, SIGKILL the process group.
         # Adapted from ray/dashboard/modules/job/job_manager.py#L154
         subprocess.Popen(
-            f'kill -9 -{proc_pid}',
+            f'kill -9 -{proc_pgid}',
             shell=True,
             # Suppress output
             stdout=subprocess.DEVNULL,
