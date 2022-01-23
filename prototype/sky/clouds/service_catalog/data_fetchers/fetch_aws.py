@@ -78,11 +78,14 @@ def get_pricing_table(region: str) -> pd.DataFrame:
 def get_spot_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading spot pricing table')
     client = aws.client('ec2', region_name=region)
-    response = client.describe_spot_price_history(
+    paginator = client.get_paginator('describe_spot_price_history')
+    response_iterator = paginator.paginate(
         ProductDescriptions=['Linux/UNIX'],
-        StartTime=datetime.datetime.utcnow(),
-    )
-    df = pd.DataFrame(response['SpotPriceHistory']).set_index(
+        StartTime=datetime.datetime.utcnow())
+    ret = []
+    for response in response_iterator:
+        ret = ret + response['SpotPriceHistory']
+    df = pd.DataFrame(ret).set_index(
         ['InstanceType', 'AvailabilityZone'])
     return df
 
