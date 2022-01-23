@@ -76,18 +76,35 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-    with subprocess.Popen(cmd,
-                          stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE,
-                          **kwargs) as proc:
-        stdout, stderr = redirect_process_output(
-            proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
-        proc.wait()
-        if proc.returncode != 0 and check:
-            raise RuntimeError('Command failed, please check the logs.')
-        if return_none:
-            return None
-        return proc, stdout, stderr
+    try:
+        with subprocess.Popen(cmd,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              start_new_session=True,
+                              **kwargs) as proc:
+            proc_pgid = os.getpgid(proc.pid)
+            stdout, stderr = redirect_process_output(
+                proc,
+                log_path,
+                stream_logs,
+                start_streaming_at=start_streaming_at)
+            proc.wait()
+            if proc.returncode != 0 and check:
+                raise RuntimeError('Command failed, please check the logs.')
+            if return_none:
+                return None
+            return proc, stdout, stderr
+    finally:
+        # The proc can be defunct if the python program is killed. Here we
+        # open a new subprocess to kill the process, SIGKILL the process group.
+        # Adapted from ray/dashboard/modules/job/job_manager.py#L154
+        subprocess.Popen(
+            f'kill -9 -{proc_pgid}',
+            shell=True,
+            # Suppress output
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
 
 def run_bash_command_with_log(bash_command: str,
