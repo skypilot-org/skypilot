@@ -1341,8 +1341,11 @@ class CloudVmRayBackend(backends.Backend):
         username = getpass.getuser()
         codegen.add_job(job_name, username, self.run_timestamp)
         code = codegen.build()
-        job_id = self.run_on_head(handle, code, stream_logs=False)[1]
-        job_id = int(job_id)
+        job_id_str = self.run_on_head(handle, code, stream_logs=False)[1]
+        try:
+            job_id = int(job_id_str)
+        except ValueError as e:
+            raise ValueError(f'Failed to parse job id: {job_id_str}') from e
         return job_id
 
     def execute(
