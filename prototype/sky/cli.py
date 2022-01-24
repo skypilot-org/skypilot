@@ -867,16 +867,22 @@ def down(
         all: Optional[bool],  # pylint: disable=redefined-builtin
 ):
     """Tear down cluster(s).
+
     CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
     are supplied, the latter takes precedence.
+
     Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
+
     Examples:
+
       \b
       # Tear down a specific cluster.
       sky down cluster_name
+
       \b
       # Tear down multiple clusters.
       sky down cluster1 cluster2
+
       \b
       # Tear down all existing clusters.
       sky down -a
