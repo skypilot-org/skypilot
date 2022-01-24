@@ -4,7 +4,7 @@
 #
 # Usage:
 #   sky launch -c ping ping.yaml --docker
-#   sky down -c ping
+#   sky down ping
 
 name: ping
 
