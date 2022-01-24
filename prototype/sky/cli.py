@@ -14,7 +14,7 @@ Example usage:
   >> sky status
 
   # Tear down a specific cluster.
-  >> sky down -c cluster_name
+  >> sky down cluster_name
 
   # Tear down all existing clusters.
   >> sky down -a
@@ -292,10 +292,10 @@ def _create_and_ssh_into_node(
     if cluster_name == _default_interactive_node_name(node_type):
         option = ''
     else:
-        option = f'-c {cluster_name}'
+        option = f' -c {cluster_name}'
     click.secho(f'sky {node_type}{option}', bold=True)
     click.echo('To stop the node:\t', nl=False)
-    click.secho(f'sky stop -c {cluster_name}', bold=True)
+    click.secho(f'sky stop {cluster_name}', bold=True)
     click.echo('To tear down the node:\t', nl=False)
     click.secho(f'sky down {cluster_name}', bold=True)
     click.echo('To upload a folder:\t', nl=False)
@@ -399,12 +399,8 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
 
 
 @cli.command()
+@click.argument('cluster', required=True, type=str)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
-@click.option('--cluster',
-              '-c',
-              required=True,
-              type=str,
-              help='Name of the existing cluster to execute a task on.')
 @click.option('--detach_run',
               '-d',
               default=False,
@@ -434,7 +430,7 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
               help=('Task name. Overrides the "name" '
                     'config in the YAML if both are supplied.'))
 # pylint: disable=redefined-builtin
-def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
+def exec(cluster: str, entrypoint: Union[Path, str], detach_run: bool,
          workdir: Optional[str], gpus: Optional[str], name: Optional[str]):
     """Execute a task or a command on a cluster (skip setup).
 
@@ -470,7 +466,7 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
       # For example, modify local workdir code.
       # Future commands: simply execute the task on the launched cluster.
 
-      >> sky exec -c mycluster app.yaml
+      >> sky exec mycluster app.yaml
 
       # Do "sky launch" again if anything other than Task.run is modified:
 
@@ -480,7 +476,7 @@ def exec(entrypoint: Union[Path, str], cluster: str, detach_run: bool,
 
       #  Pass in commands for execution
 
-      >> sky exec -c mycluster -- echo Hello World
+      >> sky exec mycluster -- echo Hello World
 
     """
     entrypoint = ' '.join(entrypoint)
@@ -603,29 +599,9 @@ def status(all: bool):  # pylint: disable=redefined-builtin
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
-@click.option('--cluster',
-              '-c',
-              required=False,
-              type=str,
-              multiple=True,
-              help=_CLUSTER_FLAG_MULTIPLE_HELP)
-@click.argument('named_clusters', required=False, type=str, nargs=-1)
-def queue(skip_finished: bool, all_users: bool, cluster: Tuple[str],
-          named_clusters: Tuple[str]):
+@click.argument('clusters', required=False, type=str, nargs=-1)
+def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
-    clusters = ()
-    if cluster and named_clusters:
-        all_names = cluster + named_clusters
-        option_variant = ' '.join([f'-c {c}' for c in all_names])
-        arg_variant = ' '.join(all_names)
-        raise click.UsageError('Use one of the following commands: \n'
-                               f'sky queue {option_variant}\n'
-                               f'sky queue {arg_variant}')
-    elif cluster:
-        clusters = cluster  # pylint: disable=redefined-outer-name
-    elif named_clusters:
-        clusters = named_clusters  # pylint: disable=redefined-outer-name
-
     click.secho('Fetching and parsing job queue...', fg='yellow')
     all_jobs = not skip_finished
 
@@ -678,11 +654,6 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
 
 
 @cli.command()
-@click.option('--cluster',
-              '-c',
-              required=True,
-              type=str,
-              help='Name of the existing cluster to find the job.')
 @click.option(
     '--sync-down',
     '-s',
@@ -690,6 +661,7 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
     default=False,
     help='Sync down the logs of the job (This is useful for distributed jobs to'
     'download separate log for each job from all the workers).')
+@click.argument('cluster', required=True, type=str)
 @click.argument('job_id', required=True, type=str)
 def logs(cluster: str, job_id: str, sync_down: bool):
     """Tail the log of a job."""
@@ -716,11 +688,7 @@ def logs(cluster: str, job_id: str, sync_down: bool):
 
 
 @cli.command()
-@click.option('--cluster',
-              '-c',
-              required=True,
-              type=str,
-              help='Name of the existing cluster to cancel the task.')
+@click.argument('cluster', required=True, type=str)
 @click.option('--all',
               '-a',
               default=False,
@@ -758,103 +726,51 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
 
 @cli.command()
-@click.option('--cluster',
-              '-c',
-              default=None,
-              multiple=True,
-              type=str,
-              required=False,
-              help=_CLUSTER_FLAG_MULTIPLE_HELP)
+@click.argument('clusters', nargs=-1, required=False)
 @click.option('--all',
               '-a',
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
-@click.argument('named_clusters', required=False, type=str, nargs=-1)
 def stop(
-        cluster: Optional[Tuple[str]],
+        clusters: Tuple[str],
         all: Optional[bool],  # pylint: disable=redefined-builtin
-        named_clusters: Optional[Tuple[str]],
 ):
     """Stop cluster(s).
-
-    --cluster is the name of the cluster to stop.  If both --cluster and --all
-    are supplied, the latter takes precedence.
-
+    CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
+    supplied, the latter takes precedence.
     Limitation: this currently only works for AWS clusters.
-
     Examples:
-
       \b
       # Stop a specific cluster.
-      sky stop -c cluster_name
-
+      sky stop cluster_name
       \b
       # Stop multiple clusters.
-      sky stop -c cluster1 -c cluster2
-
+      sky stop cluster1 cluster2
       \b
       # Stop all existing clusters.
       sky stop -a
     """
-    clusters = ()
-    if cluster and named_clusters:
-        all_names = cluster + named_clusters
-        option_variant = ' '.join([f'-c {c}' for c in all_names])
-        arg_variant = ' '.join(all_names)
-        raise click.UsageError('Use one of the following commands: \n'
-                               f'sky stop {option_variant}\n'
-                               f'sky stop {arg_variant}')
-    elif cluster:
-        clusters = cluster  # pylint: disable=redefined-outer-name
-    elif named_clusters:
-        clusters = named_clusters  # pylint: disable=redefined-outer-name
-
     _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=False)
 
 
 @cli.command()
-@click.option('--cluster',
-              '-c',
-              default=None,
-              multiple=True,
-              type=str,
-              required=False,
-              help=_CLUSTER_FLAG_MULTIPLE_HELP)
-@click.argument('named_clusters', required=False, type=str, nargs=-1)
-def start(cluster: Optional[Tuple[str]], named_clusters: Optional[Tuple[str]]):
+@click.argument('clusters', nargs=-1, required=False)
+def start(clusters: Tuple[str]):
     """Restart cluster(s).
-
     If a cluster is previously stopped (status == STOPPED) or failed in
     provisioning/a task's setup (status == INIT), this command will attempt to
     start the cluster.  (In the second case, any failed setup steps are not
     performed and only a request to start the machines is attempted.)
-
     If a cluster is already in an UP status, this command has no effect on it.
-
     Examples:
-
       \b
       # Restart a specific cluster.
-      sky start -c cluster_name
-
+      sky start cluster_name
       \b
       # Restart multiple clusters.
-      sky start -c cluster1 -c cluster2
+      sky start cluster1 cluster2
     """
-    clusters = ()
-    if cluster and named_clusters:
-        all_names = cluster + named_clusters
-        option_variant = ' '.join([f'-c {c}' for c in all_names])
-        arg_variant = ' '.join(all_names)
-        raise click.UsageError('Use one of the following commands: \n'
-                               f'sky start {option_variant}\n'
-                               f'sky start {arg_variant}')
-    elif cluster:
-        clusters = cluster  # pylint: disable=redefined-outer-name
-    elif named_clusters:
-        clusters = named_clusters  # pylint: disable=redefined-outer-name
-
     to_start = []
     if clusters:
 
@@ -898,7 +814,7 @@ def start(cluster: Optional[Tuple[str]], named_clusters: Optional[Tuple[str]]):
                 #    --no-restart) anyway.
                 #  2. A cluster may show as UP but is manually stopped in the
                 #    UI.  If Azure/GCP: ray autoscaler doesn't support reusing,
-                #    so 'sky start -c existing' will actually launch a new
+                #    so 'sky start existing' will actually launch a new
                 #    cluster with this name, leaving the original cluster
                 #    zombied (remains as stopped in the cloud's UI).
                 #
@@ -929,58 +845,31 @@ def start(cluster: Optional[Tuple[str]], named_clusters: Optional[Tuple[str]]):
 
 
 @cli.command()
-@click.option('--cluster',
-              '-c',
-              default=None,
-              multiple=True,
-              type=str,
-              required=False,
-              help=_CLUSTER_FLAG_MULTIPLE_HELP)
+@click.argument('clusters', nargs=-1, required=False)
 @click.option('--all',
               '-a',
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
-@click.argument('named_clusters', required=False, type=str, nargs=-1)
 def down(
-        cluster: Optional[Tuple[str]],
+        clusters: Tuple[str],
         all: Optional[bool],  # pylint: disable=redefined-builtin
-        named_clusters: Optional[Tuple[str]],
 ):
     """Tear down cluster(s).
-
-    --cluster is the name of the cluster to tear down.  If both --cluster and
-    --all are supplied, the latter takes precedence.
-
+    CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
+    are supplied, the latter takes precedence.
     Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
-
     Examples:
-
       \b
       # Tear down a specific cluster.
-      sky down -c cluster_name
-
+      sky down cluster_name
       \b
       # Tear down multiple clusters.
-      sky down -c cluster1 -c cluster2
-
+      sky down cluster1 cluster2
       \b
       # Tear down all existing clusters.
       sky down -a
     """
-    clusters = ()
-    if cluster and named_clusters:
-        all_names = cluster + named_clusters
-        option_variant = ' '.join([f'-c {c}' for c in all_names])
-        arg_variant = ' '.join(all_names)
-        raise click.UsageError('Use one of the following commands: \n'
-                               f'sky down {option_variant}\n'
-                               f'sky down {arg_variant}')
-    elif cluster:
-        clusters = cluster  # pylint: disable=redefined-outer-name
-    elif named_clusters:
-        clusters = named_clusters  # pylint: disable=redefined-outer-name
-
     _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
 
 
@@ -1024,7 +913,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         else:
             click.secho(f'Stopping cluster {name}...done.', fg='green')
             click.echo('  To restart the cluster, run: ', nl=False)
-            click.secho(f'sky start -c {name}', bold=True)
+            click.secho(f'sky start {name}', bold=True)
 
 
 @_interactive_node_cli_command
