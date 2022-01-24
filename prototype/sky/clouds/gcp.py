@@ -183,7 +183,7 @@ class GCP(clouds.Cloud):
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
                 resources_vars['tf_version'] = r.accelerator_args['tf_version']
-                resources_vars['tpu_name'] = r.accelerator_args['tpu_name']
+                resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus

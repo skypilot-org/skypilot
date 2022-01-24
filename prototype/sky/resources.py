@@ -59,13 +59,6 @@ class Resources:
                     logger.info('Missing tf_version in accelerator_args, using'
                                 ' default (2.5.0)')
                     accelerator_args['tf_version'] = '2.5.0'
-                if 'tpu_name' not in accelerator_args:
-                    # TODO: change ID formatting to something more pleasant.
-                    # User name is helpful in non-isolated accounts.
-                    tpu_name = f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
-                    logger.info('Missing tpu_name in accelerator_args, using'
-                                f' name {tpu_name}')
-                    accelerator_args['tpu_name'] = tpu_name
 
         self.accelerators = accelerators
         self.accelerator_args = accelerator_args

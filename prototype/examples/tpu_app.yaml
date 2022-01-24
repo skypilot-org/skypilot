@@ -7,6 +7,7 @@ resources:
   accelerators: tpu-v3-8
   accelerator_args:
     tf_version: 2.5.0
+    tpu_name: sky_tpu
 
 # The setup command.  Will be run under the working directory.
 setup: |

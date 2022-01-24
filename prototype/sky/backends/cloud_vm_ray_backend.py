@@ -588,17 +588,17 @@ class RetryingVmProvisioner(object):
         ):
             yield (region, zones)
 
-    def _try_provision_tpu(self, to_provision: Resources, acc_args,
-                           config_dict) -> bool:
-        """Returns whether the provision is successful."""
-        tpu_name = acc_args['tpu_name']
+    def _try_provision_tpu(self, to_provision: Resources,
+                           config_dict) -> Tuple[bool, Optional[str]]:
+        """Returns whether the provision is successful and the TPU name."""
+        tpu_name = config_dict['tpu_name']
         assert 'tpu-create-script' in config_dict, \
             'Expect TPU provisioning with gcloud.'
         try:
             backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
-            return True
+            return True, tpu_name
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
             if 'ALREADY_EXISTS' in stderr:
@@ -606,20 +606,23 @@ class RetryingVmProvisioner(object):
                 # 'create'. Or it can be in a "deleting" state. Investigate the
                 # right thing to do (force kill + re-provision?).
                 logger.info(f'TPU {tpu_name} already exists; skipped creation.')
-                return True
+                return True, tpu_name
 
             if 'RESOURCE_EXHAUSTED' in stderr:
-                logger.warning(f'TPU {tpu_name} creation failed '
-                               'due to quota exhaustion.')
-                return False
+                logger.warning(
+                    f'TPU {tpu_name} creation failed due to quota exhaustion. '
+                    'Please visit '
+                    'https://console.cloud.google.com/iam-admin/quotas for more'
+                    ' information.')
+                return False, None
 
             if 'PERMISSION_DENIED' in stderr:
                 logger.info('TPUs are not available in this zone.')
-                return False
+                return False, None
 
             if 'no more capacity in the zone' in stderr:
                 logger.info('No more capacity in this zone.')
-                return False
+                return False, None
 
             if 'CloudTpu received an invalid AcceleratorType' in stderr:
                 # INVALID_ARGUMENT: CloudTpu received an invalid
@@ -628,7 +631,7 @@ class RetryingVmProvisioner(object):
                 tpu_type = list(to_provision.accelerators.keys())[0]
                 logger.info(
                     f'TPU type {tpu_type} is not available in this zone.')
-                return False
+                return False, None
 
             logger.error(stderr)
             raise e
@@ -664,14 +667,13 @@ class RetryingVmProvisioner(object):
                 cluster_name=cluster_name)
             if dryrun:
                 return
-            acc_args = to_provision.accelerator_args
+            acc, _ = list(to_provision.accelerators.items())[0]
             tpu_name = None
-            if acc_args is not None and acc_args.get('tpu_name') is not None:
-                success = self._try_provision_tpu(to_provision, acc_args,
-                                                  config_dict)
+            if 'tpu' in acc:
+                success, tpu_name = self._try_provision_tpu(
+                    to_provision, config_dict)
                 if not success:
                     continue
-                tpu_name = acc_args['tpu_name']
             cluster_config_file = config_dict['ray']
 
             # Record early, so if anything goes wrong, 'sky status' will show
