@@ -14,7 +14,7 @@ from typing import Iterator, List, Optional, Tuple, Union
 from sky.skylet import job_lib
 
 
-def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
+def redirect_process_output(proc, log_path, stream_logs, start_streaming_at='', skip_lines=[]):
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
@@ -47,6 +47,8 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
                     continue
                 # Remove special characters to avoid cursor hidding
                 line = line.replace('\x1b[?25l', '')
+                if any(skip in line for skip in skip_lines):
+                    continue
                 if start_streaming_at in line:
                     start_streaming_flag = True
                 if key.fileobj is out_io:
@@ -87,7 +89,14 @@ def run_with_log(
                 proc,
                 log_path,
                 stream_logs,
-                start_streaming_at=start_streaming_at)
+                start_streaming_at=start_streaming_at,
+                # Skip these lines caused by `-i` option of bash. Failed to find
+                # other way to turn off these two warning.
+                # https://stackoverflow.com/questions/13300764/ how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and
+                skip_lines=[
+                    'bash: cannot set terminal process group',
+                    'bash: no job control in this shell',
+                ])
             proc.wait()
             if proc.returncode != 0 and check:
                 raise RuntimeError('Command failed, please check the logs.')
@@ -115,11 +124,12 @@ def run_bash_command_with_log(bash_command: str,
         fp.flush()
         script_path = fp.name
         run_with_log(
-            f'/bin/bash {script_path}',
+            # Need this `-i` option to make sure `source ~/.bashrc` work.
+            f'/bin/bash -i {script_path}',
             log_path,
             stream_logs=stream_logs,
             return_none=True,
-            # The script will be not found without this
+            # The script will not be found without this
             shell=True,
             check=True,
         )

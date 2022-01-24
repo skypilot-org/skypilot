@@ -1648,12 +1648,9 @@ class CloudVmRayBackend(backends.Backend):
             'bash',
             '--login',
             '-c',
+            # Need this `-i` option to make sure `source ~/.bashrc` work.
+            '-i',
         ]
-        if interactive:
-            # Adding this in non-interactive mode will cause the bash error
-            # `bash: cannot set terminal process group (-1): Inappropriate ioctl
-            # for device` and `bash: no job control in this shell`
-            command += ['-i']
         command += [
             shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
