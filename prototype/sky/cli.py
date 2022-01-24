@@ -915,6 +915,8 @@ def down(
 
     Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
 
+    Limitation: this does not work for stopped clusters for now.
+
     Examples:
 
       \b
@@ -929,7 +931,21 @@ def down(
       # Tear down all existing clusters.
       sky down -a
     """
-    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
+    names = []
+    for cluster_name in clusters:
+        cluster_status = global_user_state.get_status_from_cluster_name(
+            cluster_name)
+        if cluster_status == global_user_state.ClusterStatus.STOPPED:
+            click.secho(
+                f'Cannot terminate cluster {cluster_name!r} because it '
+                'is STOPPED. To fix: manually terminate in the cloud\'s '
+                'UI. (This limitation will be addressed in the future.)',
+                fg='yellow')
+        else:
+            names.append(cluster_name)
+    if not names:
+        return
+    _terminate_or_stop_clusters(names, apply_to_all=all, terminate=True)
 
 
 def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
@@ -948,19 +964,15 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             if handle is not None:
                 to_down.append({'name': name, 'handle': handle})
             else:
-                print(f'Cluster {name} was not found. Skipping.')
+                print(f'Cluster {name} not found.')
     if apply_to_all:
         to_down = global_user_state.get_clusters()
         if len(names) > 0:
             print(f'Both --all and cluster(s) specified for sky {command}. '
                   'Letting --all take effect.')
             names = []
-    if not to_down:
-        if len(names) > 0:
-            cluster_list = ', '.join(names)
-            print(f'Clusters ({cluster_list}) not found (see `sky status`).')
-        else:
-            print('No existing clusters found (see `sky status`).')
+    if not to_down and not names:
+        print('No existing clusters found (see `sky status`).')
 
     for record in to_down:  # TODO: parallelize.
         name = record['name']
