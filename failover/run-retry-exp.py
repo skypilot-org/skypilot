@@ -12,8 +12,8 @@ debug_series = {'K80': [1]}
 instance_series = {
     'p': {
         'V100': [1, 4, 8],
-        'K80': [1, 8, 16],
-        'A100': [8]
+        'K80': [1, 8, 16], # Never get 16 K80s.
+        'A100': [8],
     },
     'g': {
         'T4': [1, 4, 8],
@@ -28,7 +28,7 @@ SELECTED_REGIONS = {
     'zhwu_g_regions': [
         'us-east-2', 'us-west-2', 'eu-west-2', 'eu-central-1', 'ca-central-1'
     ],
-    'zhwu_p_regions': ['us-east-2', 'us-west-2', 'eu-west-3'],
+    'zhwu_p_regions': ['us-east-2', 'us-west-2', 'eu-west-2'],
     'all_regions': [],
 }
 
@@ -40,12 +40,13 @@ cloud = 'aws'
 TEST_SERIES = 'p'
 # Whether to keep retry until succeed.
 RETRY_UNTIL_SUCCEEDED = True
-RETRY_UNTIL_SUCCEEDED_GAP = 60
+RETRY_UNTIL_SUCCEEDED_GAP = 1
 # Catalog configs
-# TEST_REGIONS = 'all_regions'
-TEST_REGIONS = 'zhwu_p_regions'
+TEST_REGIONS = 'all_regions'
+USE_SPOT = False
+# TEST_REGIONS = 'zhwu_p_regions'
 catalog_config = dict(
-    _faster_retry_by_catalog=False,
+    _faster_retry_by_catalog=True,
     # Only retry the region/zones that are in the area. This is cloud specific.
     _retry_area=SELECTED_REGIONS[TEST_REGIONS],
     # Shuffle the order of regions to be tried
@@ -66,9 +67,10 @@ resources:
   cloud: {cloud}
   accelerators:
     {gpu}: {cnt}
-  use_spot: true
+  use_spot: {use_spot}
 """
-RESULT_PATH = f'result_{TEST_SERIES}_{TEST_REGIONS}'
+use_spot_str = '' if USE_SPOT else 'no_spot'
+RESULT_PATH = f'result_{TEST_SERIES}_{TEST_REGIONS}_{use_spot_str}'
 if RETRY_UNTIL_SUCCEEDED:
     RESULT_PATH += '_retry'
 RESULT_PATH += '.csv'
@@ -82,18 +84,23 @@ df = pd.DataFrame(columns=[
 if os.path.exists(RESULT_PATH):
     df = pd.read_csv(RESULT_PATH)
 
-
 def parse_outputs(lines: str, exp_status: dict):
+    print("Parsing outputs...")
     error_count = collections.defaultdict(int)
 
     fetch_error_in_next_line = False
+    previous_error = None
     for line in lines:
         if fetch_error_in_next_line:
             match = re.findall(SECOND_ERR_PATTERN, line)
-            assert len(match) >= 1, line
-            error_count[match[0]] += 1
-            fetch_error_in_next_line = False
-
+            if len(match) >= 1:
+                if previous_error is None or previous_error == 'Unsupported':
+                    previous_error = match[0]
+            else:
+                assert previous_error is not None
+                error_count[previous_error] += 1
+                fetch_error_in_next_line = False
+                previous_error = None
         match = re.findall(PATTERN, line)
         if len(match) > 0:
             error = match[0]
@@ -121,7 +128,8 @@ for gpu, cnt_list in TEST_INSTANCE_SERIES.items():
             print('Found in result. Skip.')
             continue
 
-        new_yaml = launch_yaml.format(cloud=cloud, gpu=gpu, cnt=cnt)
+        use_spot_str = 'true' if USE_SPOT else 'false'
+        new_yaml = launch_yaml.format(cloud=cloud, gpu=gpu, cnt=cnt, use_spot=use_spot_str)
         with open('./tmp.yaml', 'w') as f:
             f.write(new_yaml)
 
