@@ -336,7 +336,6 @@ def cli():
               type=str,
               help=_CLUSTER_FLAG_HELP)
 @click.option('--dryrun',
-              '-n',
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
