@@ -74,7 +74,7 @@ def get_hourly_cost_impl(
     if not use_spot:
         return df['Price'].iloc[0]
 
-    cheapest_idx = df['SpotPrice'].idxmin()
+    cheapest_idx = df['SpotPrice'].dropna().idxmin()
     if pd.isnull(cheapest_idx):
         return df['Price'].iloc[0]
 
@@ -180,7 +180,7 @@ def get_region_zones(df: pd.DataFrame,
     """Returns a list of regions/zones from a dataframe."""
     price_str = 'SpotPrice' if use_spot else 'Price'
     if catalog_config['_faster_retry_by_catalog']:
-        df = df.dropna(subset=[price_str]).sort_values(price_str)
+        df = df.sort_values(price_str)
     if len(catalog_config['_retry_area']) > 0:
         # filter the area of the instances, e.g. us or eu
         areas = catalog_config['_retry_area']
