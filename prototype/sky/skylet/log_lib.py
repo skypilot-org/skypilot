@@ -14,7 +14,11 @@ from typing import Iterator, List, Optional, Tuple, Union
 from sky.skylet import job_lib
 
 
-def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
+def redirect_process_output(proc,
+                            log_path: str,
+                            stream_logs: bool,
+                            start_streaming_at: str = '',
+                            skip_lines: Optional[List[str]] = None):
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
@@ -47,6 +51,9 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
                     continue
                 # Remove special characters to avoid cursor hidding
                 line = line.replace('\x1b[?25l', '')
+                if (skip_lines is not None and
+                        any(skip in line for skip in skip_lines)):
+                    continue
                 if start_streaming_at in line:
                     start_streaming_flag = True
                 if key.fileobj is out_io:
@@ -76,6 +83,7 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
+    proc_pgid = None
     try:
         with subprocess.Popen(cmd,
                               stdout=subprocess.PIPE,
@@ -87,8 +95,16 @@ def run_with_log(
                 proc,
                 log_path,
                 stream_logs,
-                start_streaming_at=start_streaming_at)
+                start_streaming_at=start_streaming_at,
+                # Skip these lines caused by `-i` option of bash. Failed to find
+                # other way to turn off these two warning.
+                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+                skip_lines=[
+                    'bash: cannot set terminal process group',
+                    'bash: no job control in this shell',
+                ])
             proc.wait()
+            proc_pgid = None
             if proc.returncode != 0 and check:
                 raise RuntimeError('Command failed, please check the logs.')
             if return_none:
@@ -98,13 +114,14 @@ def run_with_log(
         # The proc can be defunct if the python program is killed. Here we
         # open a new subprocess to kill the process, SIGKILL the process group.
         # Adapted from ray/dashboard/modules/job/job_manager.py#L154
-        subprocess.Popen(
-            f'kill -9 -{proc_pgid}',
-            shell=True,
-            # Suppress output
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        if proc_pgid is not None:
+            subprocess.Popen(
+                f'kill -9 -{proc_pgid}',
+                shell=True,
+                # Suppress output
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
 
 def run_bash_command_with_log(bash_command: str,
@@ -115,12 +132,14 @@ def run_bash_command_with_log(bash_command: str,
         fp.flush()
         script_path = fp.name
         run_with_log(
-            f'/bin/bash {script_path}',
+            # Need this `-i` option to make sure `source ~/.bashrc` work.
+            # Do not use shell=True because it will cause the environment
+            # set in this task visible to other tasks. shell=False requires
+            # the cmd to be a list.
+            ['/bin/bash', '-i', script_path],
             log_path,
             stream_logs=stream_logs,
             return_none=True,
-            # The script will be not found without this
-            shell=True,
             check=True,
         )
 
