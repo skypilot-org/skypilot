@@ -1339,8 +1339,11 @@ class CloudVmRayBackend(backends.Backend):
         username = getpass.getuser()
         codegen.add_job(job_name, username, self.run_timestamp)
         code = codegen.build()
-        job_id = self.run_on_head(handle, code, stream_logs=False)[1]
-        job_id = int(job_id)
+        job_id_str = self.run_on_head(handle, code, stream_logs=False)[1]
+        try:
+            job_id = int(job_id_str)
+        except ValueError as e:
+            raise ValueError(f'Failed to parse job id: {job_id_str}') from e
         return job_id
 
     def execute(
@@ -1646,12 +1649,9 @@ class CloudVmRayBackend(backends.Backend):
             'bash',
             '--login',
             '-c',
+            # Need this `-i` option to make sure `source ~/.bashrc` work.
+            '-i',
         ]
-        if interactive:
-            # Adding this in non-interactive mode will cause the bash error
-            # `bash: cannot set terminal process group (-1): Inappropriate ioctl
-            # for device` and `bash: no job control in this shell`
-            command += ['-i']
         command += [
             shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
