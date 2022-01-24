@@ -4,8 +4,8 @@
 #
 # Usage:
 #   sky launch -c mjq cluster_multinode.yaml
-#   sky exec -c mjq job_multinode.yaml
-#   sky exec -c mjq job.yaml
+#   sky exec mjq job_multinode.yaml
+#   sky exec mjq job.yaml
 
 resources:
   cloud: aws

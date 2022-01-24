@@ -1320,17 +1320,17 @@ class CloudVmRayBackend(backends.Backend):
 
         try:
             if not detach_run:
-                backend_utils.run(f'sky logs -c {handle.cluster_name} {job_id}')
+                backend_utils.run(f'sky logs {handle.cluster_name} {job_id}')
         finally:
             name = handle.cluster_name
             logger.info('NOTE: ctrl-c does not stop the job.\n'
                         f'\n{fore.CYAN}Job ID: '
                         f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                         '\nTo cancel the job:\t'
-                        f'{backend_utils.BOLD}sky cancel -c {name} {job_id}'
+                        f'{backend_utils.BOLD}sky cancel {name} {job_id}'
                         f'{backend_utils.RESET_BOLD}'
                         '\nTo stream the logs:\t'
-                        f'{backend_utils.BOLD}sky logs -c {name} {job_id}'
+                        f'{backend_utils.BOLD}sky logs {name} {job_id}'
                         f'{backend_utils.RESET_BOLD}'
                         '\nTo view the job queue:\t'
                         f'{backend_utils.BOLD}sky queue {name}'
@@ -1469,7 +1469,7 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}ssh {name}'
                         f'{backend_utils.RESET_BOLD}'
                         '\nTo submit a job:'
-                        f'\t\t{backend_utils.BOLD}sky exec -c {name} yaml_file'
+                        f'\t\t{backend_utils.BOLD}sky exec {name} yaml_file'
                         f'{backend_utils.RESET_BOLD}'
                         '\nTo stop the cluster:'
                         f'\t{backend_utils.BOLD}sky stop {name}'
