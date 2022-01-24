@@ -648,7 +648,7 @@ class RetryingVmProvisioner(object):
             zone_str = ','.join(
                 z.name for z in zones) if zones is not None else 'all zones'
             logger.info(f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
-                        f'{region.name} ({zone_str}){style.RESET_ALL}')
+                        f'{region.name}{style.RESET_ALL} ({zone_str})')
             config_dict = backend_utils.write_cluster_config(
                 task,
                 to_provision,
@@ -729,8 +729,6 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing VM{plural}. Setup completed.{style.RESET_ALL}')
-                logger.info(f'\nTo log into the head VM:\t{style.BRIGHT}ssh'
-                            f' {cluster_name}{style.RESET_ALL}\n')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -1059,6 +1057,7 @@ class CloudVmRayBackend(backends.Backend):
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return cluster_name, handle.launched_resources
+
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
@@ -1323,8 +1322,7 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.run(f'sky logs {handle.cluster_name} {job_id}')
         finally:
             name = handle.cluster_name
-            logger.info('NOTE: ctrl-c does not stop the job.\n'
-                        f'\n{fore.CYAN}Job ID: '
+            logger.info(f'\n{fore.CYAN}Job ID: '
                         f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                         '\nTo cancel the job:\t'
                         f'{backend_utils.BOLD}sky cancel {name} {job_id}'
@@ -1357,7 +1355,7 @@ class CloudVmRayBackend(backends.Backend):
 
         # Otherwise, handle a basic Task.
         if task.run is None:
-            logger.info(f'Nothing to run; run command not specified:\n{task}')
+            logger.info('Nothing to run (Task.run not specified).')
             return
 
         job_id = self._add_job(handle, task.name)

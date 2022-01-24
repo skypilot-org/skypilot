@@ -276,8 +276,13 @@ class Optimizer:
                 if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
             }
             metric = 'cost' if minimize_cost else 'time'
-            logger.info(f'Details: task -> {{resources -> {metric}}}')
-            logger.info('%s\n', pprint.pformat(dp_best_cost))
+            if len(dp_best_cost) > 1:
+                logger.info(f'Details: task -> {{resources -> {metric}}}')
+                logger.info('%s\n', pprint.pformat(dp_best_cost))
+            elif len(dp_best_cost) == 1:
+                logger.info(f'Considered resources -> {metric}')
+                logger.info('%s\n',
+                            pprint.pformat(list(dp_best_cost.values())[0]))
 
         return dag, best_plan
 

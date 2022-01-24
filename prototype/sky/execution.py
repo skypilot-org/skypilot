@@ -86,7 +86,6 @@ def _execute(dag: sky.Dag,
 
     if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
         if task.best_resources is None:
-            logger.info(f'Optimizer target is set to {optimize_target.name}.')
             # TODO: fix this for the situation where number of requested
             # accelerators is not an integer.
             dag = sky.optimize(dag, minimize=optimize_target)
