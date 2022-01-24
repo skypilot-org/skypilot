@@ -350,8 +350,35 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
+@click.option(
+    '--workdir',
+    required=False,
+    type=click.Path(exists=True, file_okay=False),
+    help=('If specified, sync this dir to the remote working directory, '
+          'where the task will be invoked. '
+          'Overrides the "workdir" config in the YAML if both are supplied.'))
+@click.option(
+    '--gpus',
+    required=False,
+    type=str,
+    help=('Type and number of GPUs to use. Example values: '
+          '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
+          '(fractional counts are supported by the scheduling framework). '
+          'If a new cluster is being launched by this command, this is the '
+          'resources to provision. If an existing cluster is being reused, this'
+          ' is seen as the task demand, which must fit the cluster\'s total '
+          'resources and is used for scheduling the task. '
+          'Overrides the "accelerators" '
+          'config in the YAML if both are supplied.'))
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help=('Task name. Overrides the "name" '
+                    'config in the YAML if both are supplied.'))
 def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
-           detach_run: bool, backend_name: str):
+           detach_run: bool, backend_name: str, workdir: Optional[str],
+           gpus: Optional[str], name: Optional[str]):
     """Launch a task from a YAML or command (rerun setup if cluster exists).
 
     If entrypoint points to a valid YAML file, it is read in as the task
@@ -366,13 +393,21 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
-            sky.Task.from_yaml(entrypoint)
+            task = sky.Task.from_yaml(entrypoint)
         else:
             # Treat entrypoint as a bash command.
             click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
             task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
+        # Override.
+        if workdir is not None:
+            task.workdir = workdir
+        if gpus is not None:
+            task.set_resources(
+                sky.Resources(accelerators=_parse_accelerator_options(gpus)))
+        if name is not None:
+            task.name = name
 
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
@@ -418,8 +453,9 @@ def launch(entrypoint: Union[Path, str], cluster: str, dryrun: bool,
     type=str,
     help=('Task demands: Type and number of GPUs to use. Example values: '
           '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-          '(fractional counts are supported by the scheduling framework). Must '
-          'fit the cluster\'s total resources. Overrides the "accelerators" '
+          '(fractional counts are supported by the scheduling framework). '
+          'This is used for scheduling the task, so it must fit the '
+          'cluster\'s total resources. Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
 @click.option('--name',
               '-n',
