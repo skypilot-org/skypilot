@@ -132,12 +132,10 @@ def run_bash_command_with_log(bash_command: str,
         script_path = fp.name
         run_with_log(
             # Need this `-i` option to make sure `source ~/.bashrc` work.
-            f'/bin/bash -i {script_path}',
+            f'/bin/bash -i {script_path}'.split(),
             log_path,
             stream_logs=stream_logs,
             return_none=True,
-            # The script will not be found without this
-            shell=True,
             check=True,
         )
 
