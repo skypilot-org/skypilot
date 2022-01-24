@@ -51,7 +51,8 @@ def redirect_process_output(proc,
                     continue
                 # Remove special characters to avoid cursor hidding
                 line = line.replace('\x1b[?25l', '')
-                if (skip_lines and any(skip in line for skip in skip_lines)):
+                if (skip_lines is not None and
+                        any(skip in line for skip in skip_lines)):
                     continue
                 if start_streaming_at in line:
                     start_streaming_flag = True
