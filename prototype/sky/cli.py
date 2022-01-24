@@ -737,16 +737,22 @@ def stop(
         all: Optional[bool],  # pylint: disable=redefined-builtin
 ):
     """Stop cluster(s).
+
     CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
     supplied, the latter takes precedence.
+
     Limitation: this currently only works for AWS clusters.
+
     Examples:
+
       \b
       # Stop a specific cluster.
       sky stop cluster_name
+
       \b
       # Stop multiple clusters.
       sky stop cluster1 cluster2
+
       \b
       # Stop all existing clusters.
       sky stop -a
@@ -758,15 +764,20 @@ def stop(
 @click.argument('clusters', nargs=-1, required=False)
 def start(clusters: Tuple[str]):
     """Restart cluster(s).
+
     If a cluster is previously stopped (status == STOPPED) or failed in
     provisioning/a task's setup (status == INIT), this command will attempt to
     start the cluster.  (In the second case, any failed setup steps are not
     performed and only a request to start the machines is attempted.)
+
     If a cluster is already in an UP status, this command has no effect on it.
+
     Examples:
+
       \b
       # Restart a specific cluster.
       sky start cluster_name
+
       \b
       # Restart multiple clusters.
       sky start cluster1 cluster2
