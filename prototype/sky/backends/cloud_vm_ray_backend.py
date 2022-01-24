@@ -667,9 +667,8 @@ class RetryingVmProvisioner(object):
                 cluster_name=cluster_name)
             if dryrun:
                 return
-            acc, _ = list(to_provision.accelerators.items())[0]
-            tpu_name = None
-            if 'tpu' in acc:
+            tpu_name = config_dict.get('tpu_name')
+            if tpu_name is not None:
                 success, tpu_name = self._try_provision_tpu(
                     to_provision, config_dict)
                 if not success:
@@ -728,9 +727,10 @@ class RetryingVmProvisioner(object):
                 if tpu_name is not None:
                     # TODO: refactor to a cleaner design, so that tpu code and
                     # ray up logic are not mixed up.
-                    backend_utils.run(f'ray exec {cluster_config_file} '
-                                      f'\'echo "export TPU_NAME={tpu_name}" > '
-                                      f'{SKY_REMOTE_APP_DIR}/sky_env_var.sh\'')
+                    backend_utils.run(
+                        f'ray exec {cluster_config_file} \'[[ -z $TPU_NAME ]] '
+                        f'&& echo "export TPU_NAME={tpu_name}" >> ~/.bashrc'
+                        ' || echo "TPU_NAME already exists"\'')
                 cluster_name = config_dict['cluster_name']
                 plural = '' if task.num_nodes == 1 else 's'
                 logger.info(
