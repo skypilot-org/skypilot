@@ -14,7 +14,11 @@ from typing import Iterator, List, Optional, Tuple, Union
 from sky.skylet import job_lib
 
 
-def redirect_process_output(proc, log_path, stream_logs, start_streaming_at='', skip_lines=[]):
+def redirect_process_output(proc,
+                            log_path: str,
+                            stream_logs: bool,
+                            start_streaming_at: str = '',
+                            skip_lines: Optional[List[str]] = None):
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
@@ -47,7 +51,7 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at='', 
                     continue
                 # Remove special characters to avoid cursor hidding
                 line = line.replace('\x1b[?25l', '')
-                if any(skip in line for skip in skip_lines):
+                if (skip_lines and any(skip in line for skip in skip_lines)):
                     continue
                 if start_streaming_at in line:
                     start_streaming_flag = True
@@ -93,7 +97,7 @@ def run_with_log(
                 start_streaming_at=start_streaming_at,
                 # Skip these lines caused by `-i` option of bash. Failed to find
                 # other way to turn off these two warning.
-                # https://stackoverflow.com/questions/13300764/ how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and
+                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
                 skip_lines=[
                     'bash: cannot set terminal process group',
                     'bash: no job control in this shell',
