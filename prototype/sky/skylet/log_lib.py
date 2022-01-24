@@ -132,7 +132,10 @@ def run_bash_command_with_log(bash_command: str,
         script_path = fp.name
         run_with_log(
             # Need this `-i` option to make sure `source ~/.bashrc` work.
-            f'/bin/bash -i {script_path}'.split(),
+            # Do not use shell=True because it will cause the environment
+            # set in this task visible to other tasks. shell=False requires
+            # the cmd to be a list.
+            ['/bin/bash', '-i', script_path],
             log_path,
             stream_logs=stream_logs,
             return_none=True,
