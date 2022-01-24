@@ -78,6 +78,7 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
+    proc_pgid = None
     try:
         with subprocess.Popen(cmd,
                               stdout=subprocess.PIPE,
@@ -98,6 +99,7 @@ def run_with_log(
                     'bash: no job control in this shell',
                 ])
             proc.wait()
+            proc_pgid = None
             if proc.returncode != 0 and check:
                 raise RuntimeError('Command failed, please check the logs.')
             if return_none:
@@ -107,13 +109,14 @@ def run_with_log(
         # The proc can be defunct if the python program is killed. Here we
         # open a new subprocess to kill the process, SIGKILL the process group.
         # Adapted from ray/dashboard/modules/job/job_manager.py#L154
-        subprocess.Popen(
-            f'kill -9 -{proc_pgid}',
-            shell=True,
-            # Suppress output
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        if proc_pgid is not None:
+            subprocess.Popen(
+                f'kill -9 -{proc_pgid}',
+                shell=True,
+                # Suppress output
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
 
 def run_bash_command_with_log(bash_command: str,
