@@ -336,6 +336,7 @@ def _build_sky_wheel() -> pathlib.Path:
             str(wheel_dir)
         ],
                        stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
                        check=True)
     except subprocess.CalledProcessError as e:
         raise RuntimeError('Fail to build pip wheel for Sky.') from e
