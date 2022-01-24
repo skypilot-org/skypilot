@@ -1,0 +1,24 @@
+# A minimal example.
+#
+# Runs a task that simply lists the default conda environments.
+#
+# Usage:
+#   sky launch -c min minimal.yaml
+#   sky down -c min
+
+name: source_check
+
+resources:
+  cloud: aws
+
+setup: |
+  echo "here"
+  echo "export TEST_VAR=test" >> ~/.bashrc
+
+run: |
+  if [[ -z "${TEST_VAR}" ]]; then
+    echo "TEST_VAR is not set"
+    exit 1
+  else
+    echo "TEST_VAR is set to ${TEST_VAR}"
+  fi
