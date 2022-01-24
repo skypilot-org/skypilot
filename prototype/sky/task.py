@@ -472,15 +472,22 @@ class Task:
             return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
+            if len(run_msg) > 20:
+                run_msg = f'run=\'{run_msg[:20]}...\''
+            else:
+                run_msg = f'run=\'{run_msg}\''
+        elif self.run is None:
+            run_msg = 'run=None'
         else:
-            run_msg = '<fn>'
-        if len(run_msg) > 20:
-            s = f'Task(run=\'{run_msg[:20]}...\')'
-        else:
-            s = f'Task(run=\'{run_msg}\')'
+            run_msg = 'run=<fn>'
+
+        s = f'Task({run_msg})'
         if self.inputs is not None:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
             s += f'\n  outputs: {self.outputs}'
-        s += f'\n  resources: {self.resources}'
+        if len(self.resources) > 1 or not list(self.resources)[0].is_empty():
+            s += f'\n  resources: {self.resources}'
+        else:
+            s += '\n  resources: default instances'
         return s
