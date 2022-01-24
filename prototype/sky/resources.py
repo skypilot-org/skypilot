@@ -1,7 +1,4 @@
 """Resources: compute requirements of Tasks."""
-import getpass
-import uuid
-
 from typing import Dict, Optional, Union
 
 from sky import clouds
