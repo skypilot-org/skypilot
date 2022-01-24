@@ -211,8 +211,8 @@ class SSHConfigHelper(object):
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
-        sky_autogen_comment = '# Added by sky (use `sky stop/down ' + \
-                            f'{cluster_name}` to remove)'
+        sky_autogen_comment = '# Added by sky (use `sky stop/down' + \
+                            f'-c {cluster_name}` to remove)'
         overwrite = False
         overwrite_begin_idx = None
 
