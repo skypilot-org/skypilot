@@ -27,6 +27,7 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import copy
 import functools
 import getpass
 import time
@@ -402,8 +403,10 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         if workdir is not None:
             task.workdir = workdir
         if gpus is not None:
-            task.set_resources(
-                sky.Resources(accelerators=_parse_accelerator_options(gpus)))
+            assert len(task.resources) == 1
+            copied = copy.deepcopy(list(task.resources)[0])
+            copied.accelerators = _parse_accelerator_options(gpus)
+            task.set_resources({copied})
         if name is not None:
             task.name = name
 
@@ -544,8 +547,10 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
         if workdir is not None:
             task.workdir = workdir
         if gpus is not None:
-            task.set_resources(
-                sky.Resources(accelerators=_parse_accelerator_options(gpus)))
+            assert len(task.resources) == 1
+            copied = copy.deepcopy(list(task.resources)[0])
+            copied.accelerators = _parse_accelerator_options(gpus)
+            task.set_resources({copied})
         if name is not None:
             task.name = name
 
