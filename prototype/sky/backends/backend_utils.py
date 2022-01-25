@@ -645,7 +645,6 @@ def make_task_bash_script(codegen: str) -> str:
         textwrap.dedent(f"""\
                 #!/bin/bash
                 source ~/.bashrc
-                . {SKY_REMOTE_APP_DIR}/sky_env_var.sh 2> /dev/null || true
                 . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
                 cd {SKY_REMOTE_WORKDIR}"""),
         codegen,
