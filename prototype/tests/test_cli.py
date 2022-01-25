@@ -96,7 +96,6 @@ def test_resource_mismatch_check():
 
 
 def test_node_type_check():
-    gnode_defaults = cli._INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cnode_defaults = cli._INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     tnode_defaults = cli._INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     # Launched resources from running: sky gpunode -c t1 --cloud aws --gpus V100
@@ -123,5 +122,5 @@ def test_node_type_check():
                 requested_node_type,
                 spec,
                 launched_resources,
-                user_requested_resources=True)
+                user_requested_resources=False)
         assert 'Resources cannot change for an existing cluster' in str(e.value)
