@@ -204,6 +204,36 @@ def _infer_interactive_node_type(resources: sky.Resources):
     return 'cpunode'
 
 
+def _check_interactive_node_resources_match(
+        node_type: str,
+        resources: sky.Resources,
+        launched_resources: sky.Resources,
+        user_requested_resources: Optional[bool] = False) -> None:
+    """Check matching resources when reusing an existing cluster.
+
+    The only exception is when [cpu|tpu|gpu]node -c cluster_name is used with no
+    additional arguments, then login succeeds.
+
+    Args:
+        node_type: Type of interactive node.
+        resources: Resources to attach to VM.
+        launched_resources: Existing launched resources associated with cluster.
+        user_requested_resources: If true, user requested resources explicitly.
+    """
+    # TODO: Check for same number of launched_nodes if multi-node support is
+    # added for gpu/cpu/tpunode.
+    inferred_node_type = _infer_interactive_node_type(launched_resources)
+    node_type_match = inferred_node_type == node_type
+    launched_resources_match = resources.is_same_resources(launched_resources)
+    no_resource_requests = not user_requested_resources  # e.g. sky gpunode
+    if not (node_type_match and
+            (no_resource_requests or launched_resources_match)):
+        raise click.UsageError(
+            'Resources cannot change for an existing cluster.\n'
+            f'Existing: {inferred_node_type} with {launched_resources}\n'
+            f'Requested: {node_type} with {resources}\n')
+
+
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
     node_type: str,
@@ -254,6 +284,10 @@ def _create_and_ssh_into_node(
             to_provision = None
             task.set_resources(handle.launched_resources)
             task.num_nodes = handle.launched_nodes
+            # Avoid starting clusters with requested resource mismatches.
+            _check_interactive_node_resources_match(node_type, resources,
+                                                    handle.launched_resources,
+                                                    user_requested_resources)
         else:
             dag = sky.optimize(dag)
             task = dag.tasks[0]
@@ -265,22 +299,11 @@ def _create_and_ssh_into_node(
                                    dryrun=False,
                                    stream_logs=True,
                                    cluster_name=cluster_name)
-    # Raise exception if requested resources do not match launched resources
-    # for an existing cluster. The only exception is when [cpu|tpu|gpu]node -c
-    # cluster_name is used with no additional arguments, then login succeeds.
-    # TODO: Check for same number of launched_nodes if multi-node support is
-    # added for gpu/cpu/tpunode.
-    inferred_node_type = _infer_interactive_node_type(handle.launched_resources)
-    node_type_match = inferred_node_type == node_type
-    launched_resources_match = resources.is_same_resources(
-        handle.launched_resources)
-    no_resource_requests = not user_requested_resources  # e.g. sky gpunode
-    if not (node_type_match and
-            (no_resource_requests or launched_resources_match)):
-        raise click.UsageError(
-            'Resources cannot change for an existing cluster.\n'
-            f'Existing: {inferred_node_type} with {handle.launched_resources}\n'
-            f'Requested: {node_type} with {resources}\n')
+
+    # Resource check for reusing a cluster.
+    _check_interactive_node_resources_match(node_type, resources,
+                                            handle.launched_resources,
+                                            user_requested_resources)
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
