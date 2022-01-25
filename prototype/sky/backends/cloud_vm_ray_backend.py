@@ -588,10 +588,9 @@ class RetryingVmProvisioner(object):
         ):
             yield (region, zones)
 
-    def _try_provision_tpu(self, to_provision: Resources, acc_args,
-                           config_dict) -> bool:
+    def _try_provision_tpu(self, to_provision: Resources, config_dict) -> bool:
         """Returns whether the provision is successful."""
-        tpu_name = acc_args['tpu_name']
+        tpu_name = config_dict['tpu_name']
         assert 'tpu-create-script' in config_dict, \
             'Expect TPU provisioning with gcloud.'
         try:
@@ -607,6 +606,14 @@ class RetryingVmProvisioner(object):
                 # right thing to do (force kill + re-provision?).
                 logger.info(f'TPU {tpu_name} already exists; skipped creation.')
                 return True
+
+            if 'RESOURCE_EXHAUSTED' in stderr:
+                logger.warning(
+                    f'TPU {tpu_name} creation failed due to quota exhaustion. '
+                    'Please visit '
+                    'https://console.cloud.google.com/iam-admin/quotas for more'
+                    ' information.')
+                return False
 
             if 'PERMISSION_DENIED' in stderr:
                 logger.info('TPUs are not available in this zone.')
@@ -659,14 +666,11 @@ class RetryingVmProvisioner(object):
                 cluster_name=cluster_name)
             if dryrun:
                 return
-            acc_args = to_provision.accelerator_args
-            tpu_name = None
-            if acc_args is not None and acc_args.get('tpu_name') is not None:
-                success = self._try_provision_tpu(to_provision, acc_args,
-                                                  config_dict)
+            tpu_name = config_dict.get('tpu_name')
+            if tpu_name is not None:
+                success = self._try_provision_tpu(to_provision, config_dict)
                 if not success:
                     continue
-                tpu_name = acc_args['tpu_name']
             cluster_config_file = config_dict['ray']
 
             # Record early, so if anything goes wrong, 'sky status' will show
@@ -718,12 +722,6 @@ class RetryingVmProvisioner(object):
                 # --no-restart' flag.  Ensure so.
                 self._ensure_cluster_ray_started(handle, log_abs_path)
 
-                if tpu_name is not None:
-                    # TODO: refactor to a cleaner design, so that tpu code and
-                    # ray up logic are not mixed up.
-                    backend_utils.run(f'ray exec {cluster_config_file} '
-                                      f'\'echo "export TPU_NAME={tpu_name}" > '
-                                      f'{SKY_REMOTE_APP_DIR}/sky_env_var.sh\'')
                 cluster_name = config_dict['cluster_name']
                 plural = '' if task.num_nodes == 1 else 's'
                 logger.info(
@@ -1067,6 +1065,22 @@ class CloudVmRayBackend(backends.Backend):
             'Run `sky status` to see existing clusters.')
         return cluster_name, to_provision
 
+    def _set_tpu_name(self, task: Task, cluster_config_file: str,
+                      tpu_name: str) -> None:
+        """Sets TPU_NAME on all nodes."""
+        ip_list = self._get_node_ips(cluster_config_file, task.num_nodes)
+        config = backend_utils.read_yaml(cluster_config_file)
+        ssh_user = config['auth']['ssh_user'].strip()
+
+        for ip in ip_list:
+            cmd = (f'[[ -z $TPU_NAME ]] && echo "export TPU_NAME={tpu_name}" '
+                   '>> ~/.bashrc || echo "TPU_NAME already set"')
+            backend_utils.run_command_on_ip_via_ssh(ip,
+                                                    cmd,
+                                                    task.private_key,
+                                                    None,
+                                                    ssh_user=ssh_user)
+
     def provision(self,
                   task: Task,
                   to_provision: Resources,
@@ -1105,6 +1119,11 @@ class CloudVmRayBackend(backends.Backend):
             return
         cluster_config_file = config_dict['ray']
         provisioned_resources = config_dict['launched_resources']
+
+        # Set TPU environment variables
+        tpu_name = config_dict.get('tpu_name')
+        if tpu_name is not None:
+            self._set_tpu_name(task, cluster_config_file, tpu_name)
 
         handle = self.ResourceHandle(
             cluster_name=cluster_name,
@@ -1471,7 +1490,6 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'\n{fore.CYAN}Starting Task execution.{style.RESET_ALL}')
 
         # TODO(zhanghao): Add help info for downloading logs.
-
         self._exec_code_on_head(handle,
                                 codegen.build(),
                                 job_id,

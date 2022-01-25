@@ -336,9 +336,11 @@ def _build_sky_wheel() -> pathlib.Path:
             str(wheel_dir)
         ],
                        stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE,
                        check=True)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError('Fail to build pip wheel for Sky.') from e
+        raise RuntimeError('Fail to build pip wheel for Sky. '
+                           f'Error message: {e.stderr.decode()}') from e
     try:
         latest_wheel = max(wheel_dir.glob('sky-*.whl'), key=os.path.getctime)
     except ValueError:
@@ -472,11 +474,16 @@ def write_cluster_config(task: task_lib.Task,
         return config_dict
     _add_ssh_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
+        tpu_name = resources_vars.get('tpu_name')
+        if tpu_name is None:
+            tpu_name = cluster_name
+
         scripts = tuple(
             _fill_template(
                 path,
                 dict(resources_vars, **{
                     'zones': ','.join(zones),
+                    'tpu_name': tpu_name,
                 }),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in config/user/ to be consistent with
@@ -487,6 +494,7 @@ def write_cluster_config(task: task_lib.Task,
             ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
         config_dict['tpu-create-script'] = scripts[0]
         config_dict['tpu-delete-script'] = scripts[1]
+        config_dict['tpu_name'] = tpu_name
     return config_dict
 
 
@@ -639,7 +647,6 @@ def make_task_bash_script(codegen: str) -> str:
         textwrap.dedent(f"""\
                 #!/bin/bash
                 source ~/.bashrc
-                . {SKY_REMOTE_APP_DIR}/sky_env_var.sh 2> /dev/null || true
                 . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
                 cd {SKY_REMOTE_WORKDIR}"""),
         codegen,
