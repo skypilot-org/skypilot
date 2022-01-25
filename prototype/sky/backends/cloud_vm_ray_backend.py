@@ -722,13 +722,6 @@ class RetryingVmProvisioner(object):
                 # --no-restart' flag.  Ensure so.
                 self._ensure_cluster_ray_started(handle, log_abs_path)
 
-                if tpu_name is not None:
-                    # TODO: refactor to a cleaner design, so that tpu code and
-                    # ray up logic are not mixed up.
-                    backend_utils.run(
-                        f'ray exec {cluster_config_file} \'[[ -z $TPU_NAME ]] '
-                        f'&& echo "export TPU_NAME={tpu_name}" >> ~/.bashrc'
-                        ' || echo "TPU_NAME already exists"\'')
                 cluster_name = config_dict['cluster_name']
                 plural = '' if task.num_nodes == 1 else 's'
                 logger.info(
@@ -1072,6 +1065,22 @@ class CloudVmRayBackend(backends.Backend):
             'Run `sky status` to see existing clusters.')
         return cluster_name, to_provision
 
+    def _set_tpu_name(self, task: Task, cluster_config_file: str,
+                      tpu_name: str) -> None:
+        """Sets TPU_NAME on all nodes."""
+        ip_list = self._get_node_ips(cluster_config_file, task.num_nodes)
+        config = backend_utils.read_yaml(cluster_config_file)
+        ssh_user = config['auth']['ssh_user'].strip()
+
+        for ip in ip_list:
+            cmd = (f'[[ -z $TPU_NAME ]] && echo "export TPU_NAME={tpu_name}" '
+                   '>> ~/.bashrc || echo "TPU_NAME already set"')
+            backend_utils.run_command_on_ip_via_ssh(ip,
+                                                    cmd,
+                                                    task.private_key,
+                                                    None,
+                                                    ssh_user=ssh_user)
+
     def provision(self,
                   task: Task,
                   to_provision: Resources,
@@ -1110,6 +1119,11 @@ class CloudVmRayBackend(backends.Backend):
             return
         cluster_config_file = config_dict['ray']
         provisioned_resources = config_dict['launched_resources']
+
+        # Set TPU environment variables
+        tpu_name = config_dict.get('tpu_name')
+        if tpu_name is not None:
+            self._set_tpu_name(task, cluster_config_file, tpu_name)
 
         handle = self.ResourceHandle(
             cluster_name=cluster_name,
