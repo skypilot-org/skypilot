@@ -1129,8 +1129,8 @@ class CloudVmRayBackend(backends.Backend):
         # TODO(zhwu): make this in parallel
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         for i, ip in enumerate(ip_list):
-            node_name = f'worker{i-1}' if i > 0 else 'head'
-            logger.info(f'Syncing {workdir} to {node_name}.\n')
+            node_name = f'worker{i}' if i > 0 else 'head'
+            logger.info(f'Syncing workdir to {node_name}.\n')
             self._run_rsync(handle,
                             ip=ip,
                             source=f'{workdir}/',
@@ -1600,7 +1600,9 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
         # Build command.
-        rsync_command = ['rsync', '-a']
+        rsync_command = ['rsync', '-avz']
+        if os.path.exists(os.path.join(source, '.gitignore')):
+            rsync_command.append('--filter=\':- .gitignore\'')
         ssh_options = ' '.join(
             _ssh_options_list(ssh_private_key, self._ssh_control_path(handle)))
         rsync_command.append(f'-e "ssh {ssh_options}"')
