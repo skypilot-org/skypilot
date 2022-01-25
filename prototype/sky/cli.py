@@ -248,7 +248,8 @@ def _create_and_ssh_into_node(
         # This handles stopped interactive nodes where they are restarted by
         # skipping sky start and directly calling sky [cpu|tpu|gpu]node.
 
-        cluster_status = global_user_state.get_status_from_cluster_name(cluster_name)
+        cluster_status = global_user_state.get_status_from_cluster_name(
+            cluster_name)
         if cluster_status == global_user_state.ClusterStatus.STOPPED:
             assert handle.launched_resources is not None, handle
             to_provision = None
