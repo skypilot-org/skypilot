@@ -40,7 +40,9 @@ def test_partial_t4():
 
 
 def test_partial_tpu():
-    _test_resources(sky.Resources(accelerators='tpu-v3-8'))
+    with pytest.raises(AssertionError) as e:
+        _test_resources(sky.Resources(accelerators='tpu-v3-8'))
+    assert 'Cloud must be GCP' in str(e.value)
 
 
 def test_partial_v100():
