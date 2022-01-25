@@ -833,7 +833,7 @@ class RetryingVmProvisioner(object):
         # TODO: if requesting a large amount (say 32) of expensive VMs, this
         # may loop for a long time.  Use timeouts and treat as gang_failed.
         cluster_ready = backend_utils.wait_until_ray_cluster_ready(
-            to_provision_cloud, cluster_config_file, task.num_nodes)
+            to_provision_cloud, cluster_config_file, task.num_nodes, timeout=300)
         gang_failed = not cluster_ready
         if gang_failed or ray_up_on_full_confg_only:
             # Head OK; gang scheduling failure.

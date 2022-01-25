@@ -12,15 +12,15 @@ debug_series = {'K80': [1]}
 instance_series = {
     'p': {
         'V100': [1, 4, 8],
-        'K80': [1, 8, 16], # Never get 16 K80s.
-        'A100': [8],
+        'K80': [1, 8, 16],
+        'A100': [8], # This is hard to get.
     },
     'g': {
         'T4': [1, 4, 8],
+        'A10G': [1, 4, 8],
         'M60': [1, 2, 4],
         'K520': [1, 4],
         # 'T4g': [1, 2], # Need Arm64 AMI
-        # 'A10G': [1, 4, 8],
     }
 }
 
@@ -30,6 +30,7 @@ SELECTED_REGIONS = {
     ],
     'zhwu_p_regions': ['us-east-2', 'us-west-2', 'eu-west-2'],
     'all_regions': [],
+    'all_us_eu_regions': ['us', 'eu', 'ca', 'sa'],
 }
 
 PATTERN = r'Got (.*) in '
@@ -42,9 +43,11 @@ TEST_SERIES = 'p'
 RETRY_UNTIL_SUCCEEDED = True
 RETRY_UNTIL_SUCCEEDED_GAP = 1
 # Catalog configs
-TEST_REGIONS = 'all_regions'
+# TEST_REGIONS = 'all_regions'
+# TEST_REGIONS = f'zhwu_{TEST_SERIES}_regions'
+TEST_REGIONS = 'all_us_eu_regions'
 USE_SPOT = False
-# TEST_REGIONS = 'zhwu_p_regions'
+NUM_NODES=1
 catalog_config = dict(
     _faster_retry_by_catalog=True,
     # Only retry the region/zones that are in the area. This is cloud specific.
@@ -62,15 +65,20 @@ config_path = os.path.join(file_dir, '_catalog_config.json')
 with open(config_path, 'w') as f:
     json.dump(catalog_config, f)
 
+success_line = 'Shared connection to '
+if NUM_NODES > 1:
+    success_line = 'Gang scheduling succeeded.'
+
 launch_yaml = """
 resources:
   cloud: {cloud}
   accelerators:
     {gpu}: {cnt}
   use_spot: {use_spot}
+num_nodes: {num_nodes}
 """
 use_spot_str = '' if USE_SPOT else 'no_spot'
-RESULT_PATH = f'result_{TEST_SERIES}_{TEST_REGIONS}_{use_spot_str}'
+RESULT_PATH = f'result_{TEST_SERIES}_{TEST_REGIONS}_{use_spot_str}_{NUM_NODES}nodes'
 if RETRY_UNTIL_SUCCEEDED:
     RESULT_PATH += '_retry'
 RESULT_PATH += '.csv'
@@ -129,7 +137,7 @@ for gpu, cnt_list in TEST_INSTANCE_SERIES.items():
             continue
 
         use_spot_str = 'true' if USE_SPOT else 'false'
-        new_yaml = launch_yaml.format(cloud=cloud, gpu=gpu, cnt=cnt, use_spot=use_spot_str)
+        new_yaml = launch_yaml.format(cloud=cloud, gpu=gpu, cnt=cnt, use_spot=use_spot_str,num_nodes=NUM_NODES)
         with open('./tmp.yaml', 'w') as f:
             f.write(new_yaml)
 
@@ -145,7 +153,7 @@ for gpu, cnt_list in TEST_INSTANCE_SERIES.items():
             lines = []
             for line in io.TextIOWrapper(proc.stdout, encoding='utf-8'):
                 lines.append(line)
-                if 'Shared connection to ' in line:
+                if success_line in line:
                     succeeded = True
                     break
                 if DEBUG_MODE:

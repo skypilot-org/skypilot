@@ -521,7 +521,7 @@ def get_run_timestamp() -> str:
 
 
 def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
-                                 num_nodes: int) -> bool:
+                                 num_nodes: int, timeout: Optional[int]=None) -> bool:
     """Returns whether the entire ray cluster is ready."""
     # FIXME: It may takes a while for the cluster to be available for ray,
     # especially for Azure, causing `ray exec` to fail.
@@ -534,6 +534,7 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
         worker_str = 'ray_worker_default'
     else:
         assert False, f'No support for distributed clusters for {cloud}.'
+    start = time.time()
     while True:
         proc = subprocess.run(f'ray exec {cluster_config_file} "ray status"',
                               shell=True,
@@ -543,12 +544,18 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
         output = proc.stdout.decode('ascii')
         logger.info(output)
         if f'{expected_worker_count} {worker_str}' in output:
+            logger.info('Gang scheduling succeeded.')
             break
         if '(no pending nodes)' in output and '(no failures)' in output:
             # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
             # GCP can satisfy only by half, the worker node would be forgotten.
             # The correct behavior should be for it to error out.
             return False  # failed
+        if timeout is not None:
+            time_elapsed = time.time() - start
+            if time_elapsed > timeout:
+                logger.error(f'Got Timed out in waiting for cluster to be ready.')
+                return False  # failed
         time.sleep(10)
     return True  # success
 
