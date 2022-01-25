@@ -126,7 +126,7 @@ def _execute(dag: sky.Dag,
                 backend.sync_workdir(handle, task.workdir)
 
         if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
-            backend.sync_file_mounts(handle, task.file_mounts,
+            backend.sync_file_mounts(handle, task, task.file_mounts,
                                      task.get_cloud_to_remote_file_mounts())
 
         if stages is None or Stage.PRE_EXEC in stages:
