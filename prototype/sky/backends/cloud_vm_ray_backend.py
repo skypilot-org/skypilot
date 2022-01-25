@@ -1619,8 +1619,9 @@ class CloudVmRayBackend(backends.Backend):
         ssh_private_key = auth.get('ssh_private_key')
         # Build command.
         rsync_command = ['rsync', '-avz']
-        if os.path.exists(os.path.join(source, '.gitignore')):
-            rsync_command.append('--filter=\':- .gitignore\'')
+        filter_path = os.path.join(source, '.gitignore')
+        if os.path.exists(filter_path):
+            rsync_command.append(f'--filter=\':- {filter_path}\'')
         ssh_options = ' '.join(
             _ssh_options_list(ssh_private_key, self._ssh_control_path(handle)))
         rsync_command.append(f'-e "ssh {ssh_options}"')
