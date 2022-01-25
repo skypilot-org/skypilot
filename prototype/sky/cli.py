@@ -272,6 +272,11 @@ def _create_and_ssh_into_node(
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is not None:
+        # Avoid reusing clusters with requested resource mismatches.
+        _check_interactive_node_resources_match(node_type, resources,
+                                                handle.launched_resources,
+                                                user_requested_resources)
     if handle is None or handle.head_ip is None:
         # head_ip would be None if previous provisioning failed.
 
@@ -284,10 +289,6 @@ def _create_and_ssh_into_node(
             to_provision = None
             task.set_resources(handle.launched_resources)
             task.num_nodes = handle.launched_nodes
-            # Avoid starting clusters with requested resource mismatches.
-            _check_interactive_node_resources_match(node_type, resources,
-                                                    handle.launched_resources,
-                                                    user_requested_resources)
         else:
             dag = sky.optimize(dag)
             task = dag.tasks[0]
@@ -299,11 +300,6 @@ def _create_and_ssh_into_node(
                                    dryrun=False,
                                    stream_logs=True,
                                    cluster_name=cluster_name)
-
-    # Resource check for reusing a cluster.
-    _check_interactive_node_resources_match(node_type, resources,
-                                            handle.launched_resources,
-                                            user_requested_resources)
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
