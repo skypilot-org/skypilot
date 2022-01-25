@@ -50,8 +50,9 @@ class Resources:
 
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc:
-                assert cloud is not None and cloud.is_same_cloud(
-                    clouds.GCP()), 'Cloud must be GCP.'
+                if cloud is None:
+                    cloud = clouds.GCP()
+                assert cloud.is_same_cloud(clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
                 if 'tf_version' not in accelerator_args:
