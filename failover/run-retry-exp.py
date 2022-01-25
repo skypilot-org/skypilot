@@ -30,7 +30,7 @@ SELECTED_REGIONS = {
     ],
     'zhwu_p_regions': ['us-east-2', 'us-west-2', 'eu-west-2'],
     'all_regions': [],
-    'all_us_eu_regions': ['us', 'eu', 'ca', 'sa'],
+    'all_us_eu_regions': ['us', 'eu', 'ca'],
 }
 
 PATTERN = r'Got (.*) in '
