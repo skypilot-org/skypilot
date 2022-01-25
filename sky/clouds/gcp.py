@@ -47,6 +47,12 @@ class GCP(clouds.Cloud):
         'n1-highmem-32': 1.892848,
         'n1-highmem-64': 3.785696,
         'n1-highmem-96': 5.678544,
+        # A2
+        'a2-highgpu-1g': 3.678477,
+        'a2-highgpu-2g': 7.356954,
+        'a2-highgpu-4g': 14.713908,
+        'a2-highgpu-8g': 29.427816,
+        'a2-megagpu-16g': 55.820976,
     }
 
     _SPOT_PRICES = {
@@ -68,6 +74,12 @@ class GCP(clouds.Cloud):
         'n1-highmem-32': 0.398496,
         'n1-highmem-64': 0.796992,
         'n1-highmem-96': 1.195488,
+        # A2
+        'a2-highgpu-1g': 1.101843,
+        'a2-highgpu-2g': 2.203686,
+        'a2-highgpu-4g': 4.407372,
+        'a2-highgpu-8g': 8.814745,
+        'a2-megagpu-16g': 16.719093,
     }
 
     #### Regions/Zones ####
