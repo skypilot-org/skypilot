@@ -70,8 +70,11 @@ class AWS(clouds.Cloud):
             regions = aws_catalog.get_region_zones_for_instance_type(
                 instance_type, use_spot)
         for region in regions:
-            if region.name == 'us-west-1':
-                # TODO: troubles launching AMIs.
+            # if region.name == 'us-west-1':
+            #     # TODO: troubles launching AMIs.
+            #     continue
+            if region.name == 'eu-south-1':
+                # TODO: This region should be manually opt in.
                 continue
             yield region, region.zones
 
@@ -83,7 +86,7 @@ class AWS(clouds.Cloud):
             # us
             'us-east-1': 'ami-0e3c68b57d50caf64',
             'us-east-2': 'ami-0ae79682024fe31cd',
-            # 'us-west-1': 'TODO: cannot launch',
+            'us-west-1': 'ami-09870f8bfc822200e', # 'TODO: cannot launch',
             'us-west-2': 'ami-0050625d58fa27b6d',
             # ca
             'ca-central-1': 'ami-00681419ff1614111',
@@ -92,6 +95,8 @@ class AWS(clouds.Cloud):
             'eu-west-1': 'ami-050232e50c0e4c717',
             'eu-west-2': 'ami-04784f7a629cfc417',
             'eu-west-3': 'ami-0487529c03a579d26',
+            'eu-south-1': 'ami-0e98c9a81afb5f6e1',
+            'eu-north-1': 'ami-0e98c9a81afb5f6e1',
             #ap
             # 'ap-east-1': 'TODO: not found',
             'ap-south-1': 'ami-010f0b376694126ea',
