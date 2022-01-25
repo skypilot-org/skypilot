@@ -25,6 +25,9 @@ REGIONS = [
     'eu-west-1',
     'eu-west-2',
     'eu-west-3',
+    'eu-south-1',
+    'eu-north-1',
+    'sa-east-1',
     #ap
     # 'ap-east-1': 'TODO: not found',
     'ap-south-1',
