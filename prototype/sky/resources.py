@@ -43,20 +43,23 @@ class Resources:
         self.instance_type = instance_type
         assert not (instance_type is not None and cloud is None), \
             'If instance_type is specified, must specify the cloud'
-        # Convert to Dict[str, int].
-        if accelerators is not None and isinstance(accelerators, str):
-            if 'tpu' in accelerators:
+        if accelerators is not None:
+            if isinstance(accelerators, str):  # Convert to Dict[str, int].
+                accelerators = {accelerators: 1}
+            assert len(accelerators) == 1, accelerators
+
+            acc, _ = list(accelerators.items())[0]
+            if 'tpu' in acc:
+                if cloud is None:
+                    cloud = clouds.GCP()
+                assert cloud.is_same_cloud(clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
                 if 'tf_version' not in accelerator_args:
                     logger.info('Missing tf_version in accelerator_args, using'
                                 ' default (2.5.0)')
                     accelerator_args['tf_version'] = '2.5.0'
-                if 'tpu_name' not in accelerator_args:
-                    logger.info('Missing tpu_name in accelerator_args, using'
-                                ' default (sky_tpu)')
-                    accelerator_args['tpu_name'] = 'sky_tpu'
-            accelerators = {accelerators: 1}
+
         self.accelerators = accelerators
         self.accelerator_args = accelerator_args
 
