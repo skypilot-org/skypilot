@@ -68,6 +68,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
     'tpunode': sky.Resources(cloud=sky.GCP(),
                              instance_type=None,
                              accelerators={'tpu-v3-8': 1},
+                             accelerator_args={'tf_version': '2.5.0'},
                              use_spot=False),
 }
 
@@ -251,7 +252,6 @@ def _create_and_ssh_into_node(
                                    dryrun=False,
                                    stream_logs=True,
                                    cluster_name=cluster_name)
-
     # Raise exception if requested resources do not match launched resources
     # for an existing cluster. The only exception is when [cpu|tpu|gpu]node -c
     # cluster_name is used with no additional arguments, then login succeeds.
