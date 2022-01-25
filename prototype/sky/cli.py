@@ -405,6 +405,7 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
             task.set_resources(
                 sky.Resources(cloud=task.cloud,
                               accelerators=_parse_accelerator_options(gpus),
+                              accelerator_args=task.accelerator_args,
                               use_spot=task.use_spot))
         if name is not None:
             task.name = name
@@ -549,6 +550,7 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
             task.set_resources(
                 sky.Resources(cloud=task.cloud,
                               accelerators=_parse_accelerator_options(gpus),
+                              accelerator_args=task.accelerator_args,
                               use_spot=task.use_spot))
         if name is not None:
             task.name = name
