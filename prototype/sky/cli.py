@@ -937,7 +937,7 @@ def down(
                 fg='yellow')
         else:
             names.append(cluster_name)
-    if not names:
+    if not all and not names:
         return
     _terminate_or_stop_clusters(names, apply_to_all=all, terminate=True)
 
