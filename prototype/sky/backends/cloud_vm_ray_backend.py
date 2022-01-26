@@ -1154,7 +1154,8 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         for i, ip in enumerate(ip_list):
             node_name = f'worker{i}' if i > 0 else 'head'
-            logger.info(f'{cyan} Syncing: {bright} workdir -> {node_name}{reset}.')
+            logger.info(
+                f'{cyan} Syncing: {bright} workdir -> {node_name}{reset}.')
             self._run_rsync(handle,
                             ip=ip,
                             source=f'{workdir}/',
@@ -1234,9 +1235,8 @@ class CloudVmRayBackend(backends.Backend):
             # TODO: make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
-                logger.info(
-                    f'{cyan} Syncing (on {node_name}): {bright}{src} -> {dst}{reset}'
-                )
+                logger.info(f'{cyan} Syncing (on {node_name}): '
+                            f'{bright}{src} -> {dst}{reset}')
                 backend_utils.run_command_on_ip_via_ssh(ip,
                                                         command,
                                                         task.private_key,
