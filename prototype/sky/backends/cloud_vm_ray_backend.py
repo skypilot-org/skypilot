@@ -1155,10 +1155,10 @@ class CloudVmRayBackend(backends.Backend):
                 f'{fore.CYAN} Syncing: {style.BRIGHT} workdir -> {node_name}'
                 f'{style.RESET_ALL}.')
             self._rsync_up(handle,
-                            ip=ip,
-                            source=f'{workdir}/',
-                            target=SKY_REMOTE_WORKDIR,
-                            with_outputs=True)
+                           ip=ip,
+                           source=f'{workdir}/',
+                           target=SKY_REMOTE_WORKDIR,
+                           with_outputs=True)
 
     def sync_file_mounts(
         self,
@@ -1181,11 +1181,10 @@ class CloudVmRayBackend(backends.Backend):
         bright = style.BRIGHT
         logger.info(f'{cyan}Processing cloud to VM file mounts.{reset}')
 
-        ip_list = self._get_node_ips(handle.cluster_yaml,
-                                         handle.launched_nodes)
+        ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         config = backend_utils.read_yaml(handle.cluster_yaml)
         ssh_user = config['auth']['ssh_user'].strip()
-        
+
         def sync_to_all_nodes(src: str, dst: str, command: str):
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
@@ -1323,9 +1322,9 @@ class CloudVmRayBackend(backends.Backend):
             # submit' may not work as it may use system python (python2) to
             # execute the script.  Happens for AWS.
             self._rsync_up(handle,
-                            source=fp.name,
-                            target=script_path,
-                            with_outputs=False)
+                           source=fp.name,
+                           target=script_path,
+                           with_outputs=False)
 
         job_log_path = os.path.join(self.log_dir, 'job_submit.log')
         remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, self.log_dir)
@@ -1612,7 +1611,7 @@ class CloudVmRayBackend(backends.Backend):
         auth = config['auth']
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
-        # Build command. 
+        # Build command.
         # rsync options: progress bar; verbose; compress
         rsync_command = ['rsync', '-Pavz']
         filter_path = os.path.join(source, '.gitignore')

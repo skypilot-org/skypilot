@@ -187,7 +187,7 @@ class LocalDockerBackend(backends.Backend):
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         """File mounts in Docker are implemented with volume mounts (-v)."""
-        del task # unused
+        del task  # unused
         assert not cloud_to_remote_file_mounts, \
             'Only local file mounts are supported with LocalDockerBackend.'
         docker_mounts = {}
