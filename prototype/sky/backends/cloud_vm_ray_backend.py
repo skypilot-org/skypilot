@@ -1219,8 +1219,6 @@ class CloudVmRayBackend(backends.Backend):
                         source=dst,
                         target=wrapped_dst,
                         download_target_commands=download_target_commands))
-            log_path = os.path.join(self.log_dir,
-                                    'file_mounts_cloud_to_remote.log')
             logger.info(f'{cyan} Syncing: {bright}{src} -> {dst}{reset}')
             # TODO: filter out ray boilerplate: Setting `max_workers` for node
             # type ... try re-running the command with --no-config-cache.
