@@ -1145,18 +1145,16 @@ class CloudVmRayBackend(backends.Backend):
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
-        # TODO(zhwu): make this in parallel
         fore = colorama.Fore
         style = colorama.Style
-        cyan = fore.CYAN
-        reset = style.RESET_ALL
-        bright = style.BRIGHT
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        # TODO(zhwu): make this in parallel
         for i, ip in enumerate(ip_list):
             node_name = f'worker{i}' if i > 0 else 'head'
             logger.info(
-                f'{cyan} Syncing: {bright} workdir -> {node_name}{reset}.')
-            self._run_rsync(handle,
+                f'{fore.CYAN} Syncing: {style.BRIGHT} workdir -> {node_name}'
+                f'{style.RESET_ALL}.')
+            self._rsync_up(handle,
                             ip=ip,
                             source=f'{workdir}/',
                             target=SKY_REMOTE_WORKDIR,
@@ -1182,6 +1180,24 @@ class CloudVmRayBackend(backends.Backend):
         reset = style.RESET_ALL
         bright = style.BRIGHT
         logger.info(f'{cyan}Processing cloud to VM file mounts.{reset}')
+
+        ip_list = self._get_node_ips(handle.cluster_yaml,
+                                         handle.launched_nodes)
+        config = backend_utils.read_yaml(handle.cluster_yaml)
+        ssh_user = config['auth']['ssh_user'].strip()
+        
+        def sync_to_all_nodes(src: str, dst: str, command: str):
+            # TODO(zhwu): make this in parallel
+            for i, ip in enumerate(ip_list):
+                node_name = f'worker{i}' if i > 0 else 'head'
+                logger.info(f'{cyan} Syncing (on {node_name}): '
+                            f'{bright}{src} -> {dst}{reset}')
+                backend_utils.run_command_on_ip_via_ssh(ip,
+                                                        command,
+                                                        task.private_key,
+                                                        task.container_name,
+                                                        ssh_user=ssh_user)
+
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
             # (download gsutil on remote, run gsutil on remote).  Consider
@@ -1224,23 +1240,8 @@ class CloudVmRayBackend(backends.Backend):
                         source=dst,
                         target=wrapped_dst,
                         download_target_commands=download_target_commands))
-            # TODO: filter out ray boilerplate: Setting `max_workers` for node
-            # type ... try re-running the command with --no-config-cache.
 
-            ip_list = self._get_node_ips(handle.cluster_yaml,
-                                         handle.launched_nodes)
-            config = backend_utils.read_yaml(handle.cluster_yaml)
-            ssh_user = config['auth']['ssh_user'].strip()
-            # TODO: make this in parallel
-            for i, ip in enumerate(ip_list):
-                node_name = f'worker{i}' if i > 0 else 'head'
-                logger.info(f'{cyan} Syncing (on {node_name}): '
-                            f'{bright}{src} -> {dst}{reset}')
-                backend_utils.run_command_on_ip_via_ssh(ip,
-                                                        command,
-                                                        task.private_key,
-                                                        task.container_name,
-                                                        ssh_user=ssh_user)
+            sync_to_all_nodes(src, dst, command)
 
     def run_post_setup(self, handle: ResourceHandle,
                        post_setup_fn: Optional[PostSetupFn],
@@ -1321,7 +1322,7 @@ class CloudVmRayBackend(backends.Backend):
             # We choose to sync code + exec, because the alternative of 'ray
             # submit' may not work as it may use system python (python2) to
             # execute the script.  Happens for AWS.
-            self._run_rsync(handle,
+            self._rsync_up(handle,
                             source=fp.name,
                             target=script_path,
                             with_outputs=False)
@@ -1590,7 +1591,7 @@ class CloudVmRayBackend(backends.Backend):
         os.makedirs(path, exist_ok=True)
         return path
 
-    def _run_rsync(
+    def _rsync_up(
         self,
         handle: ResourceHandle,
         source: str,
