@@ -1146,10 +1146,15 @@ class CloudVmRayBackend(backends.Backend):
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
         # TODO(zhwu): make this in parallel
+        fore = colorama.Fore
+        style = colorama.Style
+        cyan = fore.CYAN
+        reset = style.RESET_ALL
+        bright = style.BRIGHT
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         for i, ip in enumerate(ip_list):
             node_name = f'worker{i}' if i > 0 else 'head'
-            logger.info(f'Syncing workdir to {node_name}.\n')
+            logger.info(f'{cyan} Syncing: {bright} workdir -> {node_name}{reset}.')
             self._run_rsync(handle,
                             ip=ip,
                             source=f'{workdir}/',
@@ -1219,32 +1224,24 @@ class CloudVmRayBackend(backends.Backend):
                         source=dst,
                         target=wrapped_dst,
                         download_target_commands=download_target_commands))
-            logger.info(f'{cyan} Syncing: {bright}{src} -> {dst}{reset}')
             # TODO: filter out ray boilerplate: Setting `max_workers` for node
             # type ... try re-running the command with --no-config-cache.
-            # proc, unused_stdout, unused_stderr = backend_utils.run_with_log(
-            #     f'ray exec {handle.cluster_yaml} \'{command}\'',
-            #     os.path.abspath(log_path),
-            #     stream_logs=True,
-            #     shell=True)
 
             ip_list = self._get_node_ips(handle.cluster_yaml,
                                          handle.launched_nodes)
             config = backend_utils.read_yaml(handle.cluster_yaml)
             ssh_user = config['auth']['ssh_user'].strip()
             # TODO: make this in parallel
-            for ip in ip_list:
+            for i, ip in enumerate(ip_list):
+                node_name = f'worker{i}' if i > 0 else 'head'
                 logger.info(
-                    f'{cyan} Syncing (on {ip}): {bright}{src} -> {dst}{reset}')
+                    f'{cyan} Syncing (on {node_name}): {bright}{src} -> {dst}{reset}'
+                )
                 backend_utils.run_command_on_ip_via_ssh(ip,
                                                         command,
                                                         task.private_key,
                                                         task.container_name,
                                                         ssh_user=ssh_user)
-            # if proc.returncode:
-            #     raise ValueError(
-            #         f'File mounts\n\t{src} -> {dst}\nfailed to sync. '
-            #         f'See errors above and log: {log_path}')
 
     def run_post_setup(self, handle: ResourceHandle,
                        post_setup_fn: Optional[PostSetupFn],
