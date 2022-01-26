@@ -1169,7 +1169,6 @@ class CloudVmRayBackend(backends.Backend):
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
-        # TODO: this function currently only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
         # using the yaml file.  Here we handle cloud -> remote file transfers.
         # FIXME: if called out-of-band without provision() first, we actually
