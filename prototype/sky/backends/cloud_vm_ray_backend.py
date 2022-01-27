@@ -1070,14 +1070,16 @@ class CloudVmRayBackend(backends.Backend):
         """Sets TPU_NAME on all nodes."""
         ip_list = self._get_node_ips(cluster_config_file, task.num_nodes)
         config = backend_utils.read_yaml(cluster_config_file)
-        ssh_user = config['auth']['ssh_user'].strip()
+        auth = config['auth']
+        ssh_user = auth['ssh_user'].strip()
+        ssh_private_key = auth.get('ssh_private_key')
 
         for ip in ip_list:
             cmd = (f'[[ -z $TPU_NAME ]] && echo "export TPU_NAME={tpu_name}" '
                    '>> ~/.bashrc || echo "TPU_NAME already set"')
             backend_utils.run_command_on_ip_via_ssh(ip,
                                                     cmd,
-                                                    task.private_key,
+                                                    ssh_private_key,
                                                     None,
                                                     ssh_user=ssh_user)
 
@@ -1163,7 +1165,7 @@ class CloudVmRayBackend(backends.Backend):
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
-        task: Task,
+        container_name: Optional[str],
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
@@ -1183,7 +1185,9 @@ class CloudVmRayBackend(backends.Backend):
 
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         config = backend_utils.read_yaml(handle.cluster_yaml)
-        ssh_user = config['auth']['ssh_user'].strip()
+        auth = config['auth']
+        ssh_user = auth['ssh_user'].strip()
+        ssh_private_key = auth.get('ssh_private_key')
 
         def sync_to_all_nodes(src: str, dst: str, command: str):
             # TODO(zhwu): make this in parallel
@@ -1193,8 +1197,8 @@ class CloudVmRayBackend(backends.Backend):
                             f'{bright}{src} -> {dst}{reset}')
                 backend_utils.run_command_on_ip_via_ssh(ip,
                                                         command,
-                                                        task.private_key,
-                                                        task.container_name,
+                                                        ssh_private_key,
+                                                        container_name,
                                                         ssh_user=ssh_user)
 
         for dst, src in mounts.items():
@@ -1248,7 +1252,10 @@ class CloudVmRayBackend(backends.Backend):
         if post_setup_fn is not None:
             ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
             config = backend_utils.read_yaml(handle.cluster_yaml)
-            ssh_user = config['auth']['ssh_user'].strip()
+            auth = config['auth']
+            ssh_user = auth['ssh_user'].strip()
+            ssh_private_key = auth.get('ssh_private_key')
+
             ip_to_command = post_setup_fn(ip_list)
             for ip, cmd in ip_to_command.items():
                 if cmd is not None:
@@ -1256,7 +1263,7 @@ class CloudVmRayBackend(backends.Backend):
                            f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
                     backend_utils.run_command_on_ip_via_ssh(ip,
                                                             cmd,
-                                                            task.private_key,
+                                                            ssh_private_key,
                                                             task.container_name,
                                                             ssh_user=ssh_user)
 
