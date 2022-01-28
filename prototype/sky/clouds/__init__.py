@@ -14,3 +14,9 @@ __all__ = [
     'Region',
     'Zone',
 ]
+
+CLOUD_REGISTRY = {
+    'aws': AWS(),
+    'gcp': GCP(),
+    'azure': Azure(),
+}

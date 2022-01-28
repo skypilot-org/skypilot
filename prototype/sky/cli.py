@@ -42,7 +42,7 @@ import sky
 from sky import backends
 from sky import global_user_state
 from sky import sky_logging
-from sky import task as task_lib
+from sky import clouds
 from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
@@ -379,7 +379,7 @@ def cli():
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
-@click.option('--detach_run',
+@click.option('--detach-run',
               '-d',
               default=False,
               is_flag=True,
@@ -397,6 +397,10 @@ def cli():
     help=('If specified, sync this dir to the remote working directory, '
           'where the task will be invoked. '
           'Overrides the "workdir" config in the YAML if both are supplied.'))
+@click.option('--cloud',
+              required=False,
+              type=str,
+              help='If specified, override the "resources.cloud" config.')
 @click.option(
     '--gpus',
     required=False,
@@ -410,6 +414,10 @@ def cli():
           'resources and is used for scheduling the task. '
           'Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
+@click.option('--use-spot/--no-use-spot',
+              required=False,
+              default=None,
+              help='If specified, override the "resources.use_spot" config.')
 @click.option('--name',
               '-n',
               required=False,
@@ -418,7 +426,8 @@ def cli():
                     'config in the YAML if both are supplied.'))
 def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
            detach_run: bool, backend_name: str, workdir: Optional[str],
-           gpus: Optional[str], name: Optional[str]):
+           cloud: Optional[str], gpus: Optional[str], use_spot: Optional[bool],
+           name: Optional[str]):
     """Launch a task from a YAML or command (rerun setup if cluster exists).
 
     If entrypoint points to a valid YAML file, it is read in as the task
@@ -443,11 +452,20 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         # Override.
         if workdir is not None:
             task.workdir = workdir
+
+        new_resources = copy.deepcopy(list(task.resources)[0])
+        assert cloud is None
+        if cloud is not None:
+            if cloud not in clouds.CLOUD_REGISTRY:
+                raise click.UsageError(
+                    f'Cloud \'{cloud}\' is not supported. '
+                    f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
+            new_resources.cloud = clouds.CLOUD_REGISTRY[cloud]
         if gpus is not None:
-            assert len(task.resources) == 1
-            copied = copy.deepcopy(list(task.resources)[0])
-            copied.accelerators = _parse_accelerator_options(gpus)
-            task.set_resources({copied})
+            new_resources.accelerators = _parse_accelerator_options(gpus)
+        if use_spot is not None:
+            new_resources.use_spot = use_spot
+        task.set_resources({new_resources})
         if name is not None:
             task.name = name
 
@@ -472,7 +490,7 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
 @cli.command()
 @click.argument('cluster', required=True, type=str)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
-@click.option('--detach_run',
+@click.option('--detach-run',
               '-d',
               default=False,
               is_flag=True,
@@ -1018,6 +1036,11 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         name = record['name']
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
+        if handle.launched_resources.use_spot and not terminate:
+            click.secho(
+                f'Stopping cluster {name}... cannot stop spot instances, skip.',
+                fg='green')
+            continue
         backend.teardown(handle, terminate=terminate)
         if terminate:
             click.secho(f'Terminating cluster {name}...done.', fg='green')
@@ -1076,12 +1099,11 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     gpus is None and spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    cloud_provider = task_lib.CLOUD_REGISTRY.get(cloud, default_resources.cloud)
-    if cloud is not None and cloud not in task_lib.CLOUD_REGISTRY:
+    cloud_provider = clouds.CLOUD_REGISTRY.get(cloud, default_resources.cloud)
+    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
         raise click.UsageError(
-            f'Cloud \'{cloud}\' is not supported. ' + \
-            f'Supported clouds: {list(task_lib.CLOUD_REGISTRY.keys())}'
-        )
+            f'Cloud \'{cloud}\' is not supported. '
+            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
     if gpus is not None:
         gpus = _parse_accelerator_options(gpus)
     elif instance_type is None:
@@ -1152,11 +1174,11 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
-    cloud_provider = task_lib.CLOUD_REGISTRY.get(cloud, None)
-    if cloud is not None and cloud not in task_lib.CLOUD_REGISTRY:
+    cloud_provider = clouds.CLOUD_REGISTRY.get(cloud, None)
+    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
         raise click.UsageError(
             f'Cloud \'{cloud}\' is not supported. ' + \
-            f'Supported clouds: {list(task_lib.CLOUD_REGISTRY.keys())}'
+            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}'
         )
     if instance_type is None:
         instance_type = default_resources.instance_type
