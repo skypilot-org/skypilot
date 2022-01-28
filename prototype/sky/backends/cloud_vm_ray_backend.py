@@ -1080,7 +1080,6 @@ class CloudVmRayBackend(backends.Backend):
             backend_utils.run_command_on_ip_via_ssh(ip,
                                                     cmd,
                                                     ssh_private_key,
-                                                    None,
                                                     ssh_user=ssh_user)
 
     def provision(self,
@@ -1165,7 +1164,6 @@ class CloudVmRayBackend(backends.Backend):
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
-        container_name: Optional[str],
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
@@ -1198,7 +1196,6 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.run_command_on_ip_via_ssh(ip,
                                                         command,
                                                         ssh_private_key,
-                                                        container_name,
                                                         ssh_user=ssh_user)
 
         for dst, src in mounts.items():
@@ -1264,7 +1261,6 @@ class CloudVmRayBackend(backends.Backend):
                     backend_utils.run_command_on_ip_via_ssh(ip,
                                                             cmd,
                                                             ssh_private_key,
-                                                            task.container_name,
                                                             ssh_user=ssh_user)
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
