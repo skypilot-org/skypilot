@@ -766,7 +766,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     if len(jobs) == 0 and not all:
         raise click.UsageError(
             'sky cancel requires either a job id '
-            f'(see `sky queue {cluster} -aj`) or the --all flag.')
+            f'(see `sky queue {cluster} -s`) or the --all flag.')
 
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
