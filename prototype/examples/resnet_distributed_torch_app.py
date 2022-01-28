@@ -9,7 +9,7 @@ with sky.Dag() as dag:
     num_nodes = 2
 
     # The setup command.  Will be run under the working directory.
-    setup = 'echo \"alias python=python3\"" >> ~/.bashrc && pip3 install --upgrade pip && \
+    setup = 'echo \"alias python=python3\" >> ~/.bashrc && pip3 install --upgrade pip && \
       git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet && \
       cd pytorch-distributed-resnet && pip3 install -r requirements.txt && \
       mkdir -p data  && mkdir -p saved_models && cd data && \
