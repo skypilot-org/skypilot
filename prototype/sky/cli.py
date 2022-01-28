@@ -220,6 +220,15 @@ def _check_interactive_node_resources_match(
         launched_resources: Existing launched resources associated with cluster.
         user_requested_resources: If true, user requested resources explicitly.
     """
+    # In the case where the user specifies no cloud, we infer the cloud from
+    # the launched resources before performing the check.
+    # e.g. user launches sky gpunode --gpus V100 creates an AWS(p3.2xlarge)
+    # but when the resource check will fail because is_same_resources expects
+    # resources.cloud and handle.launched_resources to match.
+    if resources.cloud is None:
+        assert launched_resources.cloud is not None, launched_resources
+        resources.cloud = launched_resources.cloud
+
     # TODO: Check for same number of launched_nodes if multi-node support is
     # added for gpu/cpu/tpunode.
     inferred_node_type = _infer_interactive_node_type(launched_resources)
