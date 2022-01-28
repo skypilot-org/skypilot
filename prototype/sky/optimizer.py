@@ -78,6 +78,7 @@ class Optimizer:
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
+        import pdb; pdb.set_trace()
         optimized_dag, unused_best_plan = Optimizer._optimize_cost(
             dag,
             minimize_cost=minimize == OptimizeTarget.COST,
