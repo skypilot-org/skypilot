@@ -452,7 +452,6 @@ def write_cluster_config(task: task_lib.Task,
                 'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
-                'container_name': task.container_name,
                 'num_nodes': task.num_nodes,
                 # File mounts handling.
                 'file_mounts': wrapped_file_mounts,
@@ -580,11 +579,7 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
 def run_command_on_ip_via_ssh(ip: str,
                               command: str,
                               private_key: str,
-                              container_name: Optional[str],
                               ssh_user: str = 'ubuntu') -> None:
-    if container_name is not None:
-        command = command.replace('\\', '\\\\').replace('"', '\\"')
-        command = f'docker exec {container_name} /bin/bash -c "{command}"'
     cmd = [
         'ssh',
         '-i',

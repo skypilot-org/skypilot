@@ -1070,15 +1070,16 @@ class CloudVmRayBackend(backends.Backend):
         """Sets TPU_NAME on all nodes."""
         ip_list = self._get_node_ips(cluster_config_file, task.num_nodes)
         config = backend_utils.read_yaml(cluster_config_file)
-        ssh_user = config['auth']['ssh_user'].strip()
+        auth = config['auth']
+        ssh_user = auth['ssh_user'].strip()
+        ssh_private_key = auth.get('ssh_private_key')
 
         for ip in ip_list:
             cmd = (f'[[ -z $TPU_NAME ]] && echo "export TPU_NAME={tpu_name}" '
                    '>> ~/.bashrc || echo "TPU_NAME already set"')
             backend_utils.run_command_on_ip_via_ssh(ip,
                                                     cmd,
-                                                    task.private_key,
-                                                    None,
+                                                    ssh_private_key,
                                                     ssh_user=ssh_user)
 
     def provision(self,
@@ -1145,11 +1146,20 @@ class CloudVmRayBackend(backends.Backend):
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
-        # TODO: this only syncs to head.
-        self._run_rsync(handle,
-                        source=f'{workdir}/',
-                        target=SKY_REMOTE_WORKDIR,
-                        with_outputs=True)
+        fore = colorama.Fore
+        style = colorama.Style
+        ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        # TODO(zhwu): make this in parallel
+        for i, ip in enumerate(ip_list):
+            node_name = f'worker{i}' if i > 0 else 'head'
+            logger.info(
+                f'{fore.CYAN} Syncing: {style.BRIGHT} workdir -> {node_name}'
+                f'{style.RESET_ALL}.')
+            self._rsync_up(handle,
+                           ip=ip,
+                           source=f'{workdir}/',
+                           target=SKY_REMOTE_WORKDIR,
+                           with_outputs=True)
 
     def sync_file_mounts(
         self,
@@ -1157,7 +1167,6 @@ class CloudVmRayBackend(backends.Backend):
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
-        # TODO: this function currently only syncs to head.
         # 'all_file_mounts' should already have been handled in provision()
         # using the yaml file.  Here we handle cloud -> remote file transfers.
         # FIXME: if called out-of-band without provision() first, we actually
@@ -1171,6 +1180,24 @@ class CloudVmRayBackend(backends.Backend):
         reset = style.RESET_ALL
         bright = style.BRIGHT
         logger.info(f'{cyan}Processing cloud to VM file mounts.{reset}')
+
+        ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        config = backend_utils.read_yaml(handle.cluster_yaml)
+        auth = config['auth']
+        ssh_user = auth['ssh_user'].strip()
+        ssh_private_key = auth.get('ssh_private_key')
+
+        def sync_to_all_nodes(src: str, dst: str, command: str):
+            # TODO(zhwu): make this in parallel
+            for i, ip in enumerate(ip_list):
+                node_name = f'worker{i}' if i > 0 else 'head'
+                logger.info(f'{cyan} Syncing (on {node_name}): '
+                            f'{bright}{src} -> {dst}{reset}')
+                backend_utils.run_command_on_ip_via_ssh(ip,
+                                                        command,
+                                                        ssh_private_key,
+                                                        ssh_user=ssh_user)
+
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
             # (download gsutil on remote, run gsutil on remote).  Consider
@@ -1213,20 +1240,8 @@ class CloudVmRayBackend(backends.Backend):
                         source=dst,
                         target=wrapped_dst,
                         download_target_commands=download_target_commands))
-            log_path = os.path.join(self.log_dir,
-                                    'file_mounts_cloud_to_remote.log')
-            logger.info(f'{cyan} Syncing: {bright}{src} -> {dst}{reset}')
-            # TODO: filter out ray boilerplate: Setting `max_workers` for node
-            # type ... try re-running the command with --no-config-cache.
-            proc, unused_stdout, unused_stderr = backend_utils.run_with_log(
-                f'ray exec {handle.cluster_yaml} \'{command}\'',
-                os.path.abspath(log_path),
-                stream_logs=True,
-                shell=True)
-            if proc.returncode:
-                raise ValueError(
-                    f'File mounts\n\t{src} -> {dst}\nfailed to sync. '
-                    f'See errors above and log: {log_path}')
+
+            sync_to_all_nodes(src, dst, command)
 
     def run_post_setup(self, handle: ResourceHandle,
                        post_setup_fn: Optional[PostSetupFn],
@@ -1234,7 +1249,10 @@ class CloudVmRayBackend(backends.Backend):
         if post_setup_fn is not None:
             ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
             config = backend_utils.read_yaml(handle.cluster_yaml)
-            ssh_user = config['auth']['ssh_user'].strip()
+            auth = config['auth']
+            ssh_user = auth['ssh_user'].strip()
+            ssh_private_key = auth.get('ssh_private_key')
+
             ip_to_command = post_setup_fn(ip_list)
             for ip, cmd in ip_to_command.items():
                 if cmd is not None:
@@ -1242,8 +1260,7 @@ class CloudVmRayBackend(backends.Backend):
                            f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
                     backend_utils.run_command_on_ip_via_ssh(ip,
                                                             cmd,
-                                                            task.private_key,
-                                                            task.container_name,
+                                                            ssh_private_key,
                                                             ssh_user=ssh_user)
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
@@ -1307,10 +1324,10 @@ class CloudVmRayBackend(backends.Backend):
             # We choose to sync code + exec, because the alternative of 'ray
             # submit' may not work as it may use system python (python2) to
             # execute the script.  Happens for AWS.
-            self._run_rsync(handle,
-                            source=fp.name,
-                            target=script_path,
-                            with_outputs=False)
+            self._rsync_up(handle,
+                           source=fp.name,
+                           target=script_path,
+                           with_outputs=False)
 
         job_log_path = os.path.join(self.log_dir, 'job_submit.log')
         remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, self.log_dir)
@@ -1576,14 +1593,19 @@ class CloudVmRayBackend(backends.Backend):
         os.makedirs(path, exist_ok=True)
         return path
 
-    def _run_rsync(self,
-                   handle: ResourceHandle,
-                   source: str,
-                   target: str,
-                   with_outputs: bool = True) -> None:
-        """Runs rsync from 'source' to the cluster head node's 'target'."""
+    def _rsync_up(
+        self,
+        handle: ResourceHandle,
+        source: str,
+        target: str,
+        with_outputs: bool = True,
+        ip: Optional[str] = None,
+    ) -> None:
+        """Runs rsync from 'source' to the cluster's node 'target'."""
         # Attempt to use 'rsync user@ip' directly, which is much faster than
         # going through ray (either 'ray rsync_*' or sdk.rsync()).
+        if ip is None:
+            ip = handle.head_ip
         config = backend_utils.read_yaml(handle.cluster_yaml)
         if handle.head_ip is None:
             raise ValueError(
@@ -1593,13 +1615,17 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user = auth['ssh_user']
         ssh_private_key = auth.get('ssh_private_key')
         # Build command.
-        rsync_command = ['rsync', '-a']
+        # rsync options: progress bar; verbose; compress
+        rsync_command = ['rsync', '-Pavz']
+        filter_path = os.path.join(source, '.gitignore')
+        if os.path.exists(filter_path):
+            rsync_command.append(f'--filter=\':- {filter_path}\'')
         ssh_options = ' '.join(
             _ssh_options_list(ssh_private_key, self._ssh_control_path(handle)))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         rsync_command.extend([
             source,
-            f'{ssh_user}@{handle.head_ip}:{target}',
+            f'{ssh_user}@{ip}:{target}',
         ])
         command = ' '.join(rsync_command)
         if with_outputs:

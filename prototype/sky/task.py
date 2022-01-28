@@ -74,8 +74,6 @@ class Task:
         # Advanced:
         post_setup_fn: Optional[CommandGen] = None,
         docker_image: Optional[str] = None,
-        container_name: Optional[str] = None,
-        private_key: Optional[str] = '~/.ssh/sky-key',
     ):
         """Initializes a Task.
 
@@ -110,8 +108,6 @@ class Task:
           docker_image: The base docker image that this Task will be built on.
             In effect when LocalDockerBackend is used.  Defaults to
             'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'.
-          container_name: Unused?
-          private_key: Unused?
         """
         if not _is_valid_name(name):
             raise ValueError(f'Invalid task name {name}. Valid name: ' \
@@ -125,10 +121,8 @@ class Task:
         self.workdir = workdir
         self.docker_image = docker_image if docker_image \
             else 'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'
-        self.container_name = container_name
         self._explicit_num_nodes = num_nodes  # Used as a scheduling constraint.
         self.num_nodes = 1 if num_nodes is None else num_nodes
-        self.private_key = private_key
         self.inputs = None
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
@@ -247,9 +241,6 @@ class Task:
         return task
 
     def validate_config(self):
-        if bool(self.docker_image) != bool(self.container_name):
-            raise ValueError('Either docker_image and container_name are both'
-                             ' None or valid strings.')
         if self.num_nodes <= 0:
             raise ValueError('Must set Task.num_nodes to >0.')
 
