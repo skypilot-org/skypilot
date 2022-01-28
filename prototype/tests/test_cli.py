@@ -124,3 +124,14 @@ def test_node_type_check():
                 launched_resources,
                 user_requested_resources=False)
         assert 'Resources cannot change for an existing cluster' in str(e.value)
+
+
+def test_infer_cloud_resource_check():
+    # sky gpunode --gpus V100
+    resources = sky.Resources(cloud=None, accelerators='V100')
+    launched_resources = sky.Resources(cloud=sky.AWS(),
+                                       instance_type='p3.2xlarge')
+    cli._check_interactive_node_resources_match('gpunode',
+                                                resources,
+                                                launched_resources,
+                                                user_requested_resources=True)
