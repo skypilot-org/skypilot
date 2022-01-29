@@ -15,12 +15,6 @@ Resources = resources_lib.Resources
 CommandGen = Callable[[List[str]], Dict[str, str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
-CLOUD_REGISTRY = {
-    'aws': clouds.AWS(),
-    'gcp': clouds.GCP(),
-    'azure': clouds.Azure(),
-}
-
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
 _VALID_NAME_DESCR = 'ASCII characters and may contain lowercase and' \
                     ' uppercase letters, digits, underscores, periods,' \
@@ -226,7 +220,7 @@ class Task:
         resources = config.get('resources')
         if resources is not None:
             if resources.get('cloud') is not None:
-                resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
+                resources['cloud'] = clouds.CLOUD_REGISTRY[resources['cloud']]
             if resources.get('accelerators') is not None:
                 resources['accelerators'] = resources['accelerators']
             if resources.get('accelerator_args') is not None:
