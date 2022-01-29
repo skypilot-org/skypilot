@@ -1,4 +1,5 @@
 # Adapted from https://github.com/ray-project/ray/blob/ray-1.9.2/python/ray/worker.py
+# Fixed the problem in ray's issue https://github.com/ray-project/ray/issues/9233
 # Do not add `\n` to the end of line ending with `\r`
 from contextlib import contextmanager
 import atexit
