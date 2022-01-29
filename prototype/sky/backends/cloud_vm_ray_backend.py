@@ -1022,7 +1022,7 @@ class CloudVmRayBackend(backends.Backend):
                       tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
         ip_list = self._get_node_ips(cluster_config_file, task.num_nodes)
-        ssh_user, ssh_private_key = self._get_ssh_user_and_key(
+        ssh_user, ssh_private_key = self._get_ssh_credential(
             cluster_config_file)
 
         for ip in ip_list:
@@ -1135,7 +1135,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{cyan}Processing cloud to VM file mounts.{reset}')
 
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
-        ssh_user, ssh_private_key = self._get_ssh_credential(handle)
+        ssh_user, ssh_private_key = self._get_ssh_credential(handle.cluser_yaml)
 
         def sync_to_all_nodes(src: str, dst: str, command: str):
             # TODO(zhwu): make this in parallel
@@ -1202,7 +1202,7 @@ class CloudVmRayBackend(backends.Backend):
                        task: Task) -> None:
         if post_setup_fn is not None:
             ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
-            ssh_user, ssh_private_key = self._get_ssh_credential(handle)
+            ssh_user, ssh_private_key = self._get_ssh_credential(handle.cluster_yaml)
 
             ip_to_command = post_setup_fn(ip_list)
             for ip, cmd in ip_to_command.items():
@@ -1557,7 +1557,7 @@ class CloudVmRayBackend(backends.Backend):
             raise ValueError(
                 f'The cluster "{handle.cluster_name}" appears to be down. '
                 'Run a re-provisioning command (e.g., sky launch) and retry.')
-        ssh_user, ssh_private_key = self._get_ssh_credential(handle)
+        ssh_user, ssh_private_key = self._get_ssh_credential(handle.cluster_yaml)
         # Build command.
         # rsync options: progress bar; verbose; compress
         rsync_command = ['rsync', '-Pavz']
@@ -1600,9 +1600,9 @@ class CloudVmRayBackend(backends.Backend):
                                          handle.launched_nodes)[0]
         return head_ip
 
-    def _get_ssh_credential(self, handle: ResourceHandle) -> str:
+    def _get_ssh_credential(self, cluster_yaml: str) -> str:
         """Returns ssh_user and ssh_private_key."""
-        config = backend_utils.read_yaml(handle.cluster_yaml)
+        config = backend_utils.read_yaml(cluster_yaml)
         auth = config['auth']
         ssh_user = auth['ssh_user'].strip()
         ssh_private_key = auth.get('ssh_private_key')
@@ -1625,7 +1625,7 @@ class CloudVmRayBackend(backends.Backend):
     ) -> Tuple[subprocess.Popen, str, str]:
         """Runs 'cmd' on the cluster's head node."""
         head_ip = self._get_head_ip(handle, use_cached_head_ip)
-        ssh_user, ssh_private_key = self._get_ssh_credential(handle)
+        ssh_user, ssh_private_key = self._get_ssh_credential(handle.cluster_yaml)
 
         return backend_utils.run_command_on_ip_via_ssh(
             head_ip,
