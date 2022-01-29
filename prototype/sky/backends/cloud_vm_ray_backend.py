@@ -1135,7 +1135,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{cyan}Processing cloud to VM file mounts.{reset}')
 
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
-        ssh_user, ssh_private_key = self._get_ssh_credential(handle.cluser_yaml)
+        ssh_user, ssh_private_key = self._get_ssh_credential(handle.cluster_yaml)
 
         def sync_to_all_nodes(src: str, dst: str, command: str):
             # TODO(zhwu): make this in parallel
