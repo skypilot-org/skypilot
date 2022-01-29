@@ -8,7 +8,6 @@ import inspect
 import json
 import os
 import re
-import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -89,52 +88,6 @@ def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
     if resources is not None:
         accelerator_dict = resources.get_accelerators()
     return accelerator_dict
-
-
-def _ssh_options_list(ssh_private_key: Optional[str],
-                      ssh_control_path: str,
-                      *,
-                      timeout=30) -> List[str]:
-    """Returns a list of sane options for 'ssh'."""
-    # Forked from Ray SSHOptions:
-    # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
-    arg_dict = {
-        # Supresses initial fingerprint verification.
-        'StrictHostKeyChecking': 'no',
-        # SSH IP and fingerprint pairs no longer added to known_hosts.
-        # This is to remove a 'REMOTE HOST IDENTIFICATION HAS CHANGED'
-        # warning if a new node has the same IP as a previously
-        # deleted node, because the fingerprints will not match in
-        # that case.
-        'UserKnownHostsFile': os.devnull,
-        # Try fewer extraneous key pairs.
-        'IdentitiesOnly': 'yes',
-        # Abort if port forwarding fails (instead of just printing to
-        # stderr).
-        'ExitOnForwardFailure': 'yes',
-        # Quickly kill the connection if network connection breaks (as
-        # opposed to hanging/blocking).
-        'ServerAliveInterval': 5,
-        'ServerAliveCountMax': 3,
-        # Control path: important optimization as we do multiple ssh in one
-        # sky.launch().
-        'ControlMaster': 'auto',
-        'ControlPath': f'{ssh_control_path}/%C',
-        'ControlPersist': '30s',
-        # ConnectTimeout.
-        'ConnectTimeout': f'{timeout}s',
-        # ForwardAgent (for git credentials).
-        'ForwardAgent': 'yes',
-    }
-    ssh_key_option = [
-        '-i',
-        ssh_private_key,
-    ] if ssh_private_key is not None else []
-    return ssh_key_option + [
-        x for y in (['-o', f'{k}={v}']
-                    for k, v in arg_dict.items()
-                    if v is not None) for x in y
-    ]
 
 
 def _add_cluster_to_ssh_config(cluster_name: str, cluster_ip: str,
@@ -1069,18 +1022,18 @@ class CloudVmRayBackend(backends.Backend):
                       tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
         ip_list = self._get_node_ips(cluster_config_file, task.num_nodes)
-        config = backend_utils.read_yaml(cluster_config_file)
-        auth = config['auth']
-        ssh_user = auth['ssh_user'].strip()
-        ssh_private_key = auth.get('ssh_private_key')
+        ssh_user, ssh_private_key = self._get_ssh_user_and_key(
+            cluster_config_file)
 
         for ip in ip_list:
             cmd = (f'[[ -z $TPU_NAME ]] && echo "export TPU_NAME={tpu_name}" '
                    '>> ~/.bashrc || echo "TPU_NAME already set"')
-            backend_utils.run_command_on_ip_via_ssh(ip,
-                                                    cmd,
-                                                    ssh_private_key,
-                                                    ssh_user=ssh_user)
+            backend_utils.run_command_on_ip_via_ssh(
+                ip,
+                cmd,
+                ssh_user=ssh_user,
+                ssh_private_key=ssh_private_key,
+                check=True)
 
     def provision(self,
                   task: Task,
@@ -1182,10 +1135,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{cyan}Processing cloud to VM file mounts.{reset}')
 
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
-        config = backend_utils.read_yaml(handle.cluster_yaml)
-        auth = config['auth']
-        ssh_user = auth['ssh_user'].strip()
-        ssh_private_key = auth.get('ssh_private_key')
+        ssh_user, ssh_private_key = self._get_ssh_credential(handle)
 
         def sync_to_all_nodes(src: str, dst: str, command: str):
             # TODO(zhwu): make this in parallel
@@ -1193,10 +1143,14 @@ class CloudVmRayBackend(backends.Backend):
                 node_name = f'worker{i}' if i > 0 else 'head'
                 logger.info(f'{cyan} Syncing (on {node_name}): '
                             f'{bright}{src} -> {dst}{reset}')
-                backend_utils.run_command_on_ip_via_ssh(ip,
-                                                        command,
-                                                        ssh_private_key,
-                                                        ssh_user=ssh_user)
+                backend_utils.run_command_on_ip_via_ssh(
+                    ip,
+                    command,
+                    ssh_user=ssh_user,
+                    ssh_private_key=ssh_private_key,
+                    log_path=os.path.join(self.log_dir, 'file_mounts.log'),
+                    check=True,
+                    ssh_control_name=self._ssh_control_name(handle))
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -1248,20 +1202,21 @@ class CloudVmRayBackend(backends.Backend):
                        task: Task) -> None:
         if post_setup_fn is not None:
             ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
-            config = backend_utils.read_yaml(handle.cluster_yaml)
-            auth = config['auth']
-            ssh_user = auth['ssh_user'].strip()
-            ssh_private_key = auth.get('ssh_private_key')
+            ssh_user, ssh_private_key = self._get_ssh_credential(handle)
 
             ip_to_command = post_setup_fn(ip_list)
             for ip, cmd in ip_to_command.items():
                 if cmd is not None:
                     cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
                            f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
-                    backend_utils.run_command_on_ip_via_ssh(ip,
-                                                            cmd,
-                                                            ssh_private_key,
-                                                            ssh_user=ssh_user)
+                    backend_utils.run_command_on_ip_via_ssh(
+                        ip,
+                        cmd,
+                        ssh_user=ssh_user,
+                        ssh_private_key=ssh_private_key,
+                        log_path=os.path.join(self.log_dir, 'post_setup.log'),
+                        check=True,
+                        ssh_control_name=self._ssh_control_name(handle))
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()
@@ -1341,7 +1296,9 @@ class CloudVmRayBackend(backends.Backend):
             f'--address=127.0.0.1:8265 --job-id {job_id} -- '
             f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
-        self._run_command_on_head_via_ssh(handle,
+        head_ip = self._get_head_ip(handle)
+        self._run_command_on_head_via_ssh(head_ip,
+                                          handle,
                                           f'{cd} && {job_submit_cmd}',
                                           job_log_path,
                                           stream_logs=False,
@@ -1585,14 +1542,6 @@ class CloudVmRayBackend(backends.Backend):
             os.remove(yaml_handle)
         return head_ip + worker_ips
 
-    def _ssh_control_path(self, handle: ResourceHandle) -> str:
-        """Returns a temporary path to be used as the ssh control path."""
-        username = getpass.getuser()
-        path = (f'/tmp/sky_ssh_{username}/'
-                f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}')
-        os.makedirs(path, exist_ok=True)
-        return path
-
     def _rsync_up(
         self,
         handle: ResourceHandle,
@@ -1606,14 +1555,11 @@ class CloudVmRayBackend(backends.Backend):
         # going through ray (either 'ray rsync_*' or sdk.rsync()).
         if ip is None:
             ip = handle.head_ip
-        config = backend_utils.read_yaml(handle.cluster_yaml)
         if handle.head_ip is None:
             raise ValueError(
-                f'The cluster "{config["cluster_name"]}" appears to be down. '
+                f'The cluster "{handle.cluster_name}" appears to be down. '
                 'Run a re-provisioning command (e.g., sky launch) and retry.')
-        auth = config['auth']
-        ssh_user = auth['ssh_user']
-        ssh_private_key = auth.get('ssh_private_key')
+        ssh_user, ssh_private_key = self._get_ssh_credential(handle)
         # Build command.
         # rsync options: progress bar; verbose; compress
         rsync_command = ['rsync', '-Pavz']
@@ -1621,7 +1567,8 @@ class CloudVmRayBackend(backends.Backend):
         if os.path.exists(filter_path):
             rsync_command.append(f'--filter=\':- {filter_path}\'')
         ssh_options = ' '.join(
-            _ssh_options_list(ssh_private_key, self._ssh_control_path(handle)))
+            backend_utils.ssh_options_list(ssh_private_key,
+                                           self._ssh_control_name(handle)))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         rsync_command.extend([
             source,
@@ -1633,12 +1580,15 @@ class CloudVmRayBackend(backends.Backend):
         else:
             backend_utils.run_no_outputs(command)
 
-    def ssh_head_command(self,
-                         handle: ResourceHandle,
-                         port_forward: Optional[List[int]] = None,
-                         use_cached_head_ip: bool = True,
-                         interactive: bool = False) -> List[str]:
-        """Returns a 'ssh' command that logs into a cluster's head node."""
+    def _ssh_control_name(self, handle: ResourceHandle) -> str:
+        return f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'
+
+    def _get_head_ip(
+        self,
+        handle: ResourceHandle,
+        use_cached_head_ip: bool = True,
+    ) -> str:
+        """Returns the ip of the head node"""
         if use_cached_head_ip:
             if handle.head_ip is None:
                 # This happens for INIT clusters (e.g., exit 1 in setup).
@@ -1650,60 +1600,15 @@ class CloudVmRayBackend(backends.Backend):
         else:
             head_ip = self._get_node_ips(handle.cluster_yaml,
                                          handle.launched_nodes)[0]
+        return head_ip
+
+    def _get_ssh_credential(self, handle: ResourceHandle) -> str:
+        """Returns ssh_user and ssh_private_key."""
         config = backend_utils.read_yaml(handle.cluster_yaml)
         auth = config['auth']
-        ssh_user = auth['ssh_user']
+        ssh_user = auth['ssh_user'].strip()
         ssh_private_key = auth.get('ssh_private_key')
-        # Build command.  Imitating ray here.
-        ssh = ['ssh']
-        if interactive:
-            # Force pseudo-terminal allocation for interactive mode.
-            ssh += ['-tt']
-        else:
-            # Disable pseudo-terminal allocation. Otherwise, the output of
-            # ssh will be corrupted by the user's input.
-            ssh += ['-T']
-        if port_forward is not None:
-            for port in port_forward:
-                local = remote = port
-                logger.info(
-                    f'Forwarding port {local} to port {remote} on localhost.')
-                ssh += ['-L', f'{remote}:localhost:{local}']
-        return ssh + _ssh_options_list(
-            ssh_private_key,
-            self._ssh_control_path(handle)) + [f'{ssh_user}@{head_ip}']
-
-    def _run_command_on_head_via_ssh(
-        self,
-        handle: ResourceHandle,
-        cmd: str,
-        log_path: str,
-        stream_logs: bool,
-        check: bool = False,
-        use_cached_head_ip: bool = True,
-        interactive: bool = False,
-    ) -> Tuple[subprocess.Popen, str, str]:
-        """Uses 'ssh' to run 'cmd' on a cluster's head node."""
-        base_ssh_command = self.ssh_head_command(
-            handle,
-            use_cached_head_ip=use_cached_head_ip,
-            interactive=interactive)
-        # We need this to correctly run the cmd, and get the output.
-        command = base_ssh_command + [
-            'bash',
-            '--login',
-            '-c',
-            # Need this `-i` option to make sure `source ~/.bashrc` work.
-            '-i',
-        ]
-        command += [
-            shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                        f'PYTHONWARNINGS=ignore && ({cmd})'),
-        ]
-        return backend_utils.run_with_log(command,
-                                          log_path,
-                                          stream_logs,
-                                          check=check)
+        return ssh_user, ssh_private_key
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
@@ -1711,18 +1616,25 @@ class CloudVmRayBackend(backends.Backend):
         self,
         handle: ResourceHandle,
         cmd: str,
+        port_forward: Optional[List[str]] = None,
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
         check: bool = False,
-        interactive: bool = False,
+        interactive_mode: backend_utils.SSHInteractiveMode = backend_utils.
+        SSHInteractiveMode.NON_INTERACTIVE,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Runs 'cmd' on the cluster's head node."""
-        return self._run_command_on_head_via_ssh(
-            handle,
+        head_ip = self._get_head_ip(handle, use_cached_head_ip)
+        ssh_user, ssh_private_key = self._get_ssh_credential(handle)
+
+        return backend_utils.run_command_on_ip_via_ssh(
+            head_ip,
             cmd,
-            '/dev/null',
+            ssh_user=ssh_user,
+            ssh_private_key=ssh_private_key,
+            port_forward=port_forward,
             stream_logs=stream_logs,
-            use_cached_head_ip=use_cached_head_ip,
             check=check,
-            interactive=interactive,
+            interactive_mode=interactive_mode,
+            ssh_control_name=self._ssh_control_name(handle),
         )

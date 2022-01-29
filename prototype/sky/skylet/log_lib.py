@@ -105,8 +105,10 @@ def run_with_log(
                 ])
             proc.wait()
             proc_pgid = None
-            if proc.returncode != 0 and check:
-                raise RuntimeError('Command failed, please check the logs.')
+            if proc.returncode and check:
+                if stderr:
+                    print(stderr, file=sys.stderr)
+                raise subprocess.CalledProcessError(proc.returncode, cmd)
             if return_none:
                 return None
             return proc, stdout, stderr

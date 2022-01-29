@@ -313,14 +313,16 @@ def _create_and_ssh_into_node(
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
     # Disable check, since the returncode could be non-zero if the user Ctrl-D.
-    commands = backend.ssh_head_command(handle,
-                                        port_forward=port_forward,
-                                        interactive=True)
+    commands = []
     if session_manager == 'screen':
         commands += ['screen', '-D', '-R']
     elif session_manager == 'tmux':
         commands += ['tmux', 'attach', '||', 'tmux', 'new']
-    backend_utils.run(commands, shell=False, check=False)
+    commands = backend.run_on_head(
+        handle,
+        commands,
+        port_forward=port_forward,
+        interactive_mode=backend_utils.SSHInteractiveMode.LOGIN)
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
 
     click.echo('To attach to it again:  ', nl=False)
@@ -603,7 +605,8 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
                     backend.run_on_head(handle,
                                         entrypoint,
                                         stream_logs=True,
-                                        interactive=True)
+                                        interactive_mode=backend_utils.
+                                        SSHInteractiveMode.INTERACTIVE)
                     return
 
         # Override.

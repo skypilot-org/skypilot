@@ -1,13 +1,15 @@
 """Util constants/functions for the backends."""
 import datetime
+import enum
 import getpass
 import os
 import pathlib
+import shlex
 import subprocess
 import tempfile
 import textwrap
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 import zlib
@@ -576,30 +578,158 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
     return True  # success
 
 
-def run_command_on_ip_via_ssh(ip: str,
-                              command: str,
-                              private_key: str,
-                              ssh_user: str = 'ubuntu') -> None:
-    cmd = [
-        'ssh',
+def ssh_options_list(ssh_private_key: Optional[str],
+                     ssh_control_name: Optional[str],
+                     *,
+                     timeout=30) -> List[str]:
+    """Returns a list of sane options for 'ssh'."""
+    # Forked from Ray SSHOptions:
+    # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
+    arg_dict = {
+        # Supresses initial fingerprint verification.
+        'StrictHostKeyChecking': 'no',
+        # SSH IP and fingerprint pairs no longer added to known_hosts.
+        # This is to remove a 'REMOTE HOST IDENTIFICATION HAS CHANGED'
+        # warning if a new node has the same IP as a previously
+        # deleted node, because the fingerprints will not match in
+        # that case.
+        'UserKnownHostsFile': os.devnull,
+        # Try fewer extraneous key pairs.
+        'IdentitiesOnly': 'yes',
+        # Abort if port forwarding fails (instead of just printing to
+        # stderr).
+        'ExitOnForwardFailure': 'yes',
+        # Quickly kill the connection if network connection breaks (as
+        # opposed to hanging/blocking).
+        'ServerAliveInterval': 5,
+        'ServerAliveCountMax': 3,
+        # ConnectTimeout.
+        'ConnectTimeout': f'{timeout}s',
+        # ForwardAgent (for git credentials).
+        'ForwardAgent': 'yes',
+    }
+    if ssh_control_name is not None:
+        arg_dict.update({
+            # Control path: important optimization as we do multiple ssh in one
+            # sky.launch().
+            'ControlMaster': 'auto',
+            'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
+            'ControlPersist': '30s',
+        })
+    ssh_key_option = [
         '-i',
-        private_key,
-        '-o',
-        'StrictHostKeyChecking=no',
-        '{}@{}'.format(ssh_user, ip),
-        command  # TODO: shlex.quote() doesn't work.  Is it needed in a list?
+        ssh_private_key,
+    ] if ssh_private_key is not None else []
+    return ssh_key_option + [
+        x for y in (['-o', f'{k}={v}']
+                    for k, v in arg_dict.items()
+                    if v is not None) for x in y
     ]
-    with subprocess.Popen(cmd,
-                          stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE,
-                          universal_newlines=True) as proc:
-        outs, errs = proc.communicate()
-        if outs:
-            logger.info(outs)
-        if proc.returncode:
-            if errs:
-                logger.error(errs)
-            raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+
+def _ssh_control_path(control_path_name: Optional[str]) -> Optional[str]:
+    """Returns a temporary path to be used as the ssh control path."""
+    if control_path_name is None:
+        return None
+    username = getpass.getuser()
+    path = (f'/tmp/sky_ssh_{username}/{control_path_name}')
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+class SSHInteractiveMode(enum.Enum):
+    """Enum for SSH interactive mode."""
+    # Do not allocating pseudo-tty to avoid user input corrupting the output.
+    NON_INTERACTIVE = 0
+    # Allocate a pseudo-tty, quit the ssh session after the cmd finishes.
+    INTERACTIVE = 1
+    # Allocate a pseudo-tty and log into the ssh session.
+    LOGIN = 2
+
+
+def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
+                      interactive_mode: SSHInteractiveMode,
+                      port_forward: Optional[List[int]],
+                      ssh_control_name: Optional[str]):
+    ssh = ['ssh']
+    if interactive_mode == SSHInteractiveMode.NON_INTERACTIVE:
+        # Disable pseudo-terminal allocation. Otherwise, the output of
+        # ssh will be corrupted by the user's input.
+        ssh += ['-T']
+    else:
+        # Force pseudo-terminal allocation for interactive mode.
+        ssh += ['-tt']
+    if port_forward is not None:
+        for port in port_forward:
+            local = remote = port
+            logger.info(
+                f'Forwarding port {local} to port {remote} on localhost.')
+            ssh += ['-L', f'{remote}:localhost:{local}']
+    return ssh + ssh_options_list(ssh_private_key,
+                                  ssh_control_name) + [f'{ssh_user}@{ip}']
+
+
+def run_command_on_ip_via_ssh(
+    ip: str,
+    cmd: Union[str, List[str]],
+    *,
+    ssh_private_key: str,
+    ssh_user: str = 'ubuntu',
+    port_forward: Optional[List[int]] = None,
+    # Advanced options.
+    log_path: str = '/dev/null',
+    stream_logs: bool = True,
+    check: bool = False,
+    interactive_mode: SSHInteractiveMode = SSHInteractiveMode.NON_INTERACTIVE,
+    ssh_control_name: Optional[str] = None,
+) -> Tuple[subprocess.Popen, str, str]:
+    """Uses 'ssh' to run 'cmd' on a node with ip.
+    
+    Args:
+        ip: The IP address of the node.
+        cmd: The command to run.
+        ssh_private_key: The path to the private key to use for ssh.
+        ssh_user: The user to use for ssh.
+        port_forward: A list of ports to forward from the localhost to the
+        remote host.
+        
+        Advanced options:
+        
+        log_path: Redirect stdout/stderr to the log_path.
+        stream_logs: Stream logs to the stdout/stderr.
+        check: Check the success of the command.
+        interactive_mode: The interactive mode to use for ssh. See SSHInteractiveMode for more details.
+        ssh_control_name: The name of the ssh_control_file to use. This is used for optimizing the
+        ssh speed.
+        
+    Returns:
+        A tuple of (process, stdout, stderr).
+    """
+    base_ssh_command = _ssh_base_command(ip,
+                                         ssh_private_key,
+                                         ssh_user=ssh_user,
+                                         interactive_mode=interactive_mode,
+                                         port_forward=port_forward,
+                                         ssh_control_name=ssh_control_name)
+    if interactive_mode == SSHInteractiveMode.LOGIN:
+        assert isinstance(cmd, list), 'cmd must be a list for login mode.'
+        command = base_ssh_command + cmd
+        run(command, shell=False, check=check)
+    if isinstance(cmd, list):
+        cmd = ' '.join(cmd)
+    # We need this to correctly run the cmd, and get the output.
+    command = base_ssh_command + [
+        'bash',
+        '--login',
+        '-c',
+        # Need this `-i` option to make sure `source ~/.bashrc` work.
+        '-i',
+    ]
+    command += [
+        shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                    f'PYTHONWARNINGS=ignore && ({cmd})'),
+    ]
+    return log_lib.run_with_log(command, log_path, stream_logs, check=check)
 
 
 def run(cmd, **kwargs):
