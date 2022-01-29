@@ -400,7 +400,7 @@ def cli():
 @click.option('--cloud',
               required=False,
               type=str,
-              help='If specified, override the "resources.cloud" config.')
+              help='The cloud to use. If specified, override the "resources.cloud" config.')
 @click.option(
     '--gpus',
     required=False,
@@ -417,7 +417,7 @@ def cli():
 @click.option('--use-spot/--no-use-spot',
               required=False,
               default=None,
-              help='If specified, override the "resources.use_spot" config.')
+              help='Whether to request spot instances. If specified, override the "resources.use_spot" config.')
 @click.option('--name',
               '-n',
               required=False,
@@ -453,8 +453,9 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         if workdir is not None:
             task.workdir = workdir
 
+        assert len(task.resources) == 1
         new_resources = copy.deepcopy(list(task.resources)[0])
-        assert cloud is None
+
         if cloud is not None:
             if cloud not in clouds.CLOUD_REGISTRY:
                 raise click.UsageError(
