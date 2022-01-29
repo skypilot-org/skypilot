@@ -401,8 +401,7 @@ def cli():
     '--cloud',
     required=False,
     type=str,
-    help='The cloud to use. If specified, override the "resources.cloud" config.'
-)
+    help='The cloud to use. If specified, override the "resources.cloud".')
 @click.option(
     '--gpus',
     required=False,
@@ -420,9 +419,8 @@ def cli():
     '--use-spot/--no-use-spot',
     required=False,
     default=None,
-    help=
-    'Whether to request spot instances. If specified, override the "resources.use_spot" config.'
-)
+    help=('Whether to request spot instances. If specified, override the '
+          '"resources.use_spot".'))
 @click.option('--name',
               '-n',
               required=False,
