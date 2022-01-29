@@ -1296,13 +1296,11 @@ class CloudVmRayBackend(backends.Backend):
             f'--address=127.0.0.1:8265 --job-id {job_id} -- '
             f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
-        head_ip = self._get_head_ip(handle)
-        self._run_command_on_head_via_ssh(head_ip,
-                                          handle,
-                                          f'{cd} && {job_submit_cmd}',
-                                          job_log_path,
-                                          stream_logs=False,
-                                          check=True)
+        self.run_on_head(handle,
+                         f'{cd} && {job_submit_cmd}',
+                         log_path=job_log_path,
+                         stream_logs=False,
+                         check=True)
 
         colorama.init()
         style = colorama.Style
@@ -1616,7 +1614,9 @@ class CloudVmRayBackend(backends.Backend):
         self,
         handle: ResourceHandle,
         cmd: str,
+        *,
         port_forward: Optional[List[str]] = None,
+        log_path: str = '/dev/null',
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
         check: bool = False,
@@ -1633,6 +1633,7 @@ class CloudVmRayBackend(backends.Backend):
             ssh_user=ssh_user,
             ssh_private_key=ssh_private_key,
             port_forward=port_forward,
+            log_path=log_path,
             stream_logs=stream_logs,
             check=check,
             interactive_mode=interactive_mode,

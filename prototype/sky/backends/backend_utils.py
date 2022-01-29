@@ -684,7 +684,7 @@ def run_command_on_ip_via_ssh(
     ssh_control_name: Optional[str] = None,
 ) -> Tuple[subprocess.Popen, str, str]:
     """Uses 'ssh' to run 'cmd' on a node with ip.
-    
+
     Args:
         ip: The IP address of the node.
         cmd: The command to run.
@@ -692,16 +692,17 @@ def run_command_on_ip_via_ssh(
         ssh_user: The user to use for ssh.
         port_forward: A list of ports to forward from the localhost to the
         remote host.
-        
+
         Advanced options:
-        
+
         log_path: Redirect stdout/stderr to the log_path.
         stream_logs: Stream logs to the stdout/stderr.
         check: Check the success of the command.
-        interactive_mode: The interactive mode to use for ssh. See SSHInteractiveMode for more details.
-        ssh_control_name: The name of the ssh_control_file to use. This is used for optimizing the
-        ssh speed.
-        
+        interactive_mode: The interactive mode to use for ssh.
+            See SSHInteractiveMode for more details.
+        ssh_control_name: The name of the ssh_control_file to use. This is used
+        for optimizing the ssh speed.
+
     Returns:
         A tuple of (process, stdout, stderr).
     """
