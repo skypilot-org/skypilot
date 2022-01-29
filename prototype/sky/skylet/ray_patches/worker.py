@@ -1168,7 +1168,8 @@ def print_worker_logs(data: Dict[str, str], print_file: Any):
                                            color_for(data, line),
                                            prefix_for(data), pid,
                                            colorama.Style.RESET_ALL, line),
-                  file=print_file, end=end)
+                  file=print_file,
+                  end=end)
     else:
         for line in lines:
             end = '' if line.endswith('\r') else '\n'
@@ -1178,7 +1179,8 @@ def print_worker_logs(data: Dict[str, str], print_file: Any):
                                                   data.get("ip"),
                                                   colorama.Style.RESET_ALL,
                                                   line),
-                  file=print_file, end=end)
+                  file=print_file,
+                  end=end)
 
 
 def listen_error_messages_raylet(worker, threads_stopped):

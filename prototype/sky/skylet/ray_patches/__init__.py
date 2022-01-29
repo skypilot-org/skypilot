@@ -13,6 +13,5 @@ def patch() -> None:
     shutil.copyfile(path, log_monitor.__file__)
 
     from ray import worker
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        'worker.py')
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'worker.py')
     shutil.copyfile(path, worker.__file__)
