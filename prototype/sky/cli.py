@@ -397,10 +397,12 @@ def cli():
     help=('If specified, sync this dir to the remote working directory, '
           'where the task will be invoked. '
           'Overrides the "workdir" config in the YAML if both are supplied.'))
-@click.option('--cloud',
-              required=False,
-              type=str,
-              help='The cloud to use. If specified, override the "resources.cloud" config.')
+@click.option(
+    '--cloud',
+    required=False,
+    type=str,
+    help='The cloud to use. If specified, override the "resources.cloud" config.'
+)
 @click.option(
     '--gpus',
     required=False,
@@ -414,10 +416,13 @@ def cli():
           'resources and is used for scheduling the task. '
           'Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
-@click.option('--use-spot/--no-use-spot',
-              required=False,
-              default=None,
-              help='Whether to request spot instances. If specified, override the "resources.use_spot" config.')
+@click.option(
+    '--use-spot/--no-use-spot',
+    required=False,
+    default=None,
+    help=
+    'Whether to request spot instances. If specified, override the "resources.use_spot" config.'
+)
 @click.option('--name',
               '-n',
               required=False,
@@ -1039,8 +1044,11 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         backend = backend_utils.get_backend_from_handle(handle)
         if handle.launched_resources.use_spot and not terminate:
             click.secho(
-                f'Stopping cluster {name}... cannot stop spot instances, skip.',
+                f'Stopping cluster {name}... skipped, because spot instances '
+                'may lose attached volumes. ',
                 fg='green')
+            click.echo('  To terminate the cluster, run: ', nl=False)
+            click.secho(f'sky down {name}', bold=True)
             continue
         backend.teardown(handle, terminate=terminate)
         if terminate:
