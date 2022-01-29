@@ -1,3 +1,5 @@
+# Adapted from https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/_private/log_monitor.py
+# Logs from different jobs will be mixed together, due to the wrong `JOB_LOG_PATTERN``
 import argparse
 import errno
 import glob
