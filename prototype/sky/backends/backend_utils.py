@@ -673,8 +673,8 @@ def run_command_on_ip_via_ssh(
     ip: str,
     cmd: Union[str, List[str]],
     *,
+    ssh_user: str,
     ssh_private_key: str,
-    ssh_user: str = 'ubuntu',
     port_forward: Optional[List[int]] = None,
     # Advanced options.
     log_path: str = '/dev/null',
