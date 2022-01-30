@@ -461,6 +461,7 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         new_resources = copy.deepcopy(list(task.resources)[0])
 
         if cloud is not None:
+            cloud = cloud.lower()
             if cloud not in clouds.CLOUD_REGISTRY:
                 raise click.UsageError(
                     f'Cloud \'{cloud}\' is not supported. '
@@ -1109,10 +1110,12 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
                                     gpus is None and spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.get(cloud, default_resources.cloud)
-    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
-        raise click.UsageError(
-            f'Cloud \'{cloud}\' is not supported. '
-            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
+    if cloud is not None:
+        cloud = cloud.lower()
+        if cloud not in clouds.CLOUD_REGISTRY:
+            raise click.UsageError(
+                f'Cloud \'{cloud}\' is not supported. '
+                f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
     if gpus is not None:
         gpus = _parse_accelerator_options(gpus)
     elif instance_type is None:
@@ -1184,11 +1187,13 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
                                     spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.get(cloud, None)
-    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
-        raise click.UsageError(
-            f'Cloud \'{cloud}\' is not supported. ' + \
-            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}'
-        )
+    if cloud is not None:
+        cloud = cloud.lower()
+        if cloud not in clouds.CLOUD_REGISTRY:
+            raise click.UsageError(
+                f'Cloud \'{cloud}\' is not supported. ' + \
+                f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}'
+            )
     if instance_type is None:
         instance_type = default_resources.instance_type
     if spot is None:
