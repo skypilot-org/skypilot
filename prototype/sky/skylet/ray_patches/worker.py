@@ -1,6 +1,6 @@
 # Adapted from https://github.com/ray-project/ray/blob/ray-1.9.2/python/ray/worker.py
 # Fixed the problem in ray's issue https://github.com/ray-project/ray/issues/9233
-# Do not add `\n` to the end of line ending with `\r`
+# Do not add `\n` to the end of line ending with `\r`. (Added Line 1167 and Line 1176).
 from contextlib import contextmanager
 import atexit
 import faulthandler
@@ -1417,13 +1417,13 @@ def connect(node,
     driver_name = ""
     log_stdout_file_path = ""
     log_stderr_file_path = ""
-    interactive_mode = False
+    ssh_mode = False
     if mode == SCRIPT_MODE:
         import __main__ as main
         if hasattr(main, "__file__"):
             driver_name = main.__file__
         else:
-            interactive_mode = True
+            ssh_mode = True
             driver_name = "INTERACTIVE MODE"
     elif not LOCAL_MODE:
         raise ValueError(
@@ -1523,7 +1523,7 @@ def connect(node,
         # assumes that the directory structures on the machines in the clusters
         # are the same.
         # When using an interactive shell, there is no script directory.
-        if not interactive_mode:
+        if not ssh_mode:
             script_directory = os.path.abspath(os.path.dirname(sys.argv[0]))
             worker.run_function_on_all_workers(
                 lambda worker_info: sys.path.insert(1, script_directory))
