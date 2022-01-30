@@ -627,12 +627,12 @@ def ssh_options_list(ssh_private_key: Optional[str],
     ]
 
 
-def _ssh_control_path(control_path_name: Optional[str]) -> Optional[str]:
+def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     """Returns a temporary path to be used as the ssh control path."""
-    if control_path_name is None:
+    if ssh_control_filename is None:
         return None
     username = getpass.getuser()
-    path = (f'/tmp/sky_ssh_{username}/{control_path_name}')
+    path = (f'/tmp/sky_ssh_{username}/{ssh_control_filename}')
     os.makedirs(path, exist_ok=True)
     return path
 
