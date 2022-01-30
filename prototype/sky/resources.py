@@ -191,7 +191,8 @@ class Resources:
                     return False
         # self.accelerators <= other.accelerators
 
-        if self.accelerator_args != other.accelerator_args:
+        if (self.accelerator_args is not None and
+                self.accelerator_args != other.accelerator_args):
             return False
         # self.accelerator_args == other.accelerator_args
 

@@ -61,6 +61,7 @@ sky down dtf &
 # 6:23.58 total
 time python "$DIR"/multi_echo.py
 # python "$DIR"/huggingface_glue_imdb_grid_search_app.py
+sky down multi-echo &
 
 # Job Queue.
 time sky launch -c jq "$DIR"/job_queue/cluster.yaml
@@ -68,9 +69,8 @@ time sky exec jq -d "$DIR"/job_queue/job.yaml
 time sky exec jq -d "$DIR"/job_queue/job.yaml
 time sky exec jq -d "$DIR"/job_queue/job.yaml
 sky logs jq 2
-# TODO(suquark): wait all jobs to complete. use 'sleep' as a workaround now
-sleep 30
 sky queue jq
+# Testing the functionality of the job queue, no need to wait for it.
 sky down jq &
 
 time sky launch -c mjq "$DIR"/job_queue/cluster_multinode.yaml
@@ -80,9 +80,8 @@ time sky exec mjq -d "$DIR"/job_queue/job_multinode.yaml
 # The job id is automatically incremented from 1 (inclusive).
 sky cancel mjq 1
 sky logs mjq 2
-# TODO(suquark): wait all jobs to complete. use 'sleep' as a workaround now
-sleep 30
 sky queue mjq
+# Testing the functionality of the job queue, no need to wait for it.
 sky down mjq &
 
 wait
