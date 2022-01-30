@@ -1623,8 +1623,8 @@ class CloudVmRayBackend(backends.Backend):
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
         check: bool = False,
-        interactive_mode: backend_utils.SSHInteractiveMode = backend_utils.
-        SSHInteractiveMode.NON_INTERACTIVE,
+        ssh_mode: backend_utils.SshMode = backend_utils.
+        SshMode.NON_INTERACTIVE,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Runs 'cmd' on the cluster's head node."""
         head_ip = self._get_head_ip(handle, use_cached_head_ip)
@@ -1640,6 +1640,6 @@ class CloudVmRayBackend(backends.Backend):
             log_path=log_path,
             stream_logs=stream_logs,
             check=check,
-            interactive_mode=interactive_mode,
+            ssh_mode=ssh_mode,
             ssh_control_name=self._ssh_control_name(handle),
         )

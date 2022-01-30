@@ -605,8 +605,6 @@ def ssh_options_list(ssh_private_key: Optional[str],
         'ServerAliveCountMax': 3,
         # ConnectTimeout.
         'ConnectTimeout': f'{timeout}s',
-        # ForwardAgent (for git credentials).
-        'ForwardAgent': 'yes',
     }
     if ssh_control_name is not None:
         arg_dict.update({
@@ -637,8 +635,8 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
-class SSHInteractiveMode(enum.Enum):
-    """Enum for SSH interactive mode."""
+class SshMode(enum.Enum):
+    """Enum for SSH mode."""
     # Do not allocating pseudo-tty to avoid user input corrupting the output.
     NON_INTERACTIVE = 0
     # Allocate a pseudo-tty, quit the ssh session after the cmd finishes.
@@ -648,16 +646,16 @@ class SSHInteractiveMode(enum.Enum):
 
 
 def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
-                      interactive_mode: SSHInteractiveMode,
+                      ssh_mode: SshMode,
                       port_forward: Optional[List[int]],
-                      ssh_control_name: Optional[str]):
+                      ssh_control_name: Optional[str]) -> List[str]:
     ssh = ['ssh']
-    if interactive_mode == SSHInteractiveMode.NON_INTERACTIVE:
+    if ssh_mode == SshMode.NON_INTERACTIVE:
         # Disable pseudo-terminal allocation. Otherwise, the output of
         # ssh will be corrupted by the user's input.
         ssh += ['-T']
     else:
-        # Force pseudo-terminal allocation for interactive mode.
+        # Force pseudo-terminal allocation for interactive/login mode.
         ssh += ['-tt']
     if port_forward is not None:
         for port in port_forward:
@@ -680,7 +678,7 @@ def run_command_on_ip_via_ssh(
     log_path: str = '/dev/null',
     stream_logs: bool = True,
     check: bool = False,
-    interactive_mode: SSHInteractiveMode = SSHInteractiveMode.NON_INTERACTIVE,
+    ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
     ssh_control_name: Optional[str] = None,
 ) -> Tuple[subprocess.Popen, str, str]:
     """Uses 'ssh' to run 'cmd' on a node with ip.
@@ -698,10 +696,10 @@ def run_command_on_ip_via_ssh(
         log_path: Redirect stdout/stderr to the log_path.
         stream_logs: Stream logs to the stdout/stderr.
         check: Check the success of the command.
-        interactive_mode: The interactive mode to use for ssh.
-            See SSHInteractiveMode for more details.
-        ssh_control_name: The name of the ssh_control_file to use. This is used
-        for optimizing the ssh speed.
+        ssh_mode: The mode to use for ssh.
+            See SSHMode for more details.
+        ssh_control_name: The files name of the ssh_control to use. This is used
+            for optimizing the ssh speed.
 
     Returns:
         A tuple of (process, stdout, stderr).
@@ -709,13 +707,16 @@ def run_command_on_ip_via_ssh(
     base_ssh_command = _ssh_base_command(ip,
                                          ssh_private_key,
                                          ssh_user=ssh_user,
-                                         interactive_mode=interactive_mode,
+                                         ssh_mode=ssh_mode,
                                          port_forward=port_forward,
                                          ssh_control_name=ssh_control_name)
-    if interactive_mode == SSHInteractiveMode.LOGIN:
+    if ssh_mode == SshMode.LOGIN:
         assert isinstance(cmd, list), 'cmd must be a list for login mode.'
         command = base_ssh_command + cmd
-        run(command, shell=False, check=check)
+        proc = run(command,
+                   shell=False,
+                   check=check)
+        return proc, '', ''
     if isinstance(cmd, list):
         cmd = ' '.join(cmd)
     # We need this to correctly run the cmd, and get the output.

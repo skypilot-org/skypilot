@@ -322,7 +322,7 @@ def _create_and_ssh_into_node(
         handle,
         commands,
         port_forward=port_forward,
-        interactive_mode=backend_utils.SSHInteractiveMode.LOGIN)
+        ssh_mode=backend_utils.SshMode.LOGIN)
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
 
     click.echo('To attach to it again:  ', nl=False)
@@ -605,8 +605,8 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
                     backend.run_on_head(handle,
                                         entrypoint,
                                         stream_logs=True,
-                                        interactive_mode=backend_utils.
-                                        SSHInteractiveMode.INTERACTIVE)
+                                        ssh_mode=backend_utils.
+                                        SshMode.INTERACTIVE)
                     return
 
         # Override.
