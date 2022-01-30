@@ -2,18 +2,21 @@
 
 Usage:
 
-   >> sky.launch(planned_dag)
+    >> sky.launch(planned_dag)
 
 Current resource privisioners:
 
-  - Ray autoscaler
+    - Ray autoscaler
 
 Current task launcher:
 
-  - ray exec + each task's commands
+    - ray exec + each task's commands
 """
+import copy
 import enum
+import subprocess
 import sys
+import textwrap
 import traceback
 from typing import Any, List, Optional
 
@@ -22,6 +25,8 @@ from sky import backends
 from sky import global_user_state
 from sky import sky_logging
 from sky import optimizer
+from sky.data import storage
+from sky.backends import backend_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -204,3 +209,87 @@ def exec(  # pylint: disable=redefined-builtin
              ],
              cluster_name=cluster_name,
              detach_run=detach_run)
+
+
+def launch_chain(dag: sky.Dag,
+                 dryrun: bool = False,
+                 teardown: bool = False,
+                 stream_logs: bool = True,
+                 backend: Optional[backends.Backend] = None,
+                 optimize_target: OptimizeTarget = OptimizeTarget.COST,
+                 cluster_name: Optional[str] = None,
+                 detach_run: bool = False) -> None:
+    logger.warning(
+        '`launch_chain` is still experimental and may change in the future. '
+        'Dag should be a chain of tasks.')
+    if len(dag) == 1:
+        return sky.launch(dag, dryrun, teardown, stream_logs, backend,
+                          optimize_target, cluster_name, detach_run)
+
+    def get_storage_name(storage_path, default_name):
+        if '://' in storage_path:
+            return storage_path.split('://')[-1].split('/')[0]
+        assert default_name is not None
+        return default_name
+
+    cluster_name = backend_utils.generate_cluster_name()
+    sky.optimize(dag, minimize=optimize_target)
+    dag = copy.deepcopy(dag)
+    tasks = list(dag.get_sorted_tasks())
+    for i, task in enumerate(tasks):
+        task_cluster_name = '-'.join(
+            [cluster_name, task.name.replace('_', '-'),
+             str(i)])
+        name = get_storage_name(task.get_inputs(), task_cluster_name)
+        cloud = task.best_resources.cloud
+        current_storage_type = storage.get_storage_type_from_cloud(cloud)
+
+        # Find the correct input storage type by task running cloud
+        input_storage = sky.Storage(name=name, source=task.get_inputs())
+        input_storage.add_store(current_storage_type)
+
+        input_mount_path = f'~/.sky/sky-task-{i}-inputs'
+        task.set_storage_mounts({
+            input_storage: input_mount_path,
+        })
+
+        task.run = task.run.replace('INPUTS[0]', f'{input_mount_path}')
+
+        output_path = f'~/.sky/sky-task-{i}-outputs'
+        task.run = task.run.replace('OUTPUTS[0]', output_path)
+
+        # Execute the task on the cloud
+        task.set_resources(task.best_resources)
+        with sky.Dag() as task_dag:
+            task_dag.add(task)
+        sky.launch(task_dag, cluster_name=task_cluster_name)
+
+        # Upload the outputs to the correct storage
+        next_storage_path = copy.copy(task.get_outputs())
+        if next_storage_path is not None:
+            next_storage_name = get_storage_name(next_storage_path, None)
+            sky_storage_codegen = (
+                f'import sky; sky.Storage(name={next_storage_name!r}, '
+                f'source={output_path!r}).add_store('
+                f'sky.StorageType[{current_storage_type.name!r}])')
+            if next_storage_path.startswith('CLOUD://'):
+                assert i < len(tasks) - 1
+                next_task = tasks[i + 1]
+                next_cloud = next_task.best_resources.cloud
+                next_storage_type = storage.get_storage_type_from_cloud(
+                    next_cloud)
+
+                next_task.inputs = next_task.inputs.replace(
+                    'CLOUD://', next_storage_type.value)
+                sky_storage_codegen += (
+                    '.add_store('
+                    f'sky.StorageType[{next_storage_type.name!r}])')
+            upload_code_gen = textwrap.dedent(f"""\
+                pip3 install -U boto3
+                python3 -u -c {sky_storage_codegen!r}
+                """)
+
+            with sky.Dag() as upload_dag:
+                sky.Task(f'upload-{i}', run=upload_code_gen)
+            sky.exec(upload_dag, cluster_name=task_cluster_name)
+        subprocess.Popen(f'sky down {task_cluster_name}', shell=True)

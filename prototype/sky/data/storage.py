@@ -5,6 +5,7 @@ import glob
 from multiprocessing import pool
 from typing import Any, Dict, Optional, Tuple
 
+from sky import clouds
 from sky.data import data_utils, data_transfer
 from sky import sky_logging
 from sky.cloud_adaptors import aws, gcp
@@ -16,9 +17,17 @@ StorageHandle = Any
 
 
 class StorageType(enum.Enum):
-    S3 = 0
-    GCS = 1
-    AZURE = 2
+    S3 = 's3://'
+    GCS = 'gs://'
+    AZURE = 'azure://'
+
+
+def get_storage_type_from_cloud(cloud: clouds.Cloud) -> StorageType:
+    if isinstance(cloud, clouds.AWS):
+        return StorageType.S3
+    if isinstance(cloud, clouds.GCP):
+        return StorageType.GCS
+    raise NotImplementedError(f'Unknown cloud: {cloud}')
 
 
 class AbstractStore:

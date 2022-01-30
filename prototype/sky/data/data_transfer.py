@@ -47,9 +47,7 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     session = aws.session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
 
-    with open(os.environ['GOOGLE_APPLICATION_CREDENTIALS'], 'r') as fp:
-        gcp_credentials = json.load(fp)
-    project_id = gcp_credentials['project_id']
+    project_id = os.environ['GCLOUD_PROJECT']
 
     # Update cloud bucket IAM role to allow for data transfer
     storage_account = storagetransfer.googleServiceAccounts().get(

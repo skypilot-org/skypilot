@@ -70,3 +70,6 @@ class Dag:
 
     def get_graph(self):
         return self.graph
+
+    def get_sorted_tasks(self):
+        return nx.topological_sort(self.graph)
