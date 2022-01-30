@@ -318,11 +318,10 @@ def _create_and_ssh_into_node(
         commands += ['screen', '-D', '-R']
     elif session_manager == 'tmux':
         commands += ['tmux', 'attach', '||', 'tmux', 'new']
-    commands = backend.run_on_head(
-        handle,
-        commands,
-        port_forward=port_forward,
-        ssh_mode=backend_utils.SshMode.LOGIN)
+    commands = backend.run_on_head(handle,
+                                   commands,
+                                   port_forward=port_forward,
+                                   ssh_mode=backend_utils.SshMode.LOGIN)
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
 
     click.echo('To attach to it again:  ', nl=False)
@@ -602,11 +601,11 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
                 if gpus is None:
                     if workdir is not None:
                         backend.sync_workdir(handle, workdir)
-                    backend.run_on_head(handle,
-                                        entrypoint,
-                                        stream_logs=True,
-                                        ssh_mode=backend_utils.
-                                        SshMode.INTERACTIVE)
+                    backend.run_on_head(
+                        handle,
+                        entrypoint,
+                        stream_logs=True,
+                        ssh_mode=backend_utils.SshMode.INTERACTIVE)
                     return
 
         # Override.

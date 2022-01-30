@@ -646,8 +646,7 @@ class SshMode(enum.Enum):
 
 
 def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
-                      ssh_mode: SshMode,
-                      port_forward: Optional[List[int]],
+                      ssh_mode: SshMode, port_forward: Optional[List[int]],
                       ssh_control_name: Optional[str]) -> List[str]:
     ssh = ['ssh']
     if ssh_mode == SshMode.NON_INTERACTIVE:
@@ -713,9 +712,7 @@ def run_command_on_ip_via_ssh(
     if ssh_mode == SshMode.LOGIN:
         assert isinstance(cmd, list), 'cmd must be a list for login mode.'
         command = base_ssh_command + cmd
-        proc = run(command,
-                   shell=False,
-                   check=check)
+        proc = run(command, shell=False, check=check)
         return proc, '', ''
     if isinstance(cmd, list):
         cmd = ' '.join(cmd)
