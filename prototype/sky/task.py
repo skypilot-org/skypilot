@@ -220,7 +220,8 @@ class Task:
         resources = config.get('resources')
         if resources is not None:
             if resources.get('cloud') is not None:
-                resources['cloud'] = clouds.CLOUD_REGISTRY[resources['cloud'].lower()]
+                resources['cloud'] = clouds.CLOUD_REGISTRY[
+                    resources['cloud'].lower()]
             if resources.get('instance_type') is not None:
                 resources['instance_type'] = resources['instance_type']
             if resources.get('accelerators') is not None:

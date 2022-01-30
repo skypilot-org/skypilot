@@ -210,6 +210,7 @@ def exec(  # pylint: disable=redefined-builtin
              cluster_name=cluster_name,
              detach_run=detach_run)
 
+
 def _verify_chain_dag(dag):
     graph = dag.get_graph()
     tasks = list(dag.get_sorted_tasks())
@@ -218,10 +219,11 @@ def _verify_chain_dag(dag):
         if task_i != len(tasks) - 1:
             if len(successors) != 1:
                 raise ValueError('Dag should be a chain of tasks. Task '
-                                f' {task} has more than one successor.')
+                                 f' {task} has more than one successor.')
         elif len(successors) != 0:
             raise ValueError('Dag should be a chain of tasks. The lat task '
-                            f' {task} has successors.')
+                             f' {task} has successors.')
+
 
 def launch_chain(dag: sky.Dag,
                  dryrun: bool = False,
@@ -275,7 +277,8 @@ def launch_chain(dag: sky.Dag,
         # Upload the outputs to the correct storage
         next_storage_path = copy.copy(task.get_outputs())
         if next_storage_path is not None:
-            next_storage_name = storage.get_storage_name(next_storage_path, None)
+            next_storage_name = storage.get_storage_name(
+                next_storage_path, None)
             sky_storage_codegen = (
                 f'import sky; sky.Storage(name={next_storage_name!r}, '
                 f'source={output_path!r}).add_store('
