@@ -100,7 +100,16 @@ def _remove_cluster_from_ssh_config(cluster_ip: str,
                                     auth_config: Dict[str, str]) -> None:
     backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
 
-
+def _create_gpu_dict_from_accelerators(accelerator_dict: Dict[str, int]) -> Dict[str, int]:
+    acc_name = list(accelerator_dict.keys())[0]
+    acc_count = list(accelerator_dict.values())[0]
+    gpu_dict = {'GPU': acc_count}
+    # gpu_dict should be empty when the accelerator is not GPU.
+    # FIXME: This is a hack to make sure that we do not reserve
+    # GPU when requesting TPU.
+    if any(acc in acc_name.lower() for acc in ['tpu', 'inferentia']):
+        gpu_dict = dict()
+    return gpu_dict
 class RayCodeGen:
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -197,14 +206,7 @@ class RayCodeGen:
             self._ip_to_bundle_index = {ip: i for i, ip in enumerate(ip_list)}
 
         if accelerator_dict is not None:
-            acc_name = list(accelerator_dict.keys())[0]
-            acc_count = list(accelerator_dict.values())[0]
-            gpu_dict = {'GPU': acc_count}
-            # gpu_dict should be empty when the accelerator is not GPU.
-            # FIXME: This is a hack to make sure that we do not reserve
-            # GPU when requesting TPU.
-            if 'tpu' in acc_name.lower():
-                gpu_dict = dict()
+            gpu_dict = _create_gpu_dict_from_accelerators(accelerator_dict)
             for bundle in bundles:
                 bundle.update({
                     **accelerator_dict,
@@ -261,14 +263,14 @@ class RayCodeGen:
                  f' Found: {ray_resources_dict}.')
             resources_str = f', resources={json.dumps(ray_resources_dict)}'
 
-            # Passing this ensures that the Ray remote task gets
-            # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
-            # would be force-set to empty by Ray.
-            num_gpus_str = f', num_gpus={list(ray_resources_dict.values())[0]}'
-            # `num_gpus` should be empty when the accelerator is not GPU.
-            # FIXME: use a set of GPU types.
-            resources_key = list(ray_resources_dict.keys())[0]
-            if 'tpu' in resources_key.lower():
+            gpu_dict = _create_gpu_dict_from_accelerators(ray_resources_dict)
+            if len(gpu_dict) > 0:
+                # Passing this ensures that the Ray remote task gets
+                # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
+                # would be force-set to empty by Ray.
+                num_gpus_str = f', num_gpus={list(ray_resources_dict.values())[0]}'
+            else:
+                # `num_gpus` should be empty when the accelerator is not GPU.
                 num_gpus_str = ''
 
         bundle_index = self._ip_to_bundle_index[gang_scheduling_ip]
