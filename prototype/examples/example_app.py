@@ -20,7 +20,7 @@ import sky
 import time_estimators
 
 file_mounts = {
-    '~/application_default_credentials.json': '/Users/zhwu/.config/gcloud/application_default_credentials.json',
+    '~/application_default_credentials.json': '~/.config/gcloud/application_default_credentials.json',
     '~/.aws': '~/.aws',
 }
 setup = """
@@ -81,10 +81,10 @@ def make_application():
 
         infer_op.set_resources({
             # TODO(zhwu): inf1 will cause autoscaler failure of ray during the placement_group fulfilling.
-            # sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
+            sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
             sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
-            # sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
-            # sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
+            sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
         })
 
         infer_op.set_time_estimator(
