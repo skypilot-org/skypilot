@@ -30,6 +30,12 @@ def get_storage_type_from_cloud(cloud: clouds.Cloud) -> StorageType:
     raise NotImplementedError(f'Unknown cloud: {cloud}')
 
 
+def get_storage_name(storage_path: str, default_name: Optional[str]):
+    if '://' in storage_path:
+        return storage_path.split('://')[-1].split('/')[0]
+    assert default_name is not None
+    return default_name
+
 class AbstractStore:
     """AbstractStore abstracts away the different storage types exposed by
     different clouds.
@@ -496,7 +502,7 @@ class GcsStore(AbstractStore):
         new_bucket = self.client.create_bucket(bucket, location=region)
         logger.info(
             f'Created GCS bucket {new_bucket.name} in {new_bucket.location} \
-            with storage class {new_bucket.storage_class}')
+            with storage class {new_bucket.storage_class}'                                                          )
         return new_bucket
 
     def _delete_gcs_bucket(self, bucket_name: str) -> None:
