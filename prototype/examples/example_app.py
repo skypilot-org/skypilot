@@ -46,7 +46,7 @@ def make_application():
 
         train_op.set_inputs(
             # 's3://my-imagenet-data',
-            # Change this bucket to your own bucket.
+            # TODO: Change this bucket to your own bucket.
             's3://sky-example-test',
             estimated_size_gigabytes=150,
             # estimated_size_gigabytes=1500,
@@ -54,7 +54,7 @@ def make_application():
         )
 
         # 'CLOUD': saves to the cloud this op ends up executing on.
-        # This bucket should be globally unique and available to you.
+        # TODO: This bucket should be globally unique and available to you.
         train_op.set_outputs('CLOUD://sky-my-model',
                              estimated_size_gigabytes=0.1)
 
@@ -82,7 +82,6 @@ def make_application():
                             estimated_size_gigabytes=0.1)
 
         infer_op.set_resources({
-            # TODO(zhwu): inf1 will cause autoscaler failure of ray during the placement_group fulfilling.
             sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
             sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
             sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
