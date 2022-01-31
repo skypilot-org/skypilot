@@ -244,8 +244,9 @@ def launch_chain(dag: sky.Dag,
                           optimize_target, cluster_name, detach_run)
 
     _verify_chain_dag(dag)
-
-    cluster_name = backend_utils.generate_cluster_name()
+    
+    if cluster_name is None:
+        cluster_name = backend_utils.generate_cluster_name()
     sky.optimize(dag, minimize=optimize_target)
     dag = copy.deepcopy(dag)
     tasks = list(dag.get_sorted_tasks())
