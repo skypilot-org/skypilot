@@ -303,4 +303,5 @@ def launch_chain(dag: sky.Dag,
             with sky.Dag() as upload_dag:
                 sky.Task(f'upload-{i}', run=upload_code_gen)
             sky.exec(upload_dag, cluster_name=task_cluster_name)
-        subprocess.Popen(f'sky down {task_cluster_name}', shell=True)
+        proc = subprocess.Popen(f'sky down {task_cluster_name}', shell=True)
+    proc.wait()

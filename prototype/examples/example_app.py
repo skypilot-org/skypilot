@@ -57,7 +57,7 @@ def make_application():
                              estimated_size_gigabytes=0.1)
 
         train_op.set_resources({
-            # sky.Resources(sky.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
+            sky.Resources(sky.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
             sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
             sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
@@ -100,6 +100,5 @@ def make_application():
 
 
 dag = make_application()
-# sky.optimize(dag, minimize=sky.OptimizeTarget.COST)
-# sky.optimize(dag, minimize=OptimizeTarget.TIME)
-sky.launch_chain(dag, optimize_target=sky.OptimizeTarget.COST)
+# sky.launch_chain(dag, optimize_target=sky.OptimizeTarget.COST)
+sky.launch_chain(dag, optimize_target=sky.OptimizeTarget.TIME)
