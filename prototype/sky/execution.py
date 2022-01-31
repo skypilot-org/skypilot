@@ -258,7 +258,6 @@ def launch_chain(dag: sky.Dag,
         cloud = task.best_resources.cloud
         current_storage_type = storage.get_storage_type_from_cloud(cloud)
 
-        # Find the correct input storage type by task running cloud
         input_storage = sky.Storage(name=name, source=task.get_inputs())
 
         input_mount_path = f'~/.sky/sky-task-{i}-inputs'
