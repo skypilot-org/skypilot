@@ -46,6 +46,7 @@ def make_application():
 
         train_op.set_inputs(
             # 's3://my-imagenet-data',
+            # Change this bucket to your own bucket.
             's3://sky-example-test',
             estimated_size_gigabytes=150,
             # estimated_size_gigabytes=1500,
@@ -53,6 +54,7 @@ def make_application():
         )
 
         # 'CLOUD': saves to the cloud this op ends up executing on.
+        # This bucket should be globally unique and available to you.
         train_op.set_outputs('CLOUD://sky-my-model',
                              estimated_size_gigabytes=0.1)
 
