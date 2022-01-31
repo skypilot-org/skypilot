@@ -1,10 +1,13 @@
 """Execution layer: resource provisioner + task launcher.
 
 Usage:
-
+    # Provision/setup a cluster and execute a task.
     >> sky.launch(planned_dag)
 
-Current resource privisioners:
+    # Execute a task.
+    >> sky.exec(planned_dag)
+
+Current resource provisioners:
 
     - Ray autoscaler
 
@@ -280,9 +283,9 @@ def launch_chain(dag: sky.Dag,
             next_storage_name = storage.get_storage_name(
                 next_storage_path, None)
             sky_storage_codegen = (
-                f'import sky; sky.Storage(name={next_storage_name!r}, '
-                f'source={output_path!r}).add_store('
-                f'sky.StorageType[{current_storage_type.name!r}])')
+                f'import sky; storage = sky.Storage(name={next_storage_name!r}, '
+                f'source={output_path!r}); storage.add_store('
+                f'sky.StorageType[{current_storage_type.name!r}]);')
             if next_storage_path.startswith('CLOUD://'):
                 assert i < len(tasks) - 1
                 next_task = tasks[i + 1]
@@ -293,7 +296,7 @@ def launch_chain(dag: sky.Dag,
                 next_task.inputs = next_task.inputs.replace(
                     'CLOUD://', next_storage_type.value)
                 sky_storage_codegen += (
-                    '.add_store('
+                    'storage.add_store('
                     f'sky.StorageType[{next_storage_type.name!r}])')
             upload_code_gen = textwrap.dedent(f"""\
                 pip3 install -U boto3
@@ -303,5 +306,7 @@ def launch_chain(dag: sky.Dag,
             with sky.Dag() as upload_dag:
                 sky.Task(f'upload-{i}', run=upload_code_gen)
             sky.exec(upload_dag, cluster_name=task_cluster_name)
-        proc = subprocess.Popen(f'sky down {task_cluster_name}', shell=True)
-    proc.wait()
+        with subprocess.Popen(f'sky down {task_cluster_name}',
+                              shell=True) as proc:
+            if i == len(tasks) - 1:
+                proc.wait()
