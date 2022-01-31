@@ -283,8 +283,8 @@ def launch_chain(dag: sky.Dag,
             next_storage_name = storage.get_storage_name(
                 next_storage_path, None)
             sky_storage_codegen = (
-                f'import sky; storage = sky.Storage(name={next_storage_name!r}, '
-                f'source={output_path!r}); storage.add_store('
+                f'import sky; storage = sky.Storage(name={next_storage_name!r},'
+                f' source={output_path!r}); storage.add_store('
                 f'sky.StorageType[{current_storage_type.name!r}]);')
             if next_storage_path.startswith('CLOUD://'):
                 assert i < len(tasks) - 1
