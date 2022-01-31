@@ -259,7 +259,6 @@ def launch_chain(dag: sky.Dag,
 
         # Find the correct input storage type by task running cloud
         input_storage = sky.Storage(name=name, source=task.get_inputs())
-        input_storage.add_store(current_storage_type)
 
         input_mount_path = f'~/.sky/sky-task-{i}-inputs'
         task.set_storage_mounts({
@@ -282,6 +281,7 @@ def launch_chain(dag: sky.Dag,
         if next_storage_path is not None:
             next_storage_name = storage.get_storage_name(
                 next_storage_path, None)
+            # Upload current outputs to the cloud storage of current cloud
             sky_storage_codegen = (
                 f'import sky; storage = sky.Storage(name={next_storage_name!r},'
                 f' source={output_path!r}); storage.add_store('
@@ -295,8 +295,13 @@ def launch_chain(dag: sky.Dag,
 
                 next_task.inputs = next_task.inputs.replace(
                     'CLOUD://', next_storage_type.value)
+                current_output_storage_path = (current_storage_type.value +
+                                               next_storage_name)
+                # Transfer the current storage to the next cloud storage
                 sky_storage_codegen += (
-                    'storage.add_store('
+                    f'next_storage = sky.Storage(name={next_storage_name!r}, '
+                    f'source={current_output_storage_path!r});'
+                    'next_storage.add_store('
                     f'sky.StorageType[{next_storage_type.name!r}])')
             upload_code_gen = textwrap.dedent(f"""\
                 pip3 install -U boto3

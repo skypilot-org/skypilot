@@ -40,7 +40,7 @@ def make_application():
             run="""\
                 echo "Training on INPUTS[0]"; ls INPUTS[0]
                 mkdir -p OUTPUTS[0]
-                echo $(hostname) >> OUTPUTS[0]/model.pt; echo "Generated model in OUTPUTS[0]"
+                echo $(hostname) >> OUTPUTS[0]/model-1.pt; echo "Generated model in OUTPUTS[0]"
                 """,
             setup=setup)
 
@@ -71,7 +71,7 @@ def make_application():
         infer_op = sky.Task(
             'infer_op',
             # run='python infer.py --model_dir=INPUTS[0]')
-            run='echo "Infering on INPUTS[0]"; ls INPUTS[0]',
+            run='echo "Infering on INPUTS[0]"; ls INPUTS[0]/model-1.pt',
             setup=setup)
 
         # Data dependency.
