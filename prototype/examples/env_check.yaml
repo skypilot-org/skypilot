@@ -33,3 +33,6 @@ run: |
     echo "~/sky_workdir/sky does not exist"
     exit 1
   fi
+
+  echo NODE ID: $SKY_NODE_ID
+  echo NODE IP: ${SKY_NODE_IPS[$SKY_NODE_ID]}

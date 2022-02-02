@@ -30,7 +30,7 @@ logger = sky_logging.init_logger(__name__)
 Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.2'
@@ -764,20 +764,6 @@ def check_local_gpus() -> bool:
                        capture_output=True,
                        check=False)
     return p.returncode == 0
-
-
-def make_task_bash_script(codegen: str) -> str:
-    script = [
-        textwrap.dedent(f"""\
-                #!/bin/bash
-                source ~/.bashrc
-                . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
-                cd {SKY_REMOTE_WORKDIR}"""),
-        codegen,
-    ]
-    script = '\n'.join(script)
-    return script
-
 
 def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.

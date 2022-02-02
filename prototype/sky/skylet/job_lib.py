@@ -17,7 +17,6 @@ from sky.skylet import util_lib
 SKY_LOGS_DIRECTORY = 'sky_logs'
 SKY_REMOTE_LOGS_ROOT = '~'
 
-
 class JobStatus(enum.Enum):
     """Job status"""
     INIT = 'INIT'

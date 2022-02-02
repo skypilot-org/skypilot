@@ -124,7 +124,8 @@ class RayCodeGen:
         self._has_epilogue = False
 
         # For n nodes gang scheduling.
-        self._ip_to_bundle_index = None
+        self._has_gang_scheduling = False
+        self._num_nodes = 0
 
         # job_id
         # Job ID is used to identify the job (also this generated code).
@@ -150,6 +151,7 @@ class RayCodeGen:
             import selectors
             import subprocess
             import tempfile
+            import textwrap
             import time
             from typing import Dict, List, Optional, Tuple, Union
 
@@ -158,6 +160,7 @@ class RayCodeGen:
 
             from sky.skylet import job_lib
 
+            SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             ray.init('auto', namespace='__sky__{job_id}__', log_to_driver=True)
@@ -168,33 +171,23 @@ class RayCodeGen:
             # specify dependencies for ray.
             inspect.getsource(log_lib.redirect_process_output),
             inspect.getsource(log_lib.run_with_log),
+            inspect.getsource(log_lib.make_task_bash_script),
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
 
     def add_gang_scheduling_placement_group(
         self,
-        ip_list: Optional[List[str]],
+        num_nodes: int,
         accelerator_dict: Dict[str, int],
     ) -> None:
         """Create the gang scheduling placement group for a Task."""
         assert self._has_prologue, ('Call add_prologue() before '
                                     'add_gang_scheduling_placement_group().')
-        bundles = [{'CPU': 1}]
-        self._ip_to_bundle_index = {None: 0}
-        if ip_list is not None:
-            bundles = [
-                {
-                    # Set CPU to avoid ray hanging the resources allocation
-                    # for remote functions, since the task will request 1 CPU
-                    # by default.
-                    'CPU': 1,
-                    # ip is requested by ray to have multiple jobs running in
-                    # parallel.
-                    f'node:{ip}': 0.01
-                } for ip in ip_list
-            ]
-            self._ip_to_bundle_index = {ip: i for i, ip in enumerate(ip_list)}
+        self._has_gang_scheduling = True
+        self._num_nodes = num_nodes
+
+        bundles = [{'CPU': 1} for _ in range(num_nodes)]
 
         if accelerator_dict is not None:
             acc_name = list(accelerator_dict.keys())[0]
@@ -223,12 +216,28 @@ class RayCodeGen:
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
-                print(\'SKY INFO: All task slots reserved.\',
+                print('SKY INFO: All task slots reserved.',
                       file=sys.stderr,
                       flush=True)
                 job_lib.set_job_started({self.job_id!r})
-                """),
-        ]
+                setup_cmd = ''
+                """)]
+        if num_nodes > 1:
+            self._code += [
+                textwrap.dedent("""\
+                    @ray.remote
+                    def check_ip():
+                        return ray.util.get_node_ip_address()
+                    ip_list = ray.get([
+                        check_ip.options(placement_group=pg,
+                                        placement_group_bundle_index=i).remote()
+                        for i in range(len(pg.bundle_specs))
+                    ])
+                    print('SKY INFO: Placement group IPs:', ip_list)
+                    ip_list_str = ' '.join([repr(ip) for ip in ip_list])
+                    setup_cmd = 'export SKY_NODE_IPS=(' + ip_list_str + ')\\n'
+                    """),
+            ]
 
     def add_ray_task(
         self,
@@ -236,13 +245,10 @@ class RayCodeGen:
         task_name: Optional[str],
         ray_resources_dict: Optional[Dict[str, float]],
         log_path: str,
-        gang_scheduling_ip: Optional[str] = None,
+        gang_scheduling_id: int = 0,
     ) -> None:
         """Generates code for a ray remote task that runs a bash command."""
-        assert self._has_prologue, 'Call add_prologue() before add_ray_task().'
-        assert self._ip_to_bundle_index is not None, \
-            'Call add_gang_scheduling_placement_group() before add_ray_task().'
-
+        assert self._has_gang_scheduling, ('Call add_gang_schedule_placement_group() before add_ray_task().')
         # Build remote_task.options(...)
         #   name=...
         #   resources=...
@@ -271,18 +277,19 @@ class RayCodeGen:
             if 'tpu' in resources_key.lower():
                 num_gpus_str = ''
 
-        bundle_index = self._ip_to_bundle_index[gang_scheduling_ip]
         resources_str = ', placement_group=pg'
-        resources_str += f', placement_group_bundle_index={bundle_index}'
+        resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
         logger.debug(
             f'Added Task with options: {name_str}{resources_str}{num_gpus_str}')
         self._code += [
             textwrap.dedent(f"""\
+        setup_cmd += 'export SKY_NODE_ID={gang_scheduling_id}\\n'
         futures.append(run_bash_command_with_log \\
                 .options({name_str}{resources_str}{num_gpus_str}) \\
                 .remote(
                     {bash_script!r},
                     {log_path!r},
+                    setup_command=setup_cmd,
                     stream_logs=True,
                 ))""")
         ]
@@ -1369,8 +1376,6 @@ class CloudVmRayBackend(backends.Backend):
         # Launch the command as a Ray task.
         assert isinstance(task.run, str), \
             f'Task(run=...) should be a string (found {type(task.run)}).'
-        script = backend_utils.make_task_bash_script(task.run)
-
         log_dir = os.path.join(f'{SKY_REMOTE_LOGS_ROOT}', f'{self.log_dir}',
                                'tasks')
         log_path = os.path.join(log_dir, 'run.log')
@@ -1379,14 +1384,13 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
-        codegen.add_gang_scheduling_placement_group(None, accelerator_dict)
+        codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         codegen.add_ray_task(
-            bash_script=script,
+            bash_script=task.run,
             task_name=task.name,
             ray_resources_dict=_get_task_demands_dict(task),
-            log_path=log_path,
-            gang_scheduling_ip=None,
+            log_path=log_path
         )
 
         codegen.add_epilogue()
@@ -1406,33 +1410,28 @@ class CloudVmRayBackend(backends.Backend):
         log_dir_base = os.path.join(f'{SKY_REMOTE_LOGS_ROOT}',
                                     f'{self.log_dir}')
         log_dir = os.path.join(log_dir_base, 'tasks')
-        # Get private ips here as Ray internally uses 'node:private_ip' as
-        # per-node custom resources.
-        ips = self._get_node_ips(handle.cluster_yaml,
-                                 task.num_nodes,
-                                 return_private_ips=True)
         accelerator_dict = _get_task_demands_dict(task)
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
-        codegen.add_gang_scheduling_placement_group(ips, accelerator_dict)
+        codegen.add_gang_scheduling_placement_group(task.num_nodes, accelerator_dict)
 
-        ips_dict = task.run(ips)
-        for ip in ips_dict:
-            command_for_ip = ips_dict[ip]
-            script = backend_utils.make_task_bash_script(command_for_ip)
+        assert isinstance(task.run, dict), task.run
+        assert set(task.run.keys()) == set(range(task.num_nodes)), (task.run.keys(), task.num_nodes)
+        for i in range(task.num_nodes):
+            command_for_node = task.run[i]
 
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
-            name = f'{ip}'
+            name = f'node-{i}'
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
 
             codegen.add_ray_task(
-                bash_script=script,
+                bash_script=command_for_node,
                 task_name=name,
                 ray_resources_dict=accelerator_dict,
                 log_path=log_path,
-                gang_scheduling_ip=ip,
+                gang_scheduling_id=i,
             )
 
         codegen.add_epilogue()

@@ -135,7 +135,7 @@ class Task:
         if num_nodes is not None and num_nodes > 1 and isinstance(
                 self.run, str):
             # The same command str for all nodes.
-            self.run = lambda ips: {ip: run for ip in ips}
+            self.run = {i: run for i in range(num_nodes)}
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
