@@ -17,19 +17,16 @@ with sky.Dag() as dag:
       tar -xvzf cifar-10-python.tar.gz'
 
     # The command to run.  Will be run under the working directory.
-    def run_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
-        run_dict = {}
-        num_nodes = len(ip_list)
-        master_ip = ip_list[0]
-        for i, ip in enumerate(ip_list):
-            run_dict[ip] = f'cd pytorch-distributed-resnet && \
+    run_dict = {}
+    for i in range(num_nodes):
+        run_dict[i] = f"""\
+            cd pytorch-distributed-resnet
             python3 -m torch.distributed.launch --nproc_per_node=1 \
-            --nnodes={num_nodes} --node_rank={i} --master_addr=\"{master_ip}\" \
-            --master_port=8008 resnet_ddp.py --num_epochs 20'
+            --nnodes={num_nodes} --node_rank={i} --master_addr=${{SKY_NODE_IPS[0]}} \
+            --master_port=8008 resnet_ddp.py --num_epochs 20
+        """
 
-        return run_dict
-
-    run = run_fn
+    run = run_dict
 
     train = sky.Task(
         'train',
