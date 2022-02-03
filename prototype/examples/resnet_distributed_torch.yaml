@@ -19,5 +19,5 @@ setup: |
 run: |
     cd pytorch-distributed-resnet
     python3 -m torch.distributed.launch --nproc_per_node=1 \
-    --nnodes={num_nodes} --node_rank={i} --master_addr=${{SKY_NODE_IPS[0]}} \
+    --nnodes={num_nodes} --node_rank={i} --master_addr=${SKY_NODE_IPS[0]} \
     --master_port=8008 resnet_ddp.py --num_epochs 20
