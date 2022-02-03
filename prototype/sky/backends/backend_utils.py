@@ -765,6 +765,7 @@ def check_local_gpus() -> bool:
                        check=False)
     return p.returncode == 0
 
+
 def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.

@@ -16,6 +16,7 @@ from sky.skylet import job_lib
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 
+
 def redirect_process_output(proc,
                             log_path: str,
                             stream_logs: bool,
@@ -139,6 +140,7 @@ def make_task_bash_script(codegen: str) -> str:
     ]
     script = '\n'.join(script)
     return script
+
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,

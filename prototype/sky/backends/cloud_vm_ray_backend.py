@@ -221,7 +221,8 @@ class RayCodeGen:
                       flush=True)
                 job_lib.set_job_started({self.job_id!r})
                 setup_cmd = ''
-                """)]
+                """)
+        ]
         if num_nodes > 1:
             self._code += [
                 textwrap.dedent("""\
@@ -248,7 +249,8 @@ class RayCodeGen:
         gang_scheduling_id: int = 0,
     ) -> None:
         """Generates code for a ray remote task that runs a bash command."""
-        assert self._has_gang_scheduling, ('Call add_gang_schedule_placement_group() before add_ray_task().')
+        assert self._has_gang_scheduling, (
+            'Call add_gang_schedule_placement_group() before add_ray_task().')
         # Build remote_task.options(...)
         #   name=...
         #   resources=...
@@ -1386,12 +1388,10 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_prologue(job_id)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
-        codegen.add_ray_task(
-            bash_script=task.run,
-            task_name=task.name,
-            ray_resources_dict=_get_task_demands_dict(task),
-            log_path=log_path
-        )
+        codegen.add_ray_task(bash_script=task.run,
+                             task_name=task.name,
+                             ray_resources_dict=_get_task_demands_dict(task),
+                             log_path=log_path)
 
         codegen.add_epilogue()
 
@@ -1414,10 +1414,12 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
-        codegen.add_gang_scheduling_placement_group(task.num_nodes, accelerator_dict)
+        codegen.add_gang_scheduling_placement_group(task.num_nodes,
+                                                    accelerator_dict)
 
         assert isinstance(task.run, dict), task.run
-        assert set(task.run.keys()) == set(range(task.num_nodes)), (task.run.keys(), task.num_nodes)
+        assert set(task.run.keys()) == set(range(
+            task.num_nodes)), (task.run.keys(), task.num_nodes)
         for i in range(task.num_nodes):
             command_for_node = task.run[i]
 
