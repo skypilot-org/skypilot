@@ -65,7 +65,8 @@ def redirect_process_output(proc,
                 if stream_logs and start_streaming_flag:
                     out_stream.write(line)
                     out_stream.flush()
-                fout.write(line)
+                if log_path != '/dev/null':
+                    fout.write(line)
     return stdout, stderr
 
 
@@ -91,6 +92,8 @@ def run_with_log(
                               start_new_session=True,
                               **kwargs) as proc:
             proc_pgid = os.getpgid(proc.pid)
+            # We need this even if the log_path is '/dev/null' to ensure the
+            # progress bar is shown.
             stdout, stderr = redirect_process_output(
                 proc,
                 log_path,
