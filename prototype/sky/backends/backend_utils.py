@@ -649,12 +649,13 @@ def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
                       ssh_mode: SshMode, port_forward: Optional[List[int]],
                       ssh_control_name: Optional[str]) -> List[str]:
     ssh = ['ssh']
-    if ssh_mode != SshMode.NON_INTERACTIVE:
-        # Force pseudo-terminal allocation for interactive/login mode.
-        # Otherwise, Disable pseudo-terminal allocation. Otherwise, the output of
+    if ssh_mode == SshMode.NON_INTERACTIVE:
+        # Disable pseudo-terminal allocation. Otherwise, the output of
         # ssh will be corrupted by the user's input.
+        ssh += ['-T']
+    else:
+        # Force pseudo-terminal allocation for interactive/login mode.
         ssh += ['-tt']
-
     if port_forward is not None:
         for port in port_forward:
             local = remote = port
