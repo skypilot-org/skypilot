@@ -778,11 +778,7 @@ def logs(cluster: str, job_id: str, sync_down: bool):
         click.secho('Syncing down logs to local...', fg='yellow')
         backend.sync_down_logs(handle, job_id)
     else:
-        codegen = backend_utils.JobLibCodeGen()
-        codegen.tail_logs(job_id)
-        code = codegen.build()
-        click.secho('Start streaming logs...', fg='yellow')
-        backend.run_on_head(handle, code, stream_logs=True)
+        backend_utils.tail_logs(handle, backend, job_id)
 
 
 @cli.command()
