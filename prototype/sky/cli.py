@@ -341,13 +341,16 @@ def _create_and_ssh_into_node(
 
 
 def _check_yaml(entrypoint: str) -> bool:
-    """Checks if entrypoint is a readable YAML file"""
+    """Checks if entrypoint is a readable YAML file."""
     is_yaml = True
     try:
         with open(entrypoint, 'r') as f:
             try:
-                yaml.safe_load(f)
+                config = yaml.safe_load(f)
             except yaml.YAMLError:
+                is_yaml = False
+            if isinstance(config, str):
+                # 'sky exec cluster ./my_script.sh'
                 is_yaml = False
     except OSError:
         is_yaml = False
@@ -605,7 +608,8 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
                         handle,
                         entrypoint,
                         stream_logs=True,
-                        ssh_mode=backend_utils.SshMode.INTERACTIVE)
+                        ssh_mode=backend_utils.SshMode.INTERACTIVE,
+                        under_remote_workdir=True)
                     return
 
         # Override.

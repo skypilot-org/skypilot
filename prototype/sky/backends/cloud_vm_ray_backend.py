@@ -1624,11 +1624,14 @@ class CloudVmRayBackend(backends.Backend):
         use_cached_head_ip: bool = True,
         check: bool = False,
         ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
+        under_remote_workdir: bool = False,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Runs 'cmd' on the cluster's head node."""
         head_ip = self._get_head_ip(handle, use_cached_head_ip)
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
+        if under_remote_workdir:
+            cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
         return backend_utils.run_command_on_ip_via_ssh(
             head_ip,
