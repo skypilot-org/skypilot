@@ -98,7 +98,8 @@ def run_with_log(
         # Adapted from ray/dashboard/modules/job/job_manager.py#L154
         parent_pid = os.getpid()
         subprocess.Popen(
-            f'while kill -s 0 {parent_pid}; do sleep 1; done; pkill -TERM -P {proc_pgid}; sleep 5; kill -9 -{proc_pgid}',
+            (f'while kill -s 0 {parent_pid}; do sleep 1; done; '
+             f'pkill -TERM -P {proc_pgid}; sleep 5; kill -9 -{proc_pgid}'),
             shell=True,
             # Suppress output
             stdout=subprocess.DEVNULL,
