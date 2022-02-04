@@ -1312,7 +1312,13 @@ class CloudVmRayBackend(backends.Backend):
 
         try:
             if not detach_run:
-                backend_utils.run(f'sky logs {handle.cluster_name} {job_id}')
+                # Sky logs. Not using subprocess.run since it will make the
+                # ssh keep retrying after ctrl-c.
+                codegen = backend_utils.JobLibCodeGen()
+                codegen.tail_logs(job_id)
+                code = codegen.build()
+                click.secho('Start streaming logs...', fg='yellow')
+                self.run_on_head(handle, code, stream_logs=True, check=False)
         finally:
             name = handle.cluster_name
             logger.info(f'\n{fore.CYAN}Job ID: '
