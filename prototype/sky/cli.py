@@ -30,6 +30,7 @@ each other.
 import copy
 import functools
 import getpass
+import shlex
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
@@ -354,6 +355,15 @@ def _check_yaml(entrypoint: str) -> bool:
                 is_yaml = False
     except OSError:
         is_yaml = False
+    if not is_yaml:
+        shell_splits = shlex.split(entrypoint)
+        if len(shell_splits) == 1 and (shell_splits[0].endswith('.yaml') or
+                                       shell_splits[0].endswith('.yml')):
+            click.confirm(
+                f'Entrypoint {entrypoint!r} looks like a yaml path '
+                'but does not exist (is there a typo?).\nIt will be treated '
+                'as a command to be run remotely. Continue?',
+                abort=True)
     return is_yaml
 
 
@@ -685,7 +695,10 @@ def status(all: bool):  # pylint: disable=redefined-builtin
             # STATUS
             cluster_status['status'].value,
         ])
-    click.echo(cluster_table)
+    if clusters_status:
+        click.echo(cluster_table)
+    else:
+        click.echo('No existing clusters.')
 
 
 @cli.command()
