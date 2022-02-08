@@ -18,23 +18,24 @@ def redirect_process_output(proc,
                             log_path: str,
                             stream_logs: bool,
                             start_streaming_at: str = '',
-                            skip_lines: Optional[List[str]] = None):
+                            skip_lines: Optional[List[str]] = None) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
 
+    sel = selectors.DefaultSelector()
     out_io = io.TextIOWrapper(proc.stdout,
                               encoding='utf-8',
                               newline='',
                               errors='replace')
-    err_io = io.TextIOWrapper(proc.stderr,
-                              encoding='utf-8',
-                              newline='',
-                              errors='replace')
-    sel = selectors.DefaultSelector()
     sel.register(out_io, selectors.EVENT_READ)
-    sel.register(err_io, selectors.EVENT_READ)
+    if proc.stderr is not None:
+        err_io = io.TextIOWrapper(proc.stderr,
+                                encoding='utf-8',
+                                newline='',
+                                errors='replace')
+        sel.register(err_io, selectors.EVENT_READ)
 
     stdout = ''
     stderr = ''
@@ -77,6 +78,7 @@ def run_with_log(
     start_streaming_at: str = '',
     return_none: bool = False,
     check: bool = False,
+    to_stdout: bool = False,
     **kwargs,
 ) -> Union[None, Tuple[subprocess.Popen, str, str]]:
     """Runs a command and logs its output to a file.
@@ -84,9 +86,11 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
+    
+    stderr_pipe = subprocess.PIPE if not to_stdout else subprocess.STDOUT
     with subprocess.Popen(cmd,
                           stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE,
+                          stderr=stderr_pipe,
                           start_new_session=True,
                           **kwargs) as proc:
 
@@ -119,8 +123,6 @@ def run_with_log(
             ])
         proc.wait()
         if proc.returncode and check:
-            if stderr:
-                print(stderr, file=sys.stderr)
             raise subprocess.CalledProcessError(proc.returncode, cmd)
         if return_none:
             return None
@@ -129,7 +131,8 @@ def run_with_log(
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              stream_logs: bool = False):
+                              stream_logs: bool = False,
+                              to_stdout: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         fp.write(bash_command)
         fp.flush()
@@ -144,6 +147,7 @@ def run_bash_command_with_log(bash_command: str,
             stream_logs=stream_logs,
             return_none=True,
             check=True,
+            to_stdout=to_stdout,
         )
 
 
