@@ -54,8 +54,8 @@ def redirect_process_output(
                 # Remove special characters to avoid cursor hidding
                 line = line.replace('\x1b[?25l', '')
                 if line.endswith('\r\n'):
-                    # Replace CRLF with LF to avoid ray logging to the same line due to
-                    # separate lines with LF.
+                    # Replace CRLF with LF to avoid ray logging to the same line
+                    # due to separating lines with LF.
                     line = line[:-2] + '\n'
                 if (skip_lines is not None and
                         any(skip in line for skip in skip_lines)):
