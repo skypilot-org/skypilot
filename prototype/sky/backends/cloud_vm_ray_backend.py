@@ -589,7 +589,8 @@ class RetryingVmProvisioner(object):
             raise e
 
     def _retry_region_zones(self, task: Task, to_provision: Resources,
-                            dryrun: bool, stream_logs: bool, cluster_name: str,
+                            num_nodes: int, dryrun: bool, stream_logs: bool,
+                            cluster_name: str,
                             prev_cluster_config: Optional[Dict[str, Any]]):
         """The provision retry loop."""
         style = colorama.Style
@@ -612,6 +613,7 @@ class RetryingVmProvisioner(object):
             config_dict = backend_utils.write_cluster_config(
                 task,
                 to_provision,
+                num_nodes,
                 _get_cluster_config_template(to_provision.cloud),
                 region=region,
                 zones=zones,
@@ -632,7 +634,7 @@ class RetryingVmProvisioner(object):
             handle = CloudVmRayBackend.ResourceHandle(
                 cluster_name=cluster_name,
                 cluster_yaml=cluster_config_file,
-                launched_nodes=task.num_nodes,
+                launched_nodes=num_nodes,
                 # OK for this to be shown in CLI as status == INIT.
                 launched_resources=to_provision,
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
@@ -641,8 +643,8 @@ class RetryingVmProvisioner(object):
                                                     ready=False)
 
             gang_failed, proc, stdout, stderr = self._gang_schedule_ray_up(
-                task, to_provision.cloud, cluster_config_file, log_abs_path,
-                stream_logs, prev_cluster_config)
+                to_provision.cloud, num_nodes, cluster_config_file,
+                log_abs_path, stream_logs, prev_cluster_config)
 
             if gang_failed or proc.returncode != 0:
                 if gang_failed:
@@ -687,10 +689,9 @@ class RetryingVmProvisioner(object):
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
 
-    def _gang_schedule_ray_up(self, task: Task,
-                              to_provision_cloud: clouds.Cloud,
-                              cluster_config_file: str, log_abs_path: str,
-                              stream_logs: bool,
+    def _gang_schedule_ray_up(self, to_provision_cloud: clouds.Cloud,
+                              num_nodes: int, cluster_config_file: str,
+                              log_abs_path: str, stream_logs: bool,
                               prev_cluster_config: Optional[Dict[str, Any]]):
         """Provisions a cluster via 'ray up' with gang scheduling.
 
@@ -738,13 +739,13 @@ class RetryingVmProvisioner(object):
 
         ray_up_on_full_confg_only = False
         # Fast paths for "no need to gang schedule":
-        #  (1) task.num_nodes == 1, no need to pre-provision.
+        #  (1) num_nodes == 1, no need to pre-provision.
         #  (2) otherwise, if cluster configs have not changed, no need either.
         #    TODO: can relax further: if (num_nodes x requested_resources) now
         #    == existing, then skip Step 1.  Requested resources =
         #    cloud(instance_type, acc, acc_args).  If requested clouds are
         #    different, we still need to gang schedule on the new cloud.
-        if task.num_nodes == 1:
+        if num_nodes == 1:
             # ray up the full yaml.
             proc, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
@@ -797,7 +798,7 @@ class RetryingVmProvisioner(object):
         # TODO: if requesting a large amount (say 32) of expensive VMs, this
         # may loop for a long time.  Use timeouts and treat as gang_failed.
         cluster_ready = backend_utils.wait_until_ray_cluster_ready(
-            to_provision_cloud, cluster_config_file, task.num_nodes)
+            to_provision_cloud, cluster_config_file, num_nodes)
         gang_failed = not cluster_ready
         if gang_failed or ray_up_on_full_confg_only:
             # Head OK; gang scheduling failure.
@@ -848,7 +849,7 @@ class RetryingVmProvisioner(object):
             stream_logs=True)
 
     def provision_with_retries(self, task: Task, to_provision: Resources,
-                               dryrun: bool, stream_logs: bool,
+                               num_nodes: int, dryrun: bool, stream_logs: bool,
                                cluster_name: str):
         """Provision with retries for all launchable resources."""
         assert cluster_name is not None, 'cluster_name must be specified.'
@@ -873,6 +874,7 @@ class RetryingVmProvisioner(object):
                 config_dict = self._retry_region_zones(
                     task,
                     to_provision,
+                    num_nodes,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
@@ -1000,6 +1002,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'existing cluster first: sky down {cluster_name}')
 
     def _check_existing_cluster(self, task: Task, to_provision: Resources,
+                                num_nodes: int,
                                 cluster_name: str) -> Tuple[str, Resources]:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
@@ -1007,16 +1010,17 @@ class CloudVmRayBackend(backends.Backend):
             self._check_task_resources_smaller_than_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
-            return cluster_name, handle.launched_resources
+            return (cluster_name, handle.launched_resources,
+                    handle.launched_nodes)
 
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
-            f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
+            f'[{num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
             'Tip: to reuse an existing cluster, '
             'specify --cluster-name (-c) in the CLI or use '
             'sky.launch(.., cluster_name=..) in the Python API. '
             'Run `sky status` to see existing clusters.')
-        return cluster_name, to_provision
+        return cluster_name, to_provision, num_nodes
 
     def _set_tpu_name(self, task: Task, cluster_config_file: str,
                       tpu_name: str) -> None:
@@ -1038,6 +1042,7 @@ class CloudVmRayBackend(backends.Backend):
     def provision(self,
                   task: Task,
                   to_provision: Resources,
+                  num_nodes: int,
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None):
@@ -1053,11 +1058,13 @@ class CloudVmRayBackend(backends.Backend):
                                             self._optimize_target)
 
         if not dryrun:  # dry run doesn't need to check existing cluster.
-            cluster_name, to_provision = self._check_existing_cluster(
-                task, to_provision, cluster_name)
+            cluster_name, to_provision, num_nodes = (
+                self._check_existing_cluster(task, to_provision, num_nodes,
+                                             cluster_name))
         try:
             config_dict = provisioner.provision_with_retries(
-                task, to_provision, dryrun, stream_logs, cluster_name)
+                task, to_provision, num_nodes, dryrun, stream_logs,
+                cluster_name)
         except exceptions.ResourcesUnavailableError as e:
             # Do not remove the stopped cluster from the global state if failed
             # to start.

@@ -306,6 +306,7 @@ def _create_and_ssh_into_node(
 
         handle = backend.provision(task,
                                    to_provision=to_provision,
+                                   num_nodes=task.num_nodes,
                                    dryrun=False,
                                    stream_logs=True,
                                    cluster_name=cluster_name)
@@ -946,7 +947,8 @@ def start(clusters: Tuple[str]):
             dummy_task.num_nodes = handle.launched_nodes
         click.secho(f'Starting cluster {name}...', bold=True)
         backend.provision(dummy_task,
-                          to_provision=None,
+                          to_provision=handle.launched_resources,
+                          num_nodes=handle.launched_nodes,
                           dryrun=False,
                           stream_logs=True,
                           cluster_name=name)
