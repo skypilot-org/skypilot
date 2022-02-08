@@ -84,13 +84,11 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-    proc_pgid = None
     with subprocess.Popen(cmd,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE,
                           start_new_session=True,
                           **kwargs) as proc:
-        proc_pgid = os.getpgid(proc.pid)
 
         # The proc can be defunct if the python program is killed. Here we
         # open a new subprocess to gracefully kill the proc, SIGTERM
@@ -99,7 +97,7 @@ def run_with_log(
         parent_pid = os.getpid()
         subprocess.Popen(
             (f'while kill -s 0 {parent_pid}; do sleep 1; done; '
-             f'pkill -TERM -P {proc_pgid}; sleep 5; kill -9 -{proc_pgid}'),
+             f'pkill -TERM -P {proc.pid}; sleep 5; kill -9 -{proc.pid}'),
             shell=True,
             # Suppress output
             stdout=subprocess.DEVNULL,
@@ -120,7 +118,6 @@ def run_with_log(
                 'bash: no job control in this shell',
             ])
         proc.wait()
-        proc_pgid = None
         if proc.returncode and check:
             if stderr:
                 print(stderr, file=sys.stderr)
