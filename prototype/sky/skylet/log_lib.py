@@ -14,11 +14,12 @@ from typing import Iterator, List, Optional, Tuple, Union
 from sky.skylet import job_lib
 
 
-def redirect_process_output(proc,
-                            log_path: str,
-                            stream_logs: bool,
-                            start_streaming_at: str = '',
-                            skip_lines: Optional[List[str]] = None) -> Tuple[str, str]:
+def redirect_process_output(
+        proc,
+        log_path: str,
+        stream_logs: bool,
+        start_streaming_at: str = '',
+        skip_lines: Optional[List[str]] = None) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
@@ -32,9 +33,9 @@ def redirect_process_output(proc,
     sel.register(out_io, selectors.EVENT_READ)
     if proc.stderr is not None:
         err_io = io.TextIOWrapper(proc.stderr,
-                                encoding='utf-8',
-                                newline='',
-                                errors='replace')
+                                  encoding='utf-8',
+                                  newline='',
+                                  errors='replace')
         sel.register(err_io, selectors.EVENT_READ)
 
     stdout = ''
@@ -86,7 +87,7 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-    
+
     stderr_pipe = subprocess.PIPE if not to_stdout else subprocess.STDOUT
     with subprocess.Popen(cmd,
                           stdout=subprocess.PIPE,
