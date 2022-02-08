@@ -58,10 +58,27 @@ Interactive nodes can be started and stopped like any other cluster:
     $ sky start my-cpu
 
 
-Advanced configurations
------------------------
-By default, interactive clusters are a single node. For cases where
+Advanced configuration
+----------------------
+By default, interactive clusters are a single node. If you require a cluster with multiple nodes
+(e.g. for distributed training, etc.), you can launch a cluster using YAML:
 
-Also show that if users prefer to have a multi-node cluster here's how they can create
-a YAML with no setup or run and can just ssh in.
+.. code-block:: yaml
+
+    # multi_node.yaml
+
+    num_nodes: 16
+    resources:
+      accelerators:
+        V100: 8
+
+.. code-block:: console
+
+    $ sky launch -c my-cluster multi_node.yaml
+
+To log in to the head node:
+
+.. code-block:: console
+
+    $ ssh my-cluster
 

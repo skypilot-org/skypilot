@@ -1,21 +1,40 @@
 Python Control Flow
 ===================
 
-Installation
-------------
+For advanced use cases, we allow users to automate workflows on Sky with our
+Python API.
 
-To use Lumache, first install it using pip:
+Below is a simple task that can be expressed as a Python script:
+
+.. code-block:: python
+
+   # hello_sky.py
+
+   import sky
+
+   backend = sky.backends.CloudVmRayBackend()
+
+   with sky.Dag() as dag:
+      resources = sky.Resources()
+      setup_commands = 'echo "Hello, Sky!"'
+      task = sky.Task(run='ping 127.0.0.1 -c 5',
+                     setup=setup_commands,
+                     name='ping').set_resources(resources)
+
+   sky.launch(dag, cluster_name="mycluster", backend=backend, stream_logs=True)
+
+The task can be launched by running the Python script:
 
 .. code-block:: console
 
-   (.venv) $ pip install lumache
+   $ python hello_sky.py
 
-.. click:: sky.cli:cli
-   :prog: sky
+The above is equivalent to running :code:`sky launch -c mycluster` with the following YAML spec:
 
+.. code-block:: yaml
 
-Creating recipes
-----------------
+   name: ping
+   setup: echo "Hello, Sky!"
+   run: ping 127.0.0.1 -c 5
 
-To retrieve a list of random ingredients,
-you can use the ``lumache.get_random_ingredients()`` function:
+Please see our full API documentation for further details.
