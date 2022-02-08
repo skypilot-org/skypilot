@@ -52,6 +52,10 @@ def redirect_process_output(proc,
                     continue
                 # Remove special characters to avoid cursor hidding
                 line = line.replace('\x1b[?25l', '')
+                if line.endswith('\r\n'):
+                    # Replace CRLF with LF to avoid ray logging to the same line due to
+                    # separate lines with LF.
+                    line = line[:-2] + '\n'
                 if (skip_lines is not None and
                         any(skip in line for skip in skip_lines)):
                     continue
@@ -68,6 +72,7 @@ def redirect_process_output(proc,
                     out_stream.flush()
                 if log_path != '/dev/null':
                     fout.write(line)
+                    fout.flush()
     return stdout, stderr
 
 
