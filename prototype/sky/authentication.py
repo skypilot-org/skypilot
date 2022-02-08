@@ -66,9 +66,9 @@ def get_public_key_path(private_key_path):
 def setup_aws_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
-    # Defeault to ~/.ssh/sky-key
+    # Default to ~/.sky/sky-key
     if private_key_path is None:
-        private_key_path = '~/.ssh/sky-key'
+        private_key_path = '~/.sky/sky-key'
         config['auth']['ssh_private_key'] = private_key_path
 
     private_key_path = os.path.expanduser(private_key_path)
@@ -133,9 +133,9 @@ def setup_aws_authentication(config):
 def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
-    # Defeault to ~/.ssh/sky-key
+    # Default to ~/.sky/sky-key
     if private_key_path is None:
-        private_key_path = '~/.ssh/sky-key'
+        private_key_path = '~/.sky/sky-key'
         config['auth']['ssh_private_key'] = private_key_path
 
     private_key_path = os.path.expanduser(private_key_path)
@@ -210,9 +210,9 @@ def setup_azure_authentication(config):
     # Doesn't need special library calls!
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
-    # Defeault to ~/.ssh/sky-key
+    # Default to ~/.sky/sky-key
     if private_key_path is None:
-        private_key_path = '~/.ssh/sky-key'
+        private_key_path = '~/.sky/sky-key'
         config['auth']['ssh_private_key'] = private_key_path
 
     private_key_path = os.path.expanduser(private_key_path)
