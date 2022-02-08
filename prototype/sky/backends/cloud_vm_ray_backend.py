@@ -1317,7 +1317,7 @@ class CloudVmRayBackend(backends.Backend):
                 time.sleep(1)
                 # Sky logs. Not using subprocess.run since it will make the
                 # ssh keep connected after ctrl-c.
-                backend_utils.tail_logs(handle, self, job_id)
+                self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
             logger.info(f'\n{fore.CYAN}Job ID: '
@@ -1589,6 +1589,8 @@ class CloudVmRayBackend(backends.Backend):
         ])
         command = ' '.join(rsync_command)
         if with_outputs:
+            # TODO (zhwu): Test this if the command will be still running in the
+            # background, after the current program is killed.
             backend_utils.run(command)
         else:
             backend_utils.run_no_outputs(command)
