@@ -95,7 +95,6 @@ def run_with_log(
             # and then SIGKILL the process group.
             # Adapted from ray/dashboard/modules/job/job_manager.py#L154
             parent_pid = os.getpid()
-            print(cmd, parent_pid, proc.pid)
             kill_cmd = f'pkill -TERM -P {proc.pid}; kill -9 {proc.pid}'
             subprocess.Popen(
                 f'while kill -s 0 {parent_pid}; do sleep 1; done; {kill_cmd}',
