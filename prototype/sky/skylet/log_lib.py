@@ -127,6 +127,8 @@ def run_with_log(
             return proc, stdout, stderr
         finally:
             # Make sure the process is killed if the python program is killed.
+            # This is needed for SIGINT (ctrl-c), since the previous daemon will
+            # be killed before it correctly kill the child processes.
             subprocess.Popen(kill_cmd,
                              shell=True,
                              stdout=subprocess.DEVNULL,
