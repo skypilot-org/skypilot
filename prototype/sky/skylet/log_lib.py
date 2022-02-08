@@ -65,7 +65,8 @@ def redirect_process_output(proc,
                 if stream_logs and start_streaming_flag:
                     out_stream.write(line)
                     out_stream.flush()
-                fout.write(line)
+                if log_path != '/dev/null':
+                    fout.write(line)
     return stdout, stderr
 
 
@@ -83,47 +84,47 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-    proc_pgid = None
-    try:
-        with subprocess.Popen(cmd,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE,
-                              start_new_session=True,
-                              **kwargs) as proc:
-            proc_pgid = os.getpgid(proc.pid)
-            stdout, stderr = redirect_process_output(
-                proc,
-                log_path,
-                stream_logs,
-                start_streaming_at=start_streaming_at,
-                # Skip these lines caused by `-i` option of bash. Failed to find
-                # other way to turn off these two warning.
-                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-                skip_lines=[
-                    'bash: cannot set terminal process group',
-                    'bash: no job control in this shell',
-                ])
-            proc.wait()
-            proc_pgid = None
-            if proc.returncode and check:
-                if stderr:
-                    print(stderr, file=sys.stderr)
-                raise subprocess.CalledProcessError(proc.returncode, cmd)
-            if return_none:
-                return None
-            return proc, stdout, stderr
-    finally:
+    with subprocess.Popen(cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          start_new_session=True,
+                          **kwargs) as proc:
+
         # The proc can be defunct if the python program is killed. Here we
-        # open a new subprocess to kill the process, SIGKILL the process group.
+        # open a new subprocess to gracefully kill the proc, SIGTERM
+        # and then SIGKILL the process group.
         # Adapted from ray/dashboard/modules/job/job_manager.py#L154
-        if proc_pgid is not None:
-            subprocess.Popen(
-                f'kill -9 -{proc_pgid}',
-                shell=True,
-                # Suppress output
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+        parent_pid = os.getpid()
+        subprocess.Popen(
+            (f'while kill -s 0 {parent_pid}; do sleep 1; done; '
+             f'pkill -TERM -P {proc.pid}; sleep 5; kill -9 -{proc.pid}'),
+            shell=True,
+            # Suppress output
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # We need this even if the log_path is '/dev/null' to ensure the
+        # progress bar is shown.
+        stdout, stderr = redirect_process_output(
+            proc,
+            log_path,
+            stream_logs,
+            start_streaming_at=start_streaming_at,
+            # Skip these lines caused by `-i` option of bash. Failed to find
+            # other way to turn off these two warning.
+            # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+            skip_lines=[
+                'bash: cannot set terminal process group',
+                'bash: no job control in this shell',
+            ])
+        proc.wait()
+        if proc.returncode and check:
+            if stderr:
+                print(stderr, file=sys.stderr)
+            raise subprocess.CalledProcessError(proc.returncode, cmd)
+        if return_none:
+            return None
+        return proc, stdout, stderr
 
 
 def run_bash_command_with_log(bash_command: str,
