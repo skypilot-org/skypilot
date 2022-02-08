@@ -2,9 +2,9 @@
 
 # -- Project information
 
-project = 'SkyML'
+project = 'Sky'
 copyright = '2022, Sky Team'
-author = 'Sky Team'
+author = 'the Sky authors'
 
 release = '0.1'
 version = '0.1.0'
@@ -17,6 +17,8 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.intersphinx',
+    'sphinx_click',
+    'myst_nb',
 ]
 
 intersphinx_mapping = {
@@ -27,12 +29,29 @@ intersphinx_disabled_domains = ['std']
 
 templates_path = ['_templates']
 
+# The main toctree document.
+main_doc = 'index'
+
+pygments_style = None
+autosummary_generate = True
+napolean_use_rtype = False
+
+
 # -- Options for HTML output
 
-html_theme = 'furo'
+html_theme = 'sphinx_book_theme'
 html_theme_options = {
-    'sidebar_hide_name': True,
+    # 'logo_only': True,
+    # 'show_toc_level': 2,
 }
 
 # -- Options for EPUB output
 epub_show_urls = 'footnote'
+
+
+# -- Options for myst
+jupyter_execute_notebooks = "force"
+execution_allow_errors = False
+
+# Notebook cell execution timeout; defaults to 30.
+execution_timeout = 100

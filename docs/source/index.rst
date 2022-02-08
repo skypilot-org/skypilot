@@ -1,22 +1,66 @@
-Welcome to Lumache's documentation!
+SkyML reference documentation
 ===================================
 
-**Lumache** (/lu'make/) is a Python library for cooks and food lovers
-that creates recipes mixing random ingredients.
-It pulls data from the `Open Food Facts database <https://world.openfoodfacts.org/>`_
-and offers a *simple* and *intuitive* API.
+SkyML is a platform for infra-less machine learning on any cloud. It provides a
+set of APIs and interfaces to interact with multiple cloud backends in an agnostic
+way.
 
-Check out the :doc:`usage` section for further information, including
-how to :ref:`installation` the project.
-
-.. note::
-
-   This project is under active development.
-
-Contents
---------
 
 .. toctree::
+   :maxdepth: 1
+   :caption: Getting Started
 
-   usage
+   getting-started/installation
+   getting-started/quickstart
+   getting-started/tutorial
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Reference Documentation
+
+   reference/faq
+
+   reference/interactive-nodes
+   reference/iterative-development
+   reference/production-workflow
+
+   reference/tasks
+   reference/backends
+   reference/provisioner
+   reference/optimizer
+   reference/service-catalog
+   reference/storage
+   reference/job-queue
+   reference/cli
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Advanced Sky Tutorials
+
+   advanced/distributed
+   advanced/python-control
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Developer Documentation
+
+   developers/contributing
+   developers/testing
+   developers/design
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Examples
+
+   examples
+
+
+.. toctree::
+   :maxdepth: 3
+   :caption: API documentation
+
    api
