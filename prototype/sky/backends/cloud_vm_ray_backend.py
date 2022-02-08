@@ -1316,7 +1316,7 @@ class CloudVmRayBackend(backends.Backend):
                 # Wait for the job being sucessfully submitted to ray job.
                 time.sleep(1)
                 # Sky logs. Not using subprocess.run since it will make the
-                # ssh keep retrying after ctrl-c.
+                # ssh keep connected after ctrl-c.
                 backend_utils.tail_logs(handle, self, job_id)
         finally:
             name = handle.cluster_name
@@ -1331,6 +1331,13 @@ class CloudVmRayBackend(backends.Backend):
                         '\nTo view the job queue:\t'
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
+
+    def tail_logs(self, handle: ResourceHandle, job_id: int) -> None:
+        codegen = backend_utils.JobLibCodeGen()
+        codegen.tail_logs(job_id)
+        code = codegen.build()
+        click.secho('Start streaming logs...', fg='yellow')
+        self.run_on_head(handle, code, stream_logs=True, check=False)
 
     def _add_job(self, handle: ResourceHandle, job_name: str) -> int:
         codegen = backend_utils.JobLibCodeGen()

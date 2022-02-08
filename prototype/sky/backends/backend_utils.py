@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import click
 import datetime
 import enum
 import getpass
@@ -733,6 +732,8 @@ def run_command_on_ip_via_ssh(
 
 
 def run(cmd, **kwargs):
+    # Should be careful to use this function, as the cmd maybe keep running in
+    # the background after the current program is killed.
     shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
     executable = kwargs.pop('executable', '/bin/bash')
@@ -849,12 +850,3 @@ class JobLibCodeGen(object):
     def build(self) -> str:
         code = ';'.join(self._code)
         return f'python3 -u -c {code!r}'
-
-
-def tail_logs(handle: backends.Backend.ResourceHandle,
-              backend: backends.Backend, job_id: int) -> None:
-    codegen = JobLibCodeGen()
-    codegen.tail_logs(job_id)
-    code = codegen.build()
-    click.secho('Start streaming logs...', fg='yellow')
-    backend.run_on_head(handle, code, stream_logs=True, check=False)

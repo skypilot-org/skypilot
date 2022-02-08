@@ -778,7 +778,7 @@ def logs(cluster: str, job_id: str, sync_down: bool):
         click.secho('Syncing down logs to local...', fg='yellow')
         backend.sync_down_logs(handle, job_id)
     else:
-        backend_utils.tail_logs(handle, backend, job_id)
+        backend.tail_logs(handle, job_id)
 
 
 @cli.command()
