@@ -1,8 +1,6 @@
 Execution Backends
 ==================
 
-.. _installation:
-
 Installation
 ------------
 

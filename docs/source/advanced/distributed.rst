@@ -1,8 +1,6 @@
 Distributed Training
 ====================
 
-.. _installation:
-
 Installation
 ------------
 

@@ -1,8 +1,6 @@
 Storage
 =======
 
-.. _installation:
-
 Installation
 ------------
 

@@ -1,8 +1,6 @@
 Frequently Asked Questions
 ==========================
 
-.. _installation:
-
 Installation
 ------------
 

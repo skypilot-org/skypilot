@@ -1,8 +1,6 @@
 Additional Examples
 ===================
 
-.. _installation:
-
 Installation
 ------------
 

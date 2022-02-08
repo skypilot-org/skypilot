@@ -1,8 +1,6 @@
 CLI Reference
 =============
 
-.. _installation:
-
 Installation
 ------------
 

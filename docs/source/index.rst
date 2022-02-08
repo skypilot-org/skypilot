@@ -19,17 +19,17 @@ way.
    :maxdepth: 1
    :caption: Reference Documentation
 
-   reference/faq
+   .. reference/faq
 
    reference/interactive-nodes
    reference/iterative-development
-   reference/production-workflow
+   .. reference/production-workflow
 
    reference/tasks
-   reference/backends
-   reference/provisioner
-   reference/optimizer
-   reference/service-catalog
+   .. reference/backends
+   .. reference/provisioner
+   .. reference/optimizer
+   .. reference/service-catalog
    reference/storage
    reference/job-queue
    reference/cli
@@ -43,13 +43,13 @@ way.
    advanced/python-control
 
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Developer Documentation
+.. .. toctree::
+..    :maxdepth: 1
+..    :caption: Developer Documentation
 
-   developers/contributing
-   developers/testing
-   developers/design
+..   developers/contributing
+..   developers/testing
+..   developers/design
 
 
 .. toctree::

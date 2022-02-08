@@ -3,8 +3,6 @@ Task Definitions
 
 Show python and YAML (everything goes here)
 
-.. _installation:
-
 Installation
 ------------
 

@@ -1,8 +1,6 @@
 Contributing
 ============
 
-.. _installation:
-
 Installation
 ------------
 

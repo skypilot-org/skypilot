@@ -1,8 +1,6 @@
 Python Control Flow
 ===================
 
-.. _installation:
-
 Installation
 ------------
 

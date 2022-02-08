@@ -1,8 +1,6 @@
 Job Queue
 =========
 
-.. _installation:
-
 Installation
 ------------
 
