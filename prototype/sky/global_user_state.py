@@ -83,7 +83,17 @@ def add_or_update_cluster(cluster_name: str,
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
     last_use = _get_pretty_entry_point()
-    status = ClusterStatus.UP if ready else ClusterStatus.INIT
+
+    if ready:
+        status = ClusterStatus.UP
+    else:
+        status = ClusterStatus.INIT
+        # Check if the cluster is already in the database.
+        prev_status = get_status_from_cluster_name(cluster_name)
+        if prev_status is not None:
+            # Keep the original status of the cluster if it is not ready.
+            status = prev_status
+
     _CURSOR.execute(
         'INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?, ?)',
         (cluster_name, cluster_launched_at, handle, last_use, status.value))
