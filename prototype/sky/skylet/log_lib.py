@@ -109,7 +109,6 @@ def run_with_log(
             'subprocess_daemon.sh')
         daemon_cmd = ['/bin/bash', daemon_script, str(parent_pid),
                 str(proc.pid)]
-        print(cmd, daemon_cmd)
         subprocess.Popen(
             daemon_cmd,
             start_new_session=True,
