@@ -93,10 +93,10 @@ def run_with_log(
       Note that the stdout and stderr is already decoded.
     """
 
-    stderr_pipe = subprocess.PIPE if not to_stdout else subprocess.STDOUT
+    stderr = subprocess.PIPE if not to_stdout else subprocess.STDOUT
     with subprocess.Popen(cmd,
                           stdout=subprocess.PIPE,
-                          stderr=stderr_pipe,
+                          stderr=stderr,
                           start_new_session=True,
                           **kwargs) as proc:
 
