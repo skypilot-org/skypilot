@@ -8,7 +8,7 @@ IPAddr = str
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
-    subprocess.run(f'cd {workdir} && git checkout 222cc86',
+    subprocess.run(f'cd {workdir} && git checkout 9459fee',
                    shell=True,
                    check=True)
 
@@ -26,6 +26,7 @@ with sky.Dag() as dag:
     # The command to run.  Will be run under the working directory.
     # If a str, run the same command on all nodes.
     # If a function, run per-node command on each node.
+    # This function should be self-contained and not depend on any external.
     def run_fn(node_i: int, ip_list: List[IPAddr]) -> str:
         import json
         tf_config = {
