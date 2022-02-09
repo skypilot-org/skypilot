@@ -1057,7 +1057,8 @@ class CloudVmRayBackend(backends.Backend):
         # each other.
         provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                             self._optimize_target)
-
+                                            
+        launched_nodes = task.num_nodes
         if not dryrun:  # dry run doesn't need to check existing cluster.
             cluster_name, to_provision, launched_nodes = (
                 self._check_existing_cluster(task, to_provision, cluster_name))
