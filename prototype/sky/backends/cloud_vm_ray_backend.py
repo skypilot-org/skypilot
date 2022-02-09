@@ -1238,6 +1238,7 @@ class CloudVmRayBackend(backends.Backend):
 
     def run_post_setup(self, handle: ResourceHandle,
                        post_setup_fn: Optional[PostSetupFn]) -> None:
+        # TODO (zhwu): Do we still need this?
         if post_setup_fn is not None:
             ip_list = self._get_node_ips(handle.cluster_yaml,
                                          handle.launched_nodes)
