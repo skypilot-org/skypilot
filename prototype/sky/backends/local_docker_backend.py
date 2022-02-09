@@ -205,8 +205,7 @@ class LocalDockerBackend(backends.Backend):
         self.volume_mounts[handle] = docker_mounts
 
     def run_post_setup(self, handle: ResourceHandle,
-                       post_setup_fn: Optional[PostSetupFn],
-                       task: Task) -> None:
+                       post_setup_fn: Optional[PostSetupFn]) -> None:
         """
         Launches a container and runs a sleep command on it.
 

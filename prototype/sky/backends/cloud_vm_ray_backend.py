@@ -678,7 +678,7 @@ class RetryingVmProvisioner(object):
                 self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 cluster_name = config_dict['cluster_name']
-                plural = '' if task.num_nodes == 1 else 's'
+                plural = '' if num_nodes == 1 else 's'
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing VM{plural}. Setup completed.{style.RESET_ALL}')
@@ -1022,10 +1022,10 @@ class CloudVmRayBackend(backends.Backend):
             'Run `sky status` to see existing clusters.')
         return cluster_name, to_provision, num_nodes
 
-    def _set_tpu_name(self, task: Task, cluster_config_file: str,
+    def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
                       tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
-        ip_list = self._get_node_ips(cluster_config_file, task.num_nodes)
+        ip_list = self._get_node_ips(cluster_config_file, num_nodes)
         ssh_user, ssh_private_key = self._get_ssh_credential(
             cluster_config_file)
 
@@ -1074,7 +1074,7 @@ class CloudVmRayBackend(backends.Backend):
             global_user_state.remove_cluster(cluster_name, terminate=True)
             raise exceptions.ResourcesUnavailableError(
                 'Failed to provision all possible launchable resources. '
-                f'Relax the task\'s resource requirements:\n {task.num_nodes}x '
+                f'Relax the task\'s resource requirements:\n {num_nodes}x '
                 f'{task.resources}') from e
         if dryrun:
             return
@@ -1084,14 +1084,14 @@ class CloudVmRayBackend(backends.Backend):
         # Set TPU environment variables
         tpu_name = config_dict.get('tpu_name')
         if tpu_name is not None:
-            self._set_tpu_name(task, cluster_config_file, tpu_name)
+            self._set_tpu_name(cluster_config_file, num_nodes, tpu_name)
 
         handle = self.ResourceHandle(
             cluster_name=cluster_name,
             cluster_yaml=cluster_config_file,
             # Cache head ip in the handle to speed up ssh operations.
-            head_ip=self._get_node_ips(cluster_config_file, task.num_nodes)[0],
-            launched_nodes=task.num_nodes,
+            head_ip=self._get_node_ips(cluster_config_file, num_nodes)[0],
+            launched_nodes=num_nodes,
             launched_resources=provisioned_resources,
             # TPU.
             tpu_delete_script=config_dict.get('tpu-delete-script'))
@@ -1206,10 +1206,9 @@ class CloudVmRayBackend(backends.Backend):
             sync_to_all_nodes(src, dst, command)
 
     def run_post_setup(self, handle: ResourceHandle,
-                       post_setup_fn: Optional[PostSetupFn],
-                       task: Task) -> None:
+                       post_setup_fn: Optional[PostSetupFn]) -> None:
         if post_setup_fn is not None:
-            ip_list = self._get_node_ips(handle.cluster_yaml, task.num_nodes)
+            ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
             ssh_user, ssh_private_key = self._get_ssh_credential(
                 handle.cluster_yaml)
 
@@ -1235,8 +1234,6 @@ class CloudVmRayBackend(backends.Backend):
 
         local_log_dir = log_dir
         remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, log_dir)
-        local_tasks_dir = os.path.join(local_log_dir, 'tasks')
-        os.makedirs(local_tasks_dir, exist_ok=True)
 
         style = colorama.Style
         fore = colorama.Fore
@@ -1249,7 +1246,7 @@ class CloudVmRayBackend(backends.Backend):
             sdk.rsync(
                 handle.cluster_yaml,
                 source=f'{remote_log_dir}/*',
-                target=f'{local_log_dir}/',
+                target=f'{local_log_dir}',
                 down=True,
                 ip_address=ip,
                 use_internal_ip=False,
