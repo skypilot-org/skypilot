@@ -733,6 +733,9 @@ def run_command_on_ip_via_ssh(
 
 
 def run(cmd, **kwargs):
+    # Should be careful to use this function, as the child process cmd spawn may
+    # keep running in the background after the current program is killed. To get
+    # rid of this problem, use `log_lib.run_with_log`.
     shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
     executable = kwargs.pop('executable', '/bin/bash')
