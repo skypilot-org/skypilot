@@ -1208,7 +1208,8 @@ class CloudVmRayBackend(backends.Backend):
     def run_post_setup(self, handle: ResourceHandle,
                        post_setup_fn: Optional[PostSetupFn]) -> None:
         if post_setup_fn is not None:
-            ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+            ip_list = self._get_node_ips(handle.cluster_yaml,
+                                         handle.launched_nodes)
             ssh_user, ssh_private_key = self._get_ssh_credential(
                 handle.cluster_yaml)
 
@@ -1259,9 +1260,8 @@ class CloudVmRayBackend(backends.Backend):
                 # Disable the output of rsync.
                 with contextlib.redirect_stdout(None):
                     rsync_down(ip)
-                logger.info(
-                    f'{fore.CYAN}Downloaded logs from node-{i} ({ip}){style.RESET_ALL}'
-                )
+                logger.info(f'{fore.CYAN}Downloaded logs from node-{i} ({ip})'
+                            f'{style.RESET_ALL}')
             except click.exceptions.ClickException as e:
                 # Raised by rsync_down. Remote log dir may not exist, since
                 # the job can be run on some part of the nodes.
