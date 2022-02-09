@@ -1,5 +1,11 @@
 # Configuration file for the Sphinx documentation builder.
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath('.'))
+sys.path.insert(0, os.path.abspath('../'))
+sys.path.insert(0, os.path.abspath('../prototype'))
+
 # -- Project information
 
 project = 'Sky'
@@ -15,9 +21,12 @@ extensions = [
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
     'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',
     'sphinx.ext.autosummary',
+    'sphinx.ext.viewcode',
     'sphinx.ext.intersphinx',
     'sphinx_click',
+    'sphinx_autodoc_typehints',
     'myst_nb',
 ]
 
@@ -55,3 +64,10 @@ execution_allow_errors = False
 
 # Notebook cell execution timeout; defaults to 30.
 execution_timeout = 100
+
+always_document_param_types = True
+html_show_sourcelink = True
+
+napoleon_google_docstring = True
+napoleon_use_param = False
+napoleon_use_ivar = True

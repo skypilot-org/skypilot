@@ -13,6 +13,7 @@ way.
    getting-started/installation
    getting-started/quickstart
    getting-started/tutorial
+   Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
 
 
 .. toctree::
@@ -39,7 +40,7 @@ way.
    :maxdepth: 1
    :caption: Advanced Sky Tutorials
 
-   advanced/distributed
+   .. advanced/distributed
    advanced/python-control
 
 
@@ -53,14 +54,7 @@ way.
 
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Examples
-
-   examples
-
-
-.. toctree::
    :maxdepth: 3
    :caption: API documentation
 
-   api
+   sky
