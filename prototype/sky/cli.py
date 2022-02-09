@@ -306,7 +306,6 @@ def _create_and_ssh_into_node(
 
         handle = backend.provision(task,
                                    to_provision=to_provision,
-                                   num_nodes=task.num_nodes,
                                    dryrun=False,
                                    stream_logs=True,
                                    cluster_name=cluster_name)
