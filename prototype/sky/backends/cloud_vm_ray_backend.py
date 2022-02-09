@@ -1463,8 +1463,6 @@ class CloudVmRayBackend(backends.Backend):
         if not isinstance(task.run, dict):
             # TODO (zhwu): Add function signature check.
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
-            print(run_fn_code)
-            # import pdb; pdb.set_trace()
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
         for i in range(task.num_nodes):
