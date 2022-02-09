@@ -1230,7 +1230,7 @@ class CloudVmRayBackend(backends.Backend):
         codegen = backend_utils.JobLibCodeGen()
         codegen.get_log_path(job_id)
         code = codegen.build()
-        log_dir = self.run_on_head(handle, code, stream_logs=False)[1]
+        log_dir = self.run_on_head(handle, code, stream_logs=False)[1].strip()
 
         local_log_dir = log_dir
         remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, log_dir)
@@ -1257,10 +1257,11 @@ class CloudVmRayBackend(backends.Backend):
         for i, ip in enumerate(ips):
             try:
                 # Disable the output of rsync.
-                with open(os.devnull, 'w') as f, contextlib.redirect_stderr(
-                        f), contextlib.redirect_stdout(f):
+                with contextlib.redirect_stdout(None):
                     rsync_down(ip)
-                logger.info(f'Downloaded logs from node-{i} ({ip})')
+                logger.info(
+                    f'{fore.CYAN}Downloaded logs from node-{i} ({ip}){style.RESET_ALL}'
+                )
             except click.exceptions.ClickException as e:
                 # Raised by rsync_down. Remote log dir may not exist, since
                 # the job can be run on some part of the nodes.
