@@ -93,7 +93,7 @@ rsync_filter:
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.
-  # _gang_schedule_ray_up() requires this line; do not modify.
+  # _gang_schedule_ray_up() requires first two lines; do not modify.
   - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful
   - pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
 {%- if setup_sh_path is not none %}
