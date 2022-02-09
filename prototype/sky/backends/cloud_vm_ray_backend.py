@@ -1002,8 +1002,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'existing cluster first: sky down {cluster_name}')
 
     def _check_existing_cluster(self, task: Task, to_provision: Resources,
-                                num_nodes: int,
-                                cluster_name: str) -> Tuple[str, Resources]:
+                                cluster_name: str) -> Tuple[str, Resources, int]:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             # Cluster already exists.
@@ -1015,12 +1014,12 @@ class CloudVmRayBackend(backends.Backend):
 
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
-            f'[{num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
+            f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
             'Tip: to reuse an existing cluster, '
             'specify --cluster-name (-c) in the CLI or use '
             'sky.launch(.., cluster_name=..) in the Python API. '
             'Run `sky status` to see existing clusters.')
-        return cluster_name, to_provision, num_nodes
+        return cluster_name, to_provision, task.num_nodes
 
     def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
                       tpu_name: str) -> None:
@@ -1042,7 +1041,6 @@ class CloudVmRayBackend(backends.Backend):
     def provision(self,
                   task: Task,
                   to_provision: Resources,
-                  num_nodes: int,
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None):
@@ -1058,12 +1056,11 @@ class CloudVmRayBackend(backends.Backend):
                                             self._optimize_target)
 
         if not dryrun:  # dry run doesn't need to check existing cluster.
-            cluster_name, to_provision, num_nodes = (
-                self._check_existing_cluster(task, to_provision, num_nodes,
-                                             cluster_name))
+            cluster_name, to_provision, launched_nodes = (
+                self._check_existing_cluster(task, to_provision, cluster_name))
         try:
             config_dict = provisioner.provision_with_retries(
-                task, to_provision, num_nodes, dryrun, stream_logs,
+                task, to_provision, launched_nodes, dryrun, stream_logs,
                 cluster_name)
         except exceptions.ResourcesUnavailableError as e:
             # Do not remove the stopped cluster from the global state if failed
@@ -1074,7 +1071,7 @@ class CloudVmRayBackend(backends.Backend):
             global_user_state.remove_cluster(cluster_name, terminate=True)
             raise exceptions.ResourcesUnavailableError(
                 'Failed to provision all possible launchable resources. '
-                f'Relax the task\'s resource requirements:\n {num_nodes}x '
+                f'Relax the task\'s resource requirements:\n {launched_nodes}x '
                 f'{task.resources}') from e
         if dryrun:
             return
@@ -1084,14 +1081,14 @@ class CloudVmRayBackend(backends.Backend):
         # Set TPU environment variables
         tpu_name = config_dict.get('tpu_name')
         if tpu_name is not None:
-            self._set_tpu_name(cluster_config_file, num_nodes, tpu_name)
+            self._set_tpu_name(cluster_config_file, launched_nodes, tpu_name)
 
         handle = self.ResourceHandle(
             cluster_name=cluster_name,
             cluster_yaml=cluster_config_file,
             # Cache head ip in the handle to speed up ssh operations.
-            head_ip=self._get_node_ips(cluster_config_file, num_nodes)[0],
-            launched_nodes=num_nodes,
+            head_ip=self._get_node_ips(cluster_config_file, launched_nodes)[0],
+            launched_nodes=launched_nodes,
             launched_resources=provisioned_resources,
             # TPU.
             tpu_delete_script=config_dict.get('tpu-delete-script'))

@@ -113,7 +113,6 @@ def _execute(dag: sky.Dag,
                 # would not be updated correctly.
                 handle = backend.provision(task,
                                            task.best_resources,
-                                           task.num_nodes,
                                            dryrun=dryrun,
                                            stream_logs=stream_logs,
                                            cluster_name=cluster_name)

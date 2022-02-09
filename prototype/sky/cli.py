@@ -948,7 +948,6 @@ def start(clusters: Tuple[str]):
         click.secho(f'Starting cluster {name}...', bold=True)
         backend.provision(dummy_task,
                           to_provision=handle.launched_resources,
-                          num_nodes=handle.launched_nodes,
                           dryrun=False,
                           stream_logs=True,
                           cluster_name=name)

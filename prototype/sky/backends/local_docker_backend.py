@@ -141,7 +141,6 @@ class LocalDockerBackend(backends.Backend):
     def provision(self,
                   task: Task,
                   to_provision: Resources,
-                  num_nodes: int,
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None) -> ResourceHandle:
@@ -151,7 +150,6 @@ class LocalDockerBackend(backends.Backend):
         Since resource demands are ignored, There's no provisioning in local
         docker.
         """
-        assert num_nodes == 1, 'Local docker backend only supports 1 node'
         assert task.name is not None, 'Task name cannot be None - have you ' \
                                       'specified a task name?'
         if cluster_name is None:
