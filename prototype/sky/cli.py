@@ -348,10 +348,10 @@ def _check_yaml(entrypoint: str) -> bool:
         with open(entrypoint, 'r') as f:
             try:
                 config = yaml.safe_load(f)
+                if isinstance(config, str):
+                    # 'sky exec cluster ./my_script.sh'
+                    is_yaml = False
             except yaml.YAMLError:
-                is_yaml = False
-            if isinstance(config, str):
-                # 'sky exec cluster ./my_script.sh'
                 is_yaml = False
     except OSError:
         is_yaml = False
@@ -360,9 +360,9 @@ def _check_yaml(entrypoint: str) -> bool:
         if len(shell_splits) == 1 and (shell_splits[0].endswith('.yaml') or
                                        shell_splits[0].endswith('.yml')):
             click.confirm(
-                f'Entrypoint {entrypoint!r} looks like a yaml path '
-                'but yaml.safe_load() failed (does it exist?).\nIt will be '
-                'treated as a command to be run remotely. Continue?',
+                f'{entrypoint!r} looks like a yaml path but yaml.safe_load() '
+                'failed to return a dict (check if it exists or it\'s valid).\n'
+                'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
     return is_yaml
 

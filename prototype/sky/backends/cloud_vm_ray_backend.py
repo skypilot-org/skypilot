@@ -1108,7 +1108,7 @@ class CloudVmRayBackend(backends.Backend):
         for i, ip in enumerate(ip_list):
             node_name = f'worker{i}' if i > 0 else 'head'
             logger.info(
-                f'{fore.CYAN} Syncing: {style.BRIGHT} workdir -> {node_name}'
+                f'{fore.CYAN}Syncing: {style.BRIGHT} workdir -> {node_name}'
                 f'{style.RESET_ALL}.')
             self._rsync_up(handle,
                            ip=ip,
