@@ -353,10 +353,17 @@ class Task:
                     mnt_path: 's3://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.GCS:
+                # Remember to run `gcloud auth application-default login`
+                self.update_file_mounts(
+                    {'~/.config/gcloud': '~/.config/gcloud'})
+                self.setup = '[[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && ' + \
+                'echo GOOGLE_APPLICATION_CREDENTIALS=' + \
+                '~/.config/gcloud/application_default_credentials.json >> ' + \
+                '~/.bashrc' + ' || echo "GOOGLE_APPLICATION_CREDENTIALS ' + \
+                'already set" && ' + self.setup
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
-                assert False, 'TODO: GCS Authentication not done'
             elif storage_type is storage_lib.StorageType.AZURE:
                 assert False, 'TODO: Azure Blob not mountable yet'
             else:
