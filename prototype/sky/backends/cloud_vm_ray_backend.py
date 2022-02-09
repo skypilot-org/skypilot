@@ -1003,8 +1003,9 @@ class CloudVmRayBackend(backends.Backend):
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: sky down {cluster_name}')
 
-    def _check_existing_cluster(self, task: Task, to_provision: Resources,
-                                cluster_name: str) -> Tuple[str, Resources, int]:
+    def _check_existing_cluster(
+            self, task: Task, to_provision: Resources,
+            cluster_name: str) -> Tuple[str, Resources, int]:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             # Cluster already exists.
