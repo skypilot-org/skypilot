@@ -105,10 +105,14 @@ def run_with_log(
             # and then SIGKILL the process group.
             # Adapted from ray/dashboard/modules/job/job_manager.py#L154
             parent_pid = os.getpid()
-            kill_cmd = f'pkill -TERM -P {proc.pid}; kill -9 {proc.pid}'
+            daemon_script = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                'subprocess_daemon.sh')
+            daemon_cmd = ['/bin/bash', daemon_script, str(parent_pid),
+                 str(proc.pid)]
             subprocess.Popen(
-                f'while kill -s 0 {parent_pid}; do sleep 1; done; {kill_cmd}',
-                shell=True,
+                daemon_cmd,
+                start_new_session=True,
                 # Suppress output
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -139,10 +143,11 @@ def run_with_log(
             # Make sure the process is killed if the python program is killed.
             # This is needed for SIGINT (ctrl-c), since the previous daemon will
             # be killed before it correctly kill the child processes.
-            subprocess.Popen(kill_cmd,
-                             shell=True,
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                daemon_cmd,
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
 
 
 def run_bash_command_with_log(bash_command: str,
