@@ -774,10 +774,15 @@ class RetryingVmProvisioner(object):
                 public_key_path = config['auth']['ssh_public_key']
                 file_mounts[public_key_path] = public_key_path
 
+            if SKYLET_REMOTE_PATH in config['file_mounts']:
+                file_mounts[SKYLET_REMOTE_PATH] = config['file_mounts'][
+                    SKYLET_REMOTE_PATH]
+
             fields_to_empty = {
                 'file_mounts': file_mounts,
                 # Need ray for 'ray status' in wait_until_ray_cluster_ready().
-                'setup_commands': [config['setup_commands'][0]],
+                # Need sky for external node provider.
+                'setup_commands': config['setup_commands'][:2],
             }
             existing_fields = {k: config[k] for k in fields_to_empty}
             # Keep both in sync.
