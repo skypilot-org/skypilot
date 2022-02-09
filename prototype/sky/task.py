@@ -353,9 +353,12 @@ class Task:
                     mnt_path: 's3://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.GCS:
-                # Remember to run `gcloud auth login` on local
+                # Remember to run `gcloud auth application-default login` on local
                 self.update_file_mounts(
-                    {'~/.config/gcloud/', '~/.config/gcloud/'})
+                    {'~/.config/gcloud': '~/.config/gcloud'})
+                self.setup = 'echo GOOGLE_APPLICATION_CREDENTIALS='
+                '~/.config/gcloud/application_default_credentials.json >> '
+                '~/.bashrc' + ' && ' + self.setup
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
