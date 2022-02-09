@@ -30,6 +30,7 @@ each other.
 import copy
 import functools
 import getpass
+import shlex
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
@@ -341,16 +342,28 @@ def _create_and_ssh_into_node(
 
 
 def _check_yaml(entrypoint: str) -> bool:
-    """Checks if entrypoint is a readable YAML file"""
+    """Checks if entrypoint is a readable YAML file."""
     is_yaml = True
     try:
         with open(entrypoint, 'r') as f:
             try:
-                yaml.safe_load(f)
+                config = yaml.safe_load(f)
+                if isinstance(config, str):
+                    # 'sky exec cluster ./my_script.sh'
+                    is_yaml = False
             except yaml.YAMLError:
                 is_yaml = False
     except OSError:
         is_yaml = False
+    if not is_yaml:
+        shell_splits = shlex.split(entrypoint)
+        if len(shell_splits) == 1 and (shell_splits[0].endswith('.yaml') or
+                                       shell_splits[0].endswith('.yml')):
+            click.confirm(
+                f'{entrypoint!r} looks like a yaml path but yaml.safe_load() '
+                'failed to return a dict (check if it exists or it\'s valid).\n'
+                'It will be treated as a command to be run remotely. Continue?',
+                abort=True)
     return is_yaml
 
 
@@ -576,10 +589,10 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
     """
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
-    backend = backend_utils.get_backend_from_handle(handle)
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
-                                 'Use `sky run` to provision first.')
+                                 'Use `sky launch` to provision first.')
+    backend = backend_utils.get_backend_from_handle(handle)
 
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
@@ -605,7 +618,8 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
                         handle,
                         entrypoint,
                         stream_logs=True,
-                        ssh_mode=backend_utils.SshMode.INTERACTIVE)
+                        ssh_mode=backend_utils.SshMode.INTERACTIVE,
+                        under_remote_workdir=True)
                     return
 
         # Override.
@@ -681,7 +695,10 @@ def status(all: bool):  # pylint: disable=redefined-builtin
             # STATUS
             cluster_status['status'].value,
         ])
-    click.echo(cluster_table)
+    if clusters_status:
+        click.echo(cluster_table)
+    else:
+        click.echo('No existing clusters.')
 
 
 @cli.command()

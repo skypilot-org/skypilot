@@ -145,8 +145,11 @@ class Task:
         with open(os.path.expanduser(yaml_path), 'r') as f:
             config = yaml.safe_load(f)
 
-        # TODO: perform more checks on yaml and raise meaningful errors.
+        if isinstance(config, str):
+            raise ValueError('YAML loaded as str, not as dict. '
+                             f'Is it correct? Path: {yaml_path}')
 
+        # TODO: perform more checks on yaml and raise meaningful errors.
         task = Task(
             config.get('name'),
             run=config.get('run'),
