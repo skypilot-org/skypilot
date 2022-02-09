@@ -1032,10 +1032,6 @@ class CloudVmRayBackend(backends.Backend):
                 f'{handle.launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: sky down {cluster_name}')
-        assert (
-            task.num_nodes == handle.launched_nodes or task.num_nodes == 1), (
-                f'We currently only support Task #nodes=1, when task #nodes '
-                f'{task.num_nodes} != #launched nodes {handle.launched_nodes}.')
 
     def _check_existing_cluster(
             self, task: Task, to_provision: Resources,
