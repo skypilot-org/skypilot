@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import List
 
 import sky
 
@@ -17,7 +17,8 @@ with sky.Dag() as dag:
       tar -xvzf cifar-10-python.tar.gz'
 
     # The command to run.  Will be run under the working directory.
-    def run_fn(node_i: int, ip_list: List[IPAddr]):
+    def run_fn(node_i: int, ip_list: List[IPAddr]) -> str:
+        num_nodes = len(ip_list)
         return f"""\
         cd pytorch-distributed-resnet
         python3 -m torch.distributed.launch --nproc_per_node=1 \
@@ -49,4 +50,5 @@ with sky.Dag() as dag:
         # sky.Resources(sky.AWS(), accelerators='V100'),
     })
 
-sky.launch(dag)
+sky.launch(dag, cluster_name='dtf')
+# sky.exec(dag, cluster_name='dtf')

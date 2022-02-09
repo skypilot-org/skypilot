@@ -1,4 +1,3 @@
-import json
 import subprocess
 from typing import Dict, List
 
@@ -21,13 +20,14 @@ with sky.Dag() as dag:
            pip3 install ray[default] awscli botocore boto3 && \
            conda create -n resnet python=3.7 -y && \
            conda activate resnet && \
-           pip install tensorflow==2.4.0 pyyaml ray[default] awscli botocore boto3 && \
+           pip install tensorflow==2.4.0 pyyaml && \
            cd models && pip install -e .'
 
     # The command to run.  Will be run under the working directory.
     # If a str, run the same command on all nodes.
     # If a function, run per-node command on each node.
-    def run_fn(node_i: int, ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
+    def run_fn(node_i: int, ip_list: List[IPAddr]) -> str:
+        import json
         tf_config = {
             'cluster': {
                 'worker': [ip + ':8008' for ip in ip_list]
@@ -37,12 +37,13 @@ with sky.Dag() as dag:
                 'index': node_i
             }
         }
-        str_tf_config = json.dumps(tf_config).replace('"', '\\"')
+        str_tf_config = json.dumps(tf_config)
+        print(f'{str_tf_config!r}')
         run = f"""
-            export TF_CONFIG='{str_tf_config}'
             conda activate resnet
             rm -rf resnet_model-dir
-            export XLA_FLAGS=\'--xla_gpu_cuda_data_dir=/usr/local/cuda/\'
+            export TF_CONFIG={str_tf_config!r}
+            export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
             python models/official/resnet/resnet_main.py --use_tpu=False \
                 --mode=train --train_batch_size=256 --train_steps=500 \
                 --iterations_per_loop=125 \

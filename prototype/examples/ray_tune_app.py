@@ -21,7 +21,7 @@ with sky.Dag() as dag:
     head_run = 'python3 tune_ptl_example.py'
 
     # The command to run.  Will be run under the working directory.
-    def run_fn(node_i: int, ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
+    def run_fn(node_i: int, ip_list: List[IPAddr]) -> str:
         return head_run if node_i == 0 else ''
 
     train = sky.Task(

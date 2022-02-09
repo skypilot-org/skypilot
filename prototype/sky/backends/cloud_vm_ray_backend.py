@@ -163,6 +163,8 @@ class RayCodeGen:
 
             from sky.skylet import job_lib
 
+            IPAddr = str
+
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
@@ -239,8 +241,7 @@ class RayCodeGen:
                     ])
                     print('SKY INFO: Placement group IPs:', ip_list)
                     ip_list_str = ' '.join([repr(ip) for ip in ip_list])
-                    setup_cmd = ('export SKY_NODE_IPS=(' + ip_list_str + ')\\n'
-                                'export SKY_NODE_IPS_JSON=json.dumps(ip_list)\\n)
+                    setup_cmd = 'export SKY_NODE_IPS=(' + ip_list_str + ')\\n'
                     """),
             ]
     def register_run_fn(self, run_fn: str, run_fn_name: str) -> None:
@@ -254,11 +255,7 @@ class RayCodeGen:
         self._has_register_run_fn = True
         self.run_fn_name = run_fn_name
         
-        self._code += [
-            textwrap.dedent(f"""\
-                {run_fn}
-                """),
-        ]
+        self._code.append(run_fn)
 
     def add_ray_task(
         self,
@@ -1447,7 +1444,9 @@ class CloudVmRayBackend(backends.Backend):
         #     task.num_nodes)), (task.run.keys(), task.num_nodes)
         if not isinstance(task.run, dict):
             # TODO (zhwu): Add function signature check.
-            run_fn_code = inspect.getsource(task.run)
+            run_fn_code = textwrap.dedent(inspect.getsource(task.run))
+            print(run_fn_code)
+            # import pdb; pdb.set_trace()
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
         for i in range(task.num_nodes):
