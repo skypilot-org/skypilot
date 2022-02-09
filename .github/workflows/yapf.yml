@@ -27,4 +27,4 @@ jobs:
         pip install yapf==0.32.0
     - name: Running yapf
       run: |
-        yapf --diff --style .style.yapf --recursive prototype/ --exclude prototype/ray_patches/**
+        yapf --diff --style .style.yapf --recursive prototype/ --exclude prototype/skylet/ray_patches/** --exclude prototype/skylet/clouds/providers/**
