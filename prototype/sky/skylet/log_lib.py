@@ -99,55 +99,47 @@ def run_with_log(
                           stderr=stderr,
                           start_new_session=True,
                           **kwargs) as proc:
-        try:
-            # The proc can be defunct if the python program is killed. Here we
-            # open a new subprocess to gracefully kill the proc, SIGTERM
-            # and then SIGKILL the process group.
-            # Adapted from ray/dashboard/modules/job/job_manager.py#L154
-            parent_pid = os.getpid()
-            daemon_script = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                'subprocess_daemon.sh')
-            daemon_cmd = ['/bin/bash', daemon_script, str(parent_pid),
-                 str(proc.pid)]
-            subprocess.Popen(
-                daemon_cmd,
-                start_new_session=True,
-                # Suppress output
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            # We need this even if the log_path is '/dev/null' to ensure the
-            # progress bar is shown.
-            stdout, stderr = redirect_process_output(
-                proc,
-                log_path,
-                stream_logs,
-                start_streaming_at=start_streaming_at,
-                # Skip these lines caused by `-i` option of bash. Failed to find
-                # other way to turn off these two warning.
-                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-                skip_lines=[
-                    'bash: cannot set terminal process group',
-                    'bash: no job control in this shell',
-                ])
-            proc.wait()
-            if proc.returncode and check:
-                if stderr:
-                    print(stderr, file=sys.stderr)
-                raise subprocess.CalledProcessError(proc.returncode, cmd)
-            if return_none:
-                return None
-            return proc, stdout, stderr
-        finally:
-            # Make sure the process is killed if the python program is killed.
-            # This is needed for SIGINT (ctrl-c), since the previous daemon will
-            # be killed before it correctly kill the child processes.
-            subprocess.Popen(
-                daemon_cmd,
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL)
+        # The proc can be defunct if the python program is killed. Here we
+        # open a new subprocess to gracefully kill the proc, SIGTERM
+        # and then SIGKILL the process group.
+        # Adapted from ray/dashboard/modules/job/job_manager.py#L154
+        parent_pid = os.getpid()
+        daemon_script = os.path.join(
+            os.path.dirname(os.path.abspath(job_lib.__file__)),
+            'subprocess_daemon.sh')
+        daemon_cmd = ['/bin/bash', daemon_script, str(parent_pid),
+                str(proc.pid)]
+        print(cmd, daemon_cmd)
+        subprocess.Popen(
+            daemon_cmd,
+            start_new_session=True,
+            # Suppress output
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # We need this even if the log_path is '/dev/null' to ensure the
+        # progress bar is shown.
+        stdout, stderr = redirect_process_output(
+            proc,
+            log_path,
+            stream_logs,
+            start_streaming_at=start_streaming_at,
+            # Skip these lines caused by `-i` option of bash. Failed to find
+            # other way to turn off these two warning.
+            # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+            skip_lines=[
+                'bash: cannot set terminal process group',
+                'bash: no job control in this shell',
+            ])
+        proc.wait()
+        if proc.returncode and check:
+            if stderr:
+                print(stderr, file=sys.stderr)
+            raise subprocess.CalledProcessError(proc.returncode, cmd)
+        if return_none:
+            return None
+        return proc, stdout, stderr
+        
 
 
 def run_bash_command_with_log(bash_command: str,
