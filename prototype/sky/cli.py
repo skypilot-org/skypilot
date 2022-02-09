@@ -30,6 +30,7 @@ each other.
 import copy
 import functools
 import getpass
+import shlex
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
@@ -341,16 +342,28 @@ def _create_and_ssh_into_node(
 
 
 def _check_yaml(entrypoint: str) -> bool:
-    """Checks if entrypoint is a readable YAML file"""
+    """Checks if entrypoint is a readable YAML file."""
     is_yaml = True
     try:
         with open(entrypoint, 'r') as f:
             try:
-                yaml.safe_load(f)
+                config = yaml.safe_load(f)
+                if isinstance(config, str):
+                    # 'sky exec cluster ./my_script.sh'
+                    is_yaml = False
             except yaml.YAMLError:
                 is_yaml = False
     except OSError:
         is_yaml = False
+    if not is_yaml:
+        shell_splits = shlex.split(entrypoint)
+        if len(shell_splits) == 1 and (shell_splits[0].endswith('.yaml') or
+                                       shell_splits[0].endswith('.yml')):
+            click.confirm(
+                f'{entrypoint!r} looks like a yaml path but yaml.safe_load() '
+                'failed to return a dict (check if it exists or it\'s valid).\n'
+                'It will be treated as a command to be run remotely. Continue?',
+                abort=True)
     return is_yaml
 
 
@@ -576,10 +589,10 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
     """
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
-    backend = backend_utils.get_backend_from_handle(handle)
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
-                                 'Use `sky run` to provision first.')
+                                 'Use `sky launch` to provision first.')
+    backend = backend_utils.get_backend_from_handle(handle)
 
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
@@ -605,7 +618,8 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
                         handle,
                         entrypoint,
                         stream_logs=True,
-                        ssh_mode=backend_utils.SshMode.INTERACTIVE)
+                        ssh_mode=backend_utils.SshMode.INTERACTIVE,
+                        under_remote_workdir=True)
                     return
 
         # Override.
@@ -681,7 +695,10 @@ def status(all: bool):  # pylint: disable=redefined-builtin
             # STATUS
             cluster_status['status'].value,
         ])
-    click.echo(cluster_table)
+    if clusters_status:
+        click.echo(cluster_table)
+    else:
+        click.echo('No existing clusters.')
 
 
 @cli.command()
@@ -766,23 +783,19 @@ def logs(cluster: str, job_id: str, sync_down: bool):
     # TODO: Add an option for downloading logs.
     cluster_name = cluster
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
+                                 ' (see `sky status`).')
     if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
         raise click.UsageError('Sky logs is not available with '
                                'LocalDockerBackend.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
-                                 ' (see `sky status`).')
     if sync_down:
         click.secho('Syncing down logs to local...', fg='yellow')
         backend.sync_down_logs(handle, job_id)
     else:
-        codegen = backend_utils.JobLibCodeGen()
-        codegen.tail_logs(job_id)
-        code = codegen.build()
-        click.secho('Start streaming logs...', fg='yellow')
-        backend.run_on_head(handle, code, stream_logs=True)
+        backend.tail_logs(handle, job_id)
 
 
 @cli.command()
@@ -946,7 +959,7 @@ def start(clusters: Tuple[str]):
             dummy_task.num_nodes = handle.launched_nodes
         click.secho(f'Starting cluster {name}...', bold=True)
         backend.provision(dummy_task,
-                          to_provision=None,
+                          to_provision=handle.launched_resources,
                           dryrun=False,
                           stream_logs=True,
                           cluster_name=name)

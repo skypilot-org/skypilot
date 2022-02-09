@@ -357,6 +357,7 @@ def _build_sky_wheel() -> pathlib.Path:
 # TODO: too many things happening here - leaky abstraction. Refactor.
 def write_cluster_config(task: task_lib.Task,
                          to_provision: Resources,
+                         num_nodes: int,
                          cluster_config_template: str,
                          cluster_name: str,
                          region: Optional[clouds.Region] = None,
@@ -454,7 +455,7 @@ def write_cluster_config(task: task_lib.Task,
                 'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
-                'num_nodes': task.num_nodes,
+                'num_nodes': num_nodes,
                 # File mounts handling.
                 'file_mounts': wrapped_file_mounts,
                 'initialization_commands': initialization_commands or None,
@@ -732,6 +733,9 @@ def run_command_on_ip_via_ssh(
 
 
 def run(cmd, **kwargs):
+    # Should be careful to use this function, as the child process cmd spawn may
+    # keep running in the background after the current program is killed. To get
+    # rid of this problem, use `log_lib.run_with_log`.
     shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
     executable = kwargs.pop('executable', '/bin/bash')
