@@ -245,17 +245,19 @@ class RayCodeGen:
                     setup_cmd = 'export SKY_NODE_IPS=(' + ip_list_str + ')\\n'
                     """),
             ]
+
     def register_run_fn(self, run_fn: str, run_fn_name: str) -> None:
         """Register the run function to be run on the remote cluster.
 
         Args:
             run_fn: The run function to be run on the remote cluster.
         """
-        assert self._has_gang_scheduling, ('Call add_gang_scheduling_placement_group() '
-                                           'before register_run_fn().')
+        assert self._has_gang_scheduling, (
+            'Call add_gang_scheduling_placement_group() '
+            'before register_run_fn().')
         self._has_register_run_fn = True
         self.run_fn_name = run_fn_name
-        
+
         self._code.append(run_fn)
 
     def add_ray_task(
@@ -269,8 +271,9 @@ class RayCodeGen:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_gang_scheduling, (
             'Call add_gang_schedule_placement_group() before add_ray_task().')
-        assert (not self._has_register_run_fn or bash_script is None), ('bash_script should '
-                                                                     'be None when run_fn is registered.')
+        assert (not self._has_register_run_fn or
+                bash_script is None), ('bash_script should '
+                                       'be None when run_fn is registered.')
         # Build remote_task.options(...)
         #   name=...
         #   resources=...
@@ -1468,7 +1471,8 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
         for i in range(task.num_nodes):
-            command_for_node = task.run[i] if isinstance(task.run, dict) else None
+            command_for_node = task.run[i] if isinstance(task.run,
+                                                         dict) else None
 
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
