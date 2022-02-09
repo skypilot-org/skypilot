@@ -353,10 +353,12 @@ class Task:
                     mnt_path: 's3://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.GCS:
+                # Remember to run `gcloud auth login` on local
+                self.update_file_mounts(
+                    {'~/.config/gcloud/', '~/.config/gcloud/'})
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
-                assert False, 'TODO: GCS Authentication not done'
             elif storage_type is storage_lib.StorageType.AZURE:
                 assert False, 'TODO: Azure Blob not mountable yet'
             else:
