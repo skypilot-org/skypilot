@@ -134,7 +134,7 @@ def run_with_log(
                 'bash: cannot set terminal process group',
                 'bash: no job control in this shell',
             ],
-            # Replace CRLF when the output is logged to drive by ray.
+            # Replace CRLF when the output is logged to driver by ray.
             replace_crlf=with_ray,
         )
         proc.wait()

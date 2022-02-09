@@ -1,4 +1,5 @@
 #!/bin/bash
+# Busy-waits for parent_pid to exit, then SIGTERM the child processes of proc_pid and SIGKILL proc_pid.
 
 parent_pid=$1
 proc_pid=$2
