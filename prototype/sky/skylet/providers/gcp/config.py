@@ -13,8 +13,8 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 
 from ray.autoscaler._private.util import check_legacy_fields
-from sky.skylet.clouds.providers.gcp.node import (GCPNodeType, MAX_POLLS,
-                                                  POLL_INTERVAL)
+from sky.skylet.providers.gcp.node import (GCPNodeType, MAX_POLLS,
+                                           POLL_INTERVAL)
 
 logger = logging.getLogger(__name__)
 
