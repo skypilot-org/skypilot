@@ -34,10 +34,10 @@ with sky.Dag() as dag:
 
     # If the backend to be added is not specified, then Sky optimizer will
     # choose the backend bucket to be stored.
-    #storage = sky.Storage(name="imagenet-bucket", source="s3://imagenet-bucket")
+    # S3 Example
+    storage = sky.Storage(name="imagenet-bucket", source="s3://imagenet-bucket")
     # GCS Example
-    storage = sky.Storage(name="imagenet_test_mluo",
-                          source="gs://imagenet_test_mluo")
+    #storage = sky.Storage(name="imagenet_test_mluo",source="gs://imagenet_test_mluo")
     # Can also be from a local dir
     # storage = sky.Storage(name="imagenet-bucket", source="~/imagenet-data/")
 

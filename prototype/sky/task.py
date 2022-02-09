@@ -356,9 +356,11 @@ class Task:
                 # Remember to run `gcloud auth application-default login`
                 self.update_file_mounts(
                     {'~/.config/gcloud': '~/.config/gcloud'})
-                self.setup = 'echo GOOGLE_APPLICATION_CREDENTIALS=' + \
+                self.setup = '[[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && ' + \
+                'echo GOOGLE_APPLICATION_CREDENTIALS=' + \
                 '~/.config/gcloud/application_default_credentials.json >> ' + \
-                '~/.bashrc' + ' && ' + self.setup
+                '~/.bashrc' + ' || echo "GOOGLE_APPLICATION_CREDENTIALS ' + \
+                'already set" && ' + self.setup
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
