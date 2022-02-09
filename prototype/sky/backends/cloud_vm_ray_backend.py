@@ -1108,7 +1108,7 @@ class CloudVmRayBackend(backends.Backend):
         for i, ip in enumerate(ip_list):
             node_name = f'worker{i}' if i > 0 else 'head'
             logger.info(
-                f'{fore.CYAN} Syncing: {style.BRIGHT} workdir -> {node_name}'
+                f'{fore.CYAN}Syncing: {style.BRIGHT} workdir -> {node_name}'
                 f'{style.RESET_ALL}.')
             self._rsync_up(handle,
                            ip=ip,
@@ -1501,9 +1501,9 @@ class CloudVmRayBackend(backends.Backend):
             # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/_azure/node_provider.py
             # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/node_provider.py
             raise ValueError(
-                'Node stopping requested but is not supported on non-AWS '
-                'clusters yet. Try manually stopping or `sky down`. '
-                f'Found: {handle.launched_resources}')
+                f'Stopping cluster {handle.cluster_name!r}: not supported on '
+                'non-AWS clusters yet. Try manually stopping, or terminate by: '
+                f'sky down {handle.cluster_name}')
         if isinstance(cloud, clouds.Azure):
             # Special handling because `ray down` is buggy with Azure.
             cluster_name = config['cluster_name']
@@ -1639,11 +1639,14 @@ class CloudVmRayBackend(backends.Backend):
         use_cached_head_ip: bool = True,
         check: bool = False,
         ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
+        under_remote_workdir: bool = False,
     ) -> Tuple[subprocess.Popen, str, str]:
         """Runs 'cmd' on the cluster's head node."""
         head_ip = self._get_head_ip(handle, use_cached_head_ip)
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
+        if under_remote_workdir:
+            cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
         return backend_utils.run_command_on_ip_via_ssh(
             head_ip,
