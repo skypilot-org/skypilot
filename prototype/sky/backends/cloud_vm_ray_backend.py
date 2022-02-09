@@ -285,7 +285,7 @@ class RayCodeGen:
                     {bash_script!r},
                     {log_path!r},
                     stream_logs=True,
-                    to_stdout=True,
+                    with_ray=True,
                 ))""")
         ]
 

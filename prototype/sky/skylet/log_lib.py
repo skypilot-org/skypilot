@@ -19,7 +19,8 @@ def redirect_process_output(
         log_path: str,
         stream_logs: bool,
         start_streaming_at: str = '',
-        skip_lines: Optional[List[str]] = None) -> Tuple[str, str]:
+        skip_lines: Optional[List[str]] = None,
+        replace_crlf:bool = False) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
@@ -53,10 +54,10 @@ def redirect_process_output(
                     continue
                 # Remove special characters to avoid cursor hidding
                 line = line.replace('\x1b[?25l', '')
-                if line.endswith('\r\n'):
-                    # Replace CRLF with LFCR to avoid ray logging to the same line
+                if replace_crlf and line.endswith('\r\n'):
+                    # Replace CRLF with LF to avoid ray logging to the same line
                     # due to separating lines with '\n'.
-                    line = line[:-2] + '\n\r'
+                    line = line[:-2] + '\n'
                 if (skip_lines is not None and
                         any(skip in line for skip in skip_lines)):
                     continue
@@ -84,7 +85,7 @@ def run_with_log(
     start_streaming_at: str = '',
     return_none: bool = False,
     check: bool = False,
-    to_stdout: bool = False,
+    with_ray: bool = False,
     **kwargs,
 ) -> Union[None, Tuple[subprocess.Popen, str, str]]:
     """Runs a command and logs its output to a file.
@@ -92,8 +93,9 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-
-    stderr = subprocess.PIPE if not to_stdout else subprocess.STDOUT
+    # Redirect stderr to stdout when using ray, to preserve the order of
+    # stdout and stderr.
+    stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
     with subprocess.Popen(cmd,
                           stdout=subprocess.PIPE,
                           stderr=stderr,
@@ -129,7 +131,10 @@ def run_with_log(
             skip_lines=[
                 'bash: cannot set terminal process group',
                 'bash: no job control in this shell',
-            ])
+            ],
+            # Replace CRLF when the output is logged to drive by ray.
+            replace_crlf=with_ray,
+        )
         proc.wait()
         if proc.returncode and check:
             if stderr:
@@ -144,7 +149,7 @@ def run_with_log(
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               stream_logs: bool = False,
-                              to_stdout: bool = False):
+                              with_ray: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         fp.write(bash_command)
         fp.flush()
@@ -159,7 +164,7 @@ def run_bash_command_with_log(bash_command: str,
             stream_logs=stream_logs,
             return_none=True,
             check=True,
-            to_stdout=to_stdout,
+            with_ray=with_ray,
         )
 
 
