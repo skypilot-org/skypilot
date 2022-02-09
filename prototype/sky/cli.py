@@ -361,8 +361,8 @@ def _check_yaml(entrypoint: str) -> bool:
                                        shell_splits[0].endswith('.yml')):
             click.confirm(
                 f'Entrypoint {entrypoint!r} looks like a yaml path '
-                'but does not exist (is there a typo?).\nIt will be treated '
-                'as a command to be run remotely. Continue?',
+                'but yaml.safe_load() failed (does it exist?).\nIt will be '
+                'treated as a command to be run remotely. Continue?',
                 abort=True)
     return is_yaml
 
@@ -589,10 +589,10 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
     """
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
-    backend = backend_utils.get_backend_from_handle(handle)
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
-                                 'Use `sky run` to provision first.')
+                                 'Use `sky launch` to provision first.')
+    backend = backend_utils.get_backend_from_handle(handle)
 
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
