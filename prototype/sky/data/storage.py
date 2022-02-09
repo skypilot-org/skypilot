@@ -4,6 +4,7 @@ import os
 import glob
 from multiprocessing import pool
 from typing import Any, Dict, Optional, Tuple
+import uuid
 
 from sky.data import data_utils, data_transfer
 from sky import sky_logging
@@ -254,9 +255,24 @@ class S3Store(AbstractStore):
         self.bucket, is_new_bucket = self._get_bucket()
         assert not is_new_bucket or self.source
 
+        read, write = self._check_rw_permissions(self.name)
+        if not read:
+            raise ValueError(f'S3 Bucket {self.name} does not have read '
+                             'permissions. Check if your bucket is '
+                             'configured correctly!')
+
+        # If bucket starts with s3, only needs to be read from
         if self.source.startswith('s3://'):
-            pass
-        elif self.source.startswith('gs://'):
+            self.is_initialized = True
+            return
+
+        if not write:
+            raise ValueError(f'S3 Bucket {self.name} does not have write '
+                             'permissions. Either the bucket is a public '
+                             'bucket or the bucket configuration is set '
+                             'incorrectly!')
+
+        if self.source.startswith('gs://'):
             self._transfer_to_s3()
         else:
             if is_new_bucket:
@@ -286,6 +302,24 @@ class S3Store(AbstractStore):
         sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'
         os.system(sync_command)
 
+    def _check_rw_permissions(self, name) -> Tuple[bool, bool]:
+        """Checks if S3 bucket can be read or written to.
+        """
+        read = True
+        write = True
+        try:
+            self.client.list_objects(Bucket=self.name)
+        except aws.client_exception():
+            read = False
+
+        try:
+            key = uuid.uuid4().hex[:10]
+            self.client.put_object(Bucket=self.name, Key=key)
+            self.client.delete_object(Bucket=self.name, Key=key)
+        except aws.client_exception():
+            write = False
+        return read, write
+
     def _transfer_to_s3(self) -> None:
         if self.source.startswith('gs://'):
             data_transfer.gcs_to_s3(self.name, self.name)
@@ -300,10 +334,20 @@ class S3Store(AbstractStore):
         """
         s3 = aws.resource('s3')
         bucket = s3.Bucket(self.name)
-        if bucket in s3.buckets.all():
+        # Checks if bucket exists (both public and private buckets)
+        try:
+            s3.meta.client.head_bucket(Bucket=self.name)
             return bucket, False
+        except aws.client_exception() as e:
+            # If it was a 404 error, then the bucket does not exist.
+            error_code = e.response['Error']['Code']
+            if error_code == '404':
+                pass
+            else:
+                raise e
         if self.source.startswith('s3://'):
             raise ValueError('Attempted to connect to a non-existent bucket.')
+        # Create new bucket is the bucket does not exist
         return self._create_s3_bucket(self.name), True
 
     def _upload_file(self, local_path: str, remote_path: str) -> None:
@@ -351,8 +395,9 @@ class S3Store(AbstractStore):
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
         except aws.client_exception() as e:
+            logger.info(f'Failed to create bucket {bucket_name}.')
             logger.info(e)
-            return None
+            raise e
         return aws.resource('s3').Bucket(bucket_name)
 
     def _delete_s3_bucket(self, bucket_name: str) -> None:
