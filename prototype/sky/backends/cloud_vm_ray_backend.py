@@ -11,6 +11,7 @@ import re
 import subprocess
 import tempfile
 import textwrap
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import colorama
@@ -1313,7 +1314,11 @@ class CloudVmRayBackend(backends.Backend):
 
         try:
             if not detach_run:
-                backend_utils.run(f'sky logs {handle.cluster_name} {job_id}')
+                # Wait for the job being sucessfully submitted to ray job.
+                time.sleep(1)
+                # Sky logs. Not using subprocess.run since it will make the
+                # ssh keep connected after ctrl-c.
+                self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
             logger.info(f'\n{fore.CYAN}Job ID: '
@@ -1327,6 +1332,13 @@ class CloudVmRayBackend(backends.Backend):
                         '\nTo view the job queue:\t'
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
+
+    def tail_logs(self, handle: ResourceHandle, job_id: int) -> None:
+        codegen = backend_utils.JobLibCodeGen()
+        codegen.tail_logs(job_id)
+        code = codegen.build()
+        click.secho('Start streaming logs...', fg='yellow')
+        self.run_on_head(handle, code, stream_logs=True, check=False)
 
     def _add_job(self, handle: ResourceHandle, job_name: str) -> int:
         codegen = backend_utils.JobLibCodeGen()
@@ -1578,6 +1590,8 @@ class CloudVmRayBackend(backends.Backend):
         ])
         command = ' '.join(rsync_command)
         if with_outputs:
+            # TODO (zhwu): Test this if the command will be still running in the
+            # background, after the current program is killed.
             backend_utils.run(command)
         else:
             backend_utils.run_no_outputs(command)
