@@ -14,27 +14,29 @@ from typing import Iterator, List, Optional, Tuple, Union
 from sky.skylet import job_lib
 
 
-def redirect_process_output(proc,
-                            log_path: str,
-                            stream_logs: bool,
-                            start_streaming_at: str = '',
-                            skip_lines: Optional[List[str]] = None):
+def redirect_process_output(
+        proc,
+        log_path: str,
+        stream_logs: bool,
+        start_streaming_at: str = '',
+        skip_lines: Optional[List[str]] = None) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
 
+    sel = selectors.DefaultSelector()
     out_io = io.TextIOWrapper(proc.stdout,
                               encoding='utf-8',
                               newline='',
                               errors='replace')
-    err_io = io.TextIOWrapper(proc.stderr,
-                              encoding='utf-8',
-                              newline='',
-                              errors='replace')
-    sel = selectors.DefaultSelector()
     sel.register(out_io, selectors.EVENT_READ)
-    sel.register(err_io, selectors.EVENT_READ)
+    if proc.stderr is not None:
+        err_io = io.TextIOWrapper(proc.stderr,
+                                  encoding='utf-8',
+                                  newline='',
+                                  errors='replace')
+        sel.register(err_io, selectors.EVENT_READ)
 
     stdout = ''
     stderr = ''
@@ -51,6 +53,10 @@ def redirect_process_output(proc,
                     continue
                 # Remove special characters to avoid cursor hidding
                 line = line.replace('\x1b[?25l', '')
+                if line.endswith('\r\n'):
+                    # Replace CRLF with LF to avoid ray logging to the same line
+                    # due to separating lines with LF.
+                    line = line[:-2] + '\n'
                 if (skip_lines is not None and
                         any(skip in line for skip in skip_lines)):
                     continue
@@ -65,7 +71,9 @@ def redirect_process_output(proc,
                 if stream_logs and start_streaming_flag:
                     out_stream.write(line)
                     out_stream.flush()
-                fout.write(line)
+                if log_path != '/dev/null':
+                    fout.write(line)
+                    fout.flush()
     return stdout, stderr
 
 
@@ -76,6 +84,7 @@ def run_with_log(
     start_streaming_at: str = '',
     return_none: bool = False,
     check: bool = False,
+    to_stdout: bool = False,
     **kwargs,
 ) -> Union[None, Tuple[subprocess.Popen, str, str]]:
     """Runs a command and logs its output to a file.
@@ -83,14 +92,29 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-    proc_pgid = None
-    try:
-        with subprocess.Popen(cmd,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE,
-                              start_new_session=True,
-                              **kwargs) as proc:
-            proc_pgid = os.getpgid(proc.pid)
+
+    stderr = subprocess.PIPE if not to_stdout else subprocess.STDOUT
+    with subprocess.Popen(cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=stderr,
+                          start_new_session=True,
+                          **kwargs) as proc:
+        try:
+            # The proc can be defunct if the python program is killed. Here we
+            # open a new subprocess to gracefully kill the proc, SIGTERM
+            # and then SIGKILL the process group.
+            # Adapted from ray/dashboard/modules/job/job_manager.py#L154
+            parent_pid = os.getpid()
+            kill_cmd = f'pkill -TERM -P {proc.pid}; kill -9 {proc.pid}'
+            subprocess.Popen(
+                f'while kill -s 0 {parent_pid}; do sleep 1; done; {kill_cmd}',
+                shell=True,
+                # Suppress output
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            # We need this even if the log_path is '/dev/null' to ensure the
+            # progress bar is shown.
             stdout, stderr = redirect_process_output(
                 proc,
                 log_path,
@@ -104,7 +128,6 @@ def run_with_log(
                     'bash: no job control in this shell',
                 ])
             proc.wait()
-            proc_pgid = None
             if proc.returncode and check:
                 if stderr:
                     print(stderr, file=sys.stderr)
@@ -112,23 +135,20 @@ def run_with_log(
             if return_none:
                 return None
             return proc, stdout, stderr
-    finally:
-        # The proc can be defunct if the python program is killed. Here we
-        # open a new subprocess to kill the process, SIGKILL the process group.
-        # Adapted from ray/dashboard/modules/job/job_manager.py#L154
-        if proc_pgid is not None:
-            subprocess.Popen(
-                f'kill -9 -{proc_pgid}',
-                shell=True,
-                # Suppress output
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+        finally:
+            # Make sure the process is killed if the python program is killed.
+            # This is needed for SIGINT (ctrl-c), since the previous daemon will
+            # be killed before it correctly kill the child processes.
+            subprocess.Popen(kill_cmd,
+                             shell=True,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
 
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              stream_logs: bool = False):
+                              stream_logs: bool = False,
+                              to_stdout: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         fp.write(bash_command)
         fp.flush()
@@ -143,6 +163,7 @@ def run_bash_command_with_log(bash_command: str,
             stream_logs=stream_logs,
             return_none=True,
             check=True,
+            to_stdout=to_stdout,
         )
 
 
