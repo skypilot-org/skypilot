@@ -775,7 +775,8 @@ class RetryingVmProvisioner(object):
                 file_mounts[public_key_path] = public_key_path
 
             if SKYLET_REMOTE_PATH in config['file_mounts']:
-                file_mounts[SKYLET_REMOTE_PATH] = config['file_mounts'][SKYLET_REMOTE_PATH]
+                file_mounts[SKYLET_REMOTE_PATH] = config['file_mounts'][
+                    SKYLET_REMOTE_PATH]
 
             fields_to_empty = {
                 'file_mounts': file_mounts,
