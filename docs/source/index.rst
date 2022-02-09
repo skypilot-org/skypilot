@@ -26,7 +26,7 @@ way.
    reference/iterative-development
    .. reference/production-workflow
 
-   reference/tasks
+   .. reference/tasks
    .. reference/backends
    .. reference/provisioner
    .. reference/optimizer

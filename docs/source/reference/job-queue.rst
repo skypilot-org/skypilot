@@ -1,21 +1,37 @@
 Job Queue
 =========
 
-Installation
-------------
+We can schedule multiple jobs on a cluster using Sky's job queue. Using :code:`sky exec`, we can automatically queue each job for execution on the cluster. The :code:`-d` flag can be used to detach logging
+from the terminal, which is useful for launching long-running jobs concurrently.
 
-To use Lumache, first install it using pip:
+.. code-block:: bash
 
-.. code-block:: console
+   # Launch the job 5 times
+   sky exec mycluster task.yaml -d
+   sky exec mycluster task.yaml -d
+   sky exec mycluster task.yaml -d
+   sky exec mycluster task.yaml -d
+   sky exec mycluster task.yaml -d
 
-   (.venv) $ pip install lumache
+If we wish to view the output for each run after it has completed we can use:
 
-.. click:: sky.cli:cli
-   :prog: sky
+.. code-block:: bash
 
+   # View the jobs in the queue
+   sky queue mycluster
 
-Creating recipes
-----------------
+   # Pick a JOB_ID to view
+   sky logs mycluster JOB_ID
 
-To retrieve a list of random ingredients,
-you can use the ``lumache.get_random_ingredients()`` function:
+To cancel a job, we can follow a similar pattern:
+
+.. code-block:: bash
+
+   # View the jobs in the queue
+   sky queue mycluster
+
+   # Pick a JOB_ID to view
+   sky cancel mycluster JOB_ID
+
+   # Cancel all jobs
+   sky cancel mycluster --all
