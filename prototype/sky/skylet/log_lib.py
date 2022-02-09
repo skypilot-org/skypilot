@@ -14,13 +14,12 @@ from typing import Iterator, List, Optional, Tuple, Union
 from sky.skylet import job_lib
 
 
-def redirect_process_output(
-        proc,
-        log_path: str,
-        stream_logs: bool,
-        start_streaming_at: str = '',
-        skip_lines: Optional[List[str]] = None,
-        replace_crlf:bool = False) -> Tuple[str, str]:
+def redirect_process_output(proc,
+                            log_path: str,
+                            stream_logs: bool,
+                            start_streaming_at: str = '',
+                            skip_lines: Optional[List[str]] = None,
+                            replace_crlf: bool = False) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
@@ -109,8 +108,11 @@ def run_with_log(
         daemon_script = os.path.join(
             os.path.dirname(os.path.abspath(job_lib.__file__)),
             'subprocess_daemon.sh')
-        daemon_cmd = ['/bin/bash', daemon_script, str(parent_pid),
-                str(proc.pid)]
+        daemon_cmd = [
+            '/bin/bash', daemon_script,
+            str(parent_pid),
+            str(proc.pid)
+        ]
         subprocess.Popen(
             daemon_cmd,
             start_new_session=True,
@@ -143,7 +145,6 @@ def run_with_log(
         if return_none:
             return None
         return proc, stdout, stderr
-        
 
 
 def run_bash_command_with_log(bash_command: str,
