@@ -12,7 +12,7 @@ catalog_config = {
     '_faster_retry_by_catalog': True,
     # Only retry the region/zones that is in the area. This is cloud specific.
     # us, eu, ap or more specific us-east, us-west-1, etc.
-    '_retry_area': ['us', 'america'],
+    '_retry_area': ['us', 'ca', 'northamerica'],
     '_shuffle_regions': False,
 }
 

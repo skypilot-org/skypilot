@@ -130,10 +130,10 @@ class GCP(clouds.Cloud):
             return GCP._SPOT_PRICES[instance_type]
         return GCP._ON_DEMAND_PRICES[instance_type]
 
-    def accelerators_to_hourly_cost(self, accelerators):
+    def accelerators_to_hourly_cost(self, accelerators, use_spot):
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
-        return gcp_catalog.get_accelerator_hourly_cost(acc, acc_count)
+        return gcp_catalog.get_accelerator_hourly_cost(acc, acc_count, use_spot=use_spot)
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
