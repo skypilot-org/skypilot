@@ -1431,7 +1431,7 @@ class CloudVmRayBackend(backends.Backend):
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
-        
+
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__

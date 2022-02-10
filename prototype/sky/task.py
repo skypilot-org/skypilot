@@ -170,8 +170,8 @@ class Task:
                     'run command generator must be self contained. '
                     f'Found globals: {run_closure.globals}')
             if run_closure.unbound:
-                # Do not raise an error here. Import statements, which are allowed,
-                # will be considered as unbounded.
+                # Do not raise an error here. Import statements, which are
+                # allowed, will be considered as unbounded.
                 pass
         elif self.run is not None and not isinstance(self.run, str):
             raise ValueError('run must be either a shell script (str) or '
@@ -399,7 +399,7 @@ class Task:
                 assert False, 'TODO: Azure Blob not mountable yet'
             else:
                 raise ValueError(f'Storage Type {storage_type} \
-                    does not exist!'                                    )
+                    does not exist!')
 
     def set_file_mounts(self, file_mounts: Dict[str, str]):
         """Sets the file mounts for this Task.
