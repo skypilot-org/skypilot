@@ -8,6 +8,8 @@ import logging
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import (TAG_RAY_LAUNCH_CONFIG, TAG_RAY_NODE_KIND,
                                  TAG_RAY_USER_NODE_TYPE)
+from ray.autoscaler._private.cli_logger import cli_logger, cf
+
 from sky.skylet.providers.gcp.config import (
     bootstrap_gcp, construct_clients_from_provider_config, get_node_type)
 
@@ -163,7 +165,7 @@ class GCPNodeProvider(NodeProvider):
             # Try to reuse previously stopped nodes with compatible configs
             if self.cache_stopped_nodes:
                 if not isinstance(resource, GCPCompute):
-                    raise NotImplementedError("Start cached TPU nodes are not supported.")
+                    raise NotImplementedError("Starting cached TPU nodes is not supported.")
                 filters = {
                     TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
                     TAG_RAY_LAUNCH_CONFIG: labels[TAG_RAY_LAUNCH_CONFIG]
@@ -176,6 +178,12 @@ class GCPNodeProvider(NodeProvider):
                 if reuse_nodes:
                     # TODO(suquark): Some instances could still be stopping.
                     # We may wait until these instances stop.
+                    cli_logger.print(
+                        # TODO: handle plural vs singular?
+                        f"Reusing nodes {cli_logger.render_list(reuse_node_ids)}. "
+                        "To disable reuse, set `cache_stopped_nodes: False` "
+                        "under `provider` in the cluster configuration."
+                    )
                     for node_id in reuse_node_ids:
                         resource.start_instance(node_id)
                     for node_id in reuse_node_ids:
@@ -189,6 +197,14 @@ class GCPNodeProvider(NodeProvider):
         with self.lock:
             resource = self._get_resource_depending_on_node_name(node_id)
             if self.cache_stopped_nodes:
+                cli_logger.print(
+                    f"Stopping instance {node_id} "
+                    + cf.dimmed(
+                        "(to terminate instead, "
+                        "set `cache_stopped_nodes: False` "
+                        "under `provider` in the cluster configuration)"
+                    ),
+                )
                 result = resource.stop_instance(node_id=node_id)
             else:
                 result = resource.delete_instance(node_id=node_id)

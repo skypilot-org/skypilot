@@ -92,3 +92,4 @@ sky exec gcp-start-stop "$DIR"/gcp_start_stop.yaml
 sky stop gcp-start-stop
 sky start gcp-start-stop
 sky exec gcp-start-stop "$DIR"/gcp_start_stop.yaml
+sky down gcp-start-stop
