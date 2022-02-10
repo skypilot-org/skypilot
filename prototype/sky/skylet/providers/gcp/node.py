@@ -343,7 +343,7 @@ class GCPCompute(GCPResource):
             label_filter_expr = ""
 
         included_status = list(GCPComputeNode.NON_TERMINATED_STATUSES)
-        if not include_terminated:
+        if include_terminated:
             included_status.append("TERMINATED")
 
         instance_state_filter_expr = "(" + " OR ".join([
