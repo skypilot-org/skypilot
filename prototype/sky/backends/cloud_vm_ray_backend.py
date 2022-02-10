@@ -1511,8 +1511,8 @@ class CloudVmRayBackend(backends.Backend):
             # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/_azure/node_provider.py
             raise ValueError(
                 f'Stopping cluster {handle.cluster_name!r}: not supported on '
-                'non-AWS and non-GCP clusters yet. Try manually stopping, or terminate by: '
-                f'sky down {handle.cluster_name}')
+                'non-AWS and non-GCP clusters yet. Try manually stopping, '
+                f'or terminate by: sky down {handle.cluster_name}')
         if isinstance(cloud, clouds.Azure):
             # Special handling because `ray down` is buggy with Azure.
             cluster_name = config['cluster_name']
