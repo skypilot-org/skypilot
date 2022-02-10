@@ -113,6 +113,7 @@ def get_instance_type_for_accelerator_impl(
         # whitelist consists of:
         if len(instance_types) == 2:
             # - M60, offered by AWS g3s.xl and g3.4xl
+            # - A10G, offered by AWS g5.12xl and g5.24xl
             # - "Promo" instance types offered by Azure
             its = sorted(instance_types)
             assert (its == ['g3.4xlarge', 'g3s.xlarge'] or
@@ -126,6 +127,7 @@ def get_instance_type_for_accelerator_impl(
             ], ['g5g.2xlarge', 'g5g.4xlarge', 'g5g.8xlarge', 'g5g.xlarge']), its
         else:
             # - T4, offered by AWS g4dn.{1,2,4,8,16}xl
+            # - A10G, offered by AWS g5.{1,2,4,8,16}xl
             # - T4, offered by Azure Standard_NC{4,8,16}as_T4_v3
             for t in instance_types:
                 assert (t.startswith('g4dn') or t.startswith('g5') or

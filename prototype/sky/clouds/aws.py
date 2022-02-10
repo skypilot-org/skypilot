@@ -70,9 +70,6 @@ class AWS(clouds.Cloud):
             regions = aws_catalog.get_region_zones_for_instance_type(
                 instance_type, use_spot)
         for region in regions:
-            # if region.name == 'us-west-1':
-            #     # TODO: troubles launching AMIs.
-            #     continue
             if region.name == 'eu-south-1':
                 # TODO: This region should be manually opt in.
                 continue
