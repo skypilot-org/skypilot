@@ -30,12 +30,15 @@ def test_public_bucket():
     storage_1 = storage.Storage(name='tcga-2-open', source='s3://tcga-2-open')
 
     storage_2 = storage.Storage(name='tcga-2-open', source='~/Downloads/temp/')
-    # This should fail as you can't write to a public bucket
-    storage_2.get_or_copy_to_s3()
+    try:
+        # This should fail as you can't write to a public bucket
+        storage_2.get_or_copy_to_s3()
+    except Exception:
+        pass
 
 
 if __name__ == '__main__':
-    #test_bucket_creation()
-    #test_bucket_deletion()
-    #test_bucket_transfer()
-    #test_public_bucket()
+    test_bucket_creation()
+    test_bucket_deletion()
+    test_bucket_transfer()
+    test_public_bucket()

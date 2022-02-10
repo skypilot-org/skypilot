@@ -255,7 +255,7 @@ class S3Store(AbstractStore):
         self.bucket, is_new_bucket = self._get_bucket()
         assert not is_new_bucket or self.source
 
-        read, write = self._check_rw_permissions(self.name)
+        read, write = self._check_rw_permissions()
         if not read:
             raise ValueError(f'S3 Bucket {self.name} does not have read '
                              'permissions. Check if your bucket is '
@@ -302,7 +302,7 @@ class S3Store(AbstractStore):
         sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'
         os.system(sync_command)
 
-    def _check_rw_permissions(self, name) -> Tuple[bool, bool]:
+    def _check_rw_permissions(self) -> Tuple[bool, bool]:
         """Checks if S3 bucket can be read or written to.
         """
         read = True
@@ -437,9 +437,24 @@ class GcsStore(AbstractStore):
         self.bucket, is_new_bucket = self._get_bucket()
         assert not is_new_bucket or self.source
 
+        read, write = self._check_rw_permissions()
+        if not read:
+            raise ValueError(f'GCS Bucket {self.name} does not have read '
+                             'permissions. Check if your bucket is '
+                             'configured correctly!')
+
+        # If bucket starts with s3, only needs to be read from
         if self.source.startswith('gs://'):
-            pass
-        elif self.source.startswith('s3://'):
+            self.is_initialized = True
+            return
+
+        if not write:
+            raise ValueError(f'GCS Bucket {self.name} does not have write '
+                             'permissions. Either the bucket is a public '
+                             'bucket or the bucket configuration is set '
+                             'incorrectly!')
+
+        if self.source.startswith('s3://'):
             self._transfer_to_gcs()
         else:
             if is_new_bucket:
@@ -465,6 +480,30 @@ class GcsStore(AbstractStore):
         sync_command = f'gsutil -m rsync -d -r {self.source} gs://{self.name}/'
         os.system(sync_command)
 
+    def _check_rw_permissions(self) -> Tuple[bool, bool]:
+        """Checks if GCS bucket can be read or written to.
+        """
+        read = True
+        write = True
+        key = uuid.uuid4().hex[:10]
+        blob = self.bucket.blob(f'{key}.txt')
+        try:
+            with blob.open(mode='w') as f:
+                f.write('hello')
+        except gcp.forbidden_exception():
+            write = False
+
+        try:
+            if write:
+                blob.download_as_string()
+                blob.delete()
+            else:
+                read = False
+        except gcp.forbidden_exception():
+            read = False
+
+        return read, write
+
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
             data_transfer.s3_to_gcs(self.name, self.name)
@@ -480,12 +519,23 @@ class GcsStore(AbstractStore):
         try:
             bucket = self.client.get_bucket(self.name)
             return bucket, False
-        except gcp.not_found_exception() as e:
-            if self.source.startswith('gs://'):
-                raise ValueError(
-                    'Attempted to connect to a non-existent bucket.') from e
-            logger.info(e)
-            return self._create_gcs_bucket(self.name), True
+        except gcp.not_found_exception():
+            pass
+        except gcp.forbidden_exception():
+            # Try public bucket to see if bucket exists
+            logger.info(
+                'Public Bucket detected; Connecting to public bucket...')
+            try:
+                a_client = gcp.anonymous_storage_client()
+                bucket = a_client.get_bucket(self.name)
+                return bucket, False
+            except gcp.not_found_exception() as e:
+                logger.info(e)
+                raise ValueError('Public bucket not accessible!') from e
+
+        if self.source.startswith('gs://'):
+            raise ValueError('Attempted to connect to a non-existent bucket.')
+        return self._create_gcs_bucket(self.name), True
 
     def _upload_file(self, local_file: str, remote_path: str) -> None:
         """Uploads file from local path to remote path on GCS bucket
