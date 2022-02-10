@@ -6,6 +6,8 @@ import time
 import logging
 
 from ray.autoscaler.node_provider import NodeProvider
+from ray.autoscaler.tags import (TAG_RAY_LAUNCH_CONFIG, TAG_RAY_NODE_KIND,
+                                 TAG_RAY_USER_NODE_TYPE)
 from sky.skylet.providers.gcp.config import (
     bootstrap_gcp, construct_clients_from_provider_config, get_node_type)
 
@@ -162,7 +164,14 @@ class GCPNodeProvider(NodeProvider):
             if self.cache_stopped_nodes:
                 if not isinstance(resource, GCPCompute):
                     raise NotImplementedError("Start cached TPU nodes are not supported.")
-                reuse_nodes = resource._list_instances(labels, True)[:count]
+                filters = {
+                    TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
+                    TAG_RAY_LAUNCH_CONFIG: labels[TAG_RAY_LAUNCH_CONFIG]
+                }
+                # This tag may not always be present.
+                if TAG_RAY_USER_NODE_TYPE in labels:
+                    filters[TAG_RAY_USER_NODE_TYPE] = labels[TAG_RAY_USER_NODE_TYPE]
+                reuse_nodes = resource._list_instances(filters, ["TERMINATED"])[:count]
                 reuse_node_ids = [n.id for n in reuse_nodes]
                 if reuse_nodes:
                     # TODO(suquark): Some instances could still be stopping.
