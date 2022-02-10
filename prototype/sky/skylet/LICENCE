@@ -202,8 +202,16 @@
 
 --------------------------------------------------------------------------------
 
-Code in log_monitor.py from
-https://github.com/ray-project/ray/blob/master/python/ray/_private/log_monitor.py
+Code in ray_patches/log_monitor.py from
+https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/_private/log_monitor.py
+
+Code in ray_patches/worker.py from
+https://github.com/ray-project/ray/blob/ray-1.9.2/python/ray/worker.py
+
+Code in providers/gcp from
+https://github.com/ray-project/ray/tree/master/python/ray/autoscaler/_private/gcp
+Git Revision: ef9d9df4e7454d428a958281e9de333795dccb44
+
 
 Copyright 2016-2022 Ray developers
 

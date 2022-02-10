@@ -14,7 +14,6 @@ with sky.Dag() as dag:
                    check=True)
 
     docker_image = None  # 'rayproject/ray-ml:latest-gpu'
-    container_name = None  # 'resnet_container'
 
     # Total Nodes, INCLUDING Head Node
     num_nodes = 2
@@ -70,7 +69,6 @@ with sky.Dag() as dag:
         setup=setup,
         post_setup_fn=post_setup_fn,
         docker_image=docker_image,
-        container_name=container_name,
         num_nodes=num_nodes,
         run=run_fn,
     )

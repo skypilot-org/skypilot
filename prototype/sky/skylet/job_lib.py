@@ -11,7 +11,8 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import pendulum
-import prettytable
+
+from sky.skylet import util_lib
 
 SKY_LOGS_DIRECTORY = 'sky_logs'
 SKY_REMOTE_LOGS_ROOT = '~'
@@ -43,6 +44,7 @@ class JobInfoLoc(enum.IntEnum):
     SUBMITTED_AT = 3
     STATUS = 4
     RUN_TIMESTAMP = 5
+    START_AT = 6
 
 
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
@@ -62,7 +64,8 @@ except sqlite3.OperationalError:
         username TEXT,
         submitted_at INTEGER,
         status TEXT,
-        run_timestamp TEXT CANDIDATE KEY)""")
+        run_timestamp TEXT CANDIDATE KEY,
+        start_at INTEGER)""")
 
 _CONN.commit()
 
@@ -71,13 +74,9 @@ def add_job(job_name: str, username: str, run_timestamp: str) -> int:
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     # job_id will autoincrement with the null value
-    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?)', (
-        job_name,
-        username,
-        job_submitted_at,
-        JobStatus.INIT.value,
-        run_timestamp,
-    ))
+    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?)',
+                    (job_name, username, job_submitted_at, JobStatus.INIT.value,
+                     run_timestamp, None))
     _CONN.commit()
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
@@ -88,8 +87,16 @@ def add_job(job_name: str, username: str, run_timestamp: str) -> int:
 
 
 def set_status(job_id: int, status: JobStatus) -> None:
+    assert status != JobStatus.RUNNING, (
+        'Please use set_job_started() to set job status to RUNNING')
     _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
                     (status.value, job_id))
+    _CONN.commit()
+
+
+def set_job_started(job_id: int) -> None:
+    _CURSOR.execute('UPDATE jobs SET status=(?), start_at=(?) WHERE job_id=(?)',
+                    (JobStatus.RUNNING.value, int(time.time()), job_id))
     _CONN.commit()
 
 
@@ -106,6 +113,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
             'status': JobStatus[row[JobInfoLoc.STATUS.value]],
             'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
+            'start_at': row[JobInfoLoc.START_AT.value],
         })
     return records
 
@@ -202,10 +210,13 @@ def _update_status() -> None:
     job_status = query_job_status(running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
-        set_status(job['job_id'], status)
+        if status != JobStatus.RUNNING:
+            set_status(job['job_id'], status)
 
 
-def _readable_time_duration(start: int) -> str:
+def _readable_time_duration(start: Optional[int]) -> str:
+    if start is None:
+        return '-'
     duration = pendulum.now().subtract(seconds=time.time() - start)
     diff = duration.diff_for_humans()
     diff = diff.replace('second', 'sec')
@@ -215,9 +226,8 @@ def _readable_time_duration(start: int) -> str:
 
 
 def _show_job_queue(jobs) -> None:
-    job_table = prettytable.PrettyTable()
-    job_table.field_names = ['ID', 'NAME', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
-    job_table.align['LOG'] = 'l'
+    job_table = util_lib.create_table(
+        ['ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'STATUS', 'LOG'])
 
     for job in jobs:
         job_table.add_row([
@@ -225,6 +235,7 @@ def _show_job_queue(jobs) -> None:
             job['job_name'],
             job['username'],
             _readable_time_duration(job['submitted_at']),
+            _readable_time_duration(job['start_at']),
             job['status'].value,
             os.path.join(SKY_LOGS_DIRECTORY, job['run_timestamp']),
         ])

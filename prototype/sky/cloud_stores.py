@@ -42,7 +42,7 @@ class S3CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'pip install awscli',
+        'pip3 install awscli',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -96,19 +96,21 @@ class GcsCloudStorage(CloudStorage):
     # multi-threaded download is nice, which frees us from implementing
     # parellel workers on our end.
     _GET_GSUTIL = [
+        # Skip if gsutil already exists.
         'pushd /tmp &>/dev/null',
-        # Skip if /tmp/gsutil already exists.
-        '(test -f /tmp/gsutil/gsutil || (wget --quiet '
-        'https://storage.googleapis.com/pub/gsutil.tar.gz && '
-        'tar xzf gsutil.tar.gz))',
+        '(test -f ~/google-cloud-sdk/bin/gsutil || (wget --quiet '
+        'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/'
+        'google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
+        'tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
+        'mv google-cloud-sdk ~/ && '
+        '~/google-cloud-sdk/install.sh -q ))',
         'popd &>/dev/null',
     ]
 
-    _GSUTIL = '/tmp/gsutil/gsutil'
+    _GSUTIL = '~/google-cloud-sdk/bin/gsutil'
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
-
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
@@ -117,7 +119,12 @@ class GcsCloudStorage(CloudStorage):
         command = ' && '.join(commands)
         p = backend_utils.run(command, stdout=subprocess.PIPE)
         out = p.stdout.decode().strip()
-        # gsutil ls -d url
+        # If <url> is a bucket root, then we only need `gsutil` to succeed
+        # to make sure the bucket exists. It is already a directory.
+        _, key = data_utils.split_gcs_path(url)
+        if len(key) == 0:
+            return True
+        # Otherwise, gsutil ls -d url will return:
         #   --> url.rstrip('/')          if url is not a directory
         #   --> url with an ending '/'   if url is a directory
         if not out.endswith('/'):
@@ -128,11 +135,7 @@ class GcsCloudStorage(CloudStorage):
         return True
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
-        """Downloads a directory using gsutil.
-
-        Limitation: no authentication support; 'source' is assumed to in a
-        publicly accessible bucket.
-        """
+        """Downloads a directory using gsutil."""
         download_via_gsutil = (
             f'{self._GSUTIL} -m rsync -d -r {source} {destination}')
         all_commands = list(self._GET_GSUTIL)
@@ -140,11 +143,7 @@ class GcsCloudStorage(CloudStorage):
         return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
-        """Downloads a file using gsutil.
-
-        Limitation: no authentication support; 'source' is assumed to in a
-        publicly accessible bucket.
-        """
+        """Downloads a file using gsutil."""
         download_via_gsutil = f'{self._GSUTIL} -m cp {source} {destination}'
         all_commands = list(self._GET_GSUTIL)
         all_commands.append(download_via_gsutil)

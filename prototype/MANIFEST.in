@@ -1,1 +1,3 @@
 include sky/clouds/service_catalog/data/*
+include sky/skylet/*.sh
+include sky/skylet/providers/gcp/*

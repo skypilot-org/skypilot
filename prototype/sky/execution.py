@@ -86,7 +86,6 @@ def _execute(dag: sky.Dag,
 
     if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
         if task.best_resources is None:
-            logger.info(f'Optimizer target is set to {optimize_target.name}.')
             # TODO: fix this for the situation where number of requested
             # accelerators is not an integer.
             dag = sky.optimize(dag, minimize=optimize_target)
@@ -131,11 +130,11 @@ def _execute(dag: sky.Dag,
                                      task.get_cloud_to_remote_file_mounts())
 
         if stages is None or Stage.PRE_EXEC in stages:
-            if task.post_setup_fn is not None:
-                backend.run_post_setup(handle, task.post_setup_fn, task)
+            backend.run_post_setup(handle, task.post_setup_fn)
 
         if stages is None or Stage.EXEC in stages:
             try:
+                global_user_state.update_last_use(handle.get_cluster_name())
                 backend.execute(handle, task, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.

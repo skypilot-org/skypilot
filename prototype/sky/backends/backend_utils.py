@@ -1,12 +1,16 @@
 """Util constants/functions for the backends."""
 import datetime
+import enum
+import getpass
 import os
 import pathlib
+import shlex
 import subprocess
 import tempfile
 import textwrap
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Union
+import uuid
 import yaml
 import zlib
 
@@ -14,6 +18,7 @@ import jinja2
 
 import sky
 from sky import authentication as auth
+from sky import backends
 from sky import clouds
 from sky import sky_logging
 from sky import resources
@@ -178,8 +183,9 @@ class SSHConfigHelper(object):
               IdentityFile {ssh_key_path}
               IdentitiesOnly yes
               ForwardAgent yes
+              StrictHostKeyChecking no
               Port 22
-              """)
+            """)
         return codegen
 
     @classmethod
@@ -207,8 +213,8 @@ class SSHConfigHelper(object):
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
-        sky_autogen_comment = '# Added by sky (use `sky stop/down ' + \
-                            f'{cluster_name}` to remove)'
+        sky_autogen_comment = '# Added by sky (use `sky stop/down' + \
+                            f'-c {cluster_name}` to remove)'
         overwrite = False
         overwrite_begin_idx = None
 
@@ -237,15 +243,17 @@ class SSHConfigHelper(object):
         # Add (or overwrite) the new config.
         if overwrite:
             assert overwrite_begin_idx is not None
-            updated_lines = codegen.splitlines(keepends=True)
+            updated_lines = codegen.splitlines(keepends=True) + ['\n']
             config[overwrite_begin_idx:overwrite_begin_idx +
                    len(updated_lines)] = updated_lines
             with open(config_path, 'w') as f:
-                f.write('\n')
-                f.writelines(config)
+                f.write(''.join(config).strip())
                 f.write('\n')
         else:
             with open(config_path, 'a') as f:
+                if not config[-1].endswith('\n'):
+                    # Add trailing newline if it doesn't exist.
+                    f.write('\n')
                 f.write('\n')
                 f.write(codegen)
 
@@ -281,6 +289,12 @@ class SSHConfigHelper(object):
         if start_line_idx is None:  # No config to remove.
             return
 
+        # Scan for end of previous config.
+        cursor = start_line_idx
+        while cursor > 0 and len(config[cursor].strip()) > 0:
+            cursor -= 1
+        prev_end_line_idx = cursor
+
         # Scan for end of the cluster config.
         end_line_idx = None
         cursor = start_line_idx + 1
@@ -293,9 +307,12 @@ class SSHConfigHelper(object):
             cursor += 1
 
         # Remove sky-generated config and update the file.
-        config[start_line_idx:end_line_idx] = []
+        config[prev_end_line_idx:end_line_idx] = [
+            '\n'
+        ] if end_line_idx is not None else []
         with open(config_path, 'w') as f:
-            f.writelines(config)
+            f.write(''.join(config).strip())
+            f.write('\n')
 
 
 # TODO(suquark): once we have sky on PYPI, we should directly install sky
@@ -311,18 +328,21 @@ def _build_sky_wheel() -> pathlib.Path:
     # It is important to normalize the path, otherwise 'pip wheel' would treat
     # the directory as a file and generate an empty wheel.
     norm_path = str(package_root) + os.sep
-    wheel_dir = pathlib.Path(tempfile.gettempdir()) / 'sky_wheels'
+    username = getpass.getuser()
+    wheel_dir = pathlib.Path(tempfile.gettempdir()) / f'sky_wheels_{username}'
     try:
         # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
         # the output.
         subprocess.run([
-            'pip', 'wheel', '--no-deps', norm_path, '--wheel-dir',
+            'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
             str(wheel_dir)
         ],
                        stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE,
                        check=True)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError('Fail to build pip wheel for Sky.') from e
+        raise RuntimeError('Fail to build pip wheel for Sky. '
+                           f'Error message: {e.stderr.decode()}') from e
     try:
         latest_wheel = max(wheel_dir.glob('sky-*.whl'), key=os.path.getctime)
     except ValueError:
@@ -337,6 +357,7 @@ def _build_sky_wheel() -> pathlib.Path:
 # TODO: too many things happening here - leaky abstraction. Refactor.
 def write_cluster_config(task: task_lib.Task,
                          to_provision: Resources,
+                         num_nodes: int,
                          cluster_config_template: str,
                          cluster_name: str,
                          region: Optional[clouds.Region] = None,
@@ -434,8 +455,7 @@ def write_cluster_config(task: task_lib.Task,
                 'setup_sh_path': setup_sh_path,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
-                'container_name': task.container_name,
-                'num_nodes': task.num_nodes,
+                'num_nodes': num_nodes,
                 # File mounts handling.
                 'file_mounts': wrapped_file_mounts,
                 'initialization_commands': initialization_commands or None,
@@ -456,11 +476,16 @@ def write_cluster_config(task: task_lib.Task,
         return config_dict
     _add_ssh_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
+        tpu_name = resources_vars.get('tpu_name')
+        if tpu_name is None:
+            tpu_name = cluster_name
+
         scripts = tuple(
             _fill_template(
                 path,
                 dict(resources_vars, **{
                     'zones': ','.join(zones),
+                    'tpu_name': tpu_name,
                 }),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in config/user/ to be consistent with
@@ -471,6 +496,7 @@ def write_cluster_config(task: task_lib.Task,
             ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
         config_dict['tpu-create-script'] = scripts[0]
         config_dict['tpu-delete-script'] = scripts[1]
+        config_dict['tpu_name'] = tpu_name
     return config_dict
 
 
@@ -560,37 +586,163 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
     return True  # success
 
 
-def run_command_on_ip_via_ssh(ip: str,
-                              command: str,
-                              private_key: str,
-                              container_name: Optional[str],
-                              ssh_user: str = 'ubuntu') -> None:
-    if container_name is not None:
-        command = command.replace('\\', '\\\\').replace('"', '\\"')
-        command = f'docker exec {container_name} /bin/bash -c "{command}"'
-    cmd = [
-        'ssh',
+def ssh_options_list(ssh_private_key: Optional[str],
+                     ssh_control_name: Optional[str],
+                     *,
+                     timeout=30) -> List[str]:
+    """Returns a list of sane options for 'ssh'."""
+    # Forked from Ray SSHOptions:
+    # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
+    arg_dict = {
+        # Supresses initial fingerprint verification.
+        'StrictHostKeyChecking': 'no',
+        # SSH IP and fingerprint pairs no longer added to known_hosts.
+        # This is to remove a 'REMOTE HOST IDENTIFICATION HAS CHANGED'
+        # warning if a new node has the same IP as a previously
+        # deleted node, because the fingerprints will not match in
+        # that case.
+        'UserKnownHostsFile': os.devnull,
+        # Try fewer extraneous key pairs.
+        'IdentitiesOnly': 'yes',
+        # Abort if port forwarding fails (instead of just printing to
+        # stderr).
+        'ExitOnForwardFailure': 'yes',
+        # Quickly kill the connection if network connection breaks (as
+        # opposed to hanging/blocking).
+        'ServerAliveInterval': 5,
+        'ServerAliveCountMax': 3,
+        # ConnectTimeout.
+        'ConnectTimeout': f'{timeout}s',
+    }
+    if ssh_control_name is not None:
+        arg_dict.update({
+            # Control path: important optimization as we do multiple ssh in one
+            # sky.launch().
+            'ControlMaster': 'auto',
+            'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
+            'ControlPersist': '30s',
+        })
+    ssh_key_option = [
         '-i',
-        private_key,
-        '-o',
-        'StrictHostKeyChecking=no',
-        '{}@{}'.format(ssh_user, ip),
-        command  # TODO: shlex.quote() doesn't work.  Is it needed in a list?
+        ssh_private_key,
+    ] if ssh_private_key is not None else []
+    return ssh_key_option + [
+        x for y in (['-o', f'{k}={v}']
+                    for k, v in arg_dict.items()
+                    if v is not None) for x in y
     ]
-    with subprocess.Popen(cmd,
-                          stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE,
-                          universal_newlines=True) as proc:
-        outs, errs = proc.communicate()
-        if outs:
-            logger.info(outs)
-        if proc.returncode:
-            if errs:
-                logger.error(errs)
-            raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+
+def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
+    """Returns a temporary path to be used as the ssh control path."""
+    if ssh_control_filename is None:
+        return None
+    username = getpass.getuser()
+    path = (f'/tmp/sky_ssh_{username}/{ssh_control_filename}')
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+class SshMode(enum.Enum):
+    """Enum for SSH mode."""
+    # Do not allocating pseudo-tty to avoid user input corrupting the output.
+    NON_INTERACTIVE = 0
+    # Allocate a pseudo-tty, quit the ssh session after the cmd finishes.
+    INTERACTIVE = 1
+    # Allocate a pseudo-tty and log into the ssh session.
+    LOGIN = 2
+
+
+def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
+                      ssh_mode: SshMode, port_forward: Optional[List[int]],
+                      ssh_control_name: Optional[str]) -> List[str]:
+    ssh = ['ssh']
+    if ssh_mode == SshMode.NON_INTERACTIVE:
+        # Disable pseudo-terminal allocation. Otherwise, the output of
+        # ssh will be corrupted by the user's input.
+        ssh += ['-T']
+    else:
+        # Force pseudo-terminal allocation for interactive/login mode.
+        ssh += ['-tt']
+    if port_forward is not None:
+        for port in port_forward:
+            local = remote = port
+            logger.info(
+                f'Forwarding port {local} to port {remote} on localhost.')
+            ssh += ['-L', f'{remote}:localhost:{local}']
+    return ssh + ssh_options_list(ssh_private_key,
+                                  ssh_control_name) + [f'{ssh_user}@{ip}']
+
+
+def run_command_on_ip_via_ssh(
+    ip: str,
+    cmd: Union[str, List[str]],
+    *,
+    ssh_user: str,
+    ssh_private_key: str,
+    port_forward: Optional[List[int]] = None,
+    # Advanced options.
+    log_path: str = '/dev/null',
+    stream_logs: bool = True,
+    check: bool = False,
+    ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+    ssh_control_name: Optional[str] = None,
+) -> Tuple[subprocess.Popen, str, str]:
+    """Uses 'ssh' to run 'cmd' on a node with ip.
+
+    Args:
+        ip: The IP address of the node.
+        cmd: The command to run.
+        ssh_private_key: The path to the private key to use for ssh.
+        ssh_user: The user to use for ssh.
+        port_forward: A list of ports to forward from the localhost to the
+        remote host.
+
+        Advanced options:
+
+        log_path: Redirect stdout/stderr to the log_path.
+        stream_logs: Stream logs to the stdout/stderr.
+        check: Check the success of the command.
+        ssh_mode: The mode to use for ssh.
+            See SSHMode for more details.
+        ssh_control_name: The files name of the ssh_control to use. This is used
+            for optimizing the ssh speed.
+
+    Returns:
+        A tuple of (process, stdout, stderr).
+    """
+    base_ssh_command = _ssh_base_command(ip,
+                                         ssh_private_key,
+                                         ssh_user=ssh_user,
+                                         ssh_mode=ssh_mode,
+                                         port_forward=port_forward,
+                                         ssh_control_name=ssh_control_name)
+    if ssh_mode == SshMode.LOGIN:
+        assert isinstance(cmd, list), 'cmd must be a list for login mode.'
+        command = base_ssh_command + cmd
+        proc = run(command, shell=False, check=check)
+        return proc, '', ''
+    if isinstance(cmd, list):
+        cmd = ' '.join(cmd)
+    # We need this to correctly run the cmd, and get the output.
+    command = base_ssh_command + [
+        'bash',
+        '--login',
+        '-c',
+        # Need this `-i` option to make sure `source ~/.bashrc` work.
+        '-i',
+    ]
+    command += [
+        shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+                    f'PYTHONWARNINGS=ignore && ({cmd})'),
+    ]
+    return log_lib.run_with_log(command, log_path, stream_logs, check=check)
 
 
 def run(cmd, **kwargs):
+    # Should be careful to use this function, as the child process cmd spawn may
+    # keep running in the background after the current program is killed. To get
+    # rid of this problem, use `log_lib.run_with_log`.
     shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
     executable = kwargs.pop('executable', '/bin/bash')
@@ -611,7 +763,10 @@ def run_no_outputs(cmd, **kwargs):
 
 
 def check_local_gpus() -> bool:
-    """Returns whether GPUs are available on the local machine by checking
+    """
+    Checks if GPUs are available locally.
+
+    Returns whether GPUs are available on the local machine by checking
     if nvidia-smi is installed.
 
     Returns True if nvidia-smi is installed, false if not.
@@ -626,13 +781,35 @@ def make_task_bash_script(codegen: str) -> str:
     script = [
         textwrap.dedent(f"""\
                 #!/bin/bash
-                . {SKY_REMOTE_APP_DIR}/sky_env_var.sh 2> /dev/null || true
+                source ~/.bashrc
                 . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
                 cd {SKY_REMOTE_WORKDIR}"""),
         codegen,
     ]
     script = '\n'.join(script)
     return script
+
+
+def generate_cluster_name():
+    # TODO: change this ID formatting to something more pleasant.
+    # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
+    return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+
+
+def get_backend_from_handle(handle: backends.Backend.ResourceHandle):
+    """
+    Get a backend object from a handle.
+
+    Inspects handle type to infer the backend used for the resource.
+    """
+    if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        backend = backends.CloudVmRayBackend()
+    elif isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+        backend = backends.LocalDockerBackend()
+    else:
+        raise NotImplementedError(
+            f'Handle type {type(handle)} is not supported yet.')
+    return backend
 
 
 class JobLibCodeGen(object):

@@ -82,14 +82,12 @@ def get_spot_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading spot pricing table')
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_spot_price_history')
-    response_iterator = paginator.paginate(
-        ProductDescriptions=['Linux/UNIX'],
-        StartTime=datetime.datetime.utcnow())
+    response_iterator = paginator.paginate(ProductDescriptions=['Linux/UNIX'],
+                                           StartTime=datetime.datetime.utcnow())
     ret = []
     for response in response_iterator:
         ret = ret + response['SpotPriceHistory']
-    df = pd.DataFrame(ret).set_index(
-        ['InstanceType', 'AvailabilityZone'])
+    df = pd.DataFrame(ret).set_index(['InstanceType', 'AvailabilityZone'])
     return df
 
 
@@ -108,7 +106,6 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
         try:
             return pricing_df.loc[t]['PricePerUnit']
         except KeyError:
-            # print(f'{region} WARNING: cannot find pricing for {t}')
             return np.nan
 
     def get_spot_price(row):
@@ -117,9 +114,6 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
         try:
             return spot_pricing_df.loc[(instance, zone)]['SpotPrice']
         except KeyError:
-            # print(
-            #     f'{region} WARNING: cannot find spot pricing for {instance} {zone}'
-            # )
             return np.nan
 
     def get_acc_info(row) -> Tuple[str, float]:
