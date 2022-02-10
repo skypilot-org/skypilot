@@ -2,13 +2,12 @@
 **/*.log
 **/*.pyc
 
-docs/build
-
 plotting/*.pdf
 plotting/*.png
 
 prototype/**/*.yml
 prototype/config/**/*.sh
+prototype/docs/build
 prototype/**/*.egg-info/
 prototype/**/*.tmp
 prototype/build
