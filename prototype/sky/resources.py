@@ -131,7 +131,7 @@ class Resources:
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators)
+                self.accelerators, self.use_spot)
         return hourly_cost * hours
 
     def is_same_resources(self, other: 'Resources') -> bool:
