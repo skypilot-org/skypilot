@@ -1,9 +1,7 @@
 import subprocess
-from typing import Dict, List
+from typing import List
 
 import sky
-
-IPAddr = str
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
@@ -27,7 +25,7 @@ with sky.Dag() as dag:
     # If a str, run the same command on all nodes.
     # If a function, run per-node command on each node.
     # This function should be self-contained and not depend on any external.
-    def run_fn(node_i: int, ip_list: List[IPAddr]) -> str:
+    def run_fn(node_rank: int, ip_list: List[str]) -> str:
         import json
         tf_config = {
             'cluster': {
@@ -35,7 +33,7 @@ with sky.Dag() as dag:
             },
             'task': {
                 'type': 'worker',
-                'index': node_i
+                'index': node_rank
             }
         }
         str_tf_config = json.dumps(tf_config)

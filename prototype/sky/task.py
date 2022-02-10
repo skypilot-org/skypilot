@@ -1,4 +1,5 @@
 """Task: a coarse-grained stage in an application."""
+import inspect
 import os
 import re
 from typing import Callable, Dict, List, Optional, Set, Union
@@ -11,15 +12,19 @@ from sky import resources as resources_lib
 from sky.data import storage as storage_lib
 
 Resources = resources_lib.Resources
-# A lambda generating commands (node addrs -> {addr: cmd_i}).
-CommandGen = Callable[[List[str]], Dict[str, str]]
+# A lambda generating commands (node rank_i, node addrs -> cmd_i).
+CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
-_VALID_NAME_DESCR = 'ASCII characters and may contain lowercase and' \
-                    ' uppercase letters, digits, underscores, periods,' \
-                    ' and dashes. Must start and end with alphanumeric' \
-                    ' characters. No triple dashes or underscores.'
+_VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
+                     ' uppercase letters, digits, underscores, periods,'
+                     ' and dashes. Must start and end with alphanumeric'
+                     ' characters. No triple dashes or underscores.')
+
+_RUN_FN_CHECK_FAIL_MSG = (
+    'run command generator must take exactly 2 arguments: node_rank (int) and'
+    'a list of node ip addresses (List[str]). Got {run_sig}')
 
 
 def _is_cloud_store_url(url):
@@ -83,10 +88,11 @@ class Task:
           setup: A setup command, run under 'workdir' and before actually
             executing the run command, 'run'.
           run: Either a shell command (str) or a command generator (callable).
-            If latter, it must take a list of node addresses as input and
-            return a dictionary {addr: command for addr} (valid to exclude some
-            nodes, in which case no commands are run on them).  Commands will
-            be run under 'workdir'.
+            If latter, it must take a node rank and a list of node addresses as
+            input and return a shell command (str) (valid to return None for
+            some nodes, in which case no commands are run on them).  Commands
+            will be run under 'workdir'. Note the command generator should be
+            self-contained.
           workdir: The local working directory.  This directory and its files
             will be synced to a location on the remote VM(s), and 'setup' and
             'run' commands will be run under that location (thus, they can rely
@@ -103,9 +109,6 @@ class Task:
             In effect when LocalDockerBackend is used.  Defaults to
             'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'.
         """
-        if not _is_valid_name(name):
-            raise ValueError(f'Invalid task name {name}. Valid name: ' \
-                             f'{_VALID_NAME_DESCR}')
         self.name = name
         self.run = run
         self.storage_mounts = {}
@@ -131,14 +134,49 @@ class Task:
         # Block some of the clouds.
         self.blocked_clouds = set()
 
-        # Semantics.
-        if num_nodes is not None and num_nodes > 1 and isinstance(
-                self.run, str):
-            # The same command str for all nodes.
-            self.run = {i: run for i in range(num_nodes)}
+        # Check if the task is legal.
+        self._verify_task()
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
+
+    def _verify_task(self):
+        if not _is_valid_name(self.name):
+            raise ValueError(f'Invalid task name {self.name}. Valid name: '
+                             f'{_VALID_NAME_DESCR}')
+
+        # Check self.run
+        if callable(self.run):
+            run_sig = inspect.signature(self.run)
+            # Check that run is a function with 2 arguments.
+            if len(run_sig.parameters) != 2:
+                raise ValueError(_RUN_FN_CHECK_FAIL_MSG.format(run_sig))
+
+            type_list = [int, List[str]]
+            # Check annotations, if exists
+            for i, param in enumerate(run_sig.parameters.values()):
+                if param.annotation != inspect.Parameter.empty:
+                    if param.annotation != type_list[i]:
+                        raise ValueError(_RUN_FN_CHECK_FAIL_MSG.format(run_sig))
+
+            # Check self containedness.
+            run_closure = inspect.getclosurevars(self.run)
+            if run_closure.nonlocals:
+                raise ValueError(
+                    'run command generator must be self contained. '
+                    f'Found nonlocals: {run_closure.nonlocals}')
+            if run_closure.globals:
+                raise ValueError(
+                    'run command generator must be self contained. '
+                    f'Found globals: {run_closure.globals}')
+            if run_closure.unbound:
+                # Do not raise an error here. Import statements, which are allowed,
+                # will be considered as unbounded.
+                pass
+        elif self.run is not None and not isinstance(self.run, str):
+            raise ValueError('run must be either a shell script (str) or '
+                             f'a command generator ({CommandGen}). '
+                             f'Got {type(self.run)}')
 
     @staticmethod
     def from_yaml(yaml_path):
@@ -361,7 +399,7 @@ class Task:
                 assert False, 'TODO: Azure Blob not mountable yet'
             else:
                 raise ValueError(f'Storage Type {storage_type} \
-                    does not exist!')
+                    does not exist!'                                    )
 
     def set_file_mounts(self, file_mounts: Dict[str, str]):
         """Sets the file mounts for this Task.
