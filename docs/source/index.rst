@@ -13,7 +13,17 @@ way.
    getting-started/installation
    getting-started/quickstart
    getting-started/tutorial
-   Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Examples
+
+   examples/iterative-dev-project
+   examples/launch-many-tasks-vm
+   examples/grid-search
+   examples/distributed-jobs
+   Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
 
 
 .. toctree::
