@@ -546,8 +546,10 @@ def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
-def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
-                                 num_nodes: int, timeout: Optional[int]=None) -> bool:
+def wait_until_ray_cluster_ready(cloud: clouds.Cloud,
+                                 cluster_config_file: str,
+                                 num_nodes: int,
+                                 timeout: Optional[int] = None) -> bool:
     """Returns whether the entire ray cluster is ready."""
     # FIXME: It may takes a while for the cluster to be available for ray,
     # especially for Azure, causing `ray exec` to fail.
@@ -580,7 +582,8 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
         if timeout is not None:
             time_elapsed = time.time() - start
             if time_elapsed > timeout:
-                logger.error(f'Got Timed out in waiting for cluster to be ready.')
+                logger.error(
+                    'Got Timed out in waiting for cluster to be ready.')
                 return False  # failed
         time.sleep(10)
     return True  # success

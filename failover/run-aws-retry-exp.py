@@ -133,7 +133,6 @@ for run in range(RUNS):
             exp_status['detailed_error_count'] = dict(error_count)
             return exp_status
 
-
         for gpu, cnt_list in TEST_INSTANCE_SERIES.items():
             print(f'==== GPU: {gpu} ====')
             for cnt in cnt_list:
@@ -150,7 +149,11 @@ for run in range(RUNS):
                     continue
 
                 use_spot_str = 'true' if USE_SPOT else 'false'
-                new_yaml = launch_yaml.format(cloud=cloud, gpu=gpu, cnt=cnt, use_spot=use_spot_str,num_nodes=NUM_NODES)
+                new_yaml = launch_yaml.format(cloud=cloud,
+                                              gpu=gpu,
+                                              cnt=cnt,
+                                              use_spot=use_spot_str,
+                                              num_nodes=NUM_NODES)
                 with open('./tmp.yaml', 'w') as f:
                     f.write(new_yaml)
 
@@ -174,17 +177,19 @@ for run in range(RUNS):
 
                     down_cmd = 'sky down retry-exp'
                     proc = subprocess.run(down_cmd,
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT,
-                                        shell=True)
+                                          stdout=subprocess.PIPE,
+                                          stderr=subprocess.STDOUT,
+                                          shell=True)
 
                     exp_status = parse_outputs(lines, exp_status)
-                    exp_status['status'] = 'SUCCEEDED' if succeeded else 'FAILED'
+                    exp_status[
+                        'status'] = 'SUCCEEDED' if succeeded else 'FAILED'
                     if exp_status['status'] == 'SUCCEEDED':
                         break
                     print("\nFailed to launch.")
                     if RETRY_UNTIL_SUCCEEDED:
-                        print(f'Retry in {RETRY_UNTIL_SUCCEEDED_GAP} seconds...')
+                        print(
+                            f'Retry in {RETRY_UNTIL_SUCCEEDED_GAP} seconds...')
                         time.sleep(RETRY_UNTIL_SUCCEEDED_GAP)
                     else:
                         break

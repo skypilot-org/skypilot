@@ -50,6 +50,7 @@ logger = sky_logging.init_logger(__name__)
 # Timeout for provision a cluster and wait for it to be ready in seconds.
 CLUSTER_PROVISION_TIMEOUT = 300
 
+
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
     """Errors out on invalid cluster names not supported by cloud providers.
 
@@ -807,7 +808,10 @@ class RetryingVmProvisioner(object):
         # TODO: if requesting a large amount (say 32) of expensive VMs, this
         # may loop for a long time.  Use timeouts and treat as gang_failed.
         cluster_ready = backend_utils.wait_until_ray_cluster_ready(
-            to_provision_cloud, cluster_config_file, num_nodes, timeout=CLUSTER_PROVISION_TIMEOUT)
+            to_provision_cloud,
+            cluster_config_file,
+            num_nodes,
+            timeout=CLUSTER_PROVISION_TIMEOUT)
         gang_failed = not cluster_ready
         if gang_failed or ray_up_on_full_confg_only:
             # Head OK; gang scheduling failure.

@@ -83,7 +83,7 @@ class AWS(clouds.Cloud):
             # us
             'us-east-1': 'ami-0e3c68b57d50caf64',
             'us-east-2': 'ami-0ae79682024fe31cd',
-            'us-west-1': 'ami-09870f8bfc822200e', # 'TODO: cannot launch',
+            'us-west-1': 'ami-09870f8bfc822200e',
             'us-west-2': 'ami-0050625d58fa27b6d',
             # ca
             'ca-central-1': 'ami-00681419ff1614111',
