@@ -127,7 +127,7 @@ def get_handle_from_cluster_name(
 
 
 def get_cluster_name_from_handle(
-    cluster_handle: backends.Backend.ResourceHandle,) -> Optional[str]:
+        cluster_handle: backends.Backend.ResourceHandle) -> Optional[str]:
     handle = pickle.dumps(cluster_handle)
     rows = _CURSOR.execute('SELECT name FROM clusters WHERE handle=(?)',
                            (handle,))
@@ -140,6 +140,19 @@ def get_status_from_cluster_name(cluster_name: str) -> ClusterStatus:
                            (cluster_name,))
     for (status,) in rows:
         return ClusterStatus[status]
+
+
+def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
+    handle = get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise ValueError(f'Cluster {cluster_name} not found.')
+    _CURSOR.execute('UPDATE clusters SET handle=(?), status=(?) WHERE name=(?)',
+                    (
+                        pickle.dumps(handle),
+                        status.value,
+                        cluster_name,
+                    ))
+    _CONN.commit()
 
 
 def get_clusters() -> List[Dict[str, Any]]:
