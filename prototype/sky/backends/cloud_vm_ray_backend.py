@@ -169,7 +169,8 @@ class RayCodeGen:
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             ray.init('auto', namespace='__sky__{job_id}__', log_to_driver=True)
-
+            
+            run_fn = None
             futures = []"""),
             # FIXME: This is a hack to make sure that the functions can be found
             # by ray.remote. This should be removed once we have a better way to
