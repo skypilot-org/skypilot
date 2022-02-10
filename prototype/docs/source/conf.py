@@ -2,6 +2,7 @@
 
 import sys
 import os
+
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
 sys.path.insert(0, os.path.abspath('../prototype'))
@@ -45,7 +46,6 @@ pygments_style = None
 autosummary_generate = True
 napolean_use_rtype = False
 
-
 # -- Options for HTML output
 
 html_theme = 'sphinx_book_theme'
@@ -57,9 +57,8 @@ html_theme_options = {
 # -- Options for EPUB output
 epub_show_urls = 'footnote'
 
-
 # -- Options for myst
-jupyter_execute_notebooks = "force"
+jupyter_execute_notebooks = 'force'
 execution_allow_errors = False
 
 # Notebook cell execution timeout; defaults to 30.
