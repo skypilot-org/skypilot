@@ -1,8 +1,6 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
-import glob
-from multiprocessing import pool
 from typing import Any, Dict, Optional, Tuple
 
 from sky.data import data_utils, data_transfer
