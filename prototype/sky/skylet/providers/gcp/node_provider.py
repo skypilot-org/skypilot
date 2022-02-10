@@ -160,7 +160,9 @@ class GCPNodeProvider(NodeProvider):
 
             # Try to reuse previously stopped nodes with compatible configs
             if self.cache_stopped_nodes:
-                reuse_nodes = resource.list_instances(labels)[:count]
+                if not isinstance(resource, GCPCompute):
+                    raise NotImplementedError("Start cached TPU nodes are not supported.")
+                reuse_nodes = resource._list_instances(labels, True)[:count]
                 reuse_node_ids = [n.id for n in reuse_nodes]
                 if reuse_nodes:
                     # TODO(suquark): Some instances could still be stopping.

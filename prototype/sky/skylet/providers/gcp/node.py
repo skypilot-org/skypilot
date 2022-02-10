@@ -144,9 +144,6 @@ class GCPNode(UserDict, metaclass=abc.ABCMeta):
     def is_terminated(self) -> bool:
         return self.get(self.STATUS_FIELD) not in self.NON_TERMINATED_STATUSES
 
-    def is_stopped(self) -> bool:
-        return self.get(self.STATUS_FIELD) in ("STOPPED", "STOPPING")
-
     @property
     def id(self) -> str:
         return self["name"]
@@ -169,8 +166,8 @@ class GCPNode(UserDict, metaclass=abc.ABCMeta):
 
 class GCPComputeNode(GCPNode):
     """Abstraction around compute nodes"""
-
-    NON_TERMINATED_STATUSES = {"PROVISIONING", "STAGING", "RUNNING", "STOPPED", "STOPPING"}
+    # https://cloud.google.com/compute/docs/instances/instance-life-cycle
+    NON_TERMINATED_STATUSES = {"PROVISIONING", "STAGING", "RUNNING"}
     RUNNING_STATUSES = {"RUNNING"}
     STATUS_FIELD = "status"
 
@@ -329,8 +326,12 @@ class GCPCompute(GCPResource):
 
         return result
 
-    def list_instances(self, label_filters: Optional[dict] = None
+    def list_instances(self, label_filters: Optional[dict] = None,
                        ) -> List[GCPComputeNode]:
+        return self._list_instances(label_filters, False)
+
+    def _list_instances(self, label_filters: Optional[dict],
+                        include_terminated: bool) -> List[GCPComputeNode]:
         label_filters = label_filters or {}
 
         if label_filters:
@@ -341,9 +342,13 @@ class GCPCompute(GCPResource):
         else:
             label_filter_expr = ""
 
+        included_status = list(GCPComputeNode.NON_TERMINATED_STATUSES)
+        if not include_terminated:
+            included_status.append("TERMINATED")
+
         instance_state_filter_expr = "(" + " OR ".join([
             "(status = {status})".format(status=status)
-            for status in GCPComputeNode.NON_TERMINATED_STATUSES
+            for status in included_status
         ]) + ")"
 
         cluster_name_filter_expr = ("(labels.{key} = {value})"
@@ -483,16 +488,6 @@ class GCPCompute(GCPResource):
 
         return result, name
 
-    def _list_stopped_instances(self):
-        response = self.resource.instances().list(
-            project=self.project_id,
-            zone=self.availability_zone,
-            filter="(status = STOPPED) OR (status = STOPPING)",
-        ).execute()
-
-        instances = response.get("items", [])
-        return [GCPComputeNode(i, self) for i in instances]
-
     def start_instance(self, node_id: str,
                        wait_for_operation: bool = True) -> dict:
         operation = self.resource.instances().start(
@@ -603,10 +598,6 @@ class GCPTPU(GCPResource):
         instances = list(filter(filter_instance, instances))
 
         return instances
-
-    def _list_stopped_instances(self):
-        return [instance for instance in self.list_instances()
-                if instance.is_stopped()]
 
     def get_instance(self, node_id: str) -> GCPTPUNode:
         instance = self.resource.projects().locations().nodes().get(
