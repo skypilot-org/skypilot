@@ -852,7 +852,7 @@ def stop(
     CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
     supplied, the latter takes precedence.
 
-    Limitation: this currently only works for AWS clusters.
+    Limitation: this currently only works for AWS/GCP non-spot clusters.
 
     Examples:
 
@@ -911,7 +911,8 @@ def start(clusters: Tuple[str]):
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
-            #    (currently, only AWS clusters can be in this state)
+            #    (currently, only AWS/GCP non-spot clusters can be in this
+            #    state)
             #
             #  UP - skipped, see below
             #
