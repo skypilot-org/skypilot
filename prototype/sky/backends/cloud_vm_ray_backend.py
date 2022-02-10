@@ -129,7 +129,6 @@ class RayCodeGen:
         self._num_nodes = 0
 
         self._has_register_run_fn = False
-        self.run_fn_name = None
 
         # job_id
         # Job ID is used to identify the job (also this generated code).
@@ -255,10 +254,14 @@ class RayCodeGen:
         assert self._has_gang_scheduling, (
             'Call add_gang_scheduling_placement_group() '
             'before register_run_fn().')
+        assert not self._has_register_run_fn, (
+            'register_run_fn() called twice?')
         self._has_register_run_fn = True
-        self.run_fn_name = run_fn_name
 
-        self._code.append(run_fn)
+        self._code += [
+            run_fn,
+            f'run_fn = {run_fn_name}',
+        ]
 
     def add_ray_task(
         self,
@@ -310,7 +313,7 @@ class RayCodeGen:
             textwrap.dedent(f"""\
         script = {bash_script!r}
         if run_fn is not None:
-            script = {self.run_fn_name}({gang_scheduling_id}, ip_list)
+            script = run_fn({gang_scheduling_id}, ip_list)
         node_setup_cmd = setup_cmd + 'export SKY_NODE_ID={gang_scheduling_id}\\n'
         futures.append(run_bash_command_with_log \\
                 .options({name_str}{resources_str}{num_gpus_str}) \\
