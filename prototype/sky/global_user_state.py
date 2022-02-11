@@ -143,16 +143,15 @@ def get_status_from_cluster_name(cluster_name: str) -> ClusterStatus:
 
 
 def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
-    handle = get_handle_from_cluster_name(cluster_name)
-    if handle is None:
-        raise ValueError(f'Cluster {cluster_name} not found.')
-    _CURSOR.execute('UPDATE clusters SET handle=(?), status=(?) WHERE name=(?)',
-                    (
-                        pickle.dumps(handle),
-                        status.value,
-                        cluster_name,
-                    ))
+    _CURSOR.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
+        status.value,
+        cluster_name,
+    ))
+    count = _CURSOR.rowcount
     _CONN.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 def get_clusters() -> List[Dict[str, Any]]:
