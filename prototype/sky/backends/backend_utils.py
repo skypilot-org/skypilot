@@ -488,8 +488,8 @@ def write_cluster_config(task: task_lib.Task,
                     'tpu_name': tpu_name,
                 }),
                 # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in ~/.sky/generated/config/ to be consistent with
-                # cluster yamls.
+                # different TPUs.  Put in ~/.sky/generated/config/ to be
+                # consistent with cluster yamls.
                 output_path=path.replace('.sh.j2', f'.{cluster_name}.sh').
                 replace('config/',
                         os.path.expanduser(f'{SKY_USER_FILE_PATH}/config/')),
