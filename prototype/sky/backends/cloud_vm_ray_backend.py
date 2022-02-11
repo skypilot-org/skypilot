@@ -650,6 +650,7 @@ class RetryingVmProvisioner(object):
                 launched_nodes=num_nodes,
                 # OK for this to be shown in CLI as status == INIT.
                 launched_resources=to_provision,
+                tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
@@ -960,12 +961,14 @@ class CloudVmRayBackend(backends.Backend):
                      head_ip: Optional[str] = None,
                      launched_nodes: Optional[int] = None,
                      launched_resources: Optional[Resources] = None,
+                     tpu_create_script: Optional[str] = None,
                      tpu_delete_script: Optional[str] = None) -> None:
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
+            self.tpu_create_script = tpu_create_script
             self.tpu_delete_script = tpu_delete_script
 
         def __repr__(self):
@@ -973,9 +976,10 @@ class CloudVmRayBackend(backends.Backend):
                     f'\n\tcluster_name={self.cluster_name},'
                     f'\n\thead_ip={self.head_ip},'
                     '\n\tcluster_yaml='
-                    f'{backend_utils.get_rel_path(self.cluster_yaml)}, '
+                    f'{self.cluster_yaml}, '
                     f'\n\tlaunched_resources={self.launched_nodes}x '
                     f'{self.launched_resources}, '
+                    f'\n\ttpu_create_script={self.tpu_create_script}, '
                     f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
         def get_cluster_name(self):
@@ -1111,6 +1115,7 @@ class CloudVmRayBackend(backends.Backend):
             launched_nodes=launched_nodes,
             launched_resources=provisioned_resources,
             # TPU.
+            tpu_create_script=config_dict.get('tpu-create-script'),
             tpu_delete_script=config_dict.get('tpu-delete-script'))
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
@@ -1547,6 +1552,19 @@ class CloudVmRayBackend(backends.Backend):
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)
+
+        if terminate:
+            # Clean up generated config
+            # No try-except is needed since Ray will fail to teardown the
+            # cluster if the cluster_yaml is missing.
+            os.remove(handle.cluster_yaml)
+
+            # Clean up TPU creation/deletion scripts
+            if handle.tpu_delete_script is not None:
+                assert handle.tpu_create_script is not None
+                os.remove(handle.tpu_create_script)
+                os.remove(handle.tpu_delete_script)
+
         global_user_state.remove_cluster(name, terminate=terminate)
 
     def _get_node_ips(self,
