@@ -202,6 +202,7 @@ class LocalDockerBackend(backends.Backend):
                 }
         self.volume_mounts[handle] = docker_mounts
 
+        # TODO (zhwu): Room for refactorization here.
         self._run_post_setup(handle)
 
     def _run_post_setup(self, handle: ResourceHandle) -> None:
