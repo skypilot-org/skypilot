@@ -7,11 +7,14 @@ import os
 import selectors
 import subprocess
 import sys
+import textwrap
 import time
 import tempfile
 from typing import Iterator, List, Optional, Tuple, Union
 
 from sky.skylet import job_lib
+
+SKY_REMOTE_WORKDIR = '~/sky_workdir'
 
 
 def redirect_process_output(proc,
@@ -147,11 +150,28 @@ def run_with_log(
         return proc, stdout, stderr
 
 
+def make_task_bash_script(codegen: str) -> str:
+    script = [
+        textwrap.dedent(f"""\
+                #!/bin/bash
+                source ~/.bashrc
+                . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
+                cd {SKY_REMOTE_WORKDIR}"""),
+        codegen,
+    ]
+    script = '\n'.join(script)
+    return script
+
+
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
+                              export_sky_env_vars: Optional[str] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+        if export_sky_env_vars is not None:
+            bash_command = export_sky_env_vars + '\n' + bash_command
+        bash_command = make_task_bash_script(bash_command)
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
