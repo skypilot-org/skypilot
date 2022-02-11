@@ -72,8 +72,8 @@ def _fill_template(template_path: str,
     if output_path is None:
         assert 'cluster_name' in variables, 'cluster_name is required.'
         cluster_name = variables['cluster_name']
-        output_path = pathlib.Path(os.path.expanduser(
-            SKY_USER_FILE_PATH)) / f'{cluster_name}.yml'
+        output_path = pathlib.Path(
+            os.path.expanduser(SKY_USER_FILE_PATH)) / f'{cluster_name}.yml'
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
     output_path = to_absolute(output_path)
@@ -490,9 +490,9 @@ def write_cluster_config(task: task_lib.Task,
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in ~/.sky/generated/ to be consistent
                 # with cluster yamls.
-                output_path=path.replace('.sh.j2', f'.{cluster_name}.sh').
-                replace('config/',
-                        os.path.expanduser(f'{SKY_USER_FILE_PATH}/')),
+                output_path=path.
+                replace('.sh.j2', f'.{cluster_name}.sh').replace(
+                    'config/', os.path.expanduser(f'{SKY_USER_FILE_PATH}/')),
             ) for path in
             ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
         config_dict['tpu-create-script'] = scripts[0]
