@@ -326,7 +326,7 @@ class RayCodeGen:
                     .remote(
                         script,
                         {log_path!r},
-                        setup_command=node_export_sky_env_vars,
+                        export_sky_env_vars=node_export_sky_env_vars,
                         stream_logs=True,
                         with_ray=True,
                     ))""")
