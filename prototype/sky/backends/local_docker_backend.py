@@ -201,7 +201,7 @@ class LocalDockerBackend(backends.Backend):
                     'mode': 'rw'
                 }
         self.volume_mounts[handle] = docker_mounts
-        
+
         self._run_post_setup(handle)
 
     def _run_post_setup(self, handle: ResourceHandle) -> None:
