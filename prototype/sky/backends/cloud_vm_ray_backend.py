@@ -859,7 +859,7 @@ class RetryingVmProvisioner(object):
             # first, before the ray autoscaler's step-by-step output (<1/1>
             # Setting up head node). Probably some buffering or
             # stdout-vs-stderr bug?  We want the latter to show first, not
-            # printed in t he end.
+            # printed in the end.
             start_streaming_at='Shared connection to')
 
         return False, proc, stdout, stderr
@@ -1167,11 +1167,9 @@ class CloudVmRayBackend(backends.Backend):
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
-        # 'all_file_mounts' should already have been handled in provision()
-        # using the yaml file.  Here we handle cloud -> remote file transfers.
-        # FIXME: if called out-of-band without provision() first, we actually
-        # need to handle all_file_mounts again.
-        mounts = cloud_to_remote_file_mounts
+        # 'all_file_mounts' should be handled, since the provision will not update the
+        # file_mounts for workers.
+        mounts = all_file_mounts
         if mounts is None or not mounts:
             return
         fore = colorama.Fore
@@ -1185,20 +1183,23 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
 
-        def sync_to_all_nodes(src: str, dst: str, command: str):
+        def sync_to_all_nodes(src: str, dst: str, command: Optional[str] = None):
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
                 logger.info(f'{cyan} Syncing (on {node_name}): '
                             f'{bright}{src} -> {dst}{reset}')
-                backend_utils.run_command_on_ip_via_ssh(
-                    ip,
-                    command,
-                    ssh_user=ssh_user,
-                    ssh_private_key=ssh_private_key,
-                    log_path=os.path.join(self.log_dir, 'file_mounts.log'),
-                    check=True,
-                    ssh_control_name=self._ssh_control_name(handle))
+                if command is not None:
+                    backend_utils.run_command_on_ip_via_ssh(
+                        ip,
+                        command,
+                        ssh_user=ssh_user,
+                        ssh_private_key=ssh_private_key,
+                        log_path=os.path.join(self.log_dir, 'file_mounts.log'),
+                        check=True,
+                        ssh_control_name=self._ssh_control_name(handle))
+                else:
+                    self._rsync_up(handle, ip=ip, source=src, target=dst, with_outputs=True)
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -1215,6 +1216,9 @@ class CloudVmRayBackend(backends.Backend):
                 use_symlink_trick = False
             else:
                 wrapped_dst = backend_utils.FileMountHelper.wrap_file_mount(dst)
+            if not task_lib._is_cloud_store_url(src):
+                sync_to_all_nodes(src, wrapped_dst)
+                continue
             storage = cloud_stores.get_storage_from_path(src)
             if storage.is_directory(src):
                 sync = storage.make_sync_dir_command(source=src,

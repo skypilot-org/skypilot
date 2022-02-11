@@ -425,6 +425,8 @@ class Task:
                     'File mount paths cannot end with a slash '
                     '(try "/mydir: /mydir" or "/myfile: /myfile"). '
                     f'Found: target={target} source={source}')
+            if _is_cloud_store_url(target):
+                raise ValueError('File mount destination paths cannot be cloud storage')
         self.file_mounts = file_mounts
         return self
 
