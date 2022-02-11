@@ -1,10 +1,21 @@
 """Azure."""
 import copy
 import json
+import os
+import subprocess
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds.service_catalog import azure_catalog
+
+
+def _run_output(cmd):
+    proc = subprocess.run(cmd,
+                          shell=True,
+                          check=True,
+                          stderr=subprocess.PIPE,
+                          stdout=subprocess.PIPE)
+    return proc.stdout.decode('ascii')
 
 
 class Azure(clouds.Cloud):
@@ -147,3 +158,32 @@ class Azure(clouds.Cloud):
         if instance_type is None:
             return []
         return _make(instance_type)
+
+    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud."""
+        help_str = (
+            '\n    For more info: '
+            'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # pylint: disable=line-too-long
+        )
+        # This file is required because it will be synced to remote VMs for
+        # `az` to access private storage buckets.
+        # `az account show` does not guarantee this file exists.
+        if not os.path.isfile(os.path.expanduser('~/.azure/accessTokens.json')):
+            return (
+                False,
+                '~/.azure/accessTokens.json does not exist. Run `az login`.' +
+                help_str)
+        try:
+            output = _run_output('az account show --output=json')
+        except subprocess.CalledProcessError:
+            return False, 'Azure CLI returned error.'
+        # If Azure is properly logged in, this will return something like:
+        #   {"id": ..., "user": ...}
+        # and if not, it will return:
+        #   Please run 'az login' to setup account.
+        if output.startswith('{'):
+            return True, None
+        return False, 'Azure credentials not set. Run `az login`.' + help_str
+
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        return {'~/.azure': '~/.azure'}
