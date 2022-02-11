@@ -393,7 +393,19 @@ class RetryingVmProvisioner(object):
         zone = zones[0]
         splits = stderr.split('\n')
         exception_str = [s for s in splits if s.startswith('Exception: ')]
+
+        if len(exception_str) == 0:
+            exception_str = [s for s in splits
+                if s.startswith('googleapiclient.errors.HttpError')]
+
         if len(exception_str) == 1:
+            if exception_str[0].startswith('googleapiclient.errors.HttpError'):
+                logger.warning(f'Got HTTP error in {zone.name} '
+                               f'{style.DIM}(message: {exception_str[0]})'
+                               f'{style.RESET_ALL}')
+                self._blocked_regions.add(region.name)
+                return
+
             # Parse structured response {'errors': [...]}.
             exception_str = exception_str[0][len('Exception: '):]
             exception_dict = ast.literal_eval(exception_str)
@@ -687,11 +699,9 @@ class RetryingVmProvisioner(object):
                                                     cluster_handle=handle,
                                                     ready=False)
 
-            import pdb; pdb.set_trace()
             gang_failed, proc, stdout, stderr = self._gang_schedule_ray_up(
                 task, to_provision.cloud, cluster_config_file, log_abs_path,
                 stream_logs, prev_cluster_config)
-            import pdb; pdb.set_trace()
 
             if gang_failed or proc.returncode != 0:
                 if gang_failed:
