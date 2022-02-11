@@ -20,6 +20,7 @@ from sky.cloud_adaptors import aws, gcp
 # development.
 
 MAX_TRIALS = 64
+PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 
 
 def generate_rsa_key_pair():
@@ -66,9 +67,8 @@ def get_public_key_path(private_key_path):
 def setup_aws_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
-    # Defeault to ~/.ssh/sky-key
     if private_key_path is None:
-        private_key_path = '~/.ssh/sky-key'
+        private_key_path = PRIVATE_SSH_KEY_PATH
         config['auth']['ssh_private_key'] = private_key_path
 
     private_key_path = os.path.expanduser(private_key_path)
@@ -133,9 +133,8 @@ def setup_aws_authentication(config):
 def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
-    # Defeault to ~/.ssh/sky-key
     if private_key_path is None:
-        private_key_path = '~/.ssh/sky-key'
+        private_key_path = PRIVATE_SSH_KEY_PATH
         config['auth']['ssh_private_key'] = private_key_path
 
     private_key_path = os.path.expanduser(private_key_path)
@@ -210,9 +209,8 @@ def setup_azure_authentication(config):
     # Doesn't need special library calls!
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
-    # Defeault to ~/.ssh/sky-key
     if private_key_path is None:
-        private_key_path = '~/.ssh/sky-key'
+        private_key_path = PRIVATE_SSH_KEY_PATH
         config['auth']['ssh_private_key'] = private_key_path
 
     private_key_path = os.path.expanduser(private_key_path)
