@@ -1057,6 +1057,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
         if handle.launched_resources.use_spot and not terminate:
+            # TODO(suquark): enable GCP+spot to be stopped in the future.
             click.secho(
                 f'Stopping cluster {name}... skipped, because spot instances '
                 'may lose attached volumes. ',
