@@ -1,6 +1,8 @@
 """Amazon Web Services."""
 import copy
 import json
+import os
+import subprocess
 from typing import Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
 from sky import clouds
@@ -9,6 +11,15 @@ from sky.clouds.service_catalog import aws_catalog
 if TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
+
+
+def _run_output(cmd):
+    proc = subprocess.run(cmd,
+                          shell=True,
+                          check=True,
+                          stderr=subprocess.PIPE,
+                          stdout=subprocess.PIPE)
+    return proc.stdout.decode('ascii')
 
 
 class AWS(clouds.Cloud):
@@ -187,3 +198,46 @@ class AWS(clouds.Cloud):
         if instance_type is None:
             return []
         return _make(instance_type)
+
+    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud."""
+        help_str = (
+            '\n    For more info: '
+            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
+        )
+        # This file is required because it will be synced to remote VMs for
+        # `aws` to access private storage buckets.
+        # `aws configure list` does not guarantee this file exists.
+        if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
+            return (False,
+                    '~/.aws/credentials does not exist. Run `aws configure`.' +
+                    help_str)
+        try:
+            output = _run_output('aws configure list')
+        except subprocess.CalledProcessError:
+            return False, 'AWS CLI not installed properly.'
+        # Configured correctly, the AWS output should look like this:
+        #   ...
+        #   access_key     ******************** shared-credentials-file
+        #   secret_key     ******************** shared-credentials-file
+        #   ...
+        # Otherwise, one or both keys will show as '<not set>'.
+        lines = output.split('\n')
+        if len(lines) < 2:
+            return False, 'AWS CLI output invalid.'
+        access_key_ok = False
+        secret_key_ok = False
+        for line in lines[2:]:
+            line = line.lstrip()
+            if line.startswith('access_key'):
+                if '<not set>' not in line:
+                    access_key_ok = True
+            elif line.startswith('secret_key'):
+                if '<not set>' not in line:
+                    secret_key_ok = True
+        if access_key_ok and secret_key_ok:
+            return True, None
+        return False, 'AWS credentials not set. Run `aws configure`.' + help_str
+
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        return {'~/.aws': '~/.aws'}
