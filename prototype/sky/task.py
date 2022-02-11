@@ -27,7 +27,7 @@ _RUN_FN_CHECK_FAIL_MSG = (
     'a list of node ip addresses (List[str]). Got {run_sig}')
 
 
-def _is_cloud_store_url(url):
+def is_cloud_store_url(url):
     result = parse.urlsplit(url)
     # '' means non-cloud URLs.
     return result.netloc
@@ -425,8 +425,9 @@ class Task:
                     'File mount paths cannot end with a slash '
                     '(try "/mydir: /mydir" or "/myfile: /myfile"). '
                     f'Found: target={target} source={source}')
-            if _is_cloud_store_url(target):
-                raise ValueError('File mount destination paths cannot be cloud storage')
+            if is_cloud_store_url(target):
+                raise ValueError(
+                    'File mount destination paths cannot be cloud storage')
         self.file_mounts = file_mounts
         return self
 
@@ -468,7 +469,7 @@ class Task:
             return None
         d = {}
         for k, v in self.file_mounts.items():
-            if not _is_cloud_store_url(k) and not _is_cloud_store_url(v):
+            if not is_cloud_store_url(k) and not is_cloud_store_url(v):
                 d[k] = v
         return d
 
@@ -482,7 +483,7 @@ class Task:
             return None
         d = {}
         for k, v in self.file_mounts.items():
-            if not _is_cloud_store_url(k) and _is_cloud_store_url(v):
+            if not is_cloud_store_url(k) and is_cloud_store_url(v):
                 d[k] = v
         return d
 

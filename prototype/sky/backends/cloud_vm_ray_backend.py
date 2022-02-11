@@ -1167,8 +1167,8 @@ class CloudVmRayBackend(backends.Backend):
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
-        # 'all_file_mounts' should be handled, since the provision will not update the
-        # file_mounts for workers.
+        # 'all_file_mounts' should be handled, since the provision will not
+        # update the file_mounts for workers.
         mounts = all_file_mounts
         if mounts is None or not mounts:
             return
@@ -1183,7 +1183,9 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
 
-        def sync_to_all_nodes(src: str, dst: str, command: Optional[str] = None):
+        def sync_to_all_nodes(src: str,
+                              dst: str,
+                              command: Optional[str] = None):
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
@@ -1199,7 +1201,11 @@ class CloudVmRayBackend(backends.Backend):
                         check=True,
                         ssh_control_name=self._ssh_control_name(handle))
                 else:
-                    self._rsync_up(handle, ip=ip, source=src, target=dst, with_outputs=True)
+                    self._rsync_up(handle,
+                                   ip=ip,
+                                   source=src,
+                                   target=dst,
+                                   with_outputs=True)
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -1216,7 +1222,7 @@ class CloudVmRayBackend(backends.Backend):
                 use_symlink_trick = False
             else:
                 wrapped_dst = backend_utils.FileMountHelper.wrap_file_mount(dst)
-            if not task_lib._is_cloud_store_url(src):
+            if not task_lib.is_cloud_store_url(src):
                 sync_to_all_nodes(src, wrapped_dst)
                 continue
             storage = cloud_stores.get_storage_from_path(src)
