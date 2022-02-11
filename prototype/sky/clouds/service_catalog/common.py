@@ -35,9 +35,9 @@ def read_catalog(filename: str) -> pd.DataFrame:
 
 
 def _get_instance_type(
-        df: pd.DataFrame,
-        instance_type: str,
-        region: Optional[str],
+    df: pd.DataFrame,
+    instance_type: str,
+    region: Optional[str],
 ) -> pd.DataFrame:
     idx = df['InstanceType'] == instance_type
     if region is not None:
@@ -46,10 +46,10 @@ def _get_instance_type(
 
 
 def get_hourly_cost_impl(
-        df: pd.DataFrame,
-        instance_type: str,
-        region: str,
-        use_spot: bool = False,
+    df: pd.DataFrame,
+    instance_type: str,
+    region: str,
+    use_spot: bool = False,
 ) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     df = _get_instance_type(df, instance_type, region)
@@ -66,8 +66,8 @@ def get_hourly_cost_impl(
 
 
 def get_accelerators_from_instance_type_impl(
-        df: pd.DataFrame,
-        instance_type: str,
+    df: pd.DataFrame,
+    instance_type: str,
 ) -> Optional[Dict[str, int]]:
     df = _get_instance_type(df, instance_type, None)
     if len(df) == 0:
@@ -80,9 +80,9 @@ def get_accelerators_from_instance_type_impl(
 
 
 def get_instance_type_for_accelerator_impl(
-        df: pd.DataFrame,
-        acc_name: str,
-        acc_count: int,
+    df: pd.DataFrame,
+    acc_name: str,
+    acc_count: int,
 ) -> Optional[str]:
     """Returns the instance type with the required count of accelerators."""
     result = df[(df['AcceleratorName'] == acc_name) &
@@ -117,10 +117,10 @@ def get_instance_type_for_accelerator_impl(
 
 
 def list_accelerators_impl(
-        cloud: str,
-        df: pd.DataFrame,
-        gpus_only: bool,
-        name_filter: Optional[str],
+    cloud: str,
+    df: pd.DataFrame,
+    gpus_only: bool,
+    name_filter: Optional[str],
 ) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
@@ -157,12 +157,11 @@ def list_accelerators_impl(
     return {k: make_list_from_df(v) for k, v in grouped}
 
 
-def get_region_zones_for_instance_type(df: pd.DataFrame, instance_type: str,
-                                       use_spot: bool
-                                      ) -> List[cloud_lib.Region]:
-    """Returns a list of regions for a given instance type."""
+def get_region_zones(df: pd.DataFrame,
+                     use_spot: bool) -> List[cloud_lib.Region]:
+    """Returns a list of regions/zones from a dataframe."""
     price_str = 'SpotPrice' if use_spot else 'Price'
-    df = df[df['InstanceType'] == instance_type].sort_values(price_str)
+    df = df.dropna(subset=[price_str]).sort_values(price_str)
     regions = [cloud_lib.Region(region) for region in df['Region'].unique()]
     if 'AvailabilityZone' in df.columns:
         zones_in_region = df.groupby('Region')['AvailabilityZone'].apply(

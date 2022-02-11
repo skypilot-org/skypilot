@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import os
+import re
 from typing import Callable, Dict, List, Optional, Set, Union
 from urllib import parse
 import yaml
@@ -14,11 +15,11 @@ Resources = resources_lib.Resources
 CommandGen = Callable[[List[str]], Dict[str, str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
-CLOUD_REGISTRY = {
-    'aws': clouds.AWS(),
-    'gcp': clouds.GCP(),
-    'azure': clouds.Azure(),
-}
+_VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
+_VALID_NAME_DESCR = 'ASCII characters and may contain lowercase and' \
+                    ' uppercase letters, digits, underscores, periods,' \
+                    ' and dashes. Must start and end with alphanumeric' \
+                    ' characters. No triple dashes or underscores.'
 
 
 def _is_cloud_store_url(url):
@@ -27,22 +28,46 @@ def _is_cloud_store_url(url):
     return result.netloc
 
 
+def _is_valid_name(name: str) -> bool:
+    """Checks if the task name is valid.
+
+    Valid is defined as either NoneType or str with ASCII characters which may
+    contain lowercase and uppercase letters, digits, underscores, periods,
+    and dashes. Must start and end with alphanumeric characters.
+    No triple dashes or underscores.
+
+    Examples:
+        some_name_here
+        some-name-here
+        some__name__here
+        some--name--here
+        some__name--here
+        some.name.here
+        some-name_he.re
+        this---shouldnt--work
+        this___shouldnt_work
+        _thisshouldntwork
+        thisshouldntwork_
+    """
+    if name is None:
+        return True
+    return bool(re.fullmatch(_VALID_NAME_REGEX, name))
+
+
 class Task:
     """Task: a coarse-grained stage in an application."""
 
     def __init__(
-            self,
-            name: Optional[str] = None,
-            *,
-            setup: Optional[str] = None,
-            run: Optional[CommandOrCommandGen] = None,
-            workdir: Optional[str] = None,
-            num_nodes: Optional[int] = None,
-            # Advanced:
-            post_setup_fn: Optional[CommandGen] = None,
-            docker_image: Optional[str] = None,
-            container_name: Optional[str] = None,
-            private_key: Optional[str] = '~/.ssh/sky-key',
+        self,
+        name: Optional[str] = None,
+        *,
+        setup: Optional[str] = None,
+        run: Optional[CommandOrCommandGen] = None,
+        workdir: Optional[str] = None,
+        num_nodes: Optional[int] = None,
+        # Advanced:
+        post_setup_fn: Optional[CommandGen] = None,
+        docker_image: Optional[str] = None,
     ):
         """Initializes a Task.
 
@@ -77,9 +102,10 @@ class Task:
           docker_image: The base docker image that this Task will be built on.
             In effect when LocalDockerBackend is used.  Defaults to
             'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'.
-          container_name: Unused?
-          private_key: Unused?
         """
+        if not _is_valid_name(name):
+            raise ValueError(f'Invalid task name {name}. Valid name: ' \
+                             f'{_VALID_NAME_DESCR}')
         self.name = name
         self.run = run
         self.storage_mounts = {}
@@ -89,15 +115,14 @@ class Task:
         self.workdir = workdir
         self.docker_image = docker_image if docker_image \
             else 'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'
-        self.container_name = container_name
         self._explicit_num_nodes = num_nodes  # Used as a scheduling constraint.
         self.num_nodes = 1 if num_nodes is None else num_nodes
-        self.private_key = private_key
         self.inputs = None
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
         self.estimated_outputs_size_gigabytes = None
-        self.resources = None
+        # Default to CPUNode
+        self.resources = {sky.Resources()}
         self.time_estimator_func = None
         self.file_mounts = None
         # Filled in by the optimizer.  If None, this Task is not planned.
@@ -117,8 +142,11 @@ class Task:
         with open(os.path.expanduser(yaml_path), 'r') as f:
             config = yaml.safe_load(f)
 
-        # TODO: perform more checks on yaml and raise meaningful errors.
+        if isinstance(config, str):
+            raise ValueError('YAML loaded as str, not as dict. '
+                             f'Is it correct? Path: {yaml_path}')
 
+        # TODO: perform more checks on yaml and raise meaningful errors.
         task = Task(
             config.get('name'),
             run=config.get('run'),
@@ -190,22 +218,23 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources = config.get('resources')
-        if resources.get('cloud') is not None:
-            resources['cloud'] = CLOUD_REGISTRY[resources['cloud']]
-        if resources.get('accelerators') is not None:
-            resources['accelerators'] = resources['accelerators']
-        if resources.get('accelerator_args') is not None:
-            resources['accelerator_args'] = dict(resources['accelerator_args'])
-        if resources.get('use_spot') is not None:
-            resources['use_spot'] = resources['use_spot']
-        resources = sky.Resources(**resources)
+        if resources is not None:
+            if resources.get('cloud') is not None:
+                resources['cloud'] = clouds.CLOUD_REGISTRY[resources['cloud']]
+            if resources.get('accelerators') is not None:
+                resources['accelerators'] = resources['accelerators']
+            if resources.get('accelerator_args') is not None:
+                resources['accelerator_args'] = dict(
+                    resources['accelerator_args'])
+            if resources.get('use_spot') is not None:
+                resources['use_spot'] = resources['use_spot']
+            resources = sky.Resources(**resources)
+        else:
+            resources = sky.Resources()
         task.set_resources({resources})
         return task
 
     def validate_config(self):
-        if bool(self.docker_image) != bool(self.container_name):
-            raise ValueError('Either docker_image and container_name are both'
-                             ' None or valid strings.')
         if self.num_nodes <= 0:
             raise ValueError('Must set Task.num_nodes to >0.')
 
@@ -271,8 +300,10 @@ class Task:
                 'call set_time_estimator() first'.format(self))
         return self.time_estimator_func(resources)
 
-    def set_storage_mounts(self,
-                           storage_mounts: Dict[storage_lib.Storage, str]):
+    def set_storage_mounts(
+        self,
+        storage_mounts: Dict[storage_lib.Storage, str],
+    ):
         """Sets the storage mounts for this Task
 
         Advanced method for users. Storage mounts map a Storage object
@@ -318,6 +349,14 @@ class Task:
                     mnt_path: 's3://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.GCS:
+                # Remember to run `gcloud auth application-default login`
+                self.update_file_mounts(
+                    {'~/.config/gcloud': '~/.config/gcloud'})
+                self.setup = '[[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && ' + \
+                'echo GOOGLE_APPLICATION_CREDENTIALS=' + \
+                '~/.config/gcloud/application_default_credentials.json >> ' + \
+                '~/.bashrc' + ' || echo "GOOGLE_APPLICATION_CREDENTIALS ' + \
+                'already set" && ' + self.setup
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
@@ -420,15 +459,22 @@ class Task:
             return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
+            if len(run_msg) > 20:
+                run_msg = f'run=\'{run_msg[:20]}...\''
+            else:
+                run_msg = f'run=\'{run_msg}\''
+        elif self.run is None:
+            run_msg = 'run=None'
         else:
-            run_msg = '<fn>'
-        if len(run_msg) > 20:
-            s = f'Task(run=\'{run_msg[:20]}...\')'
-        else:
-            s = f'Task(run=\'{run_msg}\')'
+            run_msg = 'run=<fn>'
+
+        s = f'Task({run_msg})'
         if self.inputs is not None:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
             s += f'\n  outputs: {self.outputs}'
-        s += f'\n  resources: {self.resources}'
+        if len(self.resources) > 1 or not list(self.resources)[0].is_empty():
+            s += f'\n  resources: {self.resources}'
+        else:
+            s += '\n  resources: default instances'
         return s

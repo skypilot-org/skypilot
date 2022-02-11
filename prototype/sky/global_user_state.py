@@ -93,6 +93,13 @@ def add_or_update_cluster(cluster_name: str,
     _CONN.commit()
 
 
+def update_last_use(cluster_name: str):
+    """Updates the last used command for the cluster."""
+    _CURSOR.execute('UPDATE clusters SET last_use=(?) WHERE name=(?)',
+                    (_get_pretty_entry_point(), cluster_name))
+    _CONN.commit()
+
+
 def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
     if terminate:
@@ -113,8 +120,9 @@ def remove_cluster(cluster_name: str, terminate: bool):
     _CONN.commit()
 
 
-def get_handle_from_cluster_name(cluster_name: str
-                                ) -> Optional[backends.Backend.ResourceHandle]:
+def get_handle_from_cluster_name(
+        cluster_name: str) -> Optional[backends.Backend.ResourceHandle]:
+    assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _CURSOR.execute('SELECT handle FROM clusters WHERE name=(?)',
                            (cluster_name,))
     for (handle,) in rows:
@@ -122,12 +130,31 @@ def get_handle_from_cluster_name(cluster_name: str
 
 
 def get_cluster_name_from_handle(
-        cluster_handle: backends.Backend.ResourceHandle,) -> Optional[str]:
+        cluster_handle: backends.Backend.ResourceHandle) -> Optional[str]:
     handle = pickle.dumps(cluster_handle)
     rows = _CURSOR.execute('SELECT name FROM clusters WHERE handle=(?)',
                            (handle,))
     for (name,) in rows:
         return name
+
+
+def get_status_from_cluster_name(cluster_name: str) -> ClusterStatus:
+    rows = _CURSOR.execute('SELECT status FROM clusters WHERE name=(?)',
+                           (cluster_name,))
+    for (status,) in rows:
+        return ClusterStatus[status]
+
+
+def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
+    _CURSOR.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
+        status.value,
+        cluster_name,
+    ))
+    count = _CURSOR.rowcount
+    _CONN.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 def get_clusters() -> List[Dict[str, Any]]:

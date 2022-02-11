@@ -13,10 +13,15 @@ PostSetupFn = Callable[[str], Any]
 class Backend:
     """Backend interface: handles provisioning, setup, and scheduling."""
 
+    # NAME is used to identify the backend class from cli/yaml.
+    NAME = 'backend'
+
     # Backend-specific handle to the launched resources (e.g., a cluster).
     # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
     class ResourceHandle:
-        pass
+
+        def get_cluster_name(self) -> str:
+            raise NotImplementedError
 
     def provision(self,
                   task: Task,
@@ -30,21 +35,21 @@ class Backend:
         raise NotImplementedError
 
     def sync_file_mounts(
-            self,
-            handle: ResourceHandle,
-            all_file_mounts: Dict[Path, Path],
-            cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        self,
+        handle: ResourceHandle,
+        all_file_mounts: Dict[Path, Path],
+        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         raise NotImplementedError
 
     def add_storage_objects(self, task: Task) -> None:
         raise NotImplementedError
 
-    def run_post_setup(self, handle: ResourceHandle, post_setup_fn: PostSetupFn,
-                       task: Task) -> None:
+    def run_post_setup(self, handle: ResourceHandle,
+                       post_setup_fn: PostSetupFn) -> None:
         raise NotImplementedError
 
-    def execute(self, handle: ResourceHandle, task: Task, stream_logs: bool,
+    def execute(self, handle: ResourceHandle, task: Task,
                 detach_run: bool) -> None:
         raise NotImplementedError
 

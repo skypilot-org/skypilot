@@ -9,8 +9,8 @@ from sky.clouds.service_catalog import gcp_catalog
 
 
 def list_accelerators(
-        gpus_only: bool = True,
-        name_filter: Optional[str] = None,
+    gpus_only: bool = True,
+    name_filter: Optional[str] = None,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """List the names of all accelerators offered by Sky.
 
@@ -30,8 +30,8 @@ def list_accelerators(
 
 
 def list_accelerator_counts(
-        gpus_only: bool = True,
-        name_filter: Optional[str] = None,
+    gpus_only: bool = True,
+    name_filter: Optional[str] = None,
 ) -> Dict[str, List[int]]:
     """List all accelerators offered by Sky and available counts.
 

@@ -1,46 +1,46 @@
+"""Setup file for Sky."""
 import os
-from setuptools import setup
+import setuptools
 
 ROOT_DIR = os.path.dirname(__file__)
 
 install_requires = [
     'Click',
     'absl-py',
-    'boto3',
     'colorama',
     'jinja2',
     'networkx',
     'oauth2client',
     'pandas',
-    'pycryptodome==3.4.3',
+    'pycryptodome==3.12.0',
     'pendulum',
     'PrettyTable',
     'pytest',
     'ray[default]',
     'tabulate',
     'docker',
+    'wheel',
 ]
 
 extras_require = {
-    'aws': ['awscli==1.22.17'],
+    'aws': ['awscli==1.22.17', 'boto3'],
     # ray <= 1.9.1 requires an older version of azure-cli. We can get rid of
-    # this version requirement once ray 1.10 is released.
+    # this version requirement once ray 1.10 is adopted as our local version.
     'azure': ['azure-cli==2.22.0'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
 
-setup(
+setuptools.setup(
     name='sky',
     version='0.1.dev0',
-    packages=['sky'],
+    packages=setuptools.find_packages(),
+    setup_requires=['wheel'],
     install_requires=install_requires,
     extras_require=extras_require,
     entry_points={
-        'console_scripts': [
-            'sky = sky.cli:cli',
-        ],
+        'console_scripts': ['sky = sky.cli:cli'],
     },
     include_package_data=True,
     classifiers=[

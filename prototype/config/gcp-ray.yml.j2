@@ -8,7 +8,9 @@ max_workers: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
 provider:
-  type: gcp
+  # We use a custom node provider for GCP to support instance stop and reuse.
+  type: external  # type: gcp
+  module: sky.skylet.providers.GCPNodeProvider
   region: {{region}}
   availability_zone: {{zones}}
   project_id: intercloud-320520  # Globally unique project id
@@ -85,7 +87,7 @@ head_node_type: ray_head_default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-  "{{sky_remote_libs_remote_path}}": "{{sky_remote_libs_local_path}}",
+  "{{sky_remote_path}}": "{{sky_local_path}}",
 {%- if workdir is not none %}
   "~/sky_workdir": "{{workdir}}",
 {%- endif %}
@@ -102,9 +104,12 @@ initialization_commands:
 {%- for cmd in initialization_commands %}
   - {{cmd}}
 {%- endfor %}
+{%- else %}
+initialization_commands: []
 {%- endif %}
 
 # Patterns for files to exclude when running rsync up or rsync down
+rsync_exclude: []
 # rsync_exclude:
 #   - "**/.git"
 #   - "**/.git/**"
@@ -114,7 +119,9 @@ rsync_filter:
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && pip3 install pendulum PrettyTable
+  # _gang_schedule_ray_up() requires first two lines; do not modify.
+  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
+  - pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
 {%- if setup_sh_path is not none %}
   - cd ~/sky_workdir && bash /tmp/setup.sh  # FIXME: /tmp is volatile.
 {%- endif %}
@@ -126,7 +133,15 @@ head_start_ray_commands:
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
   - ray stop; ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
+{%- else %}
+worker_start_ray_commands: []
 {%- endif %}
 
 head_node: {}
 worker_nodes: {}
+
+# These fields are required for external cloud providers.
+head_setup_commands: []
+worker_setup_commands: []
+cluster_synced_files: []
+file_mounts_sync_continuously: False

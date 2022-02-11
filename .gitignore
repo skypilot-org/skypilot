@@ -7,8 +7,12 @@ plotting/*.png
 
 prototype/**/*.yml
 prototype/config/**/*.sh
-prototype/*.egg-info/
+prototype/docs/build
+prototype/**/*.egg-info/
 prototype/**/*.tmp
+prototype/build
+prototype/.eggs
+prototype/*.whl
 
 logs
 sky_logs

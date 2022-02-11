@@ -4,7 +4,9 @@
 #
 # Usage:
 #   sky launch -c jq cluster.yaml
-#   sky exec -c jq job.yaml
+#   sky exec jq job.yaml
+
+name: job
 
 resources:
   accelerators:

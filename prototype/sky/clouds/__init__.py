@@ -17,14 +17,14 @@ __all__ = [
     'from_str',
 ]
 
-__CLOUD_DICT__ = {
-    'AWS': AWS(),
-    'Azure': Azure(),
-    'GCP': GCP(),
+CLOUD_REGISTRY = {
+    'aws': AWS(),
+    'gcp': GCP(),
+    'azure': Azure(),
 }
 
-ALL_CLOUDS = list(__CLOUD_DICT__.values())
+ALL_CLOUDS = list(CLOUD_REGISTRY.values())
 
 
 def from_str(name: str) -> 'Cloud':
-    return __CLOUD_DICT__[name]
+    return CLOUD_REGISTRY[name]

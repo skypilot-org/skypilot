@@ -61,16 +61,6 @@ def test_partial_tpu(monkeypatch):
 
 
 def test_partial_v100(monkeypatch):
-    _test_resources(monkeypatch, sky.Resources(clouds.AWS(),
-                                               accelerators='V100'))
-    _test_resources(
-        monkeypatch,
-        sky.Resources(clouds.AWS(), accelerators='V100', use_spot=True))
-    _test_resources(monkeypatch,
-                    sky.Resources(clouds.AWS(), accelerators={'V100': 8}))
-
-
-def test_partial_v100(monkeypatch):
     _test_resources(monkeypatch, sky.Resources(sky.AWS(), accelerators='V100'))
     _test_resources(
         monkeypatch, sky.Resources(sky.AWS(),
@@ -78,6 +68,13 @@ def test_partial_v100(monkeypatch):
                                    use_spot=True))
     _test_resources(monkeypatch,
                     sky.Resources(sky.AWS(), accelerators={'V100': 8}))
+
+
+def test_invalid_cloud_tpu(monkeypatch):
+    with pytest.raises(AssertionError) as e:
+        _test_resources(monkeypatch,
+                        sky.Resources(cloud=sky.AWS(), accelerators='tpu-v3-8'))
+    assert 'Cloud must be GCP' in str(e.value)
 
 
 def test_clouds_not_enabled(monkeypatch):

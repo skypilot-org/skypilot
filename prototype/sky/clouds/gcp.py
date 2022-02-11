@@ -104,18 +104,25 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def region_zones_provision_loop(
-            cls,
-            *,
-            instance_type: Optional[str] = None,
-            accelerators: Optional[Dict[str, int]] = None,
-            use_spot: Optional[bool] = False,
+        cls,
+        *,
+        instance_type: Optional[str] = None,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
-        # TODO: enable this after GCP catalog completes.
-        # regions = gcp_catalog.get_region_zones_for_accelerators(accelerators)
-        del instance_type, accelerators, use_spot  # unused
+        del instance_type  # unused
+        if accelerators is None:
+            # fallback to manually specified region/zones
+            regions = cls.regions()
+        else:
+            assert len(accelerators) == 1, accelerators
+            acc = list(accelerators.keys())[0]
+            acc_count = list(accelerators.values())[0]
+            regions = gcp_catalog.get_region_zones_for_accelerators(
+                acc, acc_count, use_spot)
 
-        for region in cls.regions():
+        for region in regions:
             for zone in region.zones:
                 yield (region, [zone])
 
@@ -179,7 +186,7 @@ class GCP(clouds.Cloud):
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
                 resources_vars['tf_version'] = r.accelerator_args['tf_version']
-                resources_vars['tpu_name'] = r.accelerator_args['tpu_name']
+                resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
@@ -207,8 +214,8 @@ class GCP(clouds.Cloud):
         return [r]
 
     def get_accelerators_from_instance_type(
-            self,
-            instance_type: str,
+        self,
+        instance_type: str,
     ) -> Optional[Dict[str, int]]:
         # GCP handles accelerators separately from regular instance types,
         # hence return none here.

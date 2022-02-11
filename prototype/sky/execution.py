@@ -21,10 +21,10 @@ import sky
 from sky import backends
 from sky import init
 from sky import global_user_state
-from sky import logging
+from sky import sky_logging
 from sky import optimizer
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 OptimizeTarget = optimizer.OptimizeTarget
 
@@ -79,9 +79,14 @@ def _execute(dag: sky.Dag,
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]
 
-    if stages is None or Stage.OPTIMIZE in stages:
+    cluster_exists = False
+    if cluster_name is not None:
+        existing_handle = global_user_state.get_handle_from_cluster_name(
+            cluster_name)
+        cluster_exists = existing_handle is not None
+
+    if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
         if task.best_resources is None:
-            logger.info(f'Optimizer target is set to {optimize_target.name}.')
             # TODO: fix this for the situation where number of requested
             # accelerators is not an integer.
             dag = sky.optimize(dag, minimize=optimize_target)
@@ -128,12 +133,12 @@ def _execute(dag: sky.Dag,
                                      task.get_cloud_to_remote_file_mounts())
 
         if stages is None or Stage.PRE_EXEC in stages:
-            if task.post_setup_fn is not None:
-                backend.run_post_setup(handle, task.post_setup_fn, task)
+            backend.run_post_setup(handle, task.post_setup_fn)
 
         if stages is None or Stage.EXEC in stages:
             try:
-                backend.execute(handle, task, stream_logs, detach_run)
+                global_user_state.update_last_use(handle.get_cluster_name())
+                backend.execute(handle, task, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, teardown)
@@ -176,14 +181,14 @@ def launch(dag: sky.Dag,
 
 
 def exec(  # pylint: disable=redefined-builtin
-        dag: sky.Dag,
-        dryrun: bool = False,
-        teardown: bool = False,
-        stream_logs: bool = True,
-        backend: Optional[backends.Backend] = None,
-        optimize_target: OptimizeTarget = OptimizeTarget.COST,
-        cluster_name: Optional[str] = None,
-        detach_run: bool = False,
+    dag: sky.Dag,
+    dryrun: bool = False,
+    teardown: bool = False,
+    stream_logs: bool = True,
+    backend: Optional[backends.Backend] = None,
+    optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    cluster_name: Optional[str] = None,
+    detach_run: bool = False,
 ) -> None:
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:

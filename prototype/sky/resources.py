@@ -2,9 +2,9 @@
 from typing import Dict, Optional, Union
 
 from sky import clouds
-from sky import logging
+from sky import sky_logging
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
 class Resources:
@@ -32,34 +32,39 @@ class Resources:
     """
 
     def __init__(
-            self,
-            cloud: Optional[clouds.Cloud] = None,
-            instance_type: Optional[str] = None,
-            accelerators: Union[None, str, Dict[str, int]] = None,
-            accelerator_args: Optional[Dict[str, str]] = None,
-            use_spot: bool = False,
+        self,
+        cloud: Optional[clouds.Cloud] = None,
+        instance_type: Optional[str] = None,
+        accelerators: Union[None, str, Dict[str, int]] = None,
+        accelerator_args: Optional[Dict[str, str]] = None,
+        use_spot: Optional[bool] = None,
     ):
         self.cloud = cloud
         self.instance_type = instance_type
         assert not (instance_type is not None and cloud is None), \
             'If instance_type is specified, must specify the cloud'
-        # Convert to Dict[str, int].
-        if accelerators is not None and isinstance(accelerators, str):
-            if 'tpu' in accelerators:
+        if accelerators is not None:
+            if isinstance(accelerators, str):  # Convert to Dict[str, int].
+                accelerators = {accelerators: 1}
+            assert len(accelerators) == 1, accelerators
+
+            acc, _ = list(accelerators.items())[0]
+            if 'tpu' in acc:
+                if cloud is None:
+                    cloud = clouds.GCP()
+                assert cloud.is_same_cloud(clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
                 if 'tf_version' not in accelerator_args:
                     logger.info('Missing tf_version in accelerator_args, using'
                                 ' default (2.5.0)')
                     accelerator_args['tf_version'] = '2.5.0'
-                if 'tpu_name' not in accelerator_args:
-                    logger.info('Missing tpu_name in accelerator_args, using'
-                                ' default (sky_tpu)')
-                    accelerator_args['tpu_name'] = 'sky_tpu'
-            accelerators = {accelerators: 1}
+
         self.accelerators = accelerators
         self.accelerator_args = accelerator_args
-        self.use_spot = use_spot
+
+        self._use_spot_specified = use_spot is not None
+        self.use_spot = use_spot if use_spot is not None else False
 
         self._try_validate_accelerators()
 
@@ -147,7 +152,9 @@ class Resources:
             return False
         # self.instance_type == other.instance_type
 
-        if self.accelerators != other.accelerators:
+        other_accelerators = other.get_accelerators()
+        accelerators = self.get_accelerators()
+        if accelerators != other_accelerators:
             return False
         # self.accelerators == other.accelerators
 
@@ -184,7 +191,8 @@ class Resources:
                     return False
         # self.accelerators <= other.accelerators
 
-        if self.accelerator_args != other.accelerator_args:
+        if (self.accelerator_args is not None and
+                self.accelerator_args != other.accelerator_args):
             return False
         # self.accelerator_args == other.accelerator_args
 
@@ -204,3 +212,13 @@ class Resources:
         # For GCP, when a accelerator type fails to launch, it should be blocked
         # regardless of the count, since the larger number will fail either.
         return self.accelerators.keys() == other.accelerators.keys()
+
+    def is_empty(self) -> bool:
+        """Is this Resources an empty request (all fields None)?"""
+        return all([
+            self.cloud is None,
+            self.instance_type is None,
+            self.accelerators is None,
+            self.accelerator_args is None,
+            not self._use_spot_specified,
+        ])

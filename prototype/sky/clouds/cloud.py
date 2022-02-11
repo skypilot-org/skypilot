@@ -32,11 +32,11 @@ class Cloud:
 
     @classmethod
     def region_zones_provision_loop(
-            cls,
-            *,
-            instance_type: Optional[str] = None,
-            accelerators: Optional[Dict[str, int]] = None,
-            use_spot: Optional[bool] = False,
+        cls,
+        *,
+        instance_type: Optional[str] = None,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
@@ -101,8 +101,8 @@ class Cloud:
         raise NotImplementedError
 
     def get_accelerators_from_instance_type(
-            self,
-            instance_type: str,
+        self,
+        instance_type: str,
     ) -> Optional[Dict[str, int]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
         raise NotImplementedError

@@ -11,10 +11,11 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import pendulum
-import prettytable
 
-SKY_REMOTE_WORKDIR = '~/sky_workdir'
+from sky.skylet import util_lib
+
 SKY_LOGS_DIRECTORY = 'sky_logs'
+SKY_REMOTE_LOGS_ROOT = '~'
 
 
 class JobStatus(enum.Enum):
@@ -38,10 +39,12 @@ _RAY_TO_JOB_STATUS_MAP = {
 class JobInfoLoc(enum.IntEnum):
     """Job Info's Location in the DB record"""
     JOB_ID = 0
-    USERNAME = 1
-    SUBMITTED_AT = 2
-    STATUS = 3
-    RUN_TIMESTAMP = 4
+    JOB_NAME = 1
+    USERNAME = 2
+    SUBMITTED_AT = 3
+    STATUS = 4
+    RUN_TIMESTAMP = 5
+    START_AT = 6
 
 
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
@@ -57,24 +60,23 @@ except sqlite3.OperationalError:
     _CURSOR.execute("""\
       CREATE TABLE jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_name TEXT,
         username TEXT,
         submitted_at INTEGER,
         status TEXT,
-        run_timestamp TEXT CANDIDATE KEY)""")
+        run_timestamp TEXT CANDIDATE KEY,
+        start_at INTEGER)""")
 
 _CONN.commit()
 
 
-def add_job(username: str, run_timestamp: str) -> int:
+def add_job(job_name: str, username: str, run_timestamp: str) -> int:
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     # job_id will autoincrement with the null value
-    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?)', (
-        username,
-        job_submitted_at,
-        JobStatus.INIT.value,
-        run_timestamp,
-    ))
+    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?)',
+                    (job_name, username, job_submitted_at, JobStatus.INIT.value,
+                     run_timestamp, None))
     _CONN.commit()
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
@@ -85,14 +87,40 @@ def add_job(username: str, run_timestamp: str) -> int:
 
 
 def set_status(job_id: int, status: JobStatus) -> None:
+    assert status != JobStatus.RUNNING, (
+        'Please use set_job_started() to set job status to RUNNING')
     _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
                     (status.value, job_id))
     _CONN.commit()
 
 
-def _get_jobs(username: Optional[str],
-              status_list: Optional[List[JobStatus]] = None
-             ) -> List[Dict[str, Any]]:
+def set_job_started(job_id: int) -> None:
+    _CURSOR.execute('UPDATE jobs SET status=(?), start_at=(?) WHERE job_id=(?)',
+                    (JobStatus.RUNNING.value, int(time.time()), job_id))
+    _CONN.commit()
+
+
+def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
+    records = []
+    for row in rows:
+        if row[0] is None:
+            break
+        # TODO: use namedtuple instead of dict
+        records.append({
+            'job_id': row[JobInfoLoc.JOB_ID.value],
+            'job_name': row[JobInfoLoc.JOB_NAME.value],
+            'username': row[JobInfoLoc.USERNAME.value],
+            'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
+            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
+            'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
+            'start_at': row[JobInfoLoc.START_AT.value],
+        })
+    return records
+
+
+def _get_jobs(
+        username: Optional[str],
+        status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [status.value for status in status_list]
@@ -114,18 +142,19 @@ def _get_jobs(username: Optional[str],
             (*status_str_list, username),
         )
 
-    records = []
-    for row in rows:
-        if row[0] is None:
-            break
-        # TODO: use namedtuple instead of dict
-        records.append({
-            'job_id': row[JobInfoLoc.JOB_ID.value],
-            'username': row[JobInfoLoc.USERNAME.value],
-            'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
-            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
-            'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
-        })
+    records = _get_records_from_rows(rows)
+    return records
+
+
+def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
+    rows = _CURSOR.execute(
+        f"""\
+        SELECT * FROM jobs
+        WHERE job_id IN ({','.join(['?'] * len(job_ids))})
+        ORDER BY job_id DESC""",
+        (*job_ids,),
+    )
+    records = _get_records_from_rows(rows)
     return records
 
 
@@ -181,10 +210,13 @@ def _update_status() -> None:
     job_status = query_job_status(running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
-        set_status(job['job_id'], status)
+        if status != JobStatus.RUNNING:
+            set_status(job['job_id'], status)
 
 
-def _readable_time_duration(start: int) -> str:
+def _readable_time_duration(start: Optional[int]) -> str:
+    if start is None:
+        return '-'
     duration = pendulum.now().subtract(seconds=time.time() - start)
     diff = duration.diff_for_humans()
     diff = diff.replace('second', 'sec')
@@ -194,17 +226,18 @@ def _readable_time_duration(start: int) -> str:
 
 
 def _show_job_queue(jobs) -> None:
-    job_table = prettytable.PrettyTable()
-    job_table.field_names = ['JOB', 'USER', 'SUBMITTED', 'STATUS', 'LOG']
-    job_table.align['LOG'] = 'l'
+    job_table = util_lib.create_table(
+        ['ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'STATUS', 'LOG'])
 
     for job in jobs:
         job_table.add_row([
             job['job_id'],
+            job['job_name'],
             job['username'],
             _readable_time_duration(job['submitted_at']),
+            _readable_time_duration(job['start_at']),
             job['status'].value,
-            os.path.join('sky_logs', job['run_timestamp']),
+            os.path.join(SKY_LOGS_DIRECTORY, job['run_timestamp']),
         ])
     print(job_table)
 
@@ -225,27 +258,32 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
     _show_job_queue(jobs)
 
 
-def cancel_jobs(jobs: Optional[List[str]]) -> None:
+def cancel_jobs(jobs: Optional[List[int]]) -> None:
     """Cancel the jobs.
 
     Args:
         jobs: The job ids to cancel. If None, cancel all the jobs.
     """
+    # Update the status of the jobs to avoid setting the status of staled
+    # jobs to CANCELLED.
+    _update_status()
     if jobs is None:
         job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
-        jobs = [job['job_id'] for job in job_records]
+    else:
+        job_records = _get_jobs_by_ids(jobs)
+    jobs = [job['job_id'] for job in job_records]
     cancel_cmd = [
         f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
     ]
     cancel_cmd = ';'.join(cancel_cmd)
-    subprocess.run(cancel_cmd, shell=True, check=True, executable='/bin/bash')
+    subprocess.run(cancel_cmd, shell=True, check=False, executable='/bin/bash')
     for job in job_records:
         if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
             set_status(job['job_id'], JobStatus.CANCELLED)
 
 
 def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
-    """Returns the path to the log file for a job and the status."""
+    """Returns the relative path to the log file for a job and the status."""
     _update_status()
     rows = _CURSOR.execute(
         """\
@@ -257,5 +295,4 @@ def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
         status = row[JobInfoLoc.STATUS.value]
         status = JobStatus[status]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-    return os.path.join(SKY_REMOTE_WORKDIR, SKY_LOGS_DIRECTORY,
-                        run_timestamp), status
+    return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp), status

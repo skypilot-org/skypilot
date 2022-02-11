@@ -37,6 +37,10 @@ gcloud init
 # Run this if you don't have a credentials file.
 # This will generate ~/.config/gcloud/application_default_credentials.json.
 gcloud auth application-default login
+
+# Export environment variable to .bashrc
+echo GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json >> ~/.bashrc
+source ~/.bashrc
 ```
 TODO: allow user to set up/create her own project_id and pass in somewhere.
 

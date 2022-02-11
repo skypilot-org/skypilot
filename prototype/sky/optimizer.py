@@ -13,15 +13,18 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
 from sky import init
-from sky import logging
 from sky import resources as resources_lib
+from sky import sky_logging
 from sky import task as task_lib
 
-logger = logging.init_logger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 Dag = dag_lib.Dag
 Resources = resources_lib.Resources
 Task = task_lib.Task
+
+_DUMMY_SOURCE_NAME = 'sky-dummy-source'
+_DUMMY_SINK_NAME = 'sky-dummy-sink'
 
 
 # Constants: minimize what target?
@@ -117,10 +120,10 @@ class Optimizer:
             return dummy
 
         with dag:
-            source = make_dummy('__source__')
+            source = make_dummy(_DUMMY_SOURCE_NAME)
             for real_source_node in zero_indegree_nodes:
                 source >> real_source_node  # pylint: disable=pointless-statement
-            sink = make_dummy('__sink__')
+            sink = make_dummy(_DUMMY_SINK_NAME)
             for real_sink_node in zero_outdegree_nodes:
                 real_sink_node >> sink  # pylint: disable=pointless-statement
         return dag
@@ -128,8 +131,8 @@ class Optimizer:
     @staticmethod
     def _remove_dummy_source_sink_nodes(dag: Dag):
         """Removes special Source and Sink nodes."""
-        source = [t for t in dag.tasks if t.name == '__source__']
-        sink = [t for t in dag.tasks if t.name == '__sink__']
+        source = [t for t in dag.tasks if t.name == _DUMMY_SOURCE_NAME]
+        sink = [t for t in dag.tasks if t.name == _DUMMY_SINK_NAME]
         assert len(source) == len(sink) == 1, dag.tasks
         dag.remove(source[0])
         dag.remove(sink[0])
@@ -161,9 +164,9 @@ class Optimizer:
 
     @staticmethod
     def _optimize_cost(
-            dag: Dag,
-            minimize_cost: bool = True,
-            blocked_launchable_resources: Optional[List[Resources]] = None,
+        dag: Dag,
+        minimize_cost: bool = True,
+        blocked_launchable_resources: Optional[List[Resources]] = None,
     ):
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
@@ -174,8 +177,8 @@ class Optimizer:
         # node -> {resources -> best estimated cost}
         dp_best_cost = collections.defaultdict(dict)
         # d[node][resources][parent] = (best parent resources, best parent cost)
-        dp_point_backs = collections.defaultdict(lambda: collections.
-                                                 defaultdict(dict))
+        dp_point_backs = collections.defaultdict(
+            lambda: collections.defaultdict(dict))
 
         for node_i, node in enumerate(topo_order):
             # Base case: a special source node.
@@ -272,11 +275,16 @@ class Optimizer:
             dp_best_cost = {
                 k: v
                 for k, v in dp_best_cost.items()
-                if k.name not in ('__source__', '__sink__')
+                if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
             }
             metric = 'cost' if minimize_cost else 'time'
-            logger.info(f'Details: task -> {{resources -> {metric}}}')
-            logger.info('%s\n', pprint.pformat(dp_best_cost))
+            if len(dp_best_cost) > 1:
+                logger.info(f'Details: task -> {{resources -> {metric}}}')
+                logger.info('%s\n', pprint.pformat(dp_best_cost))
+            elif len(dp_best_cost) == 1:
+                logger.info(f'Considered resources -> {metric}')
+                logger.info('%s\n',
+                            pprint.pformat(list(dp_best_cost.values())[0]))
 
         return dag, best_plan
 
@@ -315,7 +323,7 @@ class Optimizer:
         # Do not print Source or Sink.
         message_data = [
             t for t in message_data
-            if t[0].name not in ('__source__', '__sink__')
+            if t[0].name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
         ]
         message = tabulate.tabulate(reversed(message_data),
                                     headers=['TASK', 'BEST_RESOURCE'],

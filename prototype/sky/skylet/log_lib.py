@@ -9,30 +9,34 @@ import subprocess
 import sys
 import time
 import tempfile
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional, Tuple, Union
 
-# Need this to make `job_lib` visible to this file, when imported as a module
-sys.path.append(os.path.dirname(__file__))
-import job_lib  # pylint: disable=wrong-import-position
+from sky.skylet import job_lib
 
 
-def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
+def redirect_process_output(proc,
+                            log_path: str,
+                            stream_logs: bool,
+                            start_streaming_at: str = '',
+                            skip_lines: Optional[List[str]] = None,
+                            replace_crlf: bool = False) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
 
+    sel = selectors.DefaultSelector()
     out_io = io.TextIOWrapper(proc.stdout,
                               encoding='utf-8',
                               newline='',
                               errors='replace')
-    err_io = io.TextIOWrapper(proc.stderr,
-                              encoding='utf-8',
-                              newline='',
-                              errors='replace')
-    sel = selectors.DefaultSelector()
     sel.register(out_io, selectors.EVENT_READ)
-    sel.register(err_io, selectors.EVENT_READ)
+    if proc.stderr is not None:
+        err_io = io.TextIOWrapper(proc.stderr,
+                                  encoding='utf-8',
+                                  newline='',
+                                  errors='replace')
+        sel.register(err_io, selectors.EVENT_READ)
 
     stdout = ''
     stderr = ''
@@ -49,6 +53,13 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
                     continue
                 # Remove special characters to avoid cursor hidding
                 line = line.replace('\x1b[?25l', '')
+                if replace_crlf and line.endswith('\r\n'):
+                    # Replace CRLF with LF to avoid ray logging to the same line
+                    # due to separating lines with '\n'.
+                    line = line[:-2] + '\n'
+                if (skip_lines is not None and
+                        any(skip in line for skip in skip_lines)):
+                    continue
                 if start_streaming_at in line:
                     start_streaming_flag = True
                 if key.fileobj is out_io:
@@ -60,31 +71,77 @@ def redirect_process_output(proc, log_path, stream_logs, start_streaming_at=''):
                 if stream_logs and start_streaming_flag:
                     out_stream.write(line)
                     out_stream.flush()
-                fout.write(line)
+                if log_path != '/dev/null':
+                    fout.write(line)
+                    fout.flush()
     return stdout, stderr
 
 
-def run_with_log(cmd: List[str],
-                 log_path: str,
-                 stream_logs: bool = False,
-                 start_streaming_at: str = '',
-                 return_none: bool = False,
-                 check: bool = False,
-                 **kwargs):
+def run_with_log(
+    cmd: List[str],
+    log_path: str,
+    stream_logs: bool = False,
+    start_streaming_at: str = '',
+    return_none: bool = False,
+    check: bool = False,
+    with_ray: bool = False,
+    **kwargs,
+) -> Union[None, Tuple[subprocess.Popen, str, str]]:
     """Runs a command and logs its output to a file.
 
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
+    # Redirect stderr to stdout when using ray, to preserve the order of
+    # stdout and stderr.
+    stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
     with subprocess.Popen(cmd,
                           stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE,
+                          stderr=stderr,
+                          start_new_session=True,
                           **kwargs) as proc:
+        # The proc can be defunct if the python program is killed. Here we
+        # open a new subprocess to gracefully kill the proc, SIGTERM
+        # and then SIGKILL the process group.
+        # Adapted from ray/dashboard/modules/job/job_manager.py#L154
+        parent_pid = os.getpid()
+        daemon_script = os.path.join(
+            os.path.dirname(os.path.abspath(job_lib.__file__)),
+            'subprocess_daemon.sh')
+        daemon_cmd = [
+            '/bin/bash', daemon_script,
+            str(parent_pid),
+            str(proc.pid)
+        ]
+        subprocess.Popen(
+            daemon_cmd,
+            start_new_session=True,
+            # Suppress output
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # We need this even if the log_path is '/dev/null' to ensure the
+        # progress bar is shown.
         stdout, stderr = redirect_process_output(
-            proc, log_path, stream_logs, start_streaming_at=start_streaming_at)
+            proc,
+            log_path,
+            stream_logs,
+            start_streaming_at=start_streaming_at,
+            # Skip these lines caused by `-i` option of bash. Failed to find
+            # other way to turn off these two warning.
+            # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+            skip_lines=[
+                'bash: cannot set terminal process group',
+                'bash: no job control in this shell',
+            ],
+            # Replace CRLF when the output is logged to driver by ray.
+            replace_crlf=with_ray,
+        )
         proc.wait()
-        if proc.returncode != 0 and check:
-            raise RuntimeError('Command failed, please check the logs.')
+        if proc.returncode and check:
+            if stderr:
+                print(stderr, file=sys.stderr)
+            raise subprocess.CalledProcessError(proc.returncode, cmd)
         if return_none:
             return None
         return proc, stdout, stderr
@@ -92,19 +149,23 @@ def run_with_log(cmd: List[str],
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              stream_logs: bool = False):
+                              stream_logs: bool = False,
+                              with_ray: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
         run_with_log(
-            f'/bin/bash {script_path}',
+            # Need this `-i` option to make sure `source ~/.bashrc` work.
+            # Do not use shell=True because it will cause the environment
+            # set in this task visible to other tasks. shell=False requires
+            # the cmd to be a list.
+            ['/bin/bash', '-i', script_path],
             log_path,
             stream_logs=stream_logs,
             return_none=True,
-            # The script will be not found without this
-            shell=True,
             check=True,
+            with_ray=with_ray,
         )
 
 
@@ -150,7 +211,7 @@ def tail_logs(job_id: int, log_dir: Optional[str],
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
 
-    log_path = os.path.join(log_dir, 'run.log')
+    log_path = os.path.join(job_lib.SKY_REMOTE_LOGS_ROOT, log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
