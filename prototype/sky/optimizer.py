@@ -233,7 +233,8 @@ class Optimizer:
                         logger.debug(f'resources: {resources}')
 
                     if minimize_cost:
-                        estimated_cost = resources.get_cost(estimated_runtime)
+                        cost_per_node = resources.get_cost(estimated_runtime)
+                        estimated_cost = cost_per_node * node.num_nodes
                     else:
                         # Minimize run time; overload the term 'cost'.
                         estimated_cost = estimated_runtime
@@ -246,6 +247,7 @@ class Optimizer:
                                 '  estimated_cost (not incl. egress): ${:.1f}'.
                                 format(estimated_cost))
 
+                    # FIXME: Account for egress costs for multi-node clusters
                     sum_parent_cost_and_egress = 0
                     for parent in parents:
                         min_pred_cost_plus_egress = np.inf
@@ -322,8 +324,9 @@ class Optimizer:
                     overall_best / 3600))
         # Do not print Source or Sink.
         message_data = [
-            t for t in message_data
-            if t[0].name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
+            (t, f'{t.num_nodes}x {repr(r)}' if t.num_nodes > 1 else repr(r))
+            for (t, r) in message_data
+            if t.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
         ]
         message = tabulate.tabulate(reversed(message_data),
                                     headers=['TASK', 'BEST_RESOURCE'],

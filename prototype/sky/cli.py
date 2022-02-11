@@ -854,7 +854,7 @@ def stop(
     CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
     supplied, the latter takes precedence.
 
-    Limitation: this currently only works for AWS clusters.
+    Limitation: this currently only works for AWS/GCP non-spot clusters.
 
     Examples:
 
@@ -913,7 +913,8 @@ def start(clusters: Tuple[str]):
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
-            #    (currently, only AWS clusters can be in this state)
+            #    (currently, only AWS/GCP non-spot clusters can be in this
+            #    state)
             #
             #  UP - skipped, see below
             #
@@ -1059,6 +1060,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         backend = backend_utils.get_backend_from_handle(handle)
         if (isinstance(backend, backends.CloudVmRayBackend) and
                 handle.launched_resources.use_spot and not terminate):
+            # TODO(suquark): enable GCP+spot to be stopped in the future.
             click.secho(
                 f'Stopping cluster {name}... skipped, because spot instances '
                 'may lose attached volumes. ',
