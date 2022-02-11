@@ -35,6 +35,7 @@ SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.2'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
+SKY_USER_FILE_PATH = '~/.sky/generated'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
@@ -71,8 +72,8 @@ def _fill_template(template_path: str,
     if output_path is None:
         assert 'cluster_name' in variables, 'cluster_name is required.'
         cluster_name = variables['cluster_name']
-        output_path = pathlib.Path(
-            template_path).parents[0] / 'user' / f'{cluster_name}.yml'
+        output_path = pathlib.Path(os.path.expanduser(
+            SKY_USER_FILE_PATH)) / 'config' / f'{cluster_name}.yml'
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
     output_path = to_absolute(output_path)
@@ -487,10 +488,11 @@ def write_cluster_config(task: task_lib.Task,
                     'tpu_name': tpu_name,
                 }),
                 # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in config/user/ to be consistent with
+                # different TPUs.  Put in ~/.sky/generated/config/ to be consistent with
                 # cluster yamls.
                 output_path=path.replace('.sh.j2', f'.{cluster_name}.sh').
-                replace('config/', 'config/user/'),
+                replace('config/',
+                        os.path.expanduser(f'{SKY_USER_FILE_PATH}/config/')),
             ) for path in
             ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
         config_dict['tpu-create-script'] = scripts[0]
