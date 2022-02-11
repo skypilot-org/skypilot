@@ -1,10 +1,15 @@
 from typing import Dict
+import copy
 from functools import wraps
 from threading import RLock
 import time
 import logging
 
 from ray.autoscaler.node_provider import NodeProvider
+from ray.autoscaler.tags import (TAG_RAY_LAUNCH_CONFIG, TAG_RAY_NODE_KIND,
+                                 TAG_RAY_USER_NODE_TYPE)
+from ray.autoscaler._private.cli_logger import cli_logger, cf
+
 from sky.skylet.providers.gcp.config import (
     bootstrap_gcp, construct_clients_from_provider_config, get_node_type)
 
@@ -55,6 +60,8 @@ class GCPNodeProvider(NodeProvider):
         # Cache of node objects from the last nodes() call. This avoids
         # excessive DescribeInstances requests.
         self.cached_nodes: Dict[str, GCPNode] = {}
+        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes",
+                                                       True)
 
     def _construct_clients(self):
         _, _, compute, tpu = construct_clients_from_provider_config(
@@ -150,17 +157,57 @@ class GCPNodeProvider(NodeProvider):
     def create_node(self, base_config: dict, tags: dict, count: int) -> None:
         with self.lock:
             labels = tags  # gcp uses "labels" instead of aws "tags"
+            labels = dict(sorted(copy.deepcopy(labels).items()))
 
             node_type = get_node_type(base_config)
             resource = self.resources[node_type]
 
-            resource.create_instances(base_config, labels, count)
+            # Try to reuse previously stopped nodes with compatible configs
+            if self.cache_stopped_nodes:
+                if not isinstance(resource, GCPCompute):
+                    raise NotImplementedError("Starting cached TPU nodes is not supported.")
+                filters = {
+                    TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
+                    TAG_RAY_LAUNCH_CONFIG: labels[TAG_RAY_LAUNCH_CONFIG]
+                }
+                # This tag may not always be present.
+                if TAG_RAY_USER_NODE_TYPE in labels:
+                    filters[TAG_RAY_USER_NODE_TYPE] = labels[TAG_RAY_USER_NODE_TYPE]
+                reuse_nodes = resource._list_instances(filters, ["TERMINATED"])[:count]
+                reuse_node_ids = [n.id for n in reuse_nodes]
+                if reuse_nodes:
+                    # TODO(suquark): Some instances could still be stopping.
+                    # We may wait until these instances stop.
+                    cli_logger.print(
+                        # TODO: handle plural vs singular?
+                        f"Reusing nodes {cli_logger.render_list(reuse_node_ids)}. "
+                        "To disable reuse, set `cache_stopped_nodes: False` "
+                        "under `provider` in the cluster configuration."
+                    )
+                    for node_id in reuse_node_ids:
+                        resource.start_instance(node_id)
+                    for node_id in reuse_node_ids:
+                        self.set_node_tags(node_id, tags)
+                    count -= len(reuse_node_ids)
+            if count:
+                resource.create_instances(base_config, labels, count)
 
     @_retry
     def terminate_node(self, node_id: str):
         with self.lock:
             resource = self._get_resource_depending_on_node_name(node_id)
-            result = resource.delete_instance(node_id=node_id, )
+            if self.cache_stopped_nodes:
+                cli_logger.print(
+                    f"Stopping instance {node_id} "
+                    + cf.dimmed(
+                        "(to terminate instead, "
+                        "set `cache_stopped_nodes: False` "
+                        "under `provider` in the cluster configuration)"
+                    ),
+                )
+                result = resource.stop_instance(node_id=node_id)
+            else:
+                result = resource.delete_instance(node_id=node_id)
             return result
 
     @_retry
