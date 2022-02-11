@@ -1242,29 +1242,6 @@ class CloudVmRayBackend(backends.Backend):
 
             sync_to_all_nodes(src, dst, command)
 
-    def run_post_setup(self, handle: ResourceHandle,
-                       post_setup_fn: Optional[PostSetupFn]) -> None:
-        # TODO (zhwu): Do we still need this?
-        if post_setup_fn is not None:
-            ip_list = self._get_node_ips(handle.cluster_yaml,
-                                         handle.launched_nodes)
-            ssh_user, ssh_private_key = self._get_ssh_credential(
-                handle.cluster_yaml)
-
-            ip_to_command = post_setup_fn(ip_list)
-            for ip, cmd in ip_to_command.items():
-                if cmd is not None:
-                    cmd = (f'mkdir -p {SKY_REMOTE_WORKDIR} && '
-                           f'cd {SKY_REMOTE_WORKDIR} && {cmd}')
-                    backend_utils.run_command_on_ip_via_ssh(
-                        ip,
-                        cmd,
-                        ssh_user=ssh_user,
-                        ssh_private_key=ssh_private_key,
-                        log_path=os.path.join(self.log_dir, 'post_setup.log'),
-                        check=True,
-                        ssh_control_name=self._ssh_control_name(handle))
-
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()
         codegen.get_log_path(job_id)
@@ -1471,6 +1448,8 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
+        # TODO (zhwu): The resources limitation for multi-node ray.tune and horovod
+        # should be considered.
         for i in range(task.num_nodes):
             command_for_node = task.run if isinstance(task.run, str) else None
 

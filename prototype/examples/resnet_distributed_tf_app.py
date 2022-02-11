@@ -23,8 +23,10 @@ with sky.Dag() as dag:
 
     # The command to run.  Will be run under the working directory.
     # If a str, run the same command on all nodes.
-    # If a function, run per-node command on each node.
-    # This function should be self-contained and not depend on any external.
+    # Generates per-node commands.  Must be a self-contained lambda
+    # that doesn't refer to any external variables.
+    #
+    # Will be run under the working directory.
     def run_fn(node_rank: int, ip_list: List[str]) -> str:
         import json
         tf_config = {

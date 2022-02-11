@@ -35,9 +35,8 @@ class Stage(enum.Enum):
     PROVISION = 1
     SYNC_WORKDIR = 2
     SYNC_FILE_MOUNTS = 3
-    PRE_EXEC = 4
-    EXEC = 5
-    TEARDOWN = 6
+    EXEC = 4
+    TEARDOWN = 5
 
 
 def _execute(dag: sky.Dag,
@@ -128,9 +127,6 @@ def _execute(dag: sky.Dag,
         if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.get_cloud_to_remote_file_mounts())
-
-        if stages is None or Stage.PRE_EXEC in stages:
-            backend.run_post_setup(handle, task.post_setup_fn)
 
         if stages is None or Stage.EXEC in stages:
             try:

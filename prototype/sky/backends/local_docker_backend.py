@@ -201,9 +201,10 @@ class LocalDockerBackend(backends.Backend):
                     'mode': 'rw'
                 }
         self.volume_mounts[handle] = docker_mounts
+        
+        self._run_post_setup(handle)
 
-    def run_post_setup(self, handle: ResourceHandle,
-                       post_setup_fn: Optional[PostSetupFn]) -> None:
+    def _run_post_setup(self, handle: ResourceHandle) -> None:
         """
         Launches a container and runs a sleep command on it.
 
@@ -211,9 +212,6 @@ class LocalDockerBackend(backends.Backend):
         so that the container is kept alive and we can issue docker exec cmds
         to it to handle sky exec commands.
         """
-        if post_setup_fn is not None:
-            raise ValueError('post_setup_fn is not supported in'
-                             ' LocalDockerBackend.')
         colorama.init()
         style = colorama.Style
         assert handle in self.images, \

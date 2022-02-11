@@ -45,10 +45,6 @@ class Backend:
     def add_storage_objects(self, task: Task) -> None:
         raise NotImplementedError
 
-    def run_post_setup(self, handle: ResourceHandle,
-                       post_setup_fn: PostSetupFn) -> None:
-        # TODO (zhwu): Do we still need this?
-        raise NotImplementedError
 
     def execute(self, handle: ResourceHandle, task: Task,
                 detach_run: bool) -> None:

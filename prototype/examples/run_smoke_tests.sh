@@ -15,7 +15,7 @@ python "$DIR"/example_app.py
 time sky launch -c min "$DIR"/minimal.yaml
 sky down min &
 time sky launch -c env "$DIR"/env_check.yaml
-sky down sc &
+sky down env &
 time sky launch -c fm "$DIR"/using_file_mounts.yaml
 sky down fm &
 

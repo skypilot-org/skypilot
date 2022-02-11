@@ -71,7 +71,6 @@ class Task:
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
         # Advanced:
-        post_setup_fn: Optional[CommandGen] = None,
         docker_image: Optional[str] = None,
     ):
         """Initializes a Task.
@@ -101,10 +100,6 @@ class Task:
             treated as 1 node.  If > 1, each node will execute its own
             setup/run command; 'run' can either be a str, meaning all nodes get
             the same command, or a lambda, as documented above.
-          post_setup_fn: If specified, this generates commands to be run on all
-            node(s), which are run after resource provisioning and 'setup' but
-            before 'run'.  A typical use case is to set environment variables
-            on each node based on all node IPs.
           docker_image: The base docker image that this Task will be built on.
             In effect when LocalDockerBackend is used.  Defaults to
             'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'.
@@ -114,7 +109,6 @@ class Task:
         self.storage_mounts = {}
         self.storage_plans = {}
         self.setup = setup
-        self.post_setup_fn = post_setup_fn
         self.workdir = workdir
         self.docker_image = docker_image if docker_image \
             else 'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'
