@@ -190,7 +190,7 @@ class RayCodeGen:
                                     'add_gang_scheduling_placement_group().')
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
-        
+
         # Set CPU to avoid ray hanging the resources allocation
         # for remote functions, since the task will request 1 CPU
         # by default.
