@@ -161,13 +161,18 @@ class Azure(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+        help_str = (
+            '\n    For more info: '
+            'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # pylint: disable=line-too-long
+        )
         # This file is required because it will be synced to remote VMs for
         # `az` to access private storage buckets.
         # `az account show` does not guarantee this file exists.
         if not os.path.isfile(os.path.expanduser('~/.azure/accessTokens.json')):
             return (
                 False,
-                '~/.azure/accessTokens.json does not exist. Run `az login`.')
+                '~/.azure/accessTokens.json does not exist. Run `az login`.' +
+                help_str)
         try:
             output = _run_output('az account show --output=json')
         except subprocess.CalledProcessError:
@@ -178,7 +183,7 @@ class Azure(clouds.Cloud):
         #   Please run 'az login' to setup account.
         if output.startswith('{'):
             return True, None
-        return False, 'Azure credentials not set. Run `az login`.'
+        return False, 'Azure credentials not set. Run `az login`.' + help_str
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {'~/.azure': '~/.azure'}

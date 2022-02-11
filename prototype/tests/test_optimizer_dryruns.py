@@ -12,7 +12,9 @@ from sky import exceptions
 # to return all three clouds. We also monkeypatch `sky.init.init` so that
 # when the optimizer tries calling it to update enabled_clouds, it does not
 # raise SystemExit.
-def _test_resources(monkeypatch, resources, enabled_clouds=clouds.ALL_CLOUDS):
+def _test_resources(monkeypatch, resources, enabled_clouds=None):
+    if enabled_clouds is None:
+        enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
     monkeypatch.setattr(
         'sky.global_user_state.get_enabled_clouds',
         lambda: enabled_clouds,

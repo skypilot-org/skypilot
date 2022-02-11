@@ -236,6 +236,7 @@ class GCP(clouds.Cloud):
             # which is used by Ray Autoscaler to launch VMs.
             auth.default()
         except (AssertionError, auth.exceptions.DefaultCredentialsError):
+            # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
                 'GCP credentials not set. Run the following commands:\n    '
                 # This authenticates the CLI to make `gsutil` work:
@@ -244,7 +245,11 @@ class GCP(clouds.Cloud):
                 # These two commands setup the client library to make
                 # Ray Autoscaler work:
                 '$ gcloud auth application-default login\n    '
-                '$ gcloud auth application-default set-quota-project <proj>')
+                '$ gcloud auth application-default set-quota-project '
+                '<proj>\n    '
+                'For more info: '
+                'https://googleapis.dev/python/google-api-core/latest/auth.html'
+            )
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
