@@ -245,6 +245,7 @@ class Optimizer:
                                 '  estimated_cost (not incl. egress): ${:.1f}'.
                                 format(estimated_cost))
 
+                    # FIXME: Account for egress costs for multi-node clusters
                     sum_parent_cost_and_egress = 0
                     for parent in parents:
                         min_pred_cost_plus_egress = np.inf
