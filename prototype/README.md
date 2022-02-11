@@ -37,6 +37,10 @@ gcloud init
 # Run this if you don't have a credentials file.
 # This will generate ~/.config/gcloud/application_default_credentials.json.
 gcloud auth application-default login
+
+# Export environment variable to .bashrc
+echo GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json >> ~/.bashrc
+source ~/.bashrc
 ```
 TODO: allow user to set up/create her own project_id and pass in somewhere.
 
@@ -56,7 +60,7 @@ ray attach config/gcp.yml
 ray down config/gcp.yml
 ```
 
-**Azure**. Install the Azure CLI (`pip install azure-cli`) then login using `az login`. Set the subscription to use from the command line (`az account set -s <subscription_id>`) or by modifying the provider section of the Azure template (`config/azure.yml.j2`). Ray Autoscaler does not work with the latest version of `azure-cli`. Hotfix: `pip install azure-cli-core==2.22.0` (this will make Ray work but at the cost of making the `az` CLI tool unusable).
+**Azure**. Install the Azure CLI (`pip install azure-cli==2.22.0`) then login using `az login`. Set the subscription to use from the command line (`az account set -s <subscription_id>`). Ray Autoscaler does not work with the latest version of `azure-cli` as of 1.9.1, hence the fixed Azure version.
 
 ## Open issues
 

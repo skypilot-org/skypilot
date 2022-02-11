@@ -125,3 +125,17 @@ class Cloud:
         Launchable resources require a cloud and an instance type be assigned.
         """
         raise NotImplementedError
+
+    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud.
+
+        Returns a boolean of whether the user can access this cloud, and a
+        string describing the reason if the user cannot access.
+        """
+        raise NotImplementedError
+
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        """Returns the files necessary to access this cloud.
+
+        Returns a dictionary that will be added to a task's file mounts."""
+        raise NotImplementedError

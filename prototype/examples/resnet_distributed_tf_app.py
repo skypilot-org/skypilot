@@ -6,9 +6,12 @@ import sky
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
-    subprocess.run(f'cd {workdir} && git checkout 9459fee',
-                   shell=True,
-                   check=True)
+    subprocess.run(
+        'cd ~/Downloads; '
+        '(git clone https://github.com/concretevitamin/tpu || true); '
+        f'cd {workdir} && git checkout 9459fee',
+        shell=True,
+        check=True)
 
     # Total Nodes, INCLUDING Head Node
     num_nodes = 2

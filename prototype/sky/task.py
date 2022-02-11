@@ -125,9 +125,6 @@ class Task:
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
 
-        # Block some of the clouds.
-        self.blocked_clouds = set()
-
         # Check if the task is legal.
         self._validate()
 
@@ -380,16 +377,23 @@ class Task:
             storage_type = storage_plans[store]
             if storage_type is storage_lib.StorageType.S3:
                 # TODO: allow for Storage mounting of different clouds
-                self.update_file_mounts({'~/.aws': '~/.aws'})
                 self.update_file_mounts({
                     mnt_path: 's3://' + store.name,
                 })
             elif storage_type is storage_lib.StorageType.GCS:
+                # Remember to run `gcloud auth application-default login`
+                self.update_file_mounts(
+                    {'~/.config/gcloud': '~/.config/gcloud'})
+                self.setup = '[[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && ' + \
+                'echo GOOGLE_APPLICATION_CREDENTIALS=' + \
+                '~/.config/gcloud/application_default_credentials.json >> ' + \
+                '~/.bashrc' + ' || echo "GOOGLE_APPLICATION_CREDENTIALS ' + \
+                'already set" && ' + self.setup
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
-                assert False, 'TODO: GCS Authentication not done'
             elif storage_type is storage_lib.StorageType.AZURE:
+                # TODO when Azure Blob is done: sync ~/.azure
                 assert False, 'TODO: Azure Blob not mountable yet'
             else:
                 raise ValueError(f'Storage Type {storage_type} \
@@ -454,11 +458,6 @@ class Task:
         # For validation logic:
         return self.set_file_mounts(self.file_mounts)
 
-    def set_blocked_clouds(self, blocked_clouds: Set[clouds.Cloud]):
-        """Sets the clouds that this task should not run on."""
-        self.blocked_clouds = blocked_clouds
-        return self
-
     def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=local path).
 
@@ -509,6 +508,8 @@ class Task:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
             s += f'\n  outputs: {self.outputs}'
+        if self.num_nodes > 1:
+            s += f'\n  nodes: {self.num_nodes}'
         if len(self.resources) > 1 or not list(self.resources)[0].is_empty():
             s += f'\n  resources: {self.resources}'
         else:

@@ -35,6 +35,7 @@ SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.2'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
+SKY_USER_FILE_PATH = '~/.sky/generated'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
@@ -72,7 +73,7 @@ def _fill_template(template_path: str,
         assert 'cluster_name' in variables, 'cluster_name is required.'
         cluster_name = variables['cluster_name']
         output_path = pathlib.Path(
-            template_path).parents[0] / 'user' / f'{cluster_name}.yml'
+            os.path.expanduser(SKY_USER_FILE_PATH)) / f'{cluster_name}.yml'
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
     output_path = to_absolute(output_path)
@@ -236,6 +237,10 @@ class SSHConfigHelper(object):
                         host_name = ip
                         logger.warning(f'Using {ip} to identify host instead.')
                     break
+        else:
+            config = ['\n']
+            with open(config_path, 'w') as f:
+                f.writelines(config)
 
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
                                             username, key_path)
@@ -251,7 +256,7 @@ class SSHConfigHelper(object):
                 f.write('\n')
         else:
             with open(config_path, 'a') as f:
-                if not config[-1].endswith('\n'):
+                if len(config) > 0 and not config[-1].endswith('\n'):
                     # Add trailing newline if it doesn't exist.
                     f.write('\n')
                 f.write('\n')
@@ -488,10 +493,11 @@ def write_cluster_config(task: task_lib.Task,
                     'tpu_name': tpu_name,
                 }),
                 # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in config/user/ to be consistent with
-                # cluster yamls.
-                output_path=path.replace('.sh.j2', f'.{cluster_name}.sh').
-                replace('config/', 'config/user/'),
+                # different TPUs.  Put in ~/.sky/generated/ to be consistent
+                # with cluster yamls.
+                output_path=path.
+                replace('.sh.j2', f'.{cluster_name}.sh').replace(
+                    'config/', os.path.expanduser(f'{SKY_USER_FILE_PATH}/')),
             ) for path in
             ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
         config_dict['tpu-create-script'] = scripts[0]
@@ -776,9 +782,9 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def get_backend_from_handle(handle: backends.Backend.ResourceHandle):
-    """
-    Get a backend object from a handle.
+def get_backend_from_handle(
+        handle: backends.Backend.ResourceHandle) -> backends.Backend:
+    """Gets a Backend object corresponding to a handle.
 
     Inspects handle type to infer the backend used for the resource.
     """

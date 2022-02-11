@@ -42,6 +42,7 @@ import pendulum
 import sky
 from sky import backends
 from sky import global_user_state
+from sky import init as sky_init
 from sky import sky_logging
 from sky import clouds
 from sky.backends import backend as backend_lib
@@ -79,7 +80,7 @@ def _truncate_long_string(s: str, max_length: int = 50) -> str:
         return s
     splits = s.split(' ')
     if len(splits[0]) > max_length:
-        return splits[0][:max_length] + '...'
+        return splits[0][:max_length] + '...'  # Use '…'?
     # Truncate on word boundary.
     i = 0
     total = 0
@@ -279,6 +280,7 @@ def _create_and_ssh_into_node(
             run='',
         )
         task.set_resources(resources)
+        task.update_file_mounts(sky_init.get_cloud_credential_file_mounts())
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -852,7 +854,7 @@ def stop(
     CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
     supplied, the latter takes precedence.
 
-    Limitation: this currently only works for AWS clusters.
+    Limitation: this currently only works for AWS/GCP non-spot clusters.
 
     Examples:
 
@@ -911,7 +913,8 @@ def start(clusters: Tuple[str]):
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
-            #    (currently, only AWS clusters can be in this state)
+            #    (currently, only AWS/GCP non-spot clusters can be in this
+            #    state)
             #
             #  UP - skipped, see below
             #
@@ -1055,7 +1058,9 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         name = record['name']
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
-        if handle.launched_resources.use_spot and not terminate:
+        if (isinstance(backend, backends.CloudVmRayBackend) and
+                handle.launched_resources.use_spot and not terminate):
+            # TODO(suquark): enable GCP+spot to be stopped in the future.
             click.secho(
                 f'Stopping cluster {name}... skipped, because spot instances '
                 'may lose attached volumes. ',
@@ -1291,6 +1296,16 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
 
 
 @cli.command()
+def init():
+    """Determines a set of clouds that Sky will use.
+
+    It checks access credentials for AWS, Azure and GCP. Sky tasks will only
+    run in clouds that you have access to. After configuring access for a
+    cloud, rerun `sky init` to reflect the changes.
+    """
+    sky_init.init()
+
+
 @click.argument('gpu_name', required=False)
 @click.option('--all',
               '-a',
