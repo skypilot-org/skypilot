@@ -395,8 +395,10 @@ class RetryingVmProvisioner(object):
         exception_str = [s for s in splits if s.startswith('Exception: ')]
 
         if len(exception_str) == 0:
-            exception_str = [s for s in splits
-                if s.startswith('googleapiclient.errors.HttpError')]
+            exception_str = [
+                s for s in splits
+                if s.startswith('googleapiclient.errors.HttpError')
+            ]
 
         if len(exception_str) == 1:
             if exception_str[0].startswith('googleapiclient.errors.HttpError'):
