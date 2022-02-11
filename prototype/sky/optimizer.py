@@ -321,8 +321,9 @@ class Optimizer:
                     overall_best / 3600))
         # Do not print Source or Sink.
         message_data = [
-            t for t in message_data
-            if t[0].name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
+            (t, f'{t.num_nodes}x {repr(r)}' if t.num_nodes > 1 else repr(r))
+            for (t, r) in message_data
+            if t.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
         ]
         message = tabulate.tabulate(reversed(message_data),
                                     headers=['TASK', 'BEST_RESOURCE'],

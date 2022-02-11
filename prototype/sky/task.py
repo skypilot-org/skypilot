@@ -486,6 +486,8 @@ class Task:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
             s += f'\n  outputs: {self.outputs}'
+        if self.num_nodes > 1:
+            s += f'\n  nodes: {self.num_nodes}'
         if len(self.resources) > 1 or not list(self.resources)[0].is_empty():
             s += f'\n  resources: {self.resources}'
         else:
