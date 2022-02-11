@@ -6,8 +6,6 @@ offer file-level calls (e.g., open, reading, writing).
 TODO:
 * Better interface.
 * Better implementation (e.g., fsspec, smart_open, using each cloud's SDK).
-  The full-blown impl should handle authentication so each user's private
-  datasets can be accessed.
 """
 import subprocess
 import urllib.parse

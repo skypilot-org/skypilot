@@ -1,7 +1,10 @@
 """Google Cloud Platform."""
 import copy
 import json
+import os
 from typing import Dict, Iterator, List, Optional, Tuple
+
+from google import auth
 
 from sky import clouds
 from sky.clouds.service_catalog import gcp_catalog
@@ -217,3 +220,37 @@ class GCP(clouds.Cloud):
         # GCP handles accelerators separately from regular instance types,
         # hence return none here.
         return None
+
+    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud."""
+        try:
+            # These files are required because they will be synced to remote
+            # VMs for `gsutil` to access private storage buckets.
+            # `auth.default()` does not guarantee these files exist.
+            for file in [
+                    '~/.config/gcloud/access_tokens.db',
+                    '~/.config/gcloud/credentials.db'
+            ]:
+                assert os.path.isfile(os.path.expanduser(file))
+            # Calling `auth.default()` ensures the GCP client library works,
+            # which is used by Ray Autoscaler to launch VMs.
+            auth.default()
+        except (AssertionError, auth.exceptions.DefaultCredentialsError):
+            # See also: https://stackoverflow.com/a/53307505/1165051
+            return False, (
+                'GCP credentials not set. Run the following commands:\n    '
+                # This authenticates the CLI to make `gsutil` work:
+                '$ gcloud auth login\n    '
+                '$ gcloud config set project <proj>\n    '
+                # These two commands setup the client library to make
+                # Ray Autoscaler work:
+                '$ gcloud auth application-default login\n    '
+                '$ gcloud auth application-default set-quota-project '
+                '<proj>\n    '
+                'For more info: '
+                'https://googleapis.dev/python/google-api-core/latest/auth.html'
+            )
+        return True, None
+
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        return {'~/.config/gcloud': '~/.config/gcloud'}
