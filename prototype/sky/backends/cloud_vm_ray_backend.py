@@ -1360,7 +1360,11 @@ class CloudVmRayBackend(backends.Backend):
         codegen.tail_logs(job_id)
         code = codegen.build()
         click.secho('Start streaming logs...', fg='yellow')
-        self.run_on_head(handle, code, stream_logs=True, check=False)
+        try:
+            self.run_on_head(handle, code, stream_logs=True, check=False)
+        except KeyboardInterrupt:
+            # Do nothing. When receiving ctrl-c.
+            pass
 
     def _add_job(self, handle: ResourceHandle, job_name: str) -> int:
         codegen = backend_utils.JobLibCodeGen()
