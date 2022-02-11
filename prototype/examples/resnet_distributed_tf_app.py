@@ -1,5 +1,5 @@
 import subprocess
-from typing import List
+from typing import List, Optional
 
 import sky
 
@@ -27,7 +27,7 @@ with sky.Dag() as dag:
     # that doesn't refer to any external variables.
     #
     # Will be run under the working directory.
-    def run_fn(node_rank: int, ip_list: List[str]) -> str:
+    def run_fn(node_rank: int, ip_list: List[str]) -> Optional[str]:
         import json
         tf_config = {
             'cluster': {

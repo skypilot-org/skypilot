@@ -129,12 +129,12 @@ class Task:
         self.blocked_clouds = set()
 
         # Check if the task is legal.
-        self._verify_task()
+        self._validate()
 
         dag = sky.DagContext.get_current_dag()
         dag.add(self)
 
-    def _verify_task(self):
+    def _validate(self):
         if not _is_valid_name(self.name):
             raise ValueError(f'Invalid task name {self.name}. Valid name: '
                              f'{_VALID_NAME_DESCR}')

@@ -165,12 +165,12 @@ def make_task_bash_script(codegen: str) -> str:
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              setup_command: Optional[str] = None,
+                              export_sky_env_vars: Optional[str] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-        if setup_command is not None:
-            bash_command = setup_command + '\n' + bash_command
+        if export_sky_env_vars is not None:
+            bash_command = export_sky_env_vars + '\n' + bash_command
         bash_command = make_task_bash_script(bash_command)
         fp.write(bash_command)
         fp.flush()

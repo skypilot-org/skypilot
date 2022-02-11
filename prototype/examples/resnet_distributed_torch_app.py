@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import sky
 
@@ -16,7 +16,7 @@ with sky.Dag() as dag:
       tar -xvzf cifar-10-python.tar.gz)'
 
     # The command to run.  Will be run under the working directory.
-    def run_fn(node_rank: int, ip_list: List[str]) -> str:
+    def run_fn(node_rank: int, ip_list: List[str]) -> Optional[str]:
         num_nodes = len(ip_list)
         return f"""\
         cd pytorch-distributed-resnet
