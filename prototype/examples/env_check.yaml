@@ -1,13 +1,3 @@
-# A minimal example.
-#
-# Runs a task that simply lists the default conda environments.
-#
-# Usage:
-#   sky launch -c min minimal.yaml
-#   sky down -c min
-
-name: source_check
-
 resources:
   cloud: aws
 
@@ -33,3 +23,6 @@ run: |
     echo "~/sky_workdir/sky does not exist"
     exit 1
   fi
+
+  echo NODE ID: $SKY_NODE_RANK
+  echo NODE IP: ${SKY_NODE_IPS[$SKY_NODE_RANK]}
