@@ -85,16 +85,23 @@ def _execute(dag: sky.Dag,
             cluster_name)
         cluster_exists = existing_handle is not None
 
+    backend = backend if backend is not None else backends.CloudVmRayBackend()
+
     if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
         if task.best_resources is None:
             # TODO: fix this for the situation where number of requested
             # accelerators is not an integer.
-            dag = sky.optimize(dag, minimize=optimize_target)
+            if isinstance(backend, backends.CloudVmRayBackend):
+                # TODO: adding this check because docker backend on a
+                # no-credential machine should not enter optimize(), which
+                # would directly error out ('No cloud is enabled...').  Fix by
+                # moving sky init checks out of optimize()?
+                dag = sky.optimize(dag, minimize=optimize_target)
             task = dag.tasks[0]  # Keep: dag may have been deep-copied.
 
-    backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
+    # FIXME: test on some node where the mounts do not exist.
     task.update_file_mounts(init.get_cloud_credential_file_mounts())
 
     if task.storage_mounts is not None:

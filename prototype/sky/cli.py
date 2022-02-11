@@ -80,7 +80,7 @@ def _truncate_long_string(s: str, max_length: int = 50) -> str:
         return s
     splits = s.split(' ')
     if len(splits[0]) > max_length:
-        return splits[0][:max_length] + '...'
+        return splits[0][:max_length] + '...'  # Use '…'?
     # Truncate on word boundary.
     i = 0
     total = 0
@@ -1057,7 +1057,8 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         name = record['name']
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
-        if handle.launched_resources.use_spot and not terminate:
+        if (isinstance(backend, backends.CloudVmRayBackend) and
+                handle.launched_resources.use_spot and not terminate):
             click.secho(
                 f'Stopping cluster {name}... skipped, because spot instances '
                 'may lose attached volumes. ',

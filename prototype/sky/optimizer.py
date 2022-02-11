@@ -368,9 +368,9 @@ def _filter_out_blocked_launchable_resources(
 
 
 def _fill_in_launchable_resources(
-        task: Task,
-        blocked_launchable_resources: Optional[List[Resources]],
-        try_fix_with_sky_init: bool = True,
+    task: Task,
+    blocked_launchable_resources: Optional[List[Resources]],
+    try_fix_with_sky_init: bool = True,
 ) -> Dict[Resources, List[Resources]]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_init:
@@ -390,7 +390,7 @@ def _fill_in_launchable_resources(
             raise exceptions.ResourcesUnavailableError(
                 f'Task {task} requires {resources.cloud} which is not '
                 'enabled. Run `sky init` to enable access to it, '
-                'or relax the resource requirements.')
+                'or change the cloud requirement.')
         elif resources.is_launchable():
             launchable[resources] = [resources]
         elif resources.cloud is not None:

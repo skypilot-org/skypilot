@@ -9,9 +9,12 @@ IPAddr = str
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
-    subprocess.run(f'cd {workdir} && git checkout 222cc86',
-                   shell=True,
-                   check=True)
+    subprocess.run(
+        'cd ~/Downloads; '
+        '(git clone https://github.com/concretevitamin/tpu || true); '
+        f'cd {workdir} && git checkout 9459fee',
+        shell=True,
+        check=True)
 
     docker_image = None  # 'rayproject/ray-ml:latest-gpu'
 

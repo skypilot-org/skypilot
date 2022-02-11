@@ -12,7 +12,7 @@ def init(quiet: bool = False) -> None:
     echo('Checking credentials to enable clouds for Sky.')
 
     enabled_clouds = []
-    for cloud in clouds.ALL_CLOUDS:
+    for cloud in clouds.CLOUD_REGISTRY.values():
         echo(f'  Checking {cloud}...', nl=False)
         ok, reason = cloud.check_credentials()
         echo('\r', nl=False)
@@ -30,14 +30,14 @@ def init(quiet: bool = False) -> None:
         click.echo(
             click.style(
                 'No cloud is enabled. Sky will not be able to run any task. '
-                'Please setup access to a cloud, and rerun `sky init`.',
+                'Run `sky init` for more info.',
                 fg='red',
                 bold=True))
         raise SystemExit()
     else:
         echo('\nSky will use only the enabled clouds to run tasks. '
              'To change this, configure cloud credentials, '
-             'and rerun ' + click.style('sky init', bold=True) + '.')
+             'and run ' + click.style('sky init', bold=True) + '.')
 
     global_user_state.set_enabled_clouds(enabled_clouds)
 

@@ -236,6 +236,10 @@ class SSHConfigHelper(object):
                         host_name = ip
                         logger.warning(f'Using {ip} to identify host instead.')
                     break
+        else:
+            config = ['\n']
+            with open(config_path, 'w') as f:
+                f.writelines(config)
 
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
                                             username, key_path)
@@ -251,7 +255,7 @@ class SSHConfigHelper(object):
                 f.write('\n')
         else:
             with open(config_path, 'a') as f:
-                if not config[-1].endswith('\n'):
+                if len(config) > 0 and not config[-1].endswith('\n'):
                     # Add trailing newline if it doesn't exist.
                     f.write('\n')
                 f.write('\n')
@@ -789,9 +793,9 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def get_backend_from_handle(handle: backends.Backend.ResourceHandle):
-    """
-    Get a backend object from a handle.
+def get_backend_from_handle(
+        handle: backends.Backend.ResourceHandle) -> backends.Backend:
+    """Gets a Backend object corresponding to a handle.
 
     Inspects handle type to infer the backend used for the resource.
     """
