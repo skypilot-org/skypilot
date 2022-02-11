@@ -1448,8 +1448,8 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
-        # TODO (zhwu): The resources limitation for multi-node ray.tune and horovod
-        # should be considered.
+        # TODO (zhwu): The resources limitation for multi-node ray.tune and 
+        # horovod should be considered.
         for i in range(task.num_nodes):
             command_for_node = task.run if isinstance(task.run, str) else None
 
