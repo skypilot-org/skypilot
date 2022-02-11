@@ -520,19 +520,30 @@ class RetryingVmProvisioner(object):
             if zones is not None:
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
                 region.set_zones(zones)
-            yield (region, zones)  # Ok to yield again in the next loop.
-
-            # Check the cluster status. If the cluster is previously stopped,
-            # we should not retry other regions, since the previously attached
-            # volumes are not visible on another region.
+            # Get the *previous* cluster status.
             cluster_status = global_user_state.get_status_from_cluster_name(
                 cluster_name)
+            yield (region, zones)  # Ok to yield again in the next loop.
+
+            # If it reaches here: the cluster status gets set to INIT, since
+            # a launch request was issued but failed.
+            #
+            # Check the *previous* cluster status. If the cluster is previously
+            # stopped, we should not retry other regions, since the previously
+            # attached volumes are not visible on another region.
             if cluster_status == global_user_state.ClusterStatus.STOPPED:
                 message = (
                     'Failed to acquire resources to restart the stopped '
                     f'cluster {cluster_name} on {region}. Please retry again '
                     'later.')
                 logger.error(message)
+
+                # Reset to STOPPED (rather than keeping it at INIT), because
+                # (1) the cluster is not up (2) it ensures future `sky start`
+                # will disable auto-failover too.
+                global_user_state.set_cluster_status(
+                    cluster_name, global_user_state.ClusterStatus.STOPPED)
+
                 raise exceptions.ResourcesUnavailableError(message,
                                                            no_retry=True)
 
