@@ -20,7 +20,7 @@ from sky.cloud_adaptors import aws, gcp
 # development.
 
 MAX_TRIALS = 64
-PRIVATE_SSH_KEY_PATH = '~/.sky/sky-key'
+PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 
 
 def generate_rsa_key_pair():
