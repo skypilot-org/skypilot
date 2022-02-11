@@ -190,7 +190,10 @@ class RayCodeGen:
                                     'add_gang_scheduling_placement_group().')
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
-
+        
+        # Set CPU to avoid ray hanging the resources allocation
+        # for remote functions, since the task will request 1 CPU
+        # by default.
         bundles = [{'CPU': 1} for _ in range(num_nodes)]
 
         if accelerator_dict is not None:
@@ -1448,7 +1451,7 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
-        # TODO (zhwu): The resources limitation for multi-node ray.tune and 
+        # TODO (zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
         for i in range(task.num_nodes):
             command_for_node = task.run if isinstance(task.run, str) else None
