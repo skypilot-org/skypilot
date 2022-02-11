@@ -1,0 +1,13 @@
+# start and stop GCP instances
+name: gcp-start-stop
+
+resources:
+  cloud: gcp
+
+num_nodes: 2
+
+# The setup command.  Will be run under the working directory.
+setup: 'echo "gcp_start_stop [setup]"'
+
+# The command to run.  Will be run under the working directory.
+run: 'echo "gcp_start_stop [run]"'
