@@ -805,8 +805,6 @@ class RetryingVmProvisioner(object):
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
         # stop, then launch again.
-        # TODO: if requesting a large amount (say 32) of expensive VMs, this
-        # may loop for a long time.  Use timeouts and treat as gang_failed.
         cluster_ready = backend_utils.wait_until_ray_cluster_ready(
             to_provision_cloud,
             cluster_config_file,
