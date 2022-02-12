@@ -143,8 +143,8 @@ class Azure(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
-        gen_version = azure_catalog.get_gen_version_from_instance_type(
-            r.instance_type)
+        gen_version = service_catalog.get_gen_version_from_instance_type(
+            r.instance_type, clouds='azure')
         image_config = self._get_image_config(gen_version, r.instance_type)
         return {
             'instance_type': r.instance_type,
