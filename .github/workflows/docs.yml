@@ -32,4 +32,4 @@ jobs:
         cd docs
         rm -rf build/html
         make html
-        diff docs build/html
+        diff -x .buildinfo docs build/html
