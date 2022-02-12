@@ -29,8 +29,8 @@ jobs:
     - name: Building docs
       run: |
       	cd docs
-	make html
-	mv build/html docs
+        make html
+        mv build/html docs
     - name: Commit files
       id: commit
       run: |
