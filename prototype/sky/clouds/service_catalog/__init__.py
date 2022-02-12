@@ -142,7 +142,7 @@ def get_region_zones_for_accelerators(
 def get_gen_version_from_instance_type(instance_type: str,
                                        clouds: CloudFilter = None
                                       ) -> Optional[int]:
-    return _map_clouds_catalog(clouds, 'get_region_zones_for_accelerators',
+    return _map_clouds_catalog(clouds, 'get_gen_version_from_instance_type',
                                instance_type)
 
 
