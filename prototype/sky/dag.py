@@ -38,7 +38,7 @@ class Dag:
 
     def __init__(self):
         self.tasks = []
-        import networkx as nx
+        import networkx as nx  # pylint: disable=import-outside-toplevel
 
         self.graph = nx.DiGraph()
 

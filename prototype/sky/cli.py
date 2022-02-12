@@ -1360,7 +1360,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name)
-        import pandas as pd
+        import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = util_lib.create_table([
                 'GPU',

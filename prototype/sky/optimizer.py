@@ -167,7 +167,7 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
     ):
-        import networkx as nx
+        import networkx as nx  # pylint: disable=import-outside-toplevel
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
         graph = dag.get_graph()
