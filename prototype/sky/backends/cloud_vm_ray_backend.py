@@ -1552,6 +1552,7 @@ class CloudVmRayBackend(backends.Backend):
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)
+        global_user_state.remove_cluster(name, terminate=terminate)
 
         if terminate:
             # Clean up generated config
@@ -1564,8 +1565,6 @@ class CloudVmRayBackend(backends.Backend):
                 assert handle.tpu_create_script is not None
                 os.remove(handle.tpu_create_script)
                 os.remove(handle.tpu_delete_script)
-
-        global_user_state.remove_cluster(name, terminate=terminate)
 
     def _get_node_ips(self,
                       cluster_yaml: str,
