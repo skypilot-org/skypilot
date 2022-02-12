@@ -130,7 +130,7 @@ class Storage(object):
           persistent: bool; Whether to persist across sky launches.
         """
         self.name = name
-        self.source = source
+        self.source = os.path.abspath(os.path.expanduser(source))
         self.persistent = persistent
 
         # Sky optimizer either adds a storage object instance or selects
