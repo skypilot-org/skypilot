@@ -19,6 +19,7 @@ way.
    :maxdepth: 1
    :caption: Use Cases
 
+   examples/auto-failover
    examples/iterative-dev-project
    examples/launch-many-tasks-vm
    examples/grid-search
