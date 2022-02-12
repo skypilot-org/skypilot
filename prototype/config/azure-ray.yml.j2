@@ -26,10 +26,10 @@ available_node_types:
         azure_arm_parameters:
             vmSize: {{instance_type}}
             # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
-            imagePublisher: microsoft-dsvm
-            imageOffer: ubuntu-1804
-            imageSku: 1804-gen2
-            imageVersion: 21.09.13
+            imagePublisher: {{image_publisher}}
+            imageOffer: {{image_offer}}
+            imageSku: "{{image_sku}}"
+            imageVersion: {{image_version}}
             # optionally set priority to use Spot instances
             {%- if use_spot %}
             priority: Spot
