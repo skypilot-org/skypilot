@@ -25,7 +25,7 @@ class Azure(clouds.Cloud):
     _regions: List[clouds.Region] = []
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
-        return service_catalog.get_hourly_cost(instance_type, use_spot=use_spot, clouds='azure')
+        return service_catalog.get_hourly_cost(instance_type, region=None, use_spot=use_spot, clouds='azure')
 
     def accelerators_to_hourly_cost(self, accelerators):
         # Azure includes accelerators as part of the instance type.
@@ -119,8 +119,8 @@ class Azure(clouds.Cloud):
             # fallback to manually specified region/zones
             regions = cls.regions()
         else:
-            regions = azure_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot)
+            regions = service_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, clouds='azure')
         for region in regions:
             yield region, region.zones
 
@@ -131,7 +131,7 @@ class Azure(clouds.Cloud):
         self,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        return azure_catalog.get_accelerators_from_instance_type(instance_type)
+        return service_catalog.get_accelerators_from_instance_type(instance_type, clouds='azure')
 
     def make_deploy_resources_variables(self, resources):
         r = resources
@@ -177,8 +177,8 @@ class Azure(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        instance_type = azure_catalog.get_instance_type_for_accelerator(
-            acc, acc_count)
+        instance_type = service_catalog.get_instance_type_for_accelerator(
+            acc, acc_count, clouds='azure')
         if instance_type is None:
             return []
         return _make(instance_type)

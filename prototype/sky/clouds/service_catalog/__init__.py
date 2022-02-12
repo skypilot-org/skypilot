@@ -49,6 +49,8 @@ def list_accelerators(
     """
     results = _map_clouds_catalog(
         clouds, 'list_accelerators', gpus_only, name_filter)
+    if not isinstance(results, list):
+        results = [results]
     ret = collections.defaultdict(list)
     for result in results:
         for gpu, items in result.items():
@@ -68,6 +70,8 @@ def list_accelerator_counts(
     """
     results = _map_clouds_catalog(
         clouds, 'list_accelerators', gpus_only, name_filter)
+    if not isinstance(results, list):
+        results = [results]
     ret = collections.defaultdict(set)
     for result in results:
         for gpu, items in result.items():
@@ -88,11 +92,12 @@ def get_region_zones_for_instance_type(
 
 
 def get_hourly_cost(instance_type: str,
+                    region: Optional[str],
                     use_spot: bool,
                     clouds: CloudFilter = None):
     """Returns the cost, or the cheapest cost among all zones for spot."""
     return _map_clouds_catalog(
-        clouds, 'get_hourly_cost', instance_type, use_spot)
+        clouds, 'get_hourly_cost', instance_type, region, use_spot)
 
 
 def get_accelerators_from_instance_type(
