@@ -24,8 +24,9 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
             cloud_module = importlib.import_module(
                 f'sky.clouds.service_catalog.{cloud}_catalog')
         except ModuleNotFoundError:
-            raise ValueError('Cannot find module "sky.clouds.service_catalog'
-                             f'.{cloud}_catalog" for cloud "{cloud}".') from None
+            raise ValueError(
+                'Cannot find module "sky.clouds.service_catalog'
+                f'.{cloud}_catalog" for cloud "{cloud}".') from None
         try:
             method = getattr(cloud_module, method_name)
         except AttributeError:
@@ -47,8 +48,8 @@ def list_accelerators(
     Returns: A dictionary of canonical accelerator names mapped to a list
     of instance type offerings. See usage in cli.py.
     """
-    results = _map_clouds_catalog(
-        clouds, 'list_accelerators', gpus_only, name_filter)
+    results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
+                                  name_filter)
     if not isinstance(results, list):
         results = [results]
     ret = collections.defaultdict(list)
@@ -68,8 +69,8 @@ def list_accelerator_counts(
     Returns: A dictionary of canonical accelerator names mapped to a list
     of available counts. See usage in cli.py.
     """
-    results = _map_clouds_catalog(
-        clouds, 'list_accelerators', gpus_only, name_filter)
+    results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
+                                  name_filter)
     if not isinstance(results, list):
         results = [results]
     ret = collections.defaultdict(set)
@@ -87,8 +88,8 @@ def get_region_zones_for_instance_type(
         use_spot: bool,
         clouds: CloudFilter = None) -> 'List[cloud.Region]':
     """Returns a list of regions for a given instance type."""
-    return _map_clouds_catalog(
-        clouds, 'get_region_zones_for_instance_type', instance_type, use_spot)
+    return _map_clouds_catalog(clouds, 'get_region_zones_for_instance_type',
+                               instance_type, use_spot)
 
 
 def get_hourly_cost(instance_type: str,
@@ -96,15 +97,16 @@ def get_hourly_cost(instance_type: str,
                     use_spot: bool,
                     clouds: CloudFilter = None):
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    return _map_clouds_catalog(
-        clouds, 'get_hourly_cost', instance_type, region, use_spot)
+    return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type, region,
+                               use_spot)
 
 
 def get_accelerators_from_instance_type(
-        instance_type: str, clouds: CloudFilter = None) -> Optional[Dict[str, int]]:
+        instance_type: str,
+        clouds: CloudFilter = None) -> Optional[Dict[str, int]]:
     """Returns the accelerators from a instance type."""
-    return _map_clouds_catalog(
-        clouds, 'get_accelerators_from_instance_type', instance_type)
+    return _map_clouds_catalog(clouds, 'get_accelerators_from_instance_type',
+                               instance_type)
 
 
 def get_instance_type_for_accelerator(
@@ -113,8 +115,8 @@ def get_instance_type_for_accelerator(
     clouds: CloudFilter = None,
 ) -> Optional[str]:
     """Returns the instance type with the required count of accelerators."""
-    return _map_clouds_catalog(
-        clouds, 'get_instance_type_for_accelerator', acc_name, acc_count)
+    return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
+                               acc_name, acc_count)
 
 
 def get_accelerator_hourly_cost(
@@ -123,25 +125,25 @@ def get_accelerator_hourly_cost(
     clouds: CloudFilter = None,
 ) -> float:
     """Returns the hourly cost with the accelerators."""
-    return _map_clouds_catalog(
-        clouds, 'get_accelerator_hourly_cost', acc_name, acc_count)
+    return _map_clouds_catalog(clouds, 'get_accelerator_hourly_cost', acc_name,
+                               acc_count)
 
 
 def get_region_zones_for_accelerators(
-    acc_name: str,
-    acc_count: int,
-    use_spot: bool,
-    clouds: CloudFilter = None
-) -> 'List[cloud.Region]':
+        acc_name: str,
+        acc_count: int,
+        use_spot: bool,
+        clouds: CloudFilter = None) -> 'List[cloud.Region]':
     """Returns a list of regions for a given accelerators."""
-    return _map_clouds_catalog(
-        clouds, 'get_region_zones_for_accelerators', acc_name, acc_count, use_spot)
+    return _map_clouds_catalog(clouds, 'get_region_zones_for_accelerators',
+                               acc_name, acc_count, use_spot)
 
 
 def get_gen_version_from_instance_type(instance_type: str,
-                                       clouds: CloudFilter = None) -> Optional[int]:
-    return _map_clouds_catalog(
-        clouds, 'get_region_zones_for_accelerators', instance_type)
+                                       clouds: CloudFilter = None
+                                      ) -> Optional[int]:
+    return _map_clouds_catalog(clouds, 'get_region_zones_for_accelerators',
+                               instance_type)
 
 
 def get_common_gpus() -> List[str]:

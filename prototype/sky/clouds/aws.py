@@ -102,7 +102,10 @@ class AWS(clouds.Cloud):
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
-        return service_catalog.get_hourly_cost(instance_type, region=None, use_spot=use_spot, clouds='aws')
+        return service_catalog.get_hourly_cost(instance_type,
+                                               region=None,
+                                               use_spot=use_spot,
+                                               clouds='aws')
 
     def accelerators_to_hourly_cost(self, accelerators):
         # AWS includes accelerators as part of the instance type.  Implementing
@@ -151,7 +154,8 @@ class AWS(clouds.Cloud):
         self,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        return service_catalog.get_accelerators_from_instance_type(instance_type, clouds='aws')
+        return service_catalog.get_accelerators_from_instance_type(
+            instance_type, clouds='aws')
 
     def make_deploy_resources_variables(self,
                                         resources: 'resources_lib.Resources'):

@@ -1,7 +1,7 @@
 """Docker adaptors"""
 
-
 # pylint: disable=import-outside-toplevel
+
 
 def from_env():
     import docker

@@ -136,7 +136,9 @@ class GCP(clouds.Cloud):
     def accelerators_to_hourly_cost(self, accelerators):
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
-        return service_catalog.get_accelerator_hourly_cost(acc, acc_count, clouds='gcp')
+        return service_catalog.get_accelerator_hourly_cost(acc,
+                                                           acc_count,
+                                                           clouds='gcp')
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -200,7 +202,8 @@ class GCP(clouds.Cloud):
             assert resources.is_launchable(), resources
             return [resources]
         if resources.accelerators is not None:
-            available_accelerators = service_catalog.list_accelerators(gpus_only=False, clouds='gcp')
+            available_accelerators = service_catalog.list_accelerators(
+                gpus_only=False, clouds='gcp')
             for acc, acc_count in resources.accelerators.items():
                 if acc not in available_accelerators or not any(
                         acc_count == info.accelerator_count
