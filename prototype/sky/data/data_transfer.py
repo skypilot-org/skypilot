@@ -20,8 +20,6 @@ import json
 import os
 from typing import Any
 
-from oauth2client.client import GoogleCredentials
-
 from sky import sky_logging
 from sky.cloud_adaptors import aws, gcp
 
@@ -39,6 +37,8 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
       s3_bucket_name: str; Name of the Amazon S3 Bucket
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
+    from oauth2client.client import GoogleCredentials
+
     credentials = GoogleCredentials.get_application_default()
     storagetransfer = gcp.build('storagetransfer',
                                 'v1',

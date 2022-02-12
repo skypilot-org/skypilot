@@ -1,5 +1,4 @@
 """DAGs: user applications to be run on Sky."""
-import networkx as nx
 import pprint
 
 
@@ -39,6 +38,8 @@ class Dag:
 
     def __init__(self):
         self.tasks = []
+        import networkx as nx
+
         self.graph = nx.DiGraph()
 
     def add(self, task):

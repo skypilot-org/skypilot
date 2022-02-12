@@ -4,7 +4,6 @@ import enum
 import pprint
 from typing import Dict, List, Optional
 
-import networkx as nx
 import numpy as np
 import tabulate
 
@@ -168,6 +167,7 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
     ):
+        import networkx as nx
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
         graph = dag.get_graph()

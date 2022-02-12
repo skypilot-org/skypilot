@@ -6,7 +6,7 @@ import subprocess
 from typing import Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
 from sky import clouds
-from sky.clouds.service_catalog import aws_catalog
+from sky.clouds import service_catalog
 
 if TYPE_CHECKING:
     # renaming to avoid shadowing variables
@@ -78,8 +78,8 @@ class AWS(clouds.Cloud):
             # fallback to manually specified region/zones
             regions = cls.regions()
         else:
-            regions = aws_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot)
+            regions = service_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, 'aws')
         for region in regions:
             if region.name == 'us-west-1':
                 # TODO: troubles launching AMIs.
@@ -102,7 +102,7 @@ class AWS(clouds.Cloud):
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
-        return aws_catalog.get_hourly_cost(instance_type, use_spot=use_spot)
+        return service_catalog.get_hourly_cost(instance_type, use_spot=use_spot, clouds='aws')
 
     def accelerators_to_hourly_cost(self, accelerators):
         # AWS includes accelerators as part of the instance type.  Implementing
@@ -151,7 +151,7 @@ class AWS(clouds.Cloud):
         self,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        return aws_catalog.get_accelerators_from_instance_type(instance_type)
+        return service_catalog.get_accelerators_from_instance_type(instance_type, clouds='aws')
 
     def make_deploy_resources_variables(self,
                                         resources: 'resources_lib.Resources'):
@@ -193,8 +193,8 @@ class AWS(clouds.Cloud):
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        instance_type = aws_catalog.get_instance_type_for_accelerator(
-            acc, acc_count)
+        instance_type = service_catalog.get_instance_type_for_accelerator(
+            acc, acc_count, clouds='aws')
         if instance_type is None:
             return []
         return _make(instance_type)

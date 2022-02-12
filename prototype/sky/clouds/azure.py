@@ -6,7 +6,7 @@ import subprocess
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky.clouds.service_catalog import azure_catalog
+from sky.clouds import service_catalog
 
 
 def _run_output(cmd):
@@ -25,7 +25,7 @@ class Azure(clouds.Cloud):
     _regions: List[clouds.Region] = []
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
-        return azure_catalog.get_hourly_cost(instance_type, use_spot=use_spot)
+        return service_catalog.get_hourly_cost(instance_type, use_spot=use_spot, clouds='azure')
 
     def accelerators_to_hourly_cost(self, accelerators):
         # Azure includes accelerators as part of the instance type.

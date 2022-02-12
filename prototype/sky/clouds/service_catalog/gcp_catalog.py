@@ -31,9 +31,11 @@ def _get_accelerator(
 
 def get_accelerator_hourly_cost(accelerator: str,
                                 count: int,
-                                region: str = _DEFAULT_REGION,
+                                region: Optional[str] = None,
                                 use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
+    if region is None:
+        region = _DEFAULT_REGION
     df = _get_accelerator(_df, accelerator, count, region)
     assert len(set(df['Price'])) == 1, df
     if not use_spot:
