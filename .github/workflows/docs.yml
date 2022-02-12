@@ -31,15 +31,5 @@ jobs:
       run: |
         cd docs
         make html
-        mv build/html docs
-    - name: Commit files
-      run: |
-        git config --local user.name "github"
-        git add ./docs
-        git commit -m "Build documentation"
-    - name: Push changes # push the output folder to your repo
-      uses: ad-m/github-push-action@master
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        force: true
-        branch: ${{ github.ref }}
+        mv build/html
+        diff docs build/html
