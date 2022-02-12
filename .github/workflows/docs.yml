@@ -11,7 +11,7 @@ on:
       - master
 
 jobs:
-  pylint:
+  docs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -33,20 +33,12 @@ jobs:
         make html
         mv build/html docs
     - name: Commit files
-      id: commit
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "github-actions"
-        git add --all
-        if [-z "$(git status --porcelain)"]; then
-           echo "::set-output name=push::false"
-        else
-           git commit -m "Build documentation" -a
-           echo "::set-output name=push::true"
-        fi
-      shell: bash
-    - name: Push changes
-      if: steps.commit.outputs.push == 'true'
+        git config --local user.name "github"
+        git add ./docs
+        git commit -m "Build documentation"
+    - name: Push changes # push the output folder to your repo
       uses: ad-m/github-push-action@master
       with:
-         github_token: ${{ secrets.GITHUB_TOKEN }}
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        force: true
