@@ -48,7 +48,7 @@ SKYLET_REMOTE_PATH = backend_utils.SKY_REMOTE_PATH
 logger = sky_logging.init_logger(__name__)
 
 # Timeout for provision a cluster and wait for it to be ready in seconds.
-CLUSTER_PROVISION_TIMEOUT = 300
+CLUSTER_PER_NODE_PROVISION_TIMEOUT = 300
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -811,7 +811,7 @@ class RetryingVmProvisioner(object):
             to_provision_cloud,
             cluster_config_file,
             num_nodes,
-            timeout=CLUSTER_PROVISION_TIMEOUT)
+            timeout=CLUSTER_PER_NODE_PROVISION_TIMEOUT * num_nodes)
         gang_failed = not cluster_ready
         if gang_failed or ray_up_on_full_confg_only:
             # Head OK; gang scheduling failure.
