@@ -78,7 +78,7 @@ class Azure(clouds.Cloud):
 
         # ubuntu-2004 does not work on A100
         if instance_type in [
-            'Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4'
+                'Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4'
         ]:
             image_config['image_offer'] = 'ubuntu-hpc'
             image_config['image_sku'] = '2004'
