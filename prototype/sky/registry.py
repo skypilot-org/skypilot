@@ -10,8 +10,7 @@ Resources = resources_lib.Resources
 
 _CLOUDS = [
     clouds.AWS(),
-    # FIXME(zongheng): as of 1/16/2022, our Azure subscriptions are disabled.
-    # clouds.Azure(),
+    clouds.Azure(),
     clouds.GCP(),
 ]
 
