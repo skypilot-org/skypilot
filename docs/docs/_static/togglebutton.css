@@ -1,0 +1,90 @@
+/* Visibility of the target */
+.toggle, div.admonition.toggle .admonition-title ~ * {
+    transition: opacity .5s, height .5s;
+}
+
+.toggle-hidden:not(.admonition) {
+    visibility: hidden;
+    opacity: 0;
+    height: 1.5em;
+    margin: 0px;
+    padding: 0px;
+}
+
+/* Overrides for admonition toggles */
+
+/* Titles should cut off earlier to avoid overlapping w/ button */
+div.admonition.toggle p.admonition-title {
+    padding-right: 25%;
+}
+
+/* hides all the content of a page until de-toggled */
+div.admonition.toggle-hidden .admonition-title ~ * {
+    height: 0;
+    margin: 0;
+    float: left; /* so they overlap when hidden */
+    opacity: 0;
+    visibility: hidden;
+}
+
+/* Toggle buttons inside admonitions so we see the title */
+.toggle.admonition {
+    position: relative;
+}
+
+.toggle.admonition.admonition-title:after {
+    content: "" !important;
+}
+
+/* Note, we'll over-ride this in sphinx-book-theme */
+.toggle.admonition button.toggle-button {
+    margin-right: 0.5em;
+    right: 0em;
+    position: absolute;
+    top: .2em;
+}
+
+/* General button style */
+button.toggle-button {
+    background: #999;
+    border: none;
+    z-index: 100;
+    right: -2.5em;
+    margin-left: -2.5em; /* A hack to keep code blocks from being pushed left */
+    position: relative;
+    float: right;
+    border-radius: 100%;
+    width: 1.5em;
+    height: 1.5em;
+    padding: 0px;
+}
+
+@media (min-width: 768px) {
+    button.toggle-button.toggle-button-hidden:before {
+        content: "Click to show";
+        position: absolute;
+        font-size: .8em;
+        left: -6.5em;
+        bottom: .4em;
+    }
+}
+
+
+/* Plus / minus toggles */
+.toggle-button .bar {
+    background-color: white;
+    position: absolute;
+    left: 15%;
+    top: 43%;
+    width: 16px;
+    height: 3px;
+}
+
+.toggle-button .vertical {
+    transition: all 0.25s ease-in-out;
+    transform-origin: center;
+}
+
+.toggle-button-hidden .vertical {
+    transform: rotate(-90deg);
+}

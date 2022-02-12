@@ -1,0 +1,370 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Distributed Jobs on many VMs &#8212; Sky 0.1 documentation</title>
+    
+  <link href="../_static/css/theme.css" rel="stylesheet">
+  <link href="../_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
+
+    
+  <link rel="stylesheet"
+    href="../_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-book-theme.css?digest=84ace793992934648b4de8eed757e5a2" />
+    <link rel="stylesheet" type="text/css" href="../_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.css" />
+    
+  <link rel="preload" as="script" href="../_static/js/index.be7d3bbb2ef33a8344ce.js">
+
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/togglebutton.js"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Interactive Nodes" href="../reference/interactive-nodes.html" />
+    <link rel="prev" title="Grid Search" href="grid-search.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="None">
+    
+
+    <!-- Google Analytics -->
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<!-- Checkboxes to toggle the left sidebar -->
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle navigation sidebar">
+<label class="overlay" for="__navigation">
+    <div class="visually-hidden">Toggle navigation sidebar</div>
+</label>
+<div class="col-12 col-md-3 bd-sidebar site-navigation " id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="../index.html">
+      
+      
+      
+      <h1 class="site-logo" id="site-title">Sky 0.1 documentation</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="../search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search the docs ..." aria-label="Search the docs ..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item active">
+        <p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Getting Started
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../getting-started/installation.html">
+   Installation
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../getting-started/quickstart.html">
+   Quickstart
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../getting-started/tutorial.html">
+   Tutorial: DNN Training
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Use Cases
+ </span>
+</p>
+<ul class="current nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="auto-failover.html">
+   Auto-failover Provisioning
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="iterative-dev-project.html">
+   Iteratively Developing a Project
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="launch-many-tasks-vm.html">
+   Launch Multiple Tasks on a VM
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="grid-search.html">
+   Grid Search
+  </a>
+ </li>
+ <li class="toctree-l1 current active">
+  <a class="current reference internal" href="#">
+   Distributed Jobs on many VMs
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference external" href="https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples">
+   Additional Examples
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Reference Documentation
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/interactive-nodes.html">
+   Interactive Nodes
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/iterative-development.html">
+   Iterative Development
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/storage.html">
+   Storage
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/job-queue.html">
+   Job Queue
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Advanced Sky Tutorials
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../advanced/python-control.html">
+   Python Control Flow
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Theme by the <a href="https://ebp.jupyterbook.org">Executable Book Project</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<!-- This is an invisible pixel that we watch to see if we've scrolled. -->
+<div class="sbt-scroll-pixel-helper"></div>
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            <div class="topbar-left">
+                
+                <label class="nav-toggle-button" for="__navigation">
+                    <div class="visually-hidden">Toggle navigation</div>
+                    <i class="fas fa-bars"></i>
+                </label>
+                
+            </div>
+            
+<div class="dropdown-buttons-trigger">
+    <button id="dropdown-buttons-trigger" class="btn btn-secondary topbarbtn" aria-label="Download this page"><i
+            class="fas fa-download"></i></button>
+
+    <div class="dropdown-buttons">
+        <!-- ipynb file if we had a myst markdown file -->
+        
+        <!-- Download raw file -->
+        <a class="dropdown-buttons" href="../_sources/examples/distributed-jobs.rst.txt"><button type="button"
+                class="btn btn-secondary topbarbtn" title="Download source file" data-toggle="tooltip"
+                data-placement="left">.rst</button></a>
+        <!-- Download PDF via print -->
+        <button type="button" id="download-print" class="btn btn-secondary topbarbtn" title="Print to PDF"
+                onclick="printPdf(this)" data-toggle="tooltip" data-placement="left">.pdf</button>
+    </div>
+</div>
+
+            <!-- Source interaction buttons -->
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show noprint">
+            
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+            <!-- Table of contents that is only displayed when printing the page -->
+            <div id="jb-print-docs-body" class="onlyprint">
+                <h1>Distributed Jobs on many VMs</h1>
+                <!-- Table of contents -->
+                <div id="print-main-content">
+                    <div id="jb-print-toc">
+                        
+                    </div>
+                </div>
+            </div>
+            
+              <div>
+                
+  <div class="section" id="distributed-jobs-on-many-vms">
+<h1>Distributed Jobs on many VMs<a class="headerlink" href="#distributed-jobs-on-many-vms" title="Permalink to this headline">¶</a></h1>
+<p>For certain workloads, a single node may not be sufficient. Sky supports multi-node cluster
+provisioning and distributed execution on many VMs. Currently, this functionality is only
+supported using the Python API.</p>
+<p>We define a simple distributed training example below:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">sky</span>
+
+<span class="k">with</span> <span class="n">sky</span><span class="o">.</span><span class="n">Dag</span><span class="p">()</span> <span class="k">as</span> <span class="n">dag</span><span class="p">:</span>
+  <span class="n">num_nodes</span> <span class="o">=</span> <span class="mi">2</span>  <span class="c1"># total nodes, INCLUDING head node</span>
+
+  <span class="n">setup</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">  #!/bin/bash</span>
+<span class="s2">  pip3 install --upgrade pip</span>
+<span class="s2">  git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet</span>
+<span class="s2">  cd pytorch-distributed-resnet</span>
+<span class="s2">  pip3 install -r requirements.txt</span>
+<span class="s2">  mkdir -p data</span>
+<span class="s2">  mkdir -p saved_models</span>
+<span class="s2">  mkdir -p data</span>
+<span class="s2">  wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz</span>
+<span class="s2">  tar -xvzf cifar-10-python.tar.gz</span>
+<span class="s2">  &quot;&quot;&quot;</span>
+
+  <span class="c1"># Define a distributed training job by providing a dictionary of</span>
+  <span class="c1"># commands to run on each distributed node along with its IP address.</span>
+  <span class="k">def</span> <span class="nf">run_fn</span><span class="p">(</span><span class="n">ip_list</span><span class="p">):</span>
+    <span class="n">run_dict</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># dictionary of ip -&gt; run command mapping</span>
+    <span class="n">num_workers</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ip_list</span><span class="p">)</span>
+    <span class="n">master_ip</span> <span class="o">=</span> <span class="n">ip_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ip</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">ip_list</span><span class="p">):</span>
+      <span class="n">run_dict</span><span class="p">[</span><span class="n">ip</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">      cd pytorch-distributed-resnet</span>
+<span class="s2">      python3 -m torch.distributed.launch resnet_ddp.py </span><span class="se">\</span>
+<span class="s2">        --nproc_per_node=1 </span><span class="se">\</span>
+<span class="s2">        --nnodes=</span><span class="si">{</span><span class="n">num_workers</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
+<span class="s2">        --node_rank=</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
+<span class="s2">        --master_addr=</span><span class="se">\&quot;</span><span class="si">{</span><span class="n">master_ip</span><span class="si">}</span><span class="se">\&quot;</span><span class="s2"> </span><span class="se">\</span>
+<span class="s2">        --master_port=8008 </span><span class="se">\</span>
+<span class="s2">        --num_epochs 20</span>
+<span class="s2">      &quot;&quot;&quot;</span>
+
+    <span class="k">return</span> <span class="n">run_dict</span>
+
+  <span class="c1"># Create a Sky task</span>
+  <span class="n">task</span> <span class="o">=</span> <span class="n">sky</span><span class="o">.</span><span class="n">Task</span><span class="p">(</span>
+    <span class="s1">&#39;distributed_training&#39;</span><span class="p">,</span>
+    <span class="n">setup</span><span class="o">=</span><span class="n">setup</span><span class="p">,</span>
+    <span class="n">num_nodes</span><span class="o">=</span><span class="n">num_nodes</span><span class="p">,</span>
+    <span class="n">run</span><span class="o">=</span><span class="n">run_fn</span><span class="p">,</span>
+  <span class="p">)</span>
+
+  <span class="c1"># Set task resources</span>
+  <span class="c1"># Each node on the cluster will use the resources specified below</span>
+  <span class="n">resources</span> <span class="o">=</span> <span class="n">sky</span><span class="o">.</span><span class="n">Resources</span><span class="p">(</span><span class="n">sky</span><span class="o">.</span><span class="n">AWS</span><span class="p">(),</span> <span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">)</span>
+  <span class="n">train</span><span class="o">.</span><span class="n">set_resources</span><span class="p">(</span><span class="n">resources</span><span class="p">)</span>
+
+
+<span class="c1"># Launch the task!</span>
+<span class="n">sky</span><span class="o">.</span><span class="n">launch</span><span class="p">(</span><span class="n">dag</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+
+
+              </div>
+              
+            
+                <!-- Previous / next buttons -->
+<div class='prev-next-area'> 
+    <a class='left-prev' id="prev-link" href="grid-search.html" title="previous page">
+        <i class="fas fa-angle-left"></i>
+        <div class="prev-next-info">
+            <p class="prev-next-subtitle">previous</p>
+            <p class="prev-next-title">Grid Search</p>
+        </div>
+    </a>
+    <a class='right-next' id="next-link" href="../reference/interactive-nodes.html" title="next page">
+    <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Interactive Nodes</p>
+    </div>
+    <i class="fas fa-angle-right"></i>
+    </a>
+</div>
+            
+        </div>
+    </div>
+    <footer class="footer">
+  <p>
+    
+      By the Sky authors<br/>
+    
+        &copy; Copyright 2022, Sky Team.<br/>
+  </p>
+</footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="../_static/js/index.be7d3bbb2ef33a8344ce.js"></script>
+
+  </body>
+</html>

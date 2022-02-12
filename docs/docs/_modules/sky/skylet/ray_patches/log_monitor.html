@@ -1,0 +1,737 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sky.skylet.ray_patches.log_monitor &#8212; Sky 0.1 documentation</title>
+    
+  <link href="../../../../_static/css/theme.css" rel="stylesheet">
+  <link href="../../../../_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
+
+    
+  <link rel="stylesheet"
+    href="../../../../_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../../../_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../../../_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/sphinx-book-theme.css?digest=84ace793992934648b4de8eed757e5a2" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/mystnb.css" />
+    
+  <link rel="preload" as="script" href="../../../../_static/js/index.be7d3bbb2ef33a8344ce.js">
+
+    <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/togglebutton.js"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="../../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="None">
+    
+
+    <!-- Google Analytics -->
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<!-- Checkboxes to toggle the left sidebar -->
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle navigation sidebar">
+<label class="overlay" for="__navigation">
+    <div class="visually-hidden">Toggle navigation sidebar</div>
+</label>
+<div class="col-12 col-md-3 bd-sidebar site-navigation " id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="../../../../index.html">
+      
+      
+      
+      <h1 class="site-logo" id="site-title">Sky 0.1 documentation</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="../../../../search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search the docs ..." aria-label="Search the docs ..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item active">
+        <p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Getting Started
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../getting-started/installation.html">
+   Installation
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../getting-started/quickstart.html">
+   Quickstart
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../getting-started/tutorial.html">
+   Tutorial: DNN Training
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Use Cases
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../examples/auto-failover.html">
+   Auto-failover Provisioning
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../examples/iterative-dev-project.html">
+   Iteratively Developing a Project
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../examples/launch-many-tasks-vm.html">
+   Launch Multiple Tasks on a VM
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../examples/grid-search.html">
+   Grid Search
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../examples/distributed-jobs.html">
+   Distributed Jobs on many VMs
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference external" href="https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples">
+   Additional Examples
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Reference Documentation
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../reference/interactive-nodes.html">
+   Interactive Nodes
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../reference/iterative-development.html">
+   Iterative Development
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../reference/storage.html">
+   Storage
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../reference/job-queue.html">
+   Job Queue
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Advanced Sky Tutorials
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../../advanced/python-control.html">
+   Python Control Flow
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Theme by the <a href="https://ebp.jupyterbook.org">Executable Book Project</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<!-- This is an invisible pixel that we watch to see if we've scrolled. -->
+<div class="sbt-scroll-pixel-helper"></div>
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            <div class="topbar-left">
+                
+                <label class="nav-toggle-button" for="__navigation">
+                    <div class="visually-hidden">Toggle navigation</div>
+                    <i class="fas fa-bars"></i>
+                </label>
+                
+            </div>
+            
+            <!-- Source interaction buttons -->
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show noprint">
+            
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+            <!-- Table of contents that is only displayed when printing the page -->
+            <div id="jb-print-docs-body" class="onlyprint">
+                <h1></h1>
+                <!-- Table of contents -->
+                <div id="print-main-content">
+                    <div id="jb-print-toc">
+                        
+                    </div>
+                </div>
+            </div>
+            
+              <div>
+                
+  <h1>Source code for sky.skylet.ray_patches.log_monitor</h1><div class="highlight"><pre>
+<span></span><span class="c1"># Adapted from https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/_private/log_monitor.py</span>
+<span class="c1"># Logs from different jobs will be mixed together, due to the wrong `JOB_LOG_PATTERN``</span>
+<span class="kn">import</span> <span class="nn">argparse</span>
+<span class="kn">import</span> <span class="nn">errno</span>
+<span class="kn">import</span> <span class="nn">glob</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">logging.handlers</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">platform</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">import</span> <span class="nn">shutil</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">import</span> <span class="nn">traceback</span>
+
+<span class="kn">import</span> <span class="nn">ray.ray_constants</span> <span class="k">as</span> <span class="nn">ray_constants</span>
+<span class="kn">import</span> <span class="nn">ray._private.gcs_pubsub</span> <span class="k">as</span> <span class="nn">gcs_pubsub</span>
+<span class="kn">import</span> <span class="nn">ray._private.gcs_utils</span> <span class="k">as</span> <span class="nn">gcs_utils</span>
+<span class="kn">import</span> <span class="nn">ray._private.services</span> <span class="k">as</span> <span class="nn">services</span>
+<span class="kn">import</span> <span class="nn">ray._private.utils</span>
+<span class="kn">from</span> <span class="nn">ray._private.gcs_pubsub</span> <span class="kn">import</span> <span class="n">gcs_pubsub_enabled</span><span class="p">,</span> <span class="n">GcsPublisher</span>
+<span class="kn">from</span> <span class="nn">ray._private.ray_logging</span> <span class="kn">import</span> <span class="n">setup_component_logger</span>
+
+<span class="c1"># Logger for this module. It should be configured at the entry point</span>
+<span class="c1"># into the program using Ray. Ray provides a default configuration at</span>
+<span class="c1"># entry/init points.</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="c1"># The groups are worker id, job id, and pid.</span>
+<span class="n">JOB_LOG_PATTERN</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;.*worker-([0-9a-f]+)-([0-9a-f]+)-(\d+)&quot;</span><span class="p">)</span>
+<span class="c1"># The groups are job id.</span>
+<span class="n">RUNTIME_ENV_SETUP_PATTERN</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;.*runtime_env_setup-(\d+).log&quot;</span><span class="p">)</span>
+<span class="c1"># Log name update interval under pressure.</span>
+<span class="c1"># We need it because log name update is CPU intensive and uses 100%</span>
+<span class="c1"># of cpu when there are many log files.</span>
+<span class="n">LOG_NAME_UPDATE_INTERVAL_S</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;LOG_NAME_UPDATE_INTERVAL_S&quot;</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">))</span>
+<span class="c1"># Once there are more files than this threshold,</span>
+<span class="c1"># log monitor start giving backpressure to lower cpu usages.</span>
+<span class="n">RAY_LOG_MONITOR_MANY_FILES_THRESHOLD</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;RAY_LOG_MONITOR_MANY_FILES_THRESHOLD&quot;</span><span class="p">,</span> <span class="mi">1000</span><span class="p">))</span>
+
+
+<div class="viewcode-block" id="LogFileInfo"><a class="viewcode-back" href="../../../../sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogFileInfo">[docs]</a><span class="k">class</span> <span class="nc">LogFileInfo</span><span class="p">:</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                 <span class="n">filename</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">size_when_last_opened</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">file_position</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">file_handle</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">is_err_file</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                 <span class="n">job_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">worker_pid</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="p">(</span><span class="n">filename</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">size_when_last_opened</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span>
+                <span class="n">file_position</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">size_when_last_opened</span> <span class="o">=</span> <span class="n">size_when_last_opened</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">file_position</span> <span class="o">=</span> <span class="n">file_position</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">file_handle</span> <span class="o">=</span> <span class="n">file_handle</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">is_err_file</span> <span class="o">=</span> <span class="n">is_err_file</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">job_id</span> <span class="o">=</span> <span class="n">job_id</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">worker_pid</span> <span class="o">=</span> <span class="n">worker_pid</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">actor_name</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">task_name</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+<div class="viewcode-block" id="LogMonitor"><a class="viewcode-back" href="../../../../sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor">[docs]</a><span class="k">class</span> <span class="nc">LogMonitor</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;A monitor process for monitoring Ray log files.</span>
+
+<span class="sd">    This class mantains a list of open files and a list of closed log files. We</span>
+<span class="sd">    can&#39;t simply leave all files open because we&#39;ll run out of file</span>
+<span class="sd">    descriptors.</span>
+
+<span class="sd">    The &quot;run&quot; method of this class will cycle between doing several things:</span>
+<span class="sd">    1. First, it will check if any new files have appeared in the log</span>
+<span class="sd">       directory. If so, they will be added to the list of closed files.</span>
+<span class="sd">    2. Then, if we are unable to open any new files, we will close all of the</span>
+<span class="sd">       files.</span>
+<span class="sd">    3. Then, we will open as many closed files as we can that may have new</span>
+<span class="sd">       lines (judged by an increase in file size since the last time the file</span>
+<span class="sd">       was opened).</span>
+<span class="sd">    4. Then we will loop through the open files and see if there are any new</span>
+<span class="sd">       lines in the file. If so, we will publish them to Redis.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        host (str): The hostname of this machine. Used to improve the log</span>
+<span class="sd">            messages published to Redis.</span>
+<span class="sd">        logs_dir (str): The directory that the log files are in.</span>
+<span class="sd">        redis_client: A client used to communicate with the Redis server.</span>
+<span class="sd">        log_filenames (set): This is the set of filenames of all files in</span>
+<span class="sd">            open_file_infos and closed_file_infos.</span>
+<span class="sd">        open_file_infos (list[LogFileInfo]): Info for all of the open files.</span>
+<span class="sd">        closed_file_infos (list[LogFileInfo]): Info for all of the closed</span>
+<span class="sd">            files.</span>
+<span class="sd">        can_open_more_files (bool): True if we can still open more files and</span>
+<span class="sd">            false otherwise.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logs_dir</span><span class="p">,</span> <span class="n">redis_address</span><span class="p">,</span> <span class="n">redis_password</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Initialize the log monitor object.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ip</span> <span class="o">=</span> <span class="n">services</span><span class="o">.</span><span class="n">get_node_ip_address</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logs_dir</span> <span class="o">=</span> <span class="n">logs_dir</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">redis_client</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">_private</span><span class="o">.</span><span class="n">services</span><span class="o">.</span><span class="n">create_redis_client</span><span class="p">(</span>
+            <span class="n">redis_address</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="n">redis_password</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">publisher</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">gcs_pubsub</span><span class="o">.</span><span class="n">gcs_pubsub_enabled</span><span class="p">():</span>
+            <span class="n">gcs_addr</span> <span class="o">=</span> <span class="n">gcs_utils</span><span class="o">.</span><span class="n">get_gcs_address_from_redis</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">redis_client</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">publisher</span> <span class="o">=</span> <span class="n">gcs_pubsub</span><span class="o">.</span><span class="n">GcsPublisher</span><span class="p">(</span><span class="n">address</span><span class="o">=</span><span class="n">gcs_addr</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">log_filenames</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">open_file_infos</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">closed_file_infos</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">can_open_more_files</span> <span class="o">=</span> <span class="kc">True</span>
+
+<div class="viewcode-block" id="LogMonitor.close_all_files"><a class="viewcode-back" href="../../../../sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor.close_all_files">[docs]</a>    <span class="k">def</span> <span class="nf">close_all_files</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Close all open files (so that we can open more).&quot;&quot;&quot;</span>
+        <span class="k">while</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">open_file_infos</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">file_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">open_file_infos</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">file_info</span><span class="o">.</span><span class="n">file_handle</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <span class="n">file_info</span><span class="o">.</span><span class="n">file_handle</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="c1"># Test if the worker process that generated the log file</span>
+                <span class="c1"># is still alive. Only applies to worker processes.</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span> <span class="o">!=</span> <span class="s2">&quot;raylet&quot;</span> <span class="ow">and</span>
+                        <span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span> <span class="o">!=</span> <span class="s2">&quot;gcs_server&quot;</span> <span class="ow">and</span>
+                        <span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span> <span class="o">!=</span> <span class="s2">&quot;autoscaler&quot;</span> <span class="ow">and</span>
+                        <span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span> <span class="o">!=</span> <span class="s2">&quot;runtime_env&quot;</span> <span class="ow">and</span>
+                        <span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">):</span>
+                    <span class="k">assert</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span><span class="p">,</span> <span class="nb">str</span><span class="p">),</span> <span class="p">(</span>
+                        <span class="s2">&quot;PID should be an int type. &quot;</span>
+                        <span class="s2">&quot;Given PID: </span><span class="si">{file_info.worker_pid}</span><span class="s2">.&quot;</span><span class="p">)</span>
+                    <span class="n">os</span><span class="o">.</span><span class="n">kill</span><span class="p">(</span><span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+                <span class="c1"># The process is not alive any more, so move the log file</span>
+                <span class="c1"># out of the log directory so glob.glob will not be slowed</span>
+                <span class="c1"># by it.</span>
+                <span class="n">target</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">logs_dir</span><span class="p">,</span> <span class="s2">&quot;old&quot;</span><span class="p">,</span>
+                                      <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="p">))</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">shutil</span><span class="o">.</span><span class="n">move</span><span class="p">(</span><span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+                <span class="k">except</span> <span class="p">(</span><span class="ne">IOError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">ENOENT</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">&quot;Warning: The file </span><span class="si">{</span><span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="si">}</span><span class="s2"> &quot;</span>
+                            <span class="s2">&quot;was not found.&quot;</span><span class="p">)</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="n">e</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">closed_file_infos</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">file_info</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">can_open_more_files</span> <span class="o">=</span> <span class="kc">True</span></div>
+
+<div class="viewcode-block" id="LogMonitor.update_log_filenames"><a class="viewcode-back" href="../../../../sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor.update_log_filenames">[docs]</a>    <span class="k">def</span> <span class="nf">update_log_filenames</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Update the list of log files to monitor.&quot;&quot;&quot;</span>
+        <span class="c1"># output of user code is written here</span>
+        <span class="n">log_file_paths</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">logs_dir</span><span class="si">}</span><span class="s2">/worker*[.out|.err]&quot;</span><span class="p">)</span>
+        <span class="c1"># segfaults and other serious errors are logged here</span>
+        <span class="n">raylet_err_paths</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">logs_dir</span><span class="si">}</span><span class="s2">/raylet*.err&quot;</span><span class="p">)</span>
+        <span class="c1"># monitor logs are needed to report autoscaler events</span>
+        <span class="n">monitor_log_paths</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">logs_dir</span><span class="si">}</span><span class="s2">/monitor.log&quot;</span><span class="p">)</span>
+        <span class="c1"># If gcs server restarts, there can be multiple log files.</span>
+        <span class="n">gcs_err_path</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">logs_dir</span><span class="si">}</span><span class="s2">/gcs_server*.err&quot;</span><span class="p">)</span>
+        <span class="c1"># runtime_env setup process is logged here</span>
+        <span class="n">runtime_env_setup_paths</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">logs_dir</span><span class="si">}</span><span class="s2">/runtime_env*.log&quot;</span><span class="p">)</span>
+        <span class="n">total_files</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">file_path</span> <span class="ow">in</span> <span class="p">(</span><span class="n">log_file_paths</span> <span class="o">+</span> <span class="n">raylet_err_paths</span> <span class="o">+</span> <span class="n">gcs_err_path</span> <span class="o">+</span>
+                          <span class="n">monitor_log_paths</span> <span class="o">+</span> <span class="n">runtime_env_setup_paths</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span>
+                    <span class="n">file_path</span><span class="p">)</span> <span class="ow">and</span> <span class="n">file_path</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">log_filenames</span><span class="p">:</span>
+                <span class="n">job_match</span> <span class="o">=</span> <span class="n">JOB_LOG_PATTERN</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">job_match</span><span class="p">:</span>
+                    <span class="n">job_id</span> <span class="o">=</span> <span class="n">job_match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+                    <span class="n">worker_pid</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">job_match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">job_id</span> <span class="o">=</span> <span class="kc">None</span>
+                    <span class="n">worker_pid</span> <span class="o">=</span> <span class="kc">None</span>
+
+                <span class="c1"># Perform existence check first because most file will not be</span>
+                <span class="c1"># including runtime_env. This saves some cpu cycle.</span>
+                <span class="k">if</span> <span class="s2">&quot;runtime_env&quot;</span> <span class="ow">in</span> <span class="n">file_path</span><span class="p">:</span>
+                    <span class="n">runtime_env_job_match</span> <span class="o">=</span> <span class="n">RUNTIME_ENV_SETUP_PATTERN</span><span class="o">.</span><span class="n">match</span><span class="p">(</span>
+                        <span class="n">file_path</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">runtime_env_job_match</span><span class="p">:</span>
+                        <span class="n">job_id</span> <span class="o">=</span> <span class="n">runtime_env_job_match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+                <span class="n">is_err_file</span> <span class="o">=</span> <span class="n">file_path</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;err&quot;</span><span class="p">)</span>
+
+                <span class="bp">self</span><span class="o">.</span><span class="n">log_filenames</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">closed_file_infos</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="n">LogFileInfo</span><span class="p">(</span><span class="n">filename</span><span class="o">=</span><span class="n">file_path</span><span class="p">,</span>
+                                <span class="n">size_when_last_opened</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                                <span class="n">file_position</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                                <span class="n">file_handle</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                                <span class="n">is_err_file</span><span class="o">=</span><span class="n">is_err_file</span><span class="p">,</span>
+                                <span class="n">job_id</span><span class="o">=</span><span class="n">job_id</span><span class="p">,</span>
+                                <span class="n">worker_pid</span><span class="o">=</span><span class="n">worker_pid</span><span class="p">))</span>
+                <span class="n">log_filename</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Beginning to track file </span><span class="si">{</span><span class="n">log_filename</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">total_files</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="n">total_files</span></div>
+
+<div class="viewcode-block" id="LogMonitor.open_closed_files"><a class="viewcode-back" href="../../../../sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor.open_closed_files">[docs]</a>    <span class="k">def</span> <span class="nf">open_closed_files</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Open some closed files if they may have new lines.</span>
+
+<span class="sd">        Opening more files may require us to close some of the already open</span>
+<span class="sd">        files.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">can_open_more_files</span><span class="p">:</span>
+            <span class="c1"># If we can&#39;t open any more files. Close all of the files.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">close_all_files</span><span class="p">()</span>
+
+        <span class="n">files_with_no_updates</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">while</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">closed_file_infos</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">open_file_infos</span><span class="p">)</span> <span class="o">&gt;=</span>
+                    <span class="n">ray_constants</span><span class="o">.</span><span class="n">LOG_MONITOR_MAX_OPEN_FILES</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">can_open_more_files</span> <span class="o">=</span> <span class="kc">False</span>
+                <span class="k">break</span>
+
+            <span class="n">file_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">closed_file_infos</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="n">file_info</span><span class="o">.</span><span class="n">file_handle</span> <span class="ow">is</span> <span class="kc">None</span>
+            <span class="c1"># Get the file size to see if it has gotten bigger since we last</span>
+            <span class="c1"># opened it.</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">file_size</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getsize</span><span class="p">(</span><span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="p">)</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">IOError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="c1"># Catch &quot;file not found&quot; errors.</span>
+                <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">ENOENT</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Warning: The file </span><span class="si">{</span><span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="si">}</span><span class="s2"> &quot;</span>
+                                   <span class="s2">&quot;was not found.&quot;</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">log_filenames</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="p">)</span>
+                    <span class="k">continue</span>
+                <span class="k">raise</span> <span class="n">e</span>
+
+            <span class="c1"># If some new lines have been added to this file, try to reopen the</span>
+            <span class="c1"># file.</span>
+            <span class="k">if</span> <span class="n">file_size</span> <span class="o">&gt;</span> <span class="n">file_info</span><span class="o">.</span><span class="n">size_when_last_opened</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">f</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span>
+                <span class="k">except</span> <span class="p">(</span><span class="ne">IOError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">ENOENT</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">&quot;Warning: The file </span><span class="si">{</span><span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="si">}</span><span class="s2"> &quot;</span>
+                            <span class="s2">&quot;was not found.&quot;</span><span class="p">)</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">log_filenames</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="p">)</span>
+                        <span class="k">continue</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="n">e</span>
+
+                <span class="n">f</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="n">file_info</span><span class="o">.</span><span class="n">file_position</span><span class="p">)</span>
+                <span class="n">file_info</span><span class="o">.</span><span class="n">filesize_when_last_opened</span> <span class="o">=</span> <span class="n">file_size</span>
+                <span class="n">file_info</span><span class="o">.</span><span class="n">file_handle</span> <span class="o">=</span> <span class="n">f</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">open_file_infos</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">file_info</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">files_with_no_updates</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">file_info</span><span class="p">)</span>
+
+        <span class="c1"># Add the files with no changes back to the list of closed files.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">closed_file_infos</span> <span class="o">+=</span> <span class="n">files_with_no_updates</span></div>
+
+<div class="viewcode-block" id="LogMonitor.check_log_files_and_publish_updates"><a class="viewcode-back" href="../../../../sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor.check_log_files_and_publish_updates">[docs]</a>    <span class="k">def</span> <span class="nf">check_log_files_and_publish_updates</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Get any changes to the log files and push updates to Redis.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            True if anything was published and false otherwise.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">anything_published</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">lines_to_publish</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">def</span> <span class="nf">flush</span><span class="p">():</span>
+            <span class="k">nonlocal</span> <span class="n">lines_to_publish</span>
+            <span class="k">nonlocal</span> <span class="n">anything_published</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">lines_to_publish</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="p">{</span>
+                    <span class="s2">&quot;ip&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">ip</span><span class="p">,</span>
+                    <span class="s2">&quot;pid&quot;</span><span class="p">:</span> <span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span><span class="p">,</span>
+                    <span class="s2">&quot;job&quot;</span><span class="p">:</span> <span class="n">file_info</span><span class="o">.</span><span class="n">job_id</span><span class="p">,</span>
+                    <span class="s2">&quot;is_err&quot;</span><span class="p">:</span> <span class="n">file_info</span><span class="o">.</span><span class="n">is_err_file</span><span class="p">,</span>
+                    <span class="s2">&quot;lines&quot;</span><span class="p">:</span> <span class="n">lines_to_publish</span><span class="p">,</span>
+                    <span class="s2">&quot;actor_name&quot;</span><span class="p">:</span> <span class="n">file_info</span><span class="o">.</span><span class="n">actor_name</span><span class="p">,</span>
+                    <span class="s2">&quot;task_name&quot;</span><span class="p">:</span> <span class="n">file_info</span><span class="o">.</span><span class="n">task_name</span><span class="p">,</span>
+                <span class="p">}</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">publisher</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">publisher</span><span class="o">.</span><span class="n">publish_logs</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">redis_client</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">gcs_utils</span><span class="o">.</span><span class="n">LOG_FILE_CHANNEL</span><span class="p">,</span>
+                                              <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
+                <span class="n">anything_published</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="n">lines_to_publish</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">for</span> <span class="n">file_info</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">open_file_infos</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="ow">not</span> <span class="n">file_info</span><span class="o">.</span><span class="n">file_handle</span><span class="o">.</span><span class="n">closed</span>
+
+            <span class="n">max_num_lines_to_read</span> <span class="o">=</span> <span class="mi">100</span>
+            <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">max_num_lines_to_read</span><span class="p">):</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">next_line</span> <span class="o">=</span> <span class="n">file_info</span><span class="o">.</span><span class="n">file_handle</span><span class="o">.</span><span class="n">readline</span><span class="p">()</span>
+                    <span class="c1"># Replace any characters not in UTF-8 with</span>
+                    <span class="c1"># a replacement character, see</span>
+                    <span class="c1"># https://stackoverflow.com/a/38565489/10891801</span>
+                    <span class="n">next_line</span> <span class="o">=</span> <span class="n">next_line</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">next_line</span> <span class="o">==</span> <span class="s2">&quot;&quot;</span><span class="p">:</span>
+                        <span class="k">break</span>
+                    <span class="k">if</span> <span class="n">next_line</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">:</span>
+                        <span class="n">next_line</span> <span class="o">=</span> <span class="n">next_line</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+                    <span class="k">if</span> <span class="n">next_line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span>
+                            <span class="n">ray_constants</span><span class="o">.</span><span class="n">LOG_PREFIX_ACTOR_NAME</span><span class="p">):</span>
+                        <span class="n">flush</span><span class="p">()</span>  <span class="c1"># Possible change of task/actor name.</span>
+                        <span class="n">file_info</span><span class="o">.</span><span class="n">actor_name</span> <span class="o">=</span> <span class="n">next_line</span><span class="o">.</span><span class="n">split</span><span class="p">(</span>
+                            <span class="n">ray_constants</span><span class="o">.</span><span class="n">LOG_PREFIX_ACTOR_NAME</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+                        <span class="n">file_info</span><span class="o">.</span><span class="n">task_name</span> <span class="o">=</span> <span class="kc">None</span>
+                    <span class="k">elif</span> <span class="n">next_line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span>
+                            <span class="n">ray_constants</span><span class="o">.</span><span class="n">LOG_PREFIX_TASK_NAME</span><span class="p">):</span>
+                        <span class="n">flush</span><span class="p">()</span>  <span class="c1"># Possible change of task/actor name.</span>
+                        <span class="n">file_info</span><span class="o">.</span><span class="n">task_name</span> <span class="o">=</span> <span class="n">next_line</span><span class="o">.</span><span class="n">split</span><span class="p">(</span>
+                            <span class="n">ray_constants</span><span class="o">.</span><span class="n">LOG_PREFIX_TASK_NAME</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+                    <span class="k">elif</span> <span class="n">next_line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span>
+                            <span class="s2">&quot;Windows fatal exception: access violation&quot;</span><span class="p">):</span>
+                        <span class="c1"># We are suppressing the</span>
+                        <span class="c1"># &#39;Windows fatal exception: access violation&#39;</span>
+                        <span class="c1"># message on workers on Windows here.</span>
+                        <span class="c1"># As far as we know it is harmless,</span>
+                        <span class="c1"># but is frequently popping up if Python</span>
+                        <span class="c1"># functions are run inside the core</span>
+                        <span class="c1"># worker C extension. See the investigation in</span>
+                        <span class="c1"># github.com/ray-project/ray/issues/18944</span>
+                        <span class="c1"># Also skip the following line, which is an</span>
+                        <span class="c1"># empty line.</span>
+                        <span class="n">file_info</span><span class="o">.</span><span class="n">file_handle</span><span class="o">.</span><span class="n">readline</span><span class="p">()</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">lines_to_publish</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">next_line</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;Error: Reading file: </span><span class="si">{</span><span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="si">}</span><span class="s2">, &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;position: </span><span class="si">{</span><span class="n">file_info</span><span class="o">.</span><span class="n">file_info</span><span class="o">.</span><span class="n">file_handle</span><span class="o">.</span><span class="n">tell</span><span class="p">()</span><span class="si">}</span><span class="s2"> &quot;</span>
+                        <span class="s2">&quot;failed.&quot;</span><span class="p">)</span>
+                    <span class="k">raise</span>
+
+            <span class="k">if</span> <span class="n">file_info</span><span class="o">.</span><span class="n">file_position</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">if</span> <span class="s2">&quot;/raylet&quot;</span> <span class="ow">in</span> <span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="p">:</span>
+                    <span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span> <span class="o">=</span> <span class="s2">&quot;raylet&quot;</span>
+                <span class="k">elif</span> <span class="s2">&quot;/gcs_server&quot;</span> <span class="ow">in</span> <span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="p">:</span>
+                    <span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span> <span class="o">=</span> <span class="s2">&quot;gcs_server&quot;</span>
+                <span class="k">elif</span> <span class="s2">&quot;/monitor&quot;</span> <span class="ow">in</span> <span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="p">:</span>
+                    <span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span> <span class="o">=</span> <span class="s2">&quot;autoscaler&quot;</span>
+                <span class="k">elif</span> <span class="s2">&quot;/runtime_env&quot;</span> <span class="ow">in</span> <span class="n">file_info</span><span class="o">.</span><span class="n">filename</span><span class="p">:</span>
+                    <span class="n">file_info</span><span class="o">.</span><span class="n">worker_pid</span> <span class="o">=</span> <span class="s2">&quot;runtime_env&quot;</span>
+
+            <span class="c1"># Record the current position in the file.</span>
+            <span class="n">file_info</span><span class="o">.</span><span class="n">file_position</span> <span class="o">=</span> <span class="n">file_info</span><span class="o">.</span><span class="n">file_handle</span><span class="o">.</span><span class="n">tell</span><span class="p">()</span>
+            <span class="n">flush</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">anything_published</span></div>
+
+<div class="viewcode-block" id="LogMonitor.run"><a class="viewcode-back" href="../../../../sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor.run">[docs]</a>    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Run the log monitor.</span>
+
+<span class="sd">        This will query Redis once every second to check if there are new log</span>
+<span class="sd">        files to monitor. It will also store those log files in Redis.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">total_log_files</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">last_updated</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">elapsed_seconds</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">last_updated</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">total_log_files</span> <span class="o">&lt;</span> <span class="n">RAY_LOG_MONITOR_MANY_FILES_THRESHOLD</span> <span class="ow">or</span>
+                    <span class="n">elapsed_seconds</span> <span class="o">&gt;</span> <span class="n">LOG_NAME_UPDATE_INTERVAL_S</span><span class="p">):</span>
+                <span class="n">total_log_files</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">update_log_filenames</span><span class="p">()</span>
+                <span class="n">last_updated</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">open_closed_files</span><span class="p">()</span>
+            <span class="n">anything_published</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">check_log_files_and_publish_updates</span><span class="p">()</span>
+            <span class="c1"># If nothing was published, then wait a little bit before checking</span>
+            <span class="c1"># for logs to avoid using too much CPU.</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">anything_published</span><span class="p">:</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.1</span><span class="p">)</span></div></div>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;Parse Redis server for the &quot;</span>
+                                                  <span class="s2">&quot;log monitor to connect &quot;</span>
+                                                  <span class="s2">&quot;to.&quot;</span><span class="p">))</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--gcs-address&quot;</span><span class="p">,</span>
+                        <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+                        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;The address (ip:port) of GCS.&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--redis-address&quot;</span><span class="p">,</span>
+                        <span class="n">required</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+                        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;The address to use for Redis.&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--redis-password&quot;</span><span class="p">,</span>
+                        <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+                        <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;the password to use for Redis&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--logging-level&quot;</span><span class="p">,</span>
+                        <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+                        <span class="n">default</span><span class="o">=</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOGGER_LEVEL</span><span class="p">,</span>
+                        <span class="n">choices</span><span class="o">=</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOGGER_LEVEL_CHOICES</span><span class="p">,</span>
+                        <span class="n">help</span><span class="o">=</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOGGER_LEVEL_HELP</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--logging-format&quot;</span><span class="p">,</span>
+                        <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+                        <span class="n">default</span><span class="o">=</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOGGER_FORMAT</span><span class="p">,</span>
+                        <span class="n">help</span><span class="o">=</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOGGER_FORMAT_HELP</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--logging-filename&quot;</span><span class="p">,</span>
+                        <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+                        <span class="n">default</span><span class="o">=</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOG_MONITOR_LOG_FILE_NAME</span><span class="p">,</span>
+                        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Specify the name of log file, &quot;</span>
+                        <span class="s2">&quot;log to stdout if set empty, default is &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\&quot;</span><span class="si">{</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOG_MONITOR_LOG_FILE_NAME</span><span class="si">}</span><span class="se">\&quot;</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--logs-dir&quot;</span><span class="p">,</span>
+        <span class="n">required</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Specify the path of the temporary directory used by Ray &quot;</span>
+        <span class="s2">&quot;processes.&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--logging-rotate-bytes&quot;</span><span class="p">,</span>
+                        <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                        <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+                        <span class="n">default</span><span class="o">=</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOGGING_ROTATE_BYTES</span><span class="p">,</span>
+                        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Specify the max bytes for rotating &quot;</span>
+                        <span class="s2">&quot;log file, default is &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOGGING_ROTATE_BYTES</span><span class="si">}</span><span class="s2"> bytes.&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--logging-rotate-backup-count&quot;</span><span class="p">,</span>
+        <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOGGING_ROTATE_BACKUP_COUNT</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Specify the backup count of rotated log file, default is &quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ray_constants</span><span class="o">.</span><span class="n">LOGGING_ROTATE_BACKUP_COUNT</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="n">setup_component_logger</span><span class="p">(</span><span class="n">logging_level</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">logging_level</span><span class="p">,</span>
+                           <span class="n">logging_format</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">logging_format</span><span class="p">,</span>
+                           <span class="n">log_dir</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">logs_dir</span><span class="p">,</span>
+                           <span class="n">filename</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">logging_filename</span><span class="p">,</span>
+                           <span class="n">max_bytes</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">logging_rotate_bytes</span><span class="p">,</span>
+                           <span class="n">backup_count</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">logging_rotate_backup_count</span><span class="p">)</span>
+
+    <span class="n">log_monitor</span> <span class="o">=</span> <span class="n">LogMonitor</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">logs_dir</span><span class="p">,</span>
+                             <span class="n">args</span><span class="o">.</span><span class="n">redis_address</span><span class="p">,</span>
+                             <span class="n">redis_password</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">redis_password</span><span class="p">)</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">log_monitor</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="c1"># Something went wrong, so push an error to all drivers.</span>
+        <span class="n">redis_client</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">_private</span><span class="o">.</span><span class="n">services</span><span class="o">.</span><span class="n">create_redis_client</span><span class="p">(</span>
+            <span class="n">args</span><span class="o">.</span><span class="n">redis_address</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">redis_password</span><span class="p">)</span>
+        <span class="n">gcs_publisher</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">gcs_address</span><span class="p">:</span>
+            <span class="n">gcs_publisher</span> <span class="o">=</span> <span class="n">GcsPublisher</span><span class="p">(</span><span class="n">address</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">gcs_address</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">gcs_pubsub_enabled</span><span class="p">():</span>
+            <span class="n">gcs_publisher</span> <span class="o">=</span> <span class="n">GcsPublisher</span><span class="p">(</span>
+                <span class="n">address</span><span class="o">=</span><span class="n">gcs_utils</span><span class="o">.</span><span class="n">get_gcs_address_from_redis</span><span class="p">(</span><span class="n">redis_client</span><span class="p">))</span>
+        <span class="n">traceback_str</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">_private</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">format_error_message</span><span class="p">(</span>
+            <span class="n">traceback</span><span class="o">.</span><span class="n">format_exc</span><span class="p">())</span>
+        <span class="n">message</span> <span class="o">=</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;The log monitor on node </span><span class="si">{</span><span class="n">platform</span><span class="o">.</span><span class="n">node</span><span class="p">()</span><span class="si">}</span><span class="s2"> &quot;</span>
+                   <span class="sa">f</span><span class="s2">&quot;failed with the following error:</span><span class="se">\n</span><span class="si">{</span><span class="n">traceback_str</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">ray</span><span class="o">.</span><span class="n">_private</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">publish_error_to_driver</span><span class="p">(</span>
+            <span class="n">ray_constants</span><span class="o">.</span><span class="n">LOG_MONITOR_DIED_ERROR</span><span class="p">,</span>
+            <span class="n">message</span><span class="p">,</span>
+            <span class="n">redis_client</span><span class="o">=</span><span class="n">redis_client</span><span class="p">,</span>
+            <span class="n">gcs_publisher</span><span class="o">=</span><span class="n">gcs_publisher</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="n">e</span>
+</pre></div>
+
+              </div>
+              
+            
+                <!-- Previous / next buttons -->
+<div class='prev-next-area'>
+</div>
+            
+        </div>
+    </div>
+    <footer class="footer">
+  <p>
+    
+      By the Sky authors<br/>
+    
+        &copy; Copyright 2022, Sky Team.<br/>
+  </p>
+</footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="../../../../_static/js/index.be7d3bbb2ef33a8344ce.js"></script>
+
+  </body>
+</html>
