@@ -1,6 +1,7 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
+import subprocess
 from typing import Any, Dict, Optional, Tuple
 import urllib.parse
 
@@ -38,9 +39,7 @@ class AbstractStore:
         self.is_initialized = False
 
     def delete(self) -> None:
-        """
-        Removes the storage object from the cloud
-        """
+        """Removes the Storage object from the cloud."""
         raise NotImplementedError
 
     def get_handle(self) -> StorageHandle:
@@ -50,8 +49,7 @@ class AbstractStore:
         raise NotImplementedError
 
     def sync_local_dir(self) -> None:
-        """Syncs local directory with Store bucket
-        """
+        """Syncs a local directory to a Store bucket."""
         raise NotImplementedError
 
     def download_remote_dir(self, local_path: str) -> None:
@@ -197,8 +195,9 @@ class Storage(object):
         return store
 
     def delete(self) -> None:
-        """Deletes data for all storage objects.
-        """
+        """Deletes data for all storage objects."""
+        if not self.stores:
+            logger.info('No backing stores found.')
         for _, store in self.stores.items():
             store.delete()
 
@@ -246,15 +245,14 @@ class S3Store(AbstractStore):
         return aws.resource('s3').Bucket(self.name)
 
     def sync_local_dir(self) -> None:
-        """Syncs Local folder with S3 Bucket. This method is called after
-        the folder is already uploaded onto the S3 bucket.
+        """Syncs a local directory to a S3 bucket.
 
-        AWS Sync by default uses 10 threads to upload files to the bucket.
-        To increase parallelism, modify max_concurrent_requests in your
-        aws config file (Default path: ~/.aws/config).
+        AWS Sync by default uses 10 threads to upload files to the bucket.  To
+        increase parallelism, modify max_concurrent_requests in your aws config
+        file (Default path: ~/.aws/config).
         """
         sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'
-        os.system(sync_command)
+        subprocess.run(sync_command, shell=True, check=True)
 
     def _transfer_to_s3(self) -> None:
         if self.source.startswith('gs://'):
@@ -365,11 +363,9 @@ class GcsStore(AbstractStore):
         return self.client.get_bucket(self.name)
 
     def sync_local_dir(self) -> None:
-        """Syncs Local folder with GCS Bucket. This method is called after
-        the folder is already uploaded onto the GCS bucket.
-        """
+        """Syncs a local directory to a GCS bucket."""
         sync_command = f'gsutil -m rsync -d -r {self.source} gs://{self.name}/'
-        os.system(sync_command)
+        subprocess.run(sync_command, shell=True, check=True)
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
