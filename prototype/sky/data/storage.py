@@ -2,10 +2,13 @@
 import enum
 import os
 from typing import Any, Dict, Optional, Tuple
+import urllib.parse
 
-from sky.data import data_utils, data_transfer
+from sky.cloud_adaptors import aws
+from sky.cloud_adaptors import gcp
+from sky.data import data_transfer
+from sky.data import data_utils
 from sky import sky_logging
-from sky.cloud_adaptors import aws, gcp
 
 logger = sky_logging.init_logger(__name__)
 
@@ -111,7 +114,7 @@ class Storage(object):
                  source: Path,
                  stores: Optional[Dict[StorageType, AbstractStore]] = None,
                  persistent: bool = True):
-        """Initializes a Storage object
+        """Initializes a Storage object.
 
         Three fields are required: the name of the storage, the source
         path where the data is initially located, and the default mount
@@ -120,10 +123,10 @@ class Storage(object):
         Args:
           name: str; Name of the storage object. Typically used as the
             bucket name in backing object stores.
-          source: str; File path where the data is initially stored. Can be
-            on local machine or on cloud (s3://, gs://, etc.). Paths do not need
-            to be absolute.
-          stores: Optional; - specify pre-initialized stores (S3Store, GcsStore)
+          source: str; File path where the data is initially stored. Can be a
+            local path or a cloud URI (s3://, gs://, etc.). Local paths do not
+            need to be absolute.
+          stores: Optional; Specify pre-initialized stores (S3Store, GcsStore).
           persistent: bool; Whether to persist across sky launches.
         """
         self.name = name
@@ -136,10 +139,18 @@ class Storage(object):
 
         # If source is a pre-existing bucket, connect to the bucket
         # If the bucket does not exist, this will error out
-        if 's3://' in self.source:
+        if self.source.startswith('s3://'):
             self.get_or_copy_to_s3()
-        elif 'gs://' in self.source:
+        elif self.source.startswith('gs://'):
             self.get_or_copy_to_gcs()
+        else:
+            scheme = urllib.parse.urlsplit(self.source).scheme
+            if scheme != '':
+                raise ValueError(
+                    f'Supported paths: local, s3://, gs://. Got: {self.source}')
+            if not os.path.exists(self.source):
+                raise ValueError(
+                    f'Local source path does not exist: {self.source}')
 
     def get_or_copy_to_s3(self):
         """Adds AWS S3 Store to Storage
@@ -170,7 +181,7 @@ class Storage(object):
         store = None
 
         if cloud_type in self.stores:
-            logger.info(f'Storage type {cloud_type} already exists!')
+            logger.info(f'Storage type {cloud_type} already exists.')
             return self.stores[cloud_type]
 
         if cloud_type == StorageType.S3:
@@ -178,7 +189,7 @@ class Storage(object):
         elif cloud_type == StorageType.GCS:
             store = GcsStore(name=self.name, source=self.source)
         else:
-            raise ValueError(f'{cloud_type} not supported as a Store!')
+            raise ValueError(f'{cloud_type} not supported as a Store.')
 
         assert store.is_initialized
 
@@ -202,15 +213,15 @@ class S3Store(AbstractStore):
         if self.source.startswith('s3://'):
             assert name == data_utils.split_s3_path(source)[0], (
                 'S3 Bucket is specified as path, the name should be the '
-                'same as S3 bucket!')
+                'same as S3 bucket.')
 
         elif self.source.startswith('gs://'):
             assert name == data_utils.split_gcs_path(source)[0], (
                 'GCS Bucket is specified as path, the name should be the '
-                'same as GCS bucket!')
+                'same as GCS bucket.')
             assert data_utils.verify_gcs_bucket(name), (
                 f'Source specified as {source}, a GCS bucket. ',
-                'GCS Bucket should exist!')
+                'GCS Bucket should exist.')
 
         self.client = data_utils.create_s3_client(region)
         self.region = region
@@ -262,7 +273,8 @@ class S3Store(AbstractStore):
         if bucket in s3.buckets.all():
             return bucket, False
         if self.source.startswith('s3://'):
-            raise ValueError('Attempted to connect to a non-existent bucket.')
+            raise ValueError(
+                f'Attempted to connect to a non-existent bucket: {self.source}')
         return self._create_s3_bucket(self.name), True
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
@@ -320,15 +332,15 @@ class GcsStore(AbstractStore):
         if self.source.startswith('s3://'):
             assert name == data_utils.split_s3_path(source)[0], (
                 'S3 Bucket is specified as path, the name should be the '
-                'same as S3 bucket!')
+                'same as S3 bucket.')
             assert data_utils.verify_s3_bucket(name), (
                 f'Source specified as {source}, an S3 bucket. ',
-                'S3 Bucket should exist!')
+                'S3 Bucket should exist.')
 
         elif self.source.startswith('gs://'):
             assert name == data_utils.split_gcs_path(source)[0], (
                 'GCS Bucket is specified as path, the name should be the '
-                'same as GCS bucket!')
+                'same as GCS bucket.')
 
         self.client = gcp.storage_client()
         self.region = region
@@ -377,7 +389,8 @@ class GcsStore(AbstractStore):
         except gcp.not_found_exception() as e:
             if self.source.startswith('gs://'):
                 raise ValueError(
-                    'Attempted to connect to a non-existent bucket.') from e
+                    'Attempted to connect to a non-existent bucket: '
+                    f'{self.source}') from e
             logger.info(e)
             return self._create_gcs_bucket(self.name), True
 
@@ -404,8 +417,8 @@ class GcsStore(AbstractStore):
         bucket.storage_class = 'STANDARD'
         new_bucket = self.client.create_bucket(bucket, location=region)
         logger.info(
-            f'Created GCS bucket {new_bucket.name} in {new_bucket.location} \
-            with storage class {new_bucket.storage_class}')
+            f'Created GCS bucket {new_bucket.name} in {new_bucket.location} '
+            f'with storage class {new_bucket.storage_class}')
         return new_bucket
 
     def _delete_gcs_bucket(self, bucket_name: str) -> None:
