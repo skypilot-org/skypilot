@@ -4,6 +4,7 @@ This module loads the service catalog file and can be used to query
 instance types and pricing information for Azure.
 """
 from typing import Dict, List, Optional
+import ast
 
 from sky.clouds import cloud
 from sky.clouds.service_catalog import common
@@ -40,8 +41,7 @@ def get_region_zones_for_instance_type(instance_type: str,
     return common.get_region_zones(df, use_spot)
 
 
-def get_gen_version_from_instance_type(instance_type: str) -> int:
-    import ast
+def get_gen_version_from_instance_type(instance_type: str) -> Optional[int]:
     cell = _df[_df['InstanceType'] == instance_type]['capabilities'].iloc[0]
     cap_list = ast.literal_eval(cell)
     gen_version = None

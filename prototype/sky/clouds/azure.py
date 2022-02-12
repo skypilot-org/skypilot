@@ -68,7 +68,7 @@ class Azure(clouds.Cloud):
         return 'Standard_D8_v4'
 
     @classmethod
-    def get_image_config(cls, gen_version, instance_type):
+    def _get_image_config(cls, gen_version, instance_type):
         image_config = {
             'image_publisher': 'microsoft-dsvm',
             'image_offer': 'ubuntu-2004',
@@ -141,7 +141,7 @@ class Azure(clouds.Cloud):
         else:
             custom_resources = None
         gen_version = azure_catalog.get_gen_version_from_instance_type(r.instance_type)
-        image_config = self.get_image_config(gen_version, r.instance_type)
+        image_config = self._get_image_config(gen_version, r.instance_type)
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
