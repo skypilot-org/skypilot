@@ -47,12 +47,6 @@ _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 run_with_log = log_lib.run_with_log
 
 
-def get_rel_path(path: str) -> str:
-    cwd = os.getcwd()
-    common = os.path.commonpath([path, cwd])
-    return os.path.relpath(path, common)
-
-
 def _fill_template(template_path: str,
                    variables: Dict,
                    output_path: Optional[str] = None) -> str:
