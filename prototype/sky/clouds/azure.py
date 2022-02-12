@@ -75,8 +75,11 @@ class Azure(clouds.Cloud):
             'image_sku': '2004-gen2',
             'image_version': '21.11.04'
         }
+
         # ubuntu-2004 does not work on A100
-        if instance_type in ['Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4']:
+        if instance_type in [
+            'Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4'
+        ]:
             image_config['image_offer'] = 'ubuntu-hpc'
             image_config['image_sku'] = '2004'
             image_config['image_version'] = '20.04.2021120101'
@@ -140,7 +143,8 @@ class Azure(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
-        gen_version = azure_catalog.get_gen_version_from_instance_type(r.instance_type)
+        gen_version = azure_catalog.get_gen_version_from_instance_type(
+            r.instance_type)
         image_config = self._get_image_config(gen_version, r.instance_type)
         return {
             'instance_type': r.instance_type,
