@@ -2,4 +2,4 @@
 
 rm -rf build/html docs
 make html
-mv build/html docs
+cp -r build/html docs

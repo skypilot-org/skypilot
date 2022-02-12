@@ -30,5 +30,6 @@ jobs:
     - name: Build docs
       run: |
         cd docs
+        rm -rf build/html
         make html
         diff docs build/html
