@@ -68,6 +68,26 @@ class Azure(clouds.Cloud):
         return 'Standard_D8_v4'
 
     @classmethod
+    def _get_image_config(cls, gen_version, instance_type):
+        image_config = {
+            'image_publisher': 'microsoft-dsvm',
+            'image_offer': 'ubuntu-2004',
+            'image_sku': '2004-gen2',
+            'image_version': '21.11.04'
+        }
+
+        # ubuntu-2004 does not work on A100
+        if instance_type in [
+                'Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4'
+        ]:
+            image_config['image_offer'] = 'ubuntu-hpc'
+            image_config['image_sku'] = '2004'
+            image_config['image_version'] = '20.04.2021120101'
+        if gen_version == 'V1':
+            image_config['image_sku'] = '2004'
+        return image_config
+
+    @classmethod
     def regions(cls) -> List[clouds.Region]:
         # NOTE on zones: Ray Autoscaler does not support specifying
         # availability zones, and Azure CLI will try launching VMs in all
@@ -123,10 +143,14 @@ class Azure(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
+        gen_version = azure_catalog.get_gen_version_from_instance_type(
+            r.instance_type)
+        image_config = self._get_image_config(gen_version, r.instance_type)
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
+            **image_config
         }
 
     def get_feasible_launchable_resources(self, resources):
