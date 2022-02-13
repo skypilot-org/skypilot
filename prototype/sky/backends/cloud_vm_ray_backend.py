@@ -770,6 +770,9 @@ class RetryingVmProvisioner(object):
 
         def ray_up(start_streaming_at):
             # Redirect stdout/err to the file and streaming (if stream_logs).
+            # With stdout/err redirected, 'ray up' will have no color. The 
+            # `--log-style` and `--log-color` flags do not work. To reproduce,
+            # `ray up --log-style pretty --log-color true | tee tmp.out`.
             proc, stdout, stderr = log_lib.run_with_log(
                 # NOTE: --no-restart solves the following bug.  Without it, if
                 # 'ray up' (sky launch) twice on a cluster with >1 node, the
