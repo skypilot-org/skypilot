@@ -15,7 +15,6 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import colorama
-from ray.autoscaler import sdk
 
 import sky
 from sky import backends
@@ -1293,6 +1292,7 @@ class CloudVmRayBackend(backends.Backend):
         ips = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
 
         def rsync_down(ip: str) -> None:
+            from ray.autoscaler import sdk  # pylint: disable=import-outside-toplevel
             sdk.rsync(
                 handle.cluster_yaml,
                 source=f'{remote_log_dir}/*',
