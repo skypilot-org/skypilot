@@ -771,7 +771,7 @@ class RetryingVmProvisioner(object):
         def ray_up(start_streaming_at):
             # Redirect stdout/err to the file and streaming (if stream_logs).
             # With stdout/err redirected, 'ray up' will have no color and
-            # different order from directly running in the console. The 
+            # different order from directly running in the console. The
             # `--log-style` and `--log-color` flags do not work. To reproduce,
             # `ray up --log-style pretty --log-color true | tee tmp.out`.
             proc, stdout, stderr = log_lib.run_with_log(
