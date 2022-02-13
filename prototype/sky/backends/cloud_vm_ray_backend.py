@@ -783,7 +783,8 @@ class RetryingVmProvisioner(object):
                 ['ray', 'up', '-y', '--no-restart', cluster_config_file],
                 log_abs_path,
                 stream_logs,
-                start_streaming_at=start_streaming_at)
+                start_streaming_at=start_streaming_at,
+                env=dict(os.environ, BOTO_MAX_RETRIES='5'))
             return proc, stdout, stderr
 
         def is_cluster_yaml_identical():
