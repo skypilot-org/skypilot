@@ -15,10 +15,12 @@ _DEFAULT_REGION = 'southcentralus'
 
 
 def get_hourly_cost(instance_type: str,
-                    region: str = _DEFAULT_REGION,
+                    region: Optional[str] = None,
                     use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
+    if region is None:
+        region = _DEFAULT_REGION
     assert not use_spot, 'Current Azure subscription does not support spot.'
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
