@@ -8,12 +8,12 @@ if TYPE_CHECKING:
     from sky.clouds.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
-ALL_CLOUDS = ('aws', 'azure', 'gcp')
+_ALL_CLOUDS = ('aws', 'azure', 'gcp')
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
     if clouds is None:
-        clouds = list(ALL_CLOUDS)
+        clouds = list(_ALL_CLOUDS)
     single = isinstance(clouds, str)
     if single:
         clouds = [clouds]
@@ -30,8 +30,9 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
         try:
             method = getattr(cloud_module, method_name)
         except AttributeError:
-            raise AttributeError(f'Cloud "{cloud}" does not implement the '
-                                 f'"{method_name}" method') from None
+            raise AttributeError(
+                f'Module "{cloud}_catalog" does not '
+                f'implement the "{method_name}" method') from None
         results.append(method(*args, **kwargs))
     if single:
         return results[0]
