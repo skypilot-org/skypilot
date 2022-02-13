@@ -787,7 +787,6 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs,
                 start_streaming_at=start_streaming_at,
-                to_stdout=True,
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'))
             return proc, stdout, stderr
 
