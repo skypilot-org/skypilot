@@ -770,7 +770,7 @@ class RetryingVmProvisioner(object):
 
         def ray_up(start_streaming_at):
             # Redirect stdout/err to the file and streaming (if stream_logs).
-            proc, stdout, stderr = backend_utils.run_with_log(
+            proc, stdout, stderr = log_lib.run_with_log(
                 # NOTE: --no-restart solves the following bug.  Without it, if
                 # 'ray up' (sky launch) twice on a cluster with >1 node, the
                 # worker node gets disconnected/killed by ray autoscaler; the
@@ -784,6 +784,7 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs,
                 start_streaming_at=start_streaming_at,
+                to_stdout=True,
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'))
             return proc, stdout, stderr
 
@@ -906,7 +907,7 @@ class RetryingVmProvisioner(object):
         if proc.returncode == 0:
             return
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
-        backend_utils.run_with_log(
+        log_lib.run_with_log(
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
             stream_logs=True)

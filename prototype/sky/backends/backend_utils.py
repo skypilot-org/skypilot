@@ -44,8 +44,6 @@ RESET_BOLD = '\033[0m'
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
 
-run_with_log = log_lib.run_with_log
-
 
 def _fill_template(template_path: str,
                    variables: Dict,
