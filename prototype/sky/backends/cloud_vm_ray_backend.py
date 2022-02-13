@@ -1552,6 +1552,8 @@ class CloudVmRayBackend(backends.Backend):
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
+        prev_status = global_user_state.get_status_from_cluster_name(
+            handle.cluster_name)
         if not terminate and not isinstance(cloud, (clouds.AWS, clouds.GCP)):
             # FIXME: no mentions of cache_stopped_nodes in
             # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/_azure/node_provider.py
@@ -1567,6 +1569,19 @@ class CloudVmRayBackend(backends.Backend):
                 'az vm delete --yes --ids $(az vm list --query '
                 f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
                 check=False)
+        elif (isinstance(cloud, clouds.AWS) and terminate and
+              prev_status == global_user_state.ClusterStatus.STOPPED):
+            # The stopped instance on AWS will not be correctly terminated due
+            # to ray's bug.
+            region = config['provider']['region']
+            query_cmd = (
+                f'aws ec2 describe-instances --region {region} --filters '
+                f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
+                'Name=instance-state-name,Values=stopping,stopped '
+                f'--query Reservations[].Instances[].InstanceId --output text')
+            terminate_cmd = (f'aws ec2 terminate-instances --region {region} '
+                             f'--instance-ids $({query_cmd})')
+            backend_utils.run(terminate_cmd, check=True)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
