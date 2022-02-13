@@ -140,13 +140,6 @@ def get_region_zones_for_accelerators(
                                acc_name, acc_count, use_spot)
 
 
-def get_gen_version_from_instance_type(instance_type: str,
-                                       clouds: CloudFilter = None
-                                      ) -> Optional[int]:
-    return _map_clouds_catalog(clouds, 'get_gen_version_from_instance_type',
-                               instance_type)
-
-
 def get_common_gpus() -> List[str]:
     """Returns a list of commonly used GPU names."""
     return ['V100', 'V100-32GB', 'A100', 'P100', 'K80', 'T4', 'M60']
