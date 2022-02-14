@@ -202,10 +202,14 @@ class Task:
                     if is_cloud_store_url(src):
                         # Valid cloud path (s3:// or gcs://) - create storage
                         storage_name = parse.urlsplit(src).netloc
-                        fm_storages.append({'name': storage_name,
-                                            'source': src})
-                        fm_storage_mounts.append({'storage': storage_name,
-                                                  'mount_path': dst_path})
+                        fm_storages.append({
+                            'name': storage_name,
+                            'source': src
+                        })
+                        fm_storage_mounts.append({
+                            'storage': storage_name,
+                            'mount_path': dst_path
+                        })
                     # If not a cloud url, it's a local path (for rsync)
                     else:
                         rsync_mounts[dst_path] = src
@@ -218,8 +222,10 @@ class Task:
                         raise ValueError('Inline storage objects need both name'
                                          ' and source path to be specified.')
                     fm_storages.append(src)
-                    fm_storage_mounts.append({'storage': name,
-                                              'mount_path': dst_path})
+                    fm_storage_mounts.append({
+                        'storage': name,
+                        'mount_path': dst_path
+                    })
                 else:
                     raise ValueError(f'Unable to parse file_mount '
                                      f'{dst_path}:{src}')
