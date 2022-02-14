@@ -1002,26 +1002,7 @@ def down(
       # Tear down all existing clusters.
       sky down -a
     """
-    names = []
-    # TODO(suquark,zongheng): try using aws cli to terminate stopped nodes:
-    # aws ec2 describe-instances --query 'Reservations[].Instances[].InstanceId' --filters "Name=tag:ray-cluster-name,Values=<cluster_name>" --output text  # pylint: disable=line-too-long
-    # Tricky cases to test:
-    #   - Does the above only query the default region? Test on a stopped
-    #     cluster in a non-default region.
-    #   - Is it possible for Ray to launch a same-name cluster on two regions?
-    #     If so, what happens with the above call?
-    # Tracked by Issue #240.
-    for cluster_name in clusters:
-        cluster_status = global_user_state.get_status_from_cluster_name(
-            cluster_name)
-        if cluster_status == global_user_state.ClusterStatus.STOPPED:
-            click.secho(
-                f'Cannot terminate cluster {cluster_name!r} because it '
-                'is STOPPED. To fix: manually terminate in the cloud\'s '
-                'UI. (This limitation will be addressed in the future.)',
-                fg='yellow')
-        else:
-            names.append(cluster_name)
+    names = clusters
     if not all and not names:
         return
     _terminate_or_stop_clusters(names, apply_to_all=all, terminate=True)
