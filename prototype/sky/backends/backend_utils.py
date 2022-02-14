@@ -25,6 +25,7 @@ from sky import sky_logging
 from sky import resources
 from sky import task as task_lib
 from sky.skylet import log_lib
+from sky.cloud_adaptors import azure
 
 logger = sky_logging.init_logger(__name__)
 
@@ -402,6 +403,14 @@ def write_cluster_config(task: task_lib.Task,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
+    azure_subscription_id = None
+    if isinstance(cloud, clouds.Azure):
+        azure_subscription_id = azure.get_subscription_id()
+        if not azure_subscription_id:
+            raise RuntimeError('Fail to get subscription id from azure cli. '
+                               'Try to fix it with this Azure cli command: '
+                               '"az account set -s <subscription_id>".')
+
     assert cluster_name is not None
 
     setup_sh_path = None
@@ -467,6 +476,8 @@ def write_cluster_config(task: task_lib.Task,
                 'zones': ','.join(zones),
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
+                # Azure only.
+                'azure_subscription_id': azure_subscription_id,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Sky remote utils.
