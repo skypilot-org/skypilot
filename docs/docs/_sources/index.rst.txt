@@ -24,7 +24,7 @@ way.
    examples/launch-many-tasks-vm
    examples/grid-search
    examples/distributed-jobs
-   Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
+.. Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
 
 
 .. toctree::
@@ -47,12 +47,12 @@ way.
    reference/cli
 
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Advanced Sky Tutorials
+.. .. toctree::
+..   :maxdepth: 1
+..   :caption: Advanced Sky Tutorials
 
-   .. advanced/distributed
-   advanced/python-control
+..   .. advanced/distributed
+..   advanced/python-control
 
 
 .. .. toctree::

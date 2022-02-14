@@ -130,11 +130,6 @@
    Distributed Jobs on many VMs
   </a>
  </li>
- <li class="toctree-l1">
-  <a class="reference external" href="https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples">
-   Additional Examples
-  </a>
- </li>
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
@@ -165,18 +160,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="cli.html">
    CLI Reference
-  </a>
- </li>
-</ul>
-<p aria-level="2" class="caption" role="heading">
- <span class="caption-text">
-  Advanced Sky Tutorials
- </span>
-</p>
-<ul class="nav bd-sidenav">
- <li class="toctree-l1">
-  <a class="reference internal" href="../advanced/python-control.html">
-   Python Control Flow
   </a>
  </li>
 </ul>
@@ -254,6 +237,13 @@
   <a class="reference internal nav-link" href="#installation">
    Installation
   </a>
+  <ul class="nav section-nav flex-column">
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky">
+     sky
+    </a>
+   </li>
+  </ul>
  </li>
  <li class="toc-h2 nav-item toc-entry">
   <a class="reference internal nav-link" href="#creating-recipes">
@@ -284,6 +274,13 @@
   <a class="reference internal nav-link" href="#installation">
    Installation
   </a>
+  <ul class="nav section-nav flex-column">
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky">
+     sky
+    </a>
+   </li>
+  </ul>
  </li>
  <li class="toc-h2 nav-item toc-entry">
   <a class="reference internal nav-link" href="#creating-recipes">
@@ -306,6 +303,91 @@
 <p>To use Lumache, first install it using pip:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp gp-VirtualEnv">(.venv)</span> <span class="gp">$ </span>pip install lumache
 </pre></div>
+</div>
+<div class="section" id="sky">
+<h3>sky<a class="headerlink" href="#sky" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky <span class="o">[</span>OPTIONS<span class="o">]</span> COMMAND <span class="o">[</span>ARGS<span class="o">]</span>...
+</pre></div>
+</div>
+<p class="rubric">Commands</p>
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">cancel</span></span></dt>
+<dd><p>Cancel job(s).</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">cpunode</span></span></dt>
+<dd><p>Launch or attach to an interactive CPU node.</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">down</span></span></dt>
+<dd><p>Tear down cluster(s).</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">exec</span></span></dt>
+<dd><p>Execute a task or a command on a cluster…</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">gpunode</span></span></dt>
+<dd><p>Launch or attach to an interactive GPU node.</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">init</span></span></dt>
+<dd><p>Determines a set of clouds that Sky will use.</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">launch</span></span></dt>
+<dd><p>Launch a task from a YAML or command…</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">logs</span></span></dt>
+<dd><p>Tail the log of a job.</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">queue</span></span></dt>
+<dd><p>Show the job queue for cluster(s).</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">start</span></span></dt>
+<dd><p>Restart cluster(s).</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">status</span></span></dt>
+<dd><p>Show launched clusters.</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">stop</span></span></dt>
+<dd><p>Stop cluster(s).</p>
+</dd></dl>
+
+<dl class="object">
+<dt class="sig sig-object">
+<span class="sig-name descname"><span class="pre">tpunode</span></span></dt>
+<dd><p>Launch or attach to an interactive TPU node.</p>
+</dd></dl>
+
 </div>
 </div>
 <div class="section" id="creating-recipes">

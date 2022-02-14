@@ -1,0 +1,511 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sky.skylet.log_lib &#8212; Sky 0.1 documentation</title>
+    
+  <link href="../../../_static/css/theme.css" rel="stylesheet">
+  <link href="../../../_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
+
+    
+  <link rel="stylesheet"
+    href="../../../_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../../_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../../_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/sphinx-book-theme.css?digest=84ace793992934648b4de8eed757e5a2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.css" />
+    
+  <link rel="preload" as="script" href="../../../_static/js/index.be7d3bbb2ef33a8344ce.js">
+
+    <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../../../_static/togglebutton.js"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="None">
+    
+
+    <!-- Google Analytics -->
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<!-- Checkboxes to toggle the left sidebar -->
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle navigation sidebar">
+<label class="overlay" for="__navigation">
+    <div class="visually-hidden">Toggle navigation sidebar</div>
+</label>
+<div class="col-12 col-md-3 bd-sidebar site-navigation " id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="../../../index.html">
+      
+      
+      
+      <h1 class="site-logo" id="site-title">Sky 0.1 documentation</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="../../../search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search the docs ..." aria-label="Search the docs ..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item active">
+        <p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Getting Started
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/installation.html">
+   Installation
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/quickstart.html">
+   Quickstart
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/tutorial.html">
+   Tutorial: DNN Training
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Use Cases
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/auto-failover.html">
+   Auto-failover Provisioning
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/iterative-dev-project.html">
+   Iteratively Developing a Project
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/launch-many-tasks-vm.html">
+   Launch Multiple Tasks on a VM
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/grid-search.html">
+   Grid Search
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/distributed-jobs.html">
+   Distributed Jobs on many VMs
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Reference Documentation
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/interactive-nodes.html">
+   Interactive Nodes
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/iterative-development.html">
+   Iterative Development
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/storage.html">
+   Storage
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/job-queue.html">
+   Job Queue
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Theme by the <a href="https://ebp.jupyterbook.org">Executable Book Project</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<!-- This is an invisible pixel that we watch to see if we've scrolled. -->
+<div class="sbt-scroll-pixel-helper"></div>
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            <div class="topbar-left">
+                
+                <label class="nav-toggle-button" for="__navigation">
+                    <div class="visually-hidden">Toggle navigation</div>
+                    <i class="fas fa-bars"></i>
+                </label>
+                
+            </div>
+            
+            <!-- Source interaction buttons -->
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show noprint">
+            
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+            <!-- Table of contents that is only displayed when printing the page -->
+            <div id="jb-print-docs-body" class="onlyprint">
+                <h1></h1>
+                <!-- Table of contents -->
+                <div id="print-main-content">
+                    <div id="jb-print-toc">
+                        
+                    </div>
+                </div>
+            </div>
+            
+              <div>
+                
+  <h1>Source code for sky.skylet.log_lib</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Sky logging utils.</span>
+
+<span class="sd">This is a remote utility module that provides logging functionality.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span> <span class="nn">io</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">selectors</span>
+<span class="kn">import</span> <span class="nn">subprocess</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">textwrap</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">import</span> <span class="nn">tempfile</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Iterator</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">from</span> <span class="nn">sky.skylet</span> <span class="kn">import</span> <span class="n">job_lib</span>
+
+<span class="n">SKY_REMOTE_WORKDIR</span> <span class="o">=</span> <span class="s1">&#39;~/sky_workdir&#39;</span>
+
+
+<div class="viewcode-block" id="redirect_process_output"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.log_lib.redirect_process_output">[docs]</a><span class="k">def</span> <span class="nf">redirect_process_output</span><span class="p">(</span><span class="n">proc</span><span class="p">,</span>
+                            <span class="n">log_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                            <span class="n">stream_logs</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+                            <span class="n">start_streaming_at</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="p">,</span>
+                            <span class="n">skip_lines</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                            <span class="n">replace_crlf</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+    <span class="sd">&quot;&quot;&quot;Redirect the process&#39;s filtered stdout/stderr to both stream and file&quot;&quot;&quot;</span>
+    <span class="n">log_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">log_path</span><span class="p">)</span>
+    <span class="n">dirname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">log_path</span><span class="p">)</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">dirname</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">sel</span> <span class="o">=</span> <span class="n">selectors</span><span class="o">.</span><span class="n">DefaultSelector</span><span class="p">()</span>
+    <span class="n">out_io</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">TextIOWrapper</span><span class="p">(</span><span class="n">proc</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span>
+                              <span class="n">encoding</span><span class="o">=</span><span class="s1">&#39;utf-8&#39;</span><span class="p">,</span>
+                              <span class="n">newline</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span>
+                              <span class="n">errors</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">)</span>
+    <span class="n">sel</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">out_io</span><span class="p">,</span> <span class="n">selectors</span><span class="o">.</span><span class="n">EVENT_READ</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">proc</span><span class="o">.</span><span class="n">stderr</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">err_io</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">TextIOWrapper</span><span class="p">(</span><span class="n">proc</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span>
+                                  <span class="n">encoding</span><span class="o">=</span><span class="s1">&#39;utf-8&#39;</span><span class="p">,</span>
+                                  <span class="n">newline</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span>
+                                  <span class="n">errors</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">)</span>
+        <span class="n">sel</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">err_io</span><span class="p">,</span> <span class="n">selectors</span><span class="o">.</span><span class="n">EVENT_READ</span><span class="p">)</span>
+
+    <span class="n">stdout</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+    <span class="n">stderr</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+
+    <span class="n">start_streaming_flag</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">log_path</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fout</span><span class="p">:</span>
+        <span class="k">while</span> <span class="nb">len</span><span class="p">(</span><span class="n">sel</span><span class="o">.</span><span class="n">get_map</span><span class="p">())</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">events</span> <span class="o">=</span> <span class="n">sel</span><span class="o">.</span><span class="n">select</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">events</span><span class="p">:</span>
+                <span class="n">line</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">fileobj</span><span class="o">.</span><span class="n">readline</span><span class="p">()</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">line</span><span class="p">:</span>
+                    <span class="c1"># Unregister the io when EOF reached</span>
+                    <span class="n">sel</span><span class="o">.</span><span class="n">unregister</span><span class="p">(</span><span class="n">key</span><span class="o">.</span><span class="n">fileobj</span><span class="p">)</span>
+                    <span class="k">continue</span>
+                <span class="c1"># Remove special characters to avoid cursor hidding</span>
+                <span class="n">line</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\x1b</span><span class="s1">[?25l&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">replace_crlf</span> <span class="ow">and</span> <span class="n">line</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\r\n</span><span class="s1">&#39;</span><span class="p">):</span>
+                    <span class="c1"># Replace CRLF with LF to avoid ray logging to the same line</span>
+                    <span class="c1"># due to separating lines with &#39;\n&#39;.</span>
+                    <span class="n">line</span> <span class="o">=</span> <span class="n">line</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">skip_lines</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span>
+                        <span class="nb">any</span><span class="p">(</span><span class="n">skip</span> <span class="ow">in</span> <span class="n">line</span> <span class="k">for</span> <span class="n">skip</span> <span class="ow">in</span> <span class="n">skip_lines</span><span class="p">)):</span>
+                    <span class="k">continue</span>
+                <span class="k">if</span> <span class="n">start_streaming_at</span> <span class="ow">in</span> <span class="n">line</span><span class="p">:</span>
+                    <span class="n">start_streaming_flag</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="k">if</span> <span class="n">key</span><span class="o">.</span><span class="n">fileobj</span> <span class="ow">is</span> <span class="n">out_io</span><span class="p">:</span>
+                    <span class="n">stdout</span> <span class="o">+=</span> <span class="n">line</span>
+                    <span class="n">out_stream</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">stdout</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">stderr</span> <span class="o">+=</span> <span class="n">line</span>
+                    <span class="n">out_stream</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span>
+                <span class="k">if</span> <span class="n">stream_logs</span> <span class="ow">and</span> <span class="n">start_streaming_flag</span><span class="p">:</span>
+                    <span class="n">out_stream</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+                    <span class="n">out_stream</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">log_path</span> <span class="o">!=</span> <span class="s1">&#39;/dev/null&#39;</span><span class="p">:</span>
+                    <span class="n">fout</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+                    <span class="n">fout</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span></div>
+
+
+<div class="viewcode-block" id="run_with_log"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.log_lib.run_with_log">[docs]</a><span class="k">def</span> <span class="nf">run_with_log</span><span class="p">(</span>
+    <span class="n">cmd</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">log_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">stream_logs</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">start_streaming_at</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="p">,</span>
+    <span class="n">return_none</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">check</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">with_ray</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Union</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+    <span class="sd">&quot;&quot;&quot;Runs a command and logs its output to a file.</span>
+
+<span class="sd">    Retruns the process, stdout and stderr of the command.</span>
+<span class="sd">      Note that the stdout and stderr is already decoded.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Redirect stderr to stdout when using ray, to preserve the order of</span>
+    <span class="c1"># stdout and stderr.</span>
+    <span class="n">stderr</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">with_ray</span> <span class="k">else</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">STDOUT</span>
+    <span class="k">with</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span>
+                          <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+                          <span class="n">stderr</span><span class="o">=</span><span class="n">stderr</span><span class="p">,</span>
+                          <span class="n">start_new_session</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                          <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="k">as</span> <span class="n">proc</span><span class="p">:</span>
+        <span class="c1"># The proc can be defunct if the python program is killed. Here we</span>
+        <span class="c1"># open a new subprocess to gracefully kill the proc, SIGTERM</span>
+        <span class="c1"># and then SIGKILL the process group.</span>
+        <span class="c1"># Adapted from ray/dashboard/modules/job/job_manager.py#L154</span>
+        <span class="n">parent_pid</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getpid</span><span class="p">()</span>
+        <span class="n">daemon_script</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">job_lib</span><span class="o">.</span><span class="vm">__file__</span><span class="p">)),</span>
+            <span class="s1">&#39;subprocess_daemon.sh&#39;</span><span class="p">)</span>
+        <span class="n">daemon_cmd</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="s1">&#39;/bin/bash&#39;</span><span class="p">,</span> <span class="n">daemon_script</span><span class="p">,</span>
+            <span class="nb">str</span><span class="p">(</span><span class="n">parent_pid</span><span class="p">),</span>
+            <span class="nb">str</span><span class="p">(</span><span class="n">proc</span><span class="o">.</span><span class="n">pid</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span>
+            <span class="n">daemon_cmd</span><span class="p">,</span>
+            <span class="n">start_new_session</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="c1"># Suppress output</span>
+            <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
+            <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="c1"># We need this even if the log_path is &#39;/dev/null&#39; to ensure the</span>
+        <span class="c1"># progress bar is shown.</span>
+        <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">redirect_process_output</span><span class="p">(</span>
+            <span class="n">proc</span><span class="p">,</span>
+            <span class="n">log_path</span><span class="p">,</span>
+            <span class="n">stream_logs</span><span class="p">,</span>
+            <span class="n">start_streaming_at</span><span class="o">=</span><span class="n">start_streaming_at</span><span class="p">,</span>
+            <span class="c1"># Skip these lines caused by `-i` option of bash. Failed to find</span>
+            <span class="c1"># other way to turn off these two warning.</span>
+            <span class="c1"># https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long</span>
+            <span class="n">skip_lines</span><span class="o">=</span><span class="p">[</span>
+                <span class="s1">&#39;bash: cannot set terminal process group&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;bash: no job control in this shell&#39;</span><span class="p">,</span>
+            <span class="p">],</span>
+            <span class="c1"># Replace CRLF when the output is logged to driver by ray.</span>
+            <span class="n">replace_crlf</span><span class="o">=</span><span class="n">with_ray</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">proc</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">proc</span><span class="o">.</span><span class="n">returncode</span> <span class="ow">and</span> <span class="n">check</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">stderr</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">CalledProcessError</span><span class="p">(</span><span class="n">proc</span><span class="o">.</span><span class="n">returncode</span><span class="p">,</span> <span class="n">cmd</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">return_none</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">proc</span><span class="p">,</span> <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span></div>
+
+
+<div class="viewcode-block" id="make_task_bash_script"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.log_lib.make_task_bash_script">[docs]</a><span class="k">def</span> <span class="nf">make_task_bash_script</span><span class="p">(</span><span class="n">codegen</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">script</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">textwrap</span><span class="o">.</span><span class="n">dedent</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">                #!/bin/bash</span>
+<span class="s2">                source ~/.bashrc</span>
+<span class="s2">                . $(conda info --base)/etc/profile.d/conda.sh 2&gt; /dev/null || true</span>
+<span class="s2">                cd </span><span class="si">{</span><span class="n">SKY_REMOTE_WORKDIR</span><span class="si">}</span><span class="s2">&quot;&quot;&quot;</span><span class="p">),</span>
+        <span class="n">codegen</span><span class="p">,</span>
+    <span class="p">]</span>
+    <span class="n">script</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">script</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">script</span></div>
+
+
+<div class="viewcode-block" id="run_bash_command_with_log"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.log_lib.run_bash_command_with_log">[docs]</a><span class="k">def</span> <span class="nf">run_bash_command_with_log</span><span class="p">(</span><span class="n">bash_command</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                              <span class="n">log_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                              <span class="n">export_sky_env_vars</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                              <span class="n">stream_logs</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+                              <span class="n">with_ray</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+    <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span><span class="s1">&#39;w&#39;</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s1">&#39;sky_app_&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fp</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">export_sky_env_vars</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">bash_command</span> <span class="o">=</span> <span class="n">export_sky_env_vars</span> <span class="o">+</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="o">+</span> <span class="n">bash_command</span>
+        <span class="n">bash_command</span> <span class="o">=</span> <span class="n">make_task_bash_script</span><span class="p">(</span><span class="n">bash_command</span><span class="p">)</span>
+        <span class="n">fp</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">bash_command</span><span class="p">)</span>
+        <span class="n">fp</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+        <span class="n">script_path</span> <span class="o">=</span> <span class="n">fp</span><span class="o">.</span><span class="n">name</span>
+        <span class="n">run_with_log</span><span class="p">(</span>
+            <span class="c1"># Need this `-i` option to make sure `source ~/.bashrc` work.</span>
+            <span class="c1"># Do not use shell=True because it will cause the environment</span>
+            <span class="c1"># set in this task visible to other tasks. shell=False requires</span>
+            <span class="c1"># the cmd to be a list.</span>
+            <span class="p">[</span><span class="s1">&#39;/bin/bash&#39;</span><span class="p">,</span> <span class="s1">&#39;-i&#39;</span><span class="p">,</span> <span class="n">script_path</span><span class="p">],</span>
+            <span class="n">log_path</span><span class="p">,</span>
+            <span class="n">stream_logs</span><span class="o">=</span><span class="n">stream_logs</span><span class="p">,</span>
+            <span class="n">return_none</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">with_ray</span><span class="o">=</span><span class="n">with_ray</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<span class="k">def</span> <span class="nf">_follow_job_logs</span><span class="p">(</span><span class="n">file</span><span class="p">,</span>
+                     <span class="n">job_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                     <span class="n">sleep_sec</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.5</span><span class="p">,</span>
+                     <span class="n">start_streaming_at</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterator</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="sd">&quot;&quot;&quot;Yield each line from a file as they are written.</span>
+
+<span class="sd">    `sleep_sec` is the time to sleep after empty reads. &quot;&quot;&quot;</span>
+    <span class="n">line</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+    <span class="n">status</span> <span class="o">=</span> <span class="n">job_lib</span><span class="o">.</span><span class="n">query_job_status</span><span class="p">([</span><span class="n">job_id</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">start_streaming</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">tmp</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">readline</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">tmp</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">tmp</span> <span class="o">!=</span> <span class="s1">&#39;&#39;</span><span class="p">:</span>
+            <span class="n">line</span> <span class="o">+=</span> <span class="n">tmp</span>
+            <span class="k">if</span> <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span> <span class="ow">in</span> <span class="n">line</span> <span class="ow">or</span> <span class="s1">&#39;</span><span class="se">\r</span><span class="s1">&#39;</span> <span class="ow">in</span> <span class="n">line</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">start_streaming_at</span> <span class="ow">in</span> <span class="n">line</span><span class="p">:</span>
+                    <span class="n">start_streaming</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="k">if</span> <span class="n">start_streaming</span><span class="p">:</span>
+                    <span class="k">yield</span> <span class="n">line</span>
+                <span class="n">line</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Reach the end of the file, check the status or sleep and</span>
+            <span class="c1"># retry.</span>
+
+            <span class="c1"># Auto-exit the log tailing, if the job has finished. Check</span>
+            <span class="c1"># the job status before query again to avoid unfinished logs.</span>
+            <span class="k">if</span> <span class="n">status</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span>
+                    <span class="n">job_lib</span><span class="o">.</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">,</span> <span class="n">job_lib</span><span class="o">.</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">PENDING</span>
+            <span class="p">]:</span>
+                <span class="k">return</span>
+
+            <span class="k">if</span> <span class="n">sleep_sec</span><span class="p">:</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">sleep_sec</span><span class="p">)</span>
+            <span class="n">status</span> <span class="o">=</span> <span class="n">job_lib</span><span class="o">.</span><span class="n">query_job_status</span><span class="p">([</span><span class="n">job_id</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="tail_logs"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.log_lib.tail_logs">[docs]</a><span class="k">def</span> <span class="nf">tail_logs</span><span class="p">(</span><span class="n">job_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">log_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+              <span class="n">status</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">job_lib</span><span class="o">.</span><span class="n">JobStatus</span><span class="p">]):</span>
+    <span class="k">if</span> <span class="n">log_dir</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Job </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1"> not found (see `sky queue`).&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="n">log_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">job_lib</span><span class="o">.</span><span class="n">SKY_REMOTE_LOGS_ROOT</span><span class="p">,</span> <span class="n">log_dir</span><span class="p">,</span> <span class="s1">&#39;run.log&#39;</span><span class="p">)</span>
+    <span class="n">log_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">log_path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">status</span> <span class="ow">in</span> <span class="p">[</span><span class="n">job_lib</span><span class="o">.</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">,</span> <span class="n">job_lib</span><span class="o">.</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">PENDING</span><span class="p">]:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">log_path</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">log_file</span><span class="p">:</span>
+                <span class="c1"># Using `_follow` instead of `tail -f` to streaming the whole</span>
+                <span class="c1"># log and creating a new process for tail.</span>
+                <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">_follow_job_logs</span><span class="p">(</span>
+                        <span class="n">log_file</span><span class="p">,</span>
+                        <span class="n">job_id</span><span class="o">=</span><span class="n">job_id</span><span class="p">,</span>
+                        <span class="n">start_streaming_at</span><span class="o">=</span><span class="s1">&#39;SKY INFO: Reserving task slots on&#39;</span><span class="p">):</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="n">line</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">flush</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+            <span class="k">return</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">log_path</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">())</span></div>
+</pre></div>
+
+              </div>
+              
+            
+                <!-- Previous / next buttons -->
+<div class='prev-next-area'>
+</div>
+            
+        </div>
+    </div>
+    <footer class="footer">
+  <p>
+    
+      By the Sky authors<br/>
+    
+        &copy; Copyright 2022, Sky Team.<br/>
+  </p>
+</footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="../../../_static/js/index.be7d3bbb2ef33a8344ce.js"></script>
+
+  </body>
+</html>
