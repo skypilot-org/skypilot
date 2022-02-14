@@ -3,7 +3,7 @@ Quickstart
 
 Sky is a tool to run any workload seamlessly across different cloud providers
 through a unified interface. No knowledge of cloud offerings is required or
-expected &mdash; you simply define the workload and its resource requirements,
+expected -- you simply define the workload and its resource requirements,
 and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft
 Azure.
 
