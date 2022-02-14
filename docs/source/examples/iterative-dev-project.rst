@@ -55,6 +55,18 @@ Additionally, you can always use the following to transfer files between your lo
     $ scp -r my_code/ dev:/path/to/destination  # copy files to remote VM
     $ scp -r dev:/path/to/source my_code/       # copy files from remote VM
 
+Sky also provides automatic transfer of working directory to the remote VM. This
+can be configured with the :code:`workdir` option in a task YAML file, or using the following
+command line options:
+
+.. code-block::
+
+    $ sky exec --workdir=/path/to/code task.yaml
+    $ sky launch --workdir=/path/to/code task.yaml
+
+In both scenarios, the working directory is transferred to the remote VM and will override
+:code:`workdir` defaults specified in task.yaml
+
 Ending a development session
 -----------------------------
 To end a development session, run the following command:

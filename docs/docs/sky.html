@@ -1,0 +1,576 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sky package &#8212; Sky 0.1 documentation</title>
+    
+  <link href="_static/css/theme.css" rel="stylesheet">
+  <link href="_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
+
+    
+  <link rel="stylesheet"
+    href="_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-book-theme.css?digest=84ace793992934648b4de8eed757e5a2" />
+    <link rel="stylesheet" type="text/css" href="_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.css" />
+    
+  <link rel="preload" as="script" href="_static/js/index.be7d3bbb2ef33a8344ce.js">
+
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="_static/togglebutton.js"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="None">
+    
+
+    <!-- Google Analytics -->
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<!-- Checkboxes to toggle the left sidebar -->
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle navigation sidebar">
+<label class="overlay" for="__navigation">
+    <div class="visually-hidden">Toggle navigation sidebar</div>
+</label>
+<div class="col-12 col-md-3 bd-sidebar site-navigation " id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="index.html">
+      
+      
+      
+      <h1 class="site-logo" id="site-title">Sky 0.1 documentation</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search the docs ..." aria-label="Search the docs ..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item active">
+        <p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Getting Started
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="getting-started/installation.html">
+   Installation
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="getting-started/quickstart.html">
+   Quickstart
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="getting-started/tutorial.html">
+   Tutorial: DNN Training
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Use Cases
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="examples/auto-failover.html">
+   Auto-failover Provisioning
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="examples/iterative-dev-project.html">
+   Iteratively Developing a Project
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="examples/launch-many-tasks-vm.html">
+   Launch Multiple Tasks on a VM
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="examples/grid-search.html">
+   Grid Search
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="examples/distributed-jobs.html">
+   Distributed Jobs on many VMs
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference external" href="https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples">
+   Additional Examples
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Reference Documentation
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="reference/interactive-nodes.html">
+   Interactive Nodes
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="reference/iterative-development.html">
+   Iterative Development
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="reference/storage.html">
+   Storage
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="reference/job-queue.html">
+   Job Queue
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Advanced Sky Tutorials
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="advanced/python-control.html">
+   Python Control Flow
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Theme by the <a href="https://ebp.jupyterbook.org">Executable Book Project</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<!-- This is an invisible pixel that we watch to see if we've scrolled. -->
+<div class="sbt-scroll-pixel-helper"></div>
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            <div class="topbar-left">
+                
+                <label class="nav-toggle-button" for="__navigation">
+                    <div class="visually-hidden">Toggle navigation</div>
+                    <i class="fas fa-bars"></i>
+                </label>
+                
+            </div>
+            
+<div class="dropdown-buttons-trigger">
+    <button id="dropdown-buttons-trigger" class="btn btn-secondary topbarbtn" aria-label="Download this page"><i
+            class="fas fa-download"></i></button>
+
+    <div class="dropdown-buttons">
+        <!-- ipynb file if we had a myst markdown file -->
+        
+        <!-- Download raw file -->
+        <a class="dropdown-buttons" href="_sources/sky.rst.txt"><button type="button"
+                class="btn btn-secondary topbarbtn" title="Download source file" data-toggle="tooltip"
+                data-placement="left">.rst</button></a>
+        <!-- Download PDF via print -->
+        <button type="button" id="download-print" class="btn btn-secondary topbarbtn" title="Print to PDF"
+                onclick="printPdf(this)" data-toggle="tooltip" data-placement="left">.pdf</button>
+    </div>
+</div>
+
+            <!-- Source interaction buttons -->
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show noprint">
+            
+            <div class="tocsection onthispage pt-5 pb-3">
+                <i class="fas fa-list"></i> Contents
+            </div>
+            <nav id="bd-toc-nav" aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#subpackages">
+   Subpackages
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#submodules">
+   Submodules
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-authentication-module">
+   sky.authentication module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-cli-module">
+   sky.cli module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-cloud-stores-module">
+   sky.cloud_stores module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-dag-module">
+   sky.dag module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-exceptions-module">
+   sky.exceptions module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-execution-module">
+   sky.execution module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-global-user-state-module">
+   sky.global_user_state module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-optimizer-module">
+   sky.optimizer module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-registry-module">
+   sky.registry module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-resources-module">
+   sky.resources module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-sky-logging-module">
+   sky.sky_logging module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-task-module">
+   sky.task module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#module-contents">
+   Module contents
+  </a>
+ </li>
+</ul>
+
+            </nav>
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+            <!-- Table of contents that is only displayed when printing the page -->
+            <div id="jb-print-docs-body" class="onlyprint">
+                <h1>sky package</h1>
+                <!-- Table of contents -->
+                <div id="print-main-content">
+                    <div id="jb-print-toc">
+                        
+                        <div>
+                            <h2> Contents </h2>
+                        </div>
+                        <nav aria-label="Page">
+                            <ul class="visible nav section-nav flex-column">
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#subpackages">
+   Subpackages
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#submodules">
+   Submodules
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-authentication-module">
+   sky.authentication module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-cli-module">
+   sky.cli module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-cloud-stores-module">
+   sky.cloud_stores module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-dag-module">
+   sky.dag module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-exceptions-module">
+   sky.exceptions module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-execution-module">
+   sky.execution module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-global-user-state-module">
+   sky.global_user_state module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-optimizer-module">
+   sky.optimizer module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-registry-module">
+   sky.registry module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-resources-module">
+   sky.resources module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-sky-logging-module">
+   sky.sky_logging module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#sky-task-module">
+   sky.task module
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#module-contents">
+   Module contents
+  </a>
+ </li>
+</ul>
+
+                        </nav>
+                    </div>
+                </div>
+            </div>
+            
+              <div>
+                
+  <div class="section" id="sky-package">
+<h1>sky package<a class="headerlink" href="#sky-package" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="subpackages">
+<h2>Subpackages<a class="headerlink" href="#subpackages" title="Permalink to this headline">¶</a></h2>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="sky.backends.html">sky.backends package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="sky.backends.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.backends.html#sky-backends-backend-module">sky.backends.backend module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.backends.html#sky-backends-backend-utils-module">sky.backends.backend_utils module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.backends.html#sky-backends-cloud-vm-ray-backend-module">sky.backends.cloud_vm_ray_backend module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.backends.html#sky-backends-docker-utils-module">sky.backends.docker_utils module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.backends.html#sky-backends-local-docker-backend-module">sky.backends.local_docker_backend module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.backends.html#module-contents">Module contents</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="sky.cloud_adaptors.html">sky.cloud_adaptors package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="sky.cloud_adaptors.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.cloud_adaptors.html#sky-cloud-adaptors-aws-module">sky.cloud_adaptors.aws module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.cloud_adaptors.html#sky-cloud-adaptors-gcp-module">sky.cloud_adaptors.gcp module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.cloud_adaptors.html#module-contents">Module contents</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="sky.clouds.html">sky.clouds package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="sky.clouds.html#subpackages">Subpackages</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="sky.clouds.service_catalog.html">sky.clouds.service_catalog package</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="sky.clouds.service_catalog.html#submodules">Submodules</a></li>
+<li class="toctree-l4"><a class="reference internal" href="sky.clouds.service_catalog.html#sky-clouds-service-catalog-aws-catalog-module">sky.clouds.service_catalog.aws_catalog module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="sky.clouds.service_catalog.html#sky-clouds-service-catalog-azure-catalog-module">sky.clouds.service_catalog.azure_catalog module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="sky.clouds.service_catalog.html#sky-clouds-service-catalog-common-module">sky.clouds.service_catalog.common module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="sky.clouds.service_catalog.html#sky-clouds-service-catalog-gcp-catalog-module">sky.clouds.service_catalog.gcp_catalog module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="sky.clouds.service_catalog.html#module-contents">Module contents</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="sky.clouds.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.clouds.html#sky-clouds-aws-module">sky.clouds.aws module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.clouds.html#sky-clouds-azure-module">sky.clouds.azure module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.clouds.html#sky-clouds-cloud-module">sky.clouds.cloud module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.clouds.html#sky-clouds-gcp-module">sky.clouds.gcp module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.clouds.html#module-contents">Module contents</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="sky.data.html">sky.data package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="sky.data.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.data.html#sky-data-data-transfer-module">sky.data.data_transfer module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.data.html#sky-data-data-utils-module">sky.data.data_utils module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.data.html#sky-data-storage-module">sky.data.storage module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.data.html#module-contents">Module contents</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="sky.skylet.html">sky.skylet package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="sky.skylet.html#subpackages">Subpackages</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="sky.skylet.ray_patches.html">sky.skylet.ray_patches package</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="sky.skylet.ray_patches.html#submodules">Submodules</a></li>
+<li class="toctree-l4"><a class="reference internal" href="sky.skylet.ray_patches.html#sky-skylet-ray-patches-log-monitor-module">sky.skylet.ray_patches.log_monitor module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="sky.skylet.ray_patches.html#sky-skylet-ray-patches-worker-module">sky.skylet.ray_patches.worker module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="sky.skylet.ray_patches.html#module-contents">Module contents</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="sky.skylet.html#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.skylet.html#sky-skylet-job-lib-module">sky.skylet.job_lib module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.skylet.html#sky-skylet-log-lib-module">sky.skylet.log_lib module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.skylet.html#sky-skylet-util-lib-module">sky.skylet.util_lib module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="sky.skylet.html#module-contents">Module contents</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div class="section" id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-authentication-module">
+<h2>sky.authentication module<a class="headerlink" href="#sky-authentication-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-cli-module">
+<h2>sky.cli module<a class="headerlink" href="#sky-cli-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-cloud-stores-module">
+<h2>sky.cloud_stores module<a class="headerlink" href="#sky-cloud-stores-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-dag-module">
+<h2>sky.dag module<a class="headerlink" href="#sky-dag-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-exceptions-module">
+<h2>sky.exceptions module<a class="headerlink" href="#sky-exceptions-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-execution-module">
+<h2>sky.execution module<a class="headerlink" href="#sky-execution-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-global-user-state-module">
+<h2>sky.global_user_state module<a class="headerlink" href="#sky-global-user-state-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-optimizer-module">
+<h2>sky.optimizer module<a class="headerlink" href="#sky-optimizer-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-registry-module">
+<h2>sky.registry module<a class="headerlink" href="#sky-registry-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-resources-module">
+<h2>sky.resources module<a class="headerlink" href="#sky-resources-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-sky-logging-module">
+<h2>sky.sky_logging module<a class="headerlink" href="#sky-sky-logging-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="sky-task-module">
+<h2>sky.task module<a class="headerlink" href="#sky-task-module" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="module-contents">
+<h2>Module contents<a class="headerlink" href="#module-contents" title="Permalink to this headline">¶</a></h2>
+</div>
+</div>
+
+
+              </div>
+              
+            
+                <!-- Previous / next buttons -->
+<div class='prev-next-area'>
+</div>
+            
+        </div>
+    </div>
+    <footer class="footer">
+  <p>
+    
+      By the Sky authors<br/>
+    
+        &copy; Copyright 2022, Sky Team.<br/>
+  </p>
+</footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="_static/js/index.be7d3bbb2ef33a8344ce.js"></script>
+
+  </body>
+</html>
