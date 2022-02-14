@@ -1581,22 +1581,26 @@ class CloudVmRayBackend(backends.Backend):
             if isinstance(cloud, clouds.AWS):
                 # TODO (zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
-                # The stopped instance on AWS will not be correctly terminated due
-                # to ray's bug.
+                # The stopped instance on AWS will not be correctly terminated
+                # due to ray's bug.
                 region = config['provider']['region']
                 query_cmd = (
                     f'aws ec2 describe-instances --region {region} --filters '
                     f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
                     'Name=instance-state-name,Values=stopping,stopped '
-                    f'--query Reservations[].Instances[].InstanceId --output text')
-                terminate_cmd = (f'aws ec2 terminate-instances --region {region} '
-                                f'--instance-ids $({query_cmd})')
+                    f'--query Reservations[].Instances[].InstanceId '
+                    '--output text')
+                terminate_cmd = (
+                    f'aws ec2 terminate-instances --region {region} '
+                    f'--instance-ids $({query_cmd})')
                 backend_utils.run(terminate_cmd, check=True)
             else:
+                # TODO(suquark,zongheng): Support deleting stopped GCP clusters.
                 logger.info(
-                    f'Cannot terminate non-AWS cluster {cluster_name!r} because '
-                    'it is STOPPED. \nTo fix: manually terminate in the cloud\'s '
-                    f'UI or `sky start {cluster_name}; sky down {cluster_name}` ' 
+                    f'Cannot terminate non-AWS cluster {cluster_name!r} '
+                    'because it is STOPPED. \nTo fix: manually terminate in '
+                    'the cloud\'s UI or '
+                    f'`sky start {cluster_name}; sky down {cluster_name}` '
                     '(This limitation will be addressed in the future.)')
                 return
         else:
