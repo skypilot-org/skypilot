@@ -1537,7 +1537,8 @@
     <span class="n">sky_init</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
 
 
-<div class="viewcode-block" id="show_gpus"><a class="viewcode-back" href="../../sky.html#sky.cli.show_gpus">[docs]</a><span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s1">&#39;gpu_name&#39;</span><span class="p">,</span> <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="nd">@cli</span><span class="o">.</span><span class="n">command</span><span class="p">()</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s1">&#39;gpu_name&#39;</span><span class="p">,</span> <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s1">&#39;--all&#39;</span><span class="p">,</span>
               <span class="s1">&#39;-a&#39;</span><span class="p">,</span>
               <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
@@ -1619,7 +1620,7 @@
     <span class="k">else</span><span class="p">:</span>
         <span class="k">for</span> <span class="n">out</span> <span class="ow">in</span> <span class="n">_output</span><span class="p">():</span>
             <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">nl</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">()</span></div>
+        <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">()</span>
 
 
 <div class="viewcode-block" id="main"><a class="viewcode-back" href="../../sky.html#sky.cli.main">[docs]</a><span class="k">def</span> <span class="nf">main</span><span class="p">():</span>

@@ -1305,6 +1305,7 @@ def init():
     sky_init.init()
 
 
+@cli.command()
 @click.argument('gpu_name', required=False)
 @click.option('--all',
               '-a',
