@@ -34,13 +34,15 @@ resources:
 # The file_mounts below demonstrate all three examples.
 
 file_mounts:
-  # This uses rsync to directly copy files from your machine to the remote VM.
+  # This uses rsync to directly copy files from your machine to the remote VM at
+  # /datasets.
   /datasets: ~/datasets
 
   # This uses sky Storage to first create a S3 bucket named sky-dataset,
   # copies the contents of ~/datasets to the remote bucket and makes the
   # bucket persistent (i.e., the bucket is not deleted after the completion of
-  # this sky task, and future invocations of this bucket will be much faster)
+  # this sky task, and future invocations of this bucket will be much faster).
+  # The bucket is mounted at /datasets-storage.
   /datasets-storage:
     name: sky-dataset
     source: ~/datasets
@@ -48,7 +50,7 @@ file_mounts:
     persistent: True  # Defaults to True, can be set to false.
 
   # This re-uses a predefined bucket (sky-dataset, defined above) and mounts it
-  # directly.
+  # directly at datasets-s3.
   /datasets-s3: s3://sky-dataset
 
 
