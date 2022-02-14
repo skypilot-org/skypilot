@@ -223,8 +223,6 @@ class Task:
                 else:
                     raise ValueError(f'Unable to parse file_mount '
                                      f'{dst_path}:{src}')
-            print(rsync_mounts)
-            print(fm_storages)
             task.set_file_mounts(rsync_mounts)
 
         # Process storage objects - both from file_mounts and from YAML
@@ -275,7 +273,6 @@ class Task:
 
         all_storage_mounts = yaml_storage_mounts + fm_storage_mounts
         task_storage_mounts = {}
-        print("All_SM" + str(all_storage_mounts))
         for storage_mount in all_storage_mounts:
             name = storage_mount.get('storage')
             storage_mount_path = storage_mount.get('mount_path')
@@ -284,8 +281,7 @@ class Task:
             assert storage_mount_path, \
                 'Storage mount path cannot be empty.'
             storage = task_storages[name]
-            task_storage_mounts[storage] = storage_mount_path
-        print("Task_SM" + str(task_storage_mounts))
+            task_storage_mounts[storage_mount_path] = storage
         task.set_storage_mounts(task_storage_mounts)
 
         if config.get('inputs') is not None:
@@ -388,23 +384,22 @@ class Task:
 
     def set_storage_mounts(
         self,
-        storage_mounts: Dict[storage_lib.Storage, str],
+        storage_mounts: Dict[str, storage_lib.Storage],
     ):
         """Sets the storage mounts for this Task
 
-        Advanced method for users. Storage mounts map a Storage object
-        (see sky/data/storage.py) to a mount path on the Cloud VM.
-        The storage object can be from a local folder or from an existing
-        cloud bucket.
+        Advanced method for users. Storage mounts map a mount path on the Cloud
+        VM to a Storage object (see sky/data/storage.py). The storage object
+        can be from a local folder or from an existing cloud bucket.
 
         Example:
             task.set_storage_mounts({
-                Storage(name='imagenet', source='s3://imagenet-bucket'): \
-                '/tmp/imagenet/',
+                '/tmp/imagenet/': \
+                Storage(name='imagenet', source='s3://imagenet-bucket'):
             })
 
         Args:
-            storage_mounts: a dict of {Storage : mount_path}, where mount_path
+            storage_mounts: a dict of {mount_path: Storage}, where mount_path
             is the path on the Cloud VM where the Storage object will be
             mounted on
         """
@@ -416,7 +411,7 @@ class Task:
         # Hack: Hardcode storage_plans to AWS for optimal plan
         # Optimizer is supposed to choose storage plan but we
         # move this here temporarily
-        for store in self.storage_mounts.keys():
+        for store in self.storage_mounts.values():
             if len(store.stores) == 0:
                 self.storage_plans[store] = storage_lib.StorageType.S3
                 store.get_or_copy_to_s3()
@@ -426,7 +421,7 @@ class Task:
 
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
-        for store, mnt_path in storage_mounts.items():
+        for mnt_path, store in storage_mounts.items():
             storage_type = storage_plans[store]
             if storage_type is storage_lib.StorageType.S3:
                 # TODO: allow for Storage mounting of different clouds

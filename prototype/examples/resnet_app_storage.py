@@ -48,7 +48,7 @@ with sky.Dag() as dag:
         run=run,
     )
     train.set_storage_mounts({
-        storage: data_mount_path,
+        data_mount_path: storage,
     })
 
     train.set_inputs('s3://imagenet-bucket', estimated_size_gigabytes=150)
