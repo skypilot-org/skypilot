@@ -215,7 +215,9 @@ class RayCodeGen:
         self._code += [
             textwrap.dedent(f"""\
                 pg = ray_util.placement_group({json.dumps(bundles)}, {pack_mode!r})
-                print('SKY INFO: Reserving task slots on {len(bundles)} nodes.',
+                plural = 's' if {num_nodes} > 1 else ''
+                node_str = f'{num_nodes} node' + plural + '.'
+                print('SKY INFO: Reserving task slots on ' + node_str,
                       file=sys.stderr,
                       flush=True)
                 # FIXME: This will print the error message from autoscaler if
@@ -1357,8 +1359,8 @@ class CloudVmRayBackend(backends.Backend):
 
         job_submit_cmd = (
             f'mkdir -p {remote_log_dir} && ray job submit '
-            f'--address=127.0.0.1:8265 --job-id {job_id} -- '
-            f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
+            f'--address=127.0.0.1:8265 --job-id {job_id} --no-wait '
+            f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         self.run_on_head(handle,
                          f'{cd} && {job_submit_cmd}',

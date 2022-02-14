@@ -202,9 +202,6 @@
 
 --------------------------------------------------------------------------------
 
-Code in ray_patches/log_monitor.py from
-https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/_private/log_monitor.py
-
 Code in ray_patches/worker.py from
 https://github.com/ray-project/ray/blob/ray-1.9.2/python/ray/worker.py
 

@@ -5,6 +5,7 @@ This is a remote utility module that provides job queue functionality.
 import enum
 import os
 import pathlib
+import re
 import sqlite3
 import subprocess
 import time
@@ -30,10 +31,12 @@ class JobStatus(enum.Enum):
 
 _RAY_TO_JOB_STATUS_MAP = {
     'RUNNING': JobStatus.RUNNING,
-    'SUCCEEDED': JobStatus.SUCCEEDED,
-    'FAILED': JobStatus.FAILED,
-    'STOPPED': JobStatus.CANCELLED,
+    'succeeded': JobStatus.SUCCEEDED,
+    'failed': JobStatus.FAILED,
+    'stopped': JobStatus.CANCELLED,
 }
+
+ANSI_ESCAPE = re.compile(r'(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]')
 
 
 class JobInfoLoc(enum.IntEnum):
@@ -169,8 +172,16 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
         return []
 
     # TODO: if too slow, directly query against redis.
-    test_cmd = [(f'(ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
-                 'grep "Job status" || echo "not found")') for job in job_ids]
+    test_cmd = [
+        (
+            f'(ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
+            # Not a typo, ray has inconsistent output for job status.
+            # succeeded: Job 'job_id' succeeded
+            # running: job 'job_id': RUNNING
+            # stopped: Job 'job_id' was stopped
+            # failed: Job 'job_id' failed
+            f'grep "ob \'{job}\'" || echo "not found")') for job in job_ids
+    ]
     test_cmd = ' && '.join(test_cmd)
     proc = subprocess.run(test_cmd,
                           shell=True,
@@ -185,7 +196,8 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
     # Process the results
     job_status_list = []
     for job_id, res in zip(job_ids, results):
-        if res.strip() == 'not found':
+        res = ANSI_ESCAPE.sub('', res.strip().rstrip('.'))
+        if res == 'not found':
             # The job may be stale, when the instance is restarted (the ray
             # redis is volatile). We need to reset the status of the task to
             # FAILED if its original status is RUNNING or PENDING.
@@ -196,8 +208,7 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
             if status in [JobStatus.RUNNING, JobStatus.PENDING]:
                 status = JobStatus.FAILED
         else:
-            ray_status = res.strip().rstrip('.')
-            ray_status = ray_status.rpartition(' ')[-1]
+            ray_status = res.rpartition(' ')[-1]
             status = _RAY_TO_JOB_STATUS_MAP[ray_status]
         job_status_list.append(status)
     return job_status_list
@@ -285,14 +296,14 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
 def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
     """Returns the relative path to the log file for a job and the status."""
     _update_status()
-    rows = _CURSOR.execute(
+    _CURSOR.execute(
         """\
             SELECT * FROM jobs
             WHERE job_id=(?)""", (job_id,))
-    for row in rows:
-        if row[0] is None:
-            return None, None
-        status = row[JobInfoLoc.STATUS.value]
-        status = JobStatus[status]
-        run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
+    row = _CURSOR.fetchone()
+    if row is None:
+        return None, None
+    status = row[JobInfoLoc.STATUS.value]
+    status = JobStatus[status]
+    run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
     return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp), status
