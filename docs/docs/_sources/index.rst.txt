@@ -24,7 +24,7 @@ way.
    examples/launch-many-tasks-vm
    examples/grid-search
    examples/distributed-jobs
-   Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
+.. Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
 
 
 .. toctree::
