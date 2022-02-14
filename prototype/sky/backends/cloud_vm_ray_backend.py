@@ -1559,6 +1559,9 @@ class CloudVmRayBackend(backends.Backend):
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
+        prev_status = global_user_state.get_status_from_cluster_name(
+            handle.cluster_name)
+        cluster_name = config['cluster_name']
         if not terminate and not isinstance(cloud, (clouds.AWS, clouds.GCP)):
             # FIXME: no mentions of cache_stopped_nodes in
             # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/_azure/node_provider.py
@@ -1568,12 +1571,39 @@ class CloudVmRayBackend(backends.Backend):
                 f'or terminate by: sky down {handle.cluster_name}')
         if isinstance(cloud, clouds.Azure):
             # Special handling because `ray down` is buggy with Azure.
-            cluster_name = config['cluster_name']
             # Set check=False to not error out on not found VMs.
             backend_utils.run(
                 'az vm delete --yes --ids $(az vm list --query '
                 f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
                 check=False)
+        elif (terminate and
+              prev_status == global_user_state.ClusterStatus.STOPPED):
+            if isinstance(cloud, clouds.AWS):
+                # TODO (zhwu): Room for optimization. We can move these cloud
+                # specific handling to the cloud class.
+                # The stopped instance on AWS will not be correctly terminated
+                # due to ray's bug.
+                region = config['provider']['region']
+                query_cmd = (
+                    f'aws ec2 describe-instances --region {region} --filters '
+                    f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
+                    'Name=instance-state-name,Values=stopping,stopped '
+                    f'--query Reservations[].Instances[].InstanceId '
+                    '--output text')
+                terminate_cmd = (
+                    f'aws ec2 terminate-instances --region {region} '
+                    f'--instance-ids $({query_cmd})')
+                backend_utils.run(terminate_cmd, check=True)
+            else:
+                # TODO(suquark,zongheng): Support deleting stopped GCP clusters.
+                # Tracked in issue #318.
+                logger.info(
+                    f'Cannot terminate non-AWS cluster {cluster_name!r} '
+                    'because it is STOPPED. \nTo fix: manually terminate in '
+                    'the cloud\'s UI or '
+                    f'`sky start {cluster_name}; sky down {cluster_name}` '
+                    '(This limitation will be addressed in the future.)')
+                return
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
