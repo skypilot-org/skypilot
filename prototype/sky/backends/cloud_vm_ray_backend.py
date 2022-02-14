@@ -1596,6 +1596,7 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.run(terminate_cmd, check=True)
             else:
                 # TODO(suquark,zongheng): Support deleting stopped GCP clusters.
+                # Tracked in issue #318.
                 logger.info(
                     f'Cannot terminate non-AWS cluster {cluster_name!r} '
                     'because it is STOPPED. \nTo fix: manually terminate in '
