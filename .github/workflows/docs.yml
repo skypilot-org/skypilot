@@ -29,8 +29,8 @@ jobs:
         pip install -r requirements-docs.txt
     - name: Build docs
       run: |
-      	pip install -e ".[all]"
-        cd docs
+        cd prototype && pip install -e ".[all]"
+        cd ../docs
         rm -rf build/html
         make html
         diff -x .buildinfo docs build/html
