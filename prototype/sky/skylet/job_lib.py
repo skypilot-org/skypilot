@@ -196,6 +196,7 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
     # Process the results
     job_status_list = []
     for job_id, res in zip(job_ids, results):
+        # Replace the color codes in the output
         res = ANSI_ESCAPE.sub('', res.strip().rstrip('.'))
         if res == 'not found':
             # The job may be stale, when the instance is restarted (the ray
