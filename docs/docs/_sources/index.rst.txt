@@ -47,12 +47,12 @@ way.
    reference/cli
 
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Advanced Sky Tutorials
+.. .. toctree::
+..   :maxdepth: 1
+..   :caption: Advanced Sky Tutorials
 
-   .. advanced/distributed
-   advanced/python-control
+..   .. advanced/distributed
+..   advanced/python-control
 
 
 .. .. toctree::

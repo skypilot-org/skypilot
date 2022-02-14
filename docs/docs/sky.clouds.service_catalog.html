@@ -168,18 +168,6 @@
   </a>
  </li>
 </ul>
-<p aria-level="2" class="caption" role="heading">
- <span class="caption-text">
-  Advanced Sky Tutorials
- </span>
-</p>
-<ul class="nav bd-sidenav">
- <li class="toctree-l1">
-  <a class="reference internal" href="advanced/python-control.html">
-   Python Control Flow
-  </a>
- </li>
-</ul>
 
     </div>
 </nav> <!-- To handle the deprecated key -->
@@ -256,27 +244,27 @@
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-clouds-service-catalog-aws-catalog-module">
+  <a class="reference internal nav-link" href="#module-sky.clouds.service_catalog.aws_catalog">
    sky.clouds.service_catalog.aws_catalog module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-clouds-service-catalog-azure-catalog-module">
+  <a class="reference internal nav-link" href="#module-sky.clouds.service_catalog.azure_catalog">
    sky.clouds.service_catalog.azure_catalog module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-clouds-service-catalog-common-module">
+  <a class="reference internal nav-link" href="#module-sky.clouds.service_catalog.common">
    sky.clouds.service_catalog.common module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-clouds-service-catalog-gcp-catalog-module">
+  <a class="reference internal nav-link" href="#module-sky.clouds.service_catalog.gcp_catalog">
    sky.clouds.service_catalog.gcp_catalog module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#module-contents">
+  <a class="reference internal nav-link" href="#module-sky.clouds.service_catalog">
    Module contents
   </a>
  </li>
@@ -306,27 +294,27 @@
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-clouds-service-catalog-aws-catalog-module">
+  <a class="reference internal nav-link" href="#module-sky.clouds.service_catalog.aws_catalog">
    sky.clouds.service_catalog.aws_catalog module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-clouds-service-catalog-azure-catalog-module">
+  <a class="reference internal nav-link" href="#module-sky.clouds.service_catalog.azure_catalog">
    sky.clouds.service_catalog.azure_catalog module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-clouds-service-catalog-common-module">
+  <a class="reference internal nav-link" href="#module-sky.clouds.service_catalog.common">
    sky.clouds.service_catalog.common module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-clouds-service-catalog-gcp-catalog-module">
+  <a class="reference internal nav-link" href="#module-sky.clouds.service_catalog.gcp_catalog">
    sky.clouds.service_catalog.gcp_catalog module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#module-contents">
+  <a class="reference internal nav-link" href="#module-sky.clouds.service_catalog">
    Module contents
   </a>
  </li>
@@ -344,20 +332,593 @@
 <div class="section" id="submodules">
 <h2>Submodules<a class="headerlink" href="#submodules" title="Permalink to this headline">¶</a></h2>
 </div>
-<div class="section" id="sky-clouds-service-catalog-aws-catalog-module">
-<h2>sky.clouds.service_catalog.aws_catalog module<a class="headerlink" href="#sky-clouds-service-catalog-aws-catalog-module" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="module-sky.clouds.service_catalog.aws_catalog">
+<span id="sky-clouds-service-catalog-aws-catalog-module"></span><h2>sky.clouds.service_catalog.aws_catalog module<a class="headerlink" href="#module-sky.clouds.service_catalog.aws_catalog" title="Permalink to this headline">¶</a></h2>
+<p>AWS Offerings Catalog.</p>
+<p>This module loads the service catalog file and can be used to query
+instance types and pricing information for AWS.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.aws_catalog.get_accelerators_from_instance_type">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.aws_catalog.</span></span><span class="sig-name descname"><span class="pre">get_accelerators_from_instance_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/aws_catalog.html#get_accelerators_from_instance_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.aws_catalog.get_accelerators_from_instance_type" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.aws_catalog.get_hourly_cost">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.aws_catalog.</span></span><span class="sig-name descname"><span class="pre">get_hourly_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/aws_catalog.html#get_hourly_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.aws_catalog.get_hourly_cost" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the cost, or the cheapest cost among all zones for spot.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>region</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.aws_catalog.get_instance_type_for_accelerator">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.aws_catalog.</span></span><span class="sig-name descname"><span class="pre">get_instance_type_for_accelerator</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">acc_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">acc_count</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/aws_catalog.html#get_instance_type_for_accelerator"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.aws_catalog.get_instance_type_for_accelerator" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the instance type with the required count of accelerators.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>acc_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>acc_count</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.aws_catalog.get_region_zones_for_instance_type">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.aws_catalog.</span></span><span class="sig-name descname"><span class="pre">get_region_zones_for_instance_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/aws_catalog.html#get_region_zones_for_instance_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.aws_catalog.get_region_zones_for_instance_type" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="sky.clouds.html#sky.clouds.cloud.Region" title="sky.clouds.cloud.Region"><code class="xref py py-class docutils literal notranslate"><span class="pre">Region</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.aws_catalog.list_accelerators">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.aws_catalog.</span></span><span class="sig-name descname"><span class="pre">list_accelerators</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gpus_only</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_filter</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/aws_catalog.html#list_accelerators"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.aws_catalog.list_accelerators" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns all instance types in AWS offering accelerators.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>gpus_only</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+<li><p><strong>name_filter</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="#sky.clouds.service_catalog.common.InstanceTypeInfo" title="sky.clouds.service_catalog.common.InstanceTypeInfo"><code class="xref py py-class docutils literal notranslate"><span class="pre">InstanceTypeInfo</span></code></a>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
 </div>
-<div class="section" id="sky-clouds-service-catalog-azure-catalog-module">
-<h2>sky.clouds.service_catalog.azure_catalog module<a class="headerlink" href="#sky-clouds-service-catalog-azure-catalog-module" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="module-sky.clouds.service_catalog.azure_catalog">
+<span id="sky-clouds-service-catalog-azure-catalog-module"></span><h2>sky.clouds.service_catalog.azure_catalog module<a class="headerlink" href="#module-sky.clouds.service_catalog.azure_catalog" title="Permalink to this headline">¶</a></h2>
+<p>Azure Offerings Catalog.</p>
+<p>This module loads the service catalog file and can be used to query
+instance types and pricing information for Azure.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.azure_catalog.get_accelerators_from_instance_type">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.azure_catalog.</span></span><span class="sig-name descname"><span class="pre">get_accelerators_from_instance_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/azure_catalog.html#get_accelerators_from_instance_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.azure_catalog.get_accelerators_from_instance_type" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.azure_catalog.get_gen_version_from_instance_type">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.azure_catalog.</span></span><span class="sig-name descname"><span class="pre">get_gen_version_from_instance_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/azure_catalog.html#get_gen_version_from_instance_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.azure_catalog.get_gen_version_from_instance_type" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.azure_catalog.get_hourly_cost">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.azure_catalog.</span></span><span class="sig-name descname"><span class="pre">get_hourly_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/azure_catalog.html#get_hourly_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.azure_catalog.get_hourly_cost" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the cost, or the cheapest cost among all zones for spot.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>region</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.azure_catalog.get_instance_type_for_accelerator">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.azure_catalog.</span></span><span class="sig-name descname"><span class="pre">get_instance_type_for_accelerator</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">acc_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">acc_count</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/azure_catalog.html#get_instance_type_for_accelerator"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.azure_catalog.get_instance_type_for_accelerator" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the instance type with the required count of accelerators.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>acc_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>acc_count</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.azure_catalog.get_region_zones_for_instance_type">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.azure_catalog.</span></span><span class="sig-name descname"><span class="pre">get_region_zones_for_instance_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/azure_catalog.html#get_region_zones_for_instance_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.azure_catalog.get_region_zones_for_instance_type" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="sky.clouds.html#sky.clouds.cloud.Region" title="sky.clouds.cloud.Region"><code class="xref py py-class docutils literal notranslate"><span class="pre">Region</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.azure_catalog.list_accelerators">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.azure_catalog.</span></span><span class="sig-name descname"><span class="pre">list_accelerators</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gpus_only</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_filter</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/azure_catalog.html#list_accelerators"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.azure_catalog.list_accelerators" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns all instance types in Azure offering GPUs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>gpus_only</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+<li><p><strong>name_filter</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="#sky.clouds.service_catalog.common.InstanceTypeInfo" title="sky.clouds.service_catalog.common.InstanceTypeInfo"><code class="xref py py-class docutils literal notranslate"><span class="pre">InstanceTypeInfo</span></code></a>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
 </div>
-<div class="section" id="sky-clouds-service-catalog-common-module">
-<h2>sky.clouds.service_catalog.common module<a class="headerlink" href="#sky-clouds-service-catalog-common-module" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="module-sky.clouds.service_catalog.common">
+<span id="sky-clouds-service-catalog-common-module"></span><h2>sky.clouds.service_catalog.common module<a class="headerlink" href="#module-sky.clouds.service_catalog.common" title="Permalink to this headline">¶</a></h2>
+<p>Common utilities for service catalog.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.common.</span></span><span class="sig-name descname"><span class="pre">InstanceTypeInfo</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cloud</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">instance_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">accelerator_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">accelerator_count</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">memory</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.10)"><span class="pre">float</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/common.html#InstanceTypeInfo"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code></a></p>
+<p>Instance type information.</p>
+<ul class="simple">
+<li><p>cloud: Cloud name.</p></li>
+<li><p>instance_type: String that can be used in YAML to specify this instance
+type. E.g. <cite>p3.2xlarge</cite>.</p></li>
+<li><p>accelerator_name: Canonical name of the accelerator. E.g. <cite>V100</cite>.</p></li>
+<li><p>accelerator_count: Number of accelerators offered by this instance type.</p></li>
+<li><p>memory: Instance memory in GiB.</p></li>
+<li><p>price: Regular instance price per hour.</p></li>
+</ul>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_count">
+<span class="sig-name descname"><span class="pre">accelerator_count</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><span class="pre">int</span></a></em><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_count" title="Permalink to this definition">¶</a></dt>
+<dd><p>Alias for field number 3</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_name">
+<span class="sig-name descname"><span class="pre">accelerator_name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a></em><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_name" title="Permalink to this definition">¶</a></dt>
+<dd><p>Alias for field number 2</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo.cloud">
+<span class="sig-name descname"><span class="pre">cloud</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a></em><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.cloud" title="Permalink to this definition">¶</a></dt>
+<dd><p>Alias for field number 0</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo.instance_type">
+<span class="sig-name descname"><span class="pre">instance_type</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a></em><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.instance_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Alias for field number 1</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo.memory">
+<span class="sig-name descname"><span class="pre">memory</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.10)"><span class="pre">float</span></a></em><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.memory" title="Permalink to this definition">¶</a></dt>
+<dd><p>Alias for field number 4</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.get_accelerators_from_instance_type_impl">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.common.</span></span><span class="sig-name descname"><span class="pre">get_accelerators_from_instance_type_impl</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/common.html#get_accelerators_from_instance_type_impl"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.common.get_accelerators_from_instance_type_impl" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>df</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">DataFrame</span></code>) – </p></li>
+<li><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.get_data_path">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.common.</span></span><span class="sig-name descname"><span class="pre">get_data_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/common.html#get_data_path"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.common.get_data_path" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>filename</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.get_hourly_cost_impl">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.common.</span></span><span class="sig-name descname"><span class="pre">get_hourly_cost_impl</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/common.html#get_hourly_cost_impl"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.common.get_hourly_cost_impl" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the cost, or the cheapest cost among all zones for spot.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>df</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">DataFrame</span></code>) – </p></li>
+<li><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>region</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.get_instance_type_for_accelerator_impl">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.common.</span></span><span class="sig-name descname"><span class="pre">get_instance_type_for_accelerator_impl</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">acc_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">acc_count</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/common.html#get_instance_type_for_accelerator_impl"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.common.get_instance_type_for_accelerator_impl" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the instance type with the required count of accelerators.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>df</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">DataFrame</span></code>) – </p></li>
+<li><p><strong>acc_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>acc_count</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.get_region_zones">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.common.</span></span><span class="sig-name descname"><span class="pre">get_region_zones</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">df</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/common.html#get_region_zones"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.common.get_region_zones" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a list of regions/zones from a dataframe.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>df</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">DataFrame</span></code>) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="sky.clouds.html#sky.clouds.cloud.Region" title="sky.clouds.cloud.Region"><code class="xref py py-class docutils literal notranslate"><span class="pre">Region</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.list_accelerators_impl">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.common.</span></span><span class="sig-name descname"><span class="pre">list_accelerators_impl</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cloud</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">df</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpus_only</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_filter</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/common.html#list_accelerators_impl"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.common.list_accelerators_impl" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lists accelerators offered in a cloud service catalog.</p>
+<p><cite>name_filter</cite> is a regular expression used to filter accelerator names
+using pandas.Series.str.contains.</p>
+<p>Returns a mapping from the canonical names of accelerators to a list of
+instance types offered by this cloud.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>cloud</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>df</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">DataFrame</span></code>) – </p></li>
+<li><p><strong>gpus_only</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+<li><p><strong>name_filter</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="#sky.clouds.service_catalog.common.InstanceTypeInfo" title="sky.clouds.service_catalog.common.InstanceTypeInfo"><code class="xref py py-class docutils literal notranslate"><span class="pre">InstanceTypeInfo</span></code></a>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.common.read_catalog">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.common.</span></span><span class="sig-name descname"><span class="pre">read_catalog</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/common.html#read_catalog"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.common.read_catalog" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>filename</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><code class="xref py py-class docutils literal notranslate"><span class="pre">DataFrame</span></code></p>
+</dd>
+</dl>
+</dd></dl>
+
 </div>
-<div class="section" id="sky-clouds-service-catalog-gcp-catalog-module">
-<h2>sky.clouds.service_catalog.gcp_catalog module<a class="headerlink" href="#sky-clouds-service-catalog-gcp-catalog-module" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="module-sky.clouds.service_catalog.gcp_catalog">
+<span id="sky-clouds-service-catalog-gcp-catalog-module"></span><h2>sky.clouds.service_catalog.gcp_catalog module<a class="headerlink" href="#module-sky.clouds.service_catalog.gcp_catalog" title="Permalink to this headline">¶</a></h2>
+<p>GCP Offerings Catalog.</p>
+<p>For now this service catalog is manually coded. In the future it should be
+queried from GCP API.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.gcp_catalog.get_accelerator_hourly_cost">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.gcp_catalog.</span></span><span class="sig-name descname"><span class="pre">get_accelerator_hourly_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">accelerator</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">count</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/gcp_catalog.html#get_accelerator_hourly_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.gcp_catalog.get_accelerator_hourly_cost" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the cost, or the cheapest cost among all zones for spot.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>accelerator</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>count</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>) – </p></li>
+<li><p><strong>region</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.gcp_catalog.get_region_zones_for_accelerators">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.gcp_catalog.</span></span><span class="sig-name descname"><span class="pre">get_region_zones_for_accelerators</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">accelerator</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">count</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/gcp_catalog.html#get_region_zones_for_accelerators"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.gcp_catalog.get_region_zones_for_accelerators" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a list of regions for a given accelerators.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>accelerator</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>count</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="sky.clouds.html#sky.clouds.cloud.Region" title="sky.clouds.cloud.Region"><code class="xref py py-class docutils literal notranslate"><span class="pre">Region</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.gcp_catalog.list_accelerators">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.gcp_catalog.</span></span><span class="sig-name descname"><span class="pre">list_accelerators</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gpus_only</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_filter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog/gcp_catalog.html#list_accelerators"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.gcp_catalog.list_accelerators" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns all instance types in GCP offering GPUs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>gpus_only</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+<li><p><strong>name_filter</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="#sky.clouds.service_catalog.common.InstanceTypeInfo" title="sky.clouds.service_catalog.common.InstanceTypeInfo"><code class="xref py py-class docutils literal notranslate"><span class="pre">InstanceTypeInfo</span></code></a>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
 </div>
-<div class="section" id="module-contents">
-<h2>Module contents<a class="headerlink" href="#module-contents" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="module-sky.clouds.service_catalog">
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-sky.clouds.service_catalog" title="Permalink to this headline">¶</a></h2>
+<p>Service catalog.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.get_accelerator_hourly_cost">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.</span></span><span class="sig-name descname"><span class="pre">get_accelerator_hourly_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">acc_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">acc_count</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clouds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog.html#get_accelerator_hourly_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.get_accelerator_hourly_cost" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the hourly cost with the accelerators.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>acc_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>acc_count</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>) – </p></li>
+<li><p><strong>clouds</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Union" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>], <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.get_accelerators_from_instance_type">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.</span></span><span class="sig-name descname"><span class="pre">get_accelerators_from_instance_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clouds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog.html#get_accelerators_from_instance_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.get_accelerators_from_instance_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the accelerators from a instance type.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>clouds</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Union" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>], <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.get_common_gpus">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.</span></span><span class="sig-name descname"><span class="pre">get_common_gpus</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog.html#get_common_gpus"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.get_common_gpus" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a list of commonly used GPU names.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.get_hourly_cost">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.</span></span><span class="sig-name descname"><span class="pre">get_hourly_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clouds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog.html#get_hourly_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.get_hourly_cost" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the cost, or the cheapest cost among all zones for spot.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>region</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+<li><p><strong>clouds</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Union" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>], <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>]) – </p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.get_instance_type_for_accelerator">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.</span></span><span class="sig-name descname"><span class="pre">get_instance_type_for_accelerator</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">acc_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">acc_count</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clouds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog.html#get_instance_type_for_accelerator"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.get_instance_type_for_accelerator" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the instance type with the required count of accelerators.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>acc_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>acc_count</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>) – </p></li>
+<li><p><strong>clouds</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Union" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>], <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.get_region_zones_for_accelerators">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.</span></span><span class="sig-name descname"><span class="pre">get_region_zones_for_accelerators</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">acc_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">acc_count</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clouds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog.html#get_region_zones_for_accelerators"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.get_region_zones_for_accelerators" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a list of regions for a given accelerators.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>acc_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>acc_count</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+<li><p><strong>clouds</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Union" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>], <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="sky.clouds.html#sky.clouds.cloud.Region" title="sky.clouds.cloud.Region"><code class="xref py py-class docutils literal notranslate"><span class="pre">Region</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.get_region_zones_for_instance_type">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.</span></span><span class="sig-name descname"><span class="pre">get_region_zones_for_instance_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clouds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog.html#get_region_zones_for_instance_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.get_region_zones_for_instance_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a list of regions for a given instance type.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>instance_type</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>use_spot</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+<li><p><strong>clouds</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Union" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>], <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="sky.clouds.html#sky.clouds.cloud.Region" title="sky.clouds.cloud.Region"><code class="xref py py-class docutils literal notranslate"><span class="pre">Region</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.get_tpus">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.</span></span><span class="sig-name descname"><span class="pre">get_tpus</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog.html#get_tpus"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.get_tpus" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a list of TPU names.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.list_accelerator_counts">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.</span></span><span class="sig-name descname"><span class="pre">list_accelerator_counts</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gpus_only</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_filter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clouds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog.html#list_accelerator_counts"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.list_accelerator_counts" title="Permalink to this definition">¶</a></dt>
+<dd><p>List all accelerators offered by Sky and available counts.</p>
+<p>Returns: A dictionary of canonical accelerator names mapped to a list
+of available counts. See usage in cli.py.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>gpus_only</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+<li><p><strong>name_filter</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p></li>
+<li><p><strong>clouds</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Union" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>], <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.clouds.service_catalog.list_accelerators">
+<span class="sig-prename descclassname"><span class="pre">sky.clouds.service_catalog.</span></span><span class="sig-name descname"><span class="pre">list_accelerators</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gpus_only</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_filter</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">clouds</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/clouds/service_catalog.html#list_accelerators"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.clouds.service_catalog.list_accelerators" title="Permalink to this definition">¶</a></dt>
+<dd><p>List the names of all accelerators offered by Sky.</p>
+<p>Returns: A dictionary of canonical accelerator names mapped to a list
+of instance type offerings. See usage in cli.py.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>gpus_only</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>) – </p></li>
+<li><p><strong>name_filter</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p></li>
+<li><p><strong>clouds</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Union" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>], <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a>]) – </p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference internal" href="#sky.clouds.service_catalog.common.InstanceTypeInfo" title="sky.clouds.service_catalog.common.InstanceTypeInfo"><code class="xref py py-class docutils literal notranslate"><span class="pre">InstanceTypeInfo</span></code></a>]]</p>
+</dd>
+</dl>
+</dd></dl>
+
 </div>
 </div>
 

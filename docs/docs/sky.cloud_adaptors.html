@@ -168,18 +168,6 @@
   </a>
  </li>
 </ul>
-<p aria-level="2" class="caption" role="heading">
- <span class="caption-text">
-  Advanced Sky Tutorials
- </span>
-</p>
-<ul class="nav bd-sidenav">
- <li class="toctree-l1">
-  <a class="reference internal" href="advanced/python-control.html">
-   Python Control Flow
-  </a>
- </li>
-</ul>
 
     </div>
 </nav> <!-- To handle the deprecated key -->
@@ -256,17 +244,17 @@
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-cloud-adaptors-aws-module">
+  <a class="reference internal nav-link" href="#module-sky.cloud_adaptors.aws">
    sky.cloud_adaptors.aws module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-cloud-adaptors-gcp-module">
+  <a class="reference internal nav-link" href="#module-sky.cloud_adaptors.gcp">
    sky.cloud_adaptors.gcp module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#module-contents">
+  <a class="reference internal nav-link" href="#module-sky.cloud_adaptors">
    Module contents
   </a>
  </li>
@@ -296,17 +284,17 @@
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-cloud-adaptors-aws-module">
+  <a class="reference internal nav-link" href="#module-sky.cloud_adaptors.aws">
    sky.cloud_adaptors.aws module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#sky-cloud-adaptors-gcp-module">
+  <a class="reference internal nav-link" href="#module-sky.cloud_adaptors.gcp">
    sky.cloud_adaptors.gcp module
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#module-contents">
+  <a class="reference internal nav-link" href="#module-sky.cloud_adaptors">
    Module contents
   </a>
  </li>
@@ -324,14 +312,95 @@
 <div class="section" id="submodules">
 <h2>Submodules<a class="headerlink" href="#submodules" title="Permalink to this headline">¶</a></h2>
 </div>
-<div class="section" id="sky-cloud-adaptors-aws-module">
-<h2>sky.cloud_adaptors.aws module<a class="headerlink" href="#sky-cloud-adaptors-aws-module" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="module-sky.cloud_adaptors.aws">
+<span id="sky-cloud-adaptors-aws-module"></span><h2>sky.cloud_adaptors.aws module<a class="headerlink" href="#module-sky.cloud_adaptors.aws" title="Permalink to this headline">¶</a></h2>
+<p>AWS cloud adaptors</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.cloud_adaptors.aws.client">
+<span class="sig-prename descclassname"><span class="pre">sky.cloud_adaptors.aws.</span></span><span class="sig-name descname"><span class="pre">client</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">service_name</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/cloud_adaptors/aws.html#client"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.cloud_adaptors.aws.client" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create an AWS client of a certain service.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>service_name</strong> – AWS service name (e.g., ‘s3’, ‘ec2’).</p></li>
+<li><p><strong>kwargs</strong> – Other options.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Parameters</dt>
+<dd class="field-even"><p><strong>service_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.cloud_adaptors.aws.client_exception">
+<span class="sig-prename descclassname"><span class="pre">sky.cloud_adaptors.aws.</span></span><span class="sig-name descname"><span class="pre">client_exception</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/cloud_adaptors/aws.html#client_exception"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.cloud_adaptors.aws.client_exception" title="Permalink to this definition">¶</a></dt>
+<dd><p>Client exception.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.cloud_adaptors.aws.resource">
+<span class="sig-prename descclassname"><span class="pre">sky.cloud_adaptors.aws.</span></span><span class="sig-name descname"><span class="pre">resource</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resource_name</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/cloud_adaptors/aws.html#resource"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.cloud_adaptors.aws.resource" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create an AWS resource.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>resource_name</strong> – AWS resource name (e.g., ‘s3’).</p></li>
+<li><p><strong>kwargs</strong> – Other options.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Parameters</dt>
+<dd class="field-even"><p><strong>resource_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.cloud_adaptors.aws.session">
+<span class="sig-prename descclassname"><span class="pre">sky.cloud_adaptors.aws.</span></span><span class="sig-name descname"><span class="pre">session</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/cloud_adaptors/aws.html#session"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.cloud_adaptors.aws.session" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create an AWS session.</p>
+</dd></dl>
+
 </div>
-<div class="section" id="sky-cloud-adaptors-gcp-module">
-<h2>sky.cloud_adaptors.gcp module<a class="headerlink" href="#sky-cloud-adaptors-gcp-module" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="module-sky.cloud_adaptors.gcp">
+<span id="sky-cloud-adaptors-gcp-module"></span><h2>sky.cloud_adaptors.gcp module<a class="headerlink" href="#module-sky.cloud_adaptors.gcp" title="Permalink to this headline">¶</a></h2>
+<p>GCP cloud adaptors</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.cloud_adaptors.gcp.build">
+<span class="sig-prename descclassname"><span class="pre">sky.cloud_adaptors.gcp.</span></span><span class="sig-name descname"><span class="pre">build</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">service_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">version</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/cloud_adaptors/gcp.html#build"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.cloud_adaptors.gcp.build" title="Permalink to this definition">¶</a></dt>
+<dd><p>Build a GCP service.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>service_name</strong> – GCP service name (e.g., ‘compute’, ‘storagetransfer’).</p></li>
+<li><p><strong>version</strong> – Service version (e.g., ‘v1’).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Parameters</dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>service_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+<li><p><strong>version</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>) – </p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.cloud_adaptors.gcp.not_found_exception">
+<span class="sig-prename descclassname"><span class="pre">sky.cloud_adaptors.gcp.</span></span><span class="sig-name descname"><span class="pre">not_found_exception</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/cloud_adaptors/gcp.html#not_found_exception"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.cloud_adaptors.gcp.not_found_exception" title="Permalink to this definition">¶</a></dt>
+<dd><p>NotFound exception.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="sky.cloud_adaptors.gcp.storage_client">
+<span class="sig-prename descclassname"><span class="pre">sky.cloud_adaptors.gcp.</span></span><span class="sig-name descname"><span class="pre">storage_client</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/cloud_adaptors/gcp.html#storage_client"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.cloud_adaptors.gcp.storage_client" title="Permalink to this definition">¶</a></dt>
+<dd><p>Helper method that connects to GCS Storage Client for
+GCS Bucket</p>
+</dd></dl>
+
 </div>
-<div class="section" id="module-contents">
-<h2>Module contents<a class="headerlink" href="#module-contents" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="module-sky.cloud_adaptors">
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-sky.cloud_adaptors" title="Permalink to this headline">¶</a></h2>
 </div>
 </div>
 
