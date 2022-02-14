@@ -1,3 +1,12 @@
+# Storage API Demo.
+#
+# This YAML demonstrates how the storage API can be used - either through
+# file_mount shorthand or the declarative storage API.
+#
+# Usage:
+#   sky launch -c demo storage_demo.yaml
+#   sky down demo
+
 name: storage-demo
 
 resources:
@@ -17,6 +26,12 @@ resources:
 ###############################################
 #  Method 1  - file_mounts shorthand #
 ###############################################
+# By default, file_mounts use rsync to directly copy files from local to remote
+# VM. However, you can optionally have them backed by sky Storage, which uploads
+# the files to a cloud store (e.g. S3, GCS) and have them persist there. By
+# enabling persistence, file_mount sync can be made significantly faster.
+# Finally, you can also directly mount s3/gcs buckets in your remote VM.
+# The file_mounts below demonstrate all three examples.
 
 file_mounts:
   # This uses rsync to directly copy files from your machine to the remote VM.
@@ -40,6 +55,10 @@ file_mounts:
 ###############################################
 #  Method 2  - Declarative Sky API #
 ###############################################
+# Some power users may want to only upload their files to an object store
+# without mounting it, while others may want to re-use pre-existing storage
+# objects. They can do so using the storage and storage_mount fields, which are
+# at 1:1 parity with the sky.Storage python API.
 
 # storage: List[sky.Storage]
 #
@@ -90,4 +109,3 @@ storage_mounts:
 run: |
   pwd
   ls -la /
-# ls -la /datasets-decl/
