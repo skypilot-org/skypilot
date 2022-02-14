@@ -18,23 +18,23 @@ resources:
 #  Method 1  - file_mounts shorthand #
 ###############################################
 
-#file_mounts:
-#  # This uses rsync to directly copy files from your machine to the remote VM.
-#  /datasets: ~/datasets
-#
-#  # This uses sky Storage to first create a S3 bucket named sky-dataset,
-#  # copies the contents of ~/datasets to the remote bucket and makes the
-#  # bucket persistent (i.e., the bucket is not deleted after the completion of
-#  # this sky task, and future invocations of this bucket will be much faster)
-#  /datasets-storage:
-#    name: sky-dataset
-#    source: ~/datasets
-#    force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
-#    persistent: True
-#
-#  # This re-uses a predefined bucket (sky-dataset, defined above) and mounts it
-#  # directly.
-#  /datasets-s3: s3://sky-dataset
+file_mounts:
+  # This uses rsync to directly copy files from your machine to the remote VM.
+  /datasets: ~/datasets
+
+  # This uses sky Storage to first create a S3 bucket named sky-dataset,
+  # copies the contents of ~/datasets to the remote bucket and makes the
+  # bucket persistent (i.e., the bucket is not deleted after the completion of
+  # this sky task, and future invocations of this bucket will be much faster)
+  /datasets-storage:
+    name: sky-dataset
+    source: ~/datasets
+    force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
+    persistent: True  # Defaults to True, can be set to false.
+
+  # This re-uses a predefined bucket (sky-dataset, defined above) and mounts it
+  # directly.
+  /datasets-s3: s3://sky-dataset
 
 
 ###############################################
@@ -72,6 +72,7 @@ resources:
 #     execution of this task or not. Set to True to avoid uploading files again
 #     in subsequent runs (at the cost of storing your data in the cloud). If
 #     files change between runs, new files are synced to the bucket.
+
 storage:
   - name: sky-dataset-decl
     source: ~/datasets
