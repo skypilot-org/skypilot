@@ -1,6 +1,6 @@
 # Adapted from https://github.com/ray-project/ray/blob/ray-1.9.2/python/ray/worker.py
 # Fixed the problem in ray's issue https://github.com/ray-project/ray/issues/9233
-# Do not add `\n` to the end of line ending with `\r`. (Added Line 1167 and Line 1176).
+# Tracked in PR https://github.com/ray-project/ray/pull/21977/files.
 from contextlib import contextmanager
 import atexit
 import faulthandler
