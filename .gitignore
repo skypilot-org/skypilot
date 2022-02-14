@@ -2,6 +2,8 @@
 **/*.log
 **/*.pyc
 
+docs/build
+
 plotting/*.pdf
 plotting/*.png
 
