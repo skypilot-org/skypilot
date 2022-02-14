@@ -205,18 +205,19 @@ class Task:
                        'Storage Object needs name and source path specified.'
                 persistent = True if storage.get(
                     'persistent') is None else storage['persistent']
-                task_storages[name] = storage_lib.Storage(name=name,
-                                                          source=source,
-                                                          persistent=persistent)
+                storage_instance = storage_lib.Storage(name=name,
+                                                       source=source,
+                                                       persistent=persistent)
                 if force_stores is not None:
                     assert set(force_stores) <= {'s3', 'gcs', 'azure_blob'}
                     for cloud_type in force_stores:
                         if cloud_type == 's3':
-                            task_storages[name].get_or_copy_to_s3()
+                            storage_instance.get_or_copy_to_s3()
                         elif cloud_type == 'gcs':
-                            task_storages[name].get_or_copy_to_gcs()
+                            storage_instance.get_or_copy_to_gcs()
                         elif cloud_type == 'azure_blob':
-                            task_storages[name].get_or_copy_to_azure_blob()
+                            storage_instance.get_or_copy_to_azure_blob()
+                task_storages[name] = storage_instance
 
         storage_mounts = config.get('storage_mounts')
         if storage_mounts is not None:

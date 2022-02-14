@@ -1,0 +1,92 @@
+name: storage-demo
+
+resources:
+  cloud: aws
+  instance_type: m5.2xlarge
+
+###############################################
+#  Using sky storage #
+###############################################
+# Sky storage can be used in two ways. First is the shorthand, which builds on
+# the file_mounts API (see using_file_mounts.yaml) and is easier to use. The
+# second is the the declarative API which allows more flexibility for users.
+# Both achieve the same goal, but are specified differently. It is recommended
+# for most users to use Method 1 since it is easier to use.
+
+
+###############################################
+#  Method 1  - file_mounts shorthand #
+###############################################
+
+#file_mounts:
+#  # This uses rsync to directly copy files from your machine to the remote VM.
+#  /datasets: ~/datasets
+#
+#  # This uses sky Storage to first create a S3 bucket named sky-dataset,
+#  # copies the contents of ~/datasets to the remote bucket and makes the
+#  # bucket persistent (i.e., the bucket is not deleted after the completion of
+#  # this sky task, and future invocations of this bucket will be much faster)
+#  /datasets-storage:
+#    name: sky-dataset
+#    source: ~/datasets
+#    force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
+#    persistent: True
+#
+#  # This re-uses a predefined bucket (sky-dataset, defined above) and mounts it
+#  # directly.
+#  /datasets-s3: s3://sky-dataset
+
+
+###############################################
+#  Method 2  - Declarative Sky API #
+###############################################
+
+# storage: List[sky.Storage]
+#
+# Storage represents an abstract data store containing large data files
+# required by the task. Compared to file_mounts, storage is faster and
+# can persist across runs, requiring fewer uploads from your local machine.
+# A storage object is used by "mounting" it to a task. On mounting, the data
+# specified in the source becomes available at the destination mount_path.
+#
+# Behind the scenes, storage automatically uploads all data in the source
+# to a backing object store in a particular cloud (S3/GCS/Azure Blob).
+#
+# Fields:
+#   sky.Storage.name: str
+#     Identifier for the storage object, used as reference in storage_mount
+#
+#   sky.Storage.source: str
+#     The source attribute specifies the local path that must be made available
+#     in the storage object. It can either be a local path, in which case data
+#     is uploaded to the cloud to an appropriate object store (s3 or gcs), or it
+#     can be a remote path (s3://, gs://), in which case it is mounted directly.
+#
+#   sky.Storage.force_stores: List[str]
+#     If you wish to force sky.Storage to be backed by specific cloud object
+#     stores, you can specify them here. If the Storage object does not already
+#     exist there, it will be replicated onto those clouds.
+#
+#   sky.Storage.persistent: str
+#     Whether the remote backing stores in the cloud should be deleted after
+#     execution of this task or not. Set to True to avoid uploading files again
+#     in subsequent runs (at the cost of storing your data in the cloud). If
+#     files change between runs, new files are synced to the bucket.
+storage:
+  - name: sky-dataset-decl
+    source: ~/datasets
+    #force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
+    persistent: True
+
+# storage_mounts: List[sky.storage_mounts]
+#
+# Storage mounts specify where the storage objects defined above should be
+# mounted when the task is run.
+storage_mounts:
+  - storage: sky-dataset-decl # Name of the storage defined above
+    mount_path: /datasets-decl # Path to mount the storage at
+
+run: |
+  pwd
+  ls -la /
+# ls -la /datasets-decl/
