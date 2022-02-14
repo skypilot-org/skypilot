@@ -36,7 +36,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
-import pandas as pd
 import pendulum
 
 import sky
@@ -1287,6 +1286,7 @@ def init():
     sky_init.init()
 
 
+@cli.command()
 @click.argument('gpu_name', required=False)
 @click.option('--all',
               '-a',
@@ -1342,6 +1342,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name)
+        import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = util_lib.create_table([
                 'GPU',
