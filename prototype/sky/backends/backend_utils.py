@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 import zlib
+import shutil
 
 import jinja2
 
@@ -327,6 +328,11 @@ def _build_sky_wheel() -> pathlib.Path:
     norm_path = str(package_root) + os.sep
     username = getpass.getuser()
     wheel_dir = pathlib.Path(tempfile.gettempdir()) / f'sky_wheels_{username}'
+    # remove old wheels
+    for f in wheel_dir.glob('sky-*.whl'):
+        f.unlink()
+    # remove pip wheels build directory, otherwise we may include outdated code
+    shutil.rmtree(str(package_root / 'build'), ignore_errors=True)
     try:
         # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
         # the output.
