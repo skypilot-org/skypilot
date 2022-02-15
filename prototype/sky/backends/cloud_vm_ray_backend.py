@@ -1594,11 +1594,21 @@ class CloudVmRayBackend(backends.Backend):
                     f'aws ec2 terminate-instances --region {region} '
                     f'--instance-ids $({query_cmd})')
                 backend_utils.run(terminate_cmd, check=True)
+            elif isinstance(cloud, clouds.GCP):
+                zone = config['provider']['availability_zone']
+                query_cmd = (
+                    f'gcloud compute instances list '
+                    f'--filter=(labels.ray-cluster-name={cluster_name}) '
+                    f'--zone {zone} --format=value(name)')
+                terminate_cmd = (
+                    f'gcloud compute instances delete --zone {zone} '
+                    f'$({query_cmd}) --quiet')
+                backend_utils.run(terminate_cmd, check=True)
             else:
                 # TODO(suquark,zongheng): Support deleting stopped GCP clusters.
                 # Tracked in issue #318.
                 logger.info(
-                    f'Cannot terminate non-AWS cluster {cluster_name!r} '
+                    f'Cannot terminate Azure cluster {cluster_name!r} '
                     'because it is STOPPED. \nTo fix: manually terminate in '
                     'the cloud\'s UI or '
                     f'`sky start {cluster_name}; sky down {cluster_name}` '
