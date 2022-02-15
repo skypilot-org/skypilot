@@ -405,11 +405,19 @@ def write_cluster_config(task: task_lib.Task,
 
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
-        azure_subscription_id = azure.get_subscription_id()
-        if not azure_subscription_id:
-            raise RuntimeError('Fail to get subscription id from azure cli. '
-                               'Try to fix it with this Azure cli command: '
-                               '"az account set -s <subscription_id>".')
+        if dryrun:
+            azure_subscription_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+        else:
+            try:
+                azure_subscription_id = azure.get_subscription_id()
+                if not azure_subscription_id:
+                    raise ValueError  # The error message will be replaced.
+            except Exception:
+                raise RuntimeError(
+                    'Fail to get subscription id from azure cli. '
+                    'Make sure you have login in and fix it with this Azure '
+                    'cli command: "az account set -s <subscription_id>".'
+                ) from None
 
     assert cluster_name is not None
 
