@@ -1584,8 +1584,8 @@ class CloudVmRayBackend(backends.Backend):
                 zone = config['provider']['availability_zone']
                 query_cmd = (
                     f'gcloud compute instances list '
-                    f'--filter=\(labels.ray-cluster-name={cluster_name}\) '
-                    f'--zones={zone} --format=value\(name\)')
+                    f'--filter=\\(labels.ray-cluster-name={cluster_name}\\) '
+                    f'--zones={zone} --format=value\\(name\\)')
                 terminate_cmd = (
                     f'gcloud compute instances delete --zone={zone} --quiet '
                     f'$({query_cmd})')
