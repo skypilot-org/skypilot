@@ -24,8 +24,8 @@ from sky import clouds
 from sky import sky_logging
 from sky import resources
 from sky import task as task_lib
-from sky.skylet import log_lib
 from sky.cloud_adaptors import azure
+from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
 
