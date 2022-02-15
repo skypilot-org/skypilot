@@ -197,10 +197,11 @@ class Azure(clouds.Cloud):
         # This file is required because it will be synced to remote VMs for
         # `az` to access private storage buckets.
         # `az account show` does not guarantee this file exists.
-        if not os.path.isfile(os.path.expanduser('~/.azure/accessTokens.json')):
+        azure_token_cache_file = '~/.azure/msal_token_cache.json'
+        if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
             return (
                 False,
-                '~/.azure/accessTokens.json does not exist. Run `az login`.' +
+                f'{azure_token_cache_file} does not exist. Run `az login`.' +
                 help_str)
         try:
             output = _run_output('az account show --output=json')

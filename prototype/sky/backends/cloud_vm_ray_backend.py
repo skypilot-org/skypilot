@@ -1562,22 +1562,8 @@ class CloudVmRayBackend(backends.Backend):
         prev_status = global_user_state.get_status_from_cluster_name(
             handle.cluster_name)
         cluster_name = config['cluster_name']
-        if not terminate and not isinstance(cloud, (clouds.AWS, clouds.GCP)):
-            # FIXME: no mentions of cache_stopped_nodes in
-            # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/_azure/node_provider.py
-            raise ValueError(
-                f'Stopping cluster {handle.cluster_name!r}: not supported on '
-                'non-AWS and non-GCP clusters yet. Try manually stopping, '
-                f'or terminate by: sky down {handle.cluster_name}')
-        if isinstance(cloud, clouds.Azure):
-            # Special handling because `ray down` is buggy with Azure.
-            # Set check=False to not error out on not found VMs.
-            backend_utils.run(
-                'az vm delete --yes --ids $(az vm list --query '
-                f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
-                check=False)
-        elif (terminate and
-              prev_status == global_user_state.ClusterStatus.STOPPED):
+        if (terminate and
+                prev_status == global_user_state.ClusterStatus.STOPPED):
             if isinstance(cloud, clouds.AWS):
                 # TODO (zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
@@ -1604,11 +1590,18 @@ class CloudVmRayBackend(backends.Backend):
                     f'gcloud compute instances delete --zone={zone} --quiet '
                     f'$({query_cmd})')
                 backend_utils.run(terminate_cmd, check=True)
+            elif isinstance(cloud, clouds.Azure):
+                # Special handling because `ray down` is buggy with Azure.
+                # Set check=False to not error out on not found VMs.
+                backend_utils.run(
+                    'az vm delete --yes --ids $(az vm list --query '
+                    f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
+                    check=False)
             else:
                 # TODO(suquark,zongheng): Support deleting stopped GCP clusters.
                 # Tracked in issue #318.
                 logger.info(
-                    f'Cannot terminate Azure cluster {cluster_name!r} '
+                    f'Cannot terminate {cloud} cluster {cluster_name!r} '
                     'because it is STOPPED. \nTo fix: manually terminate in '
                     'the cloud\'s UI or '
                     f'`sky start {cluster_name}; sky down {cluster_name}` '
