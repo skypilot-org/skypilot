@@ -100,9 +100,6 @@ def _execute(dag: sky.Dag,
 
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
-    # FIXME: test on some node where the mounts do not exist.
-    task.update_file_mounts(init.get_cloud_credential_file_mounts())
-
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
         task.add_storage_mounts()
@@ -120,11 +117,16 @@ def _execute(dag: sky.Dag,
                 # sync all files.  They are mitigations because if one manually
                 # changes the cluster AND passing in a handle, the cluster still
                 # would not be updated correctly.
+                prev_file_mounts = task.file_mounts
+                if prev_file_mounts is not None:
+                    prev_file_mounts = dict(task.file_mounts)
+                task.update_file_mounts(init.get_cloud_credential_file_mounts())
                 handle = backend.provision(task,
                                            task.best_resources,
                                            dryrun=dryrun,
                                            stream_logs=stream_logs,
                                            cluster_name=cluster_name)
+                task.set_file_mounts(prev_file_mounts)
 
         if dryrun:
             logger.info('Dry run finished.')
