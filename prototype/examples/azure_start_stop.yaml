@@ -1,0 +1,13 @@
+# start and stop Azure instances
+name: azure-start-stop
+
+resources:
+  cloud: azure
+
+num_nodes: 2
+
+# The setup command.  Will be run under the working directory.
+setup: 'echo "azure-start-stop [setup]"'
+
+# The command to run.  Will be run under the working directory.
+run: 'echo "azure-start-stop [run]"'
