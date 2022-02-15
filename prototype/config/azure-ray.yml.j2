@@ -12,6 +12,9 @@ provider:
     # instead of the cluster_name. This ensures that ray creates new instances
     # for different cluster_name.
     resource_group: {{cluster_name}}-{{region}}
+    # This is required in ray>=1.10.0
+    # TODO: Change the azure subscription_id according to the user
+    subscription_id: aa86df77-e703-453e-b2f4-955c3b33e534
     # Keep (otherwise cannot reuse when re-provisioning).
     # teardown(terminate=True) will override this.
     cache_stopped_nodes: True
