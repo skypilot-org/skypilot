@@ -302,10 +302,9 @@ class Worker:
         # removed before this one, it will corrupt the state in the
         # reference counter.
         return ray.ObjectRef(
-            self.core_worker.put_serialized_object(
-                serialized_value,
-                object_ref=object_ref,
-                owner_address=owner_address),
+            self.core_worker.put_serialized_object(serialized_value,
+                                                   object_ref=object_ref,
+                                                   owner_address=owner_address),
             # If the owner address is set, then the initial reference is
             # already acquired internally in CoreWorker::CreateOwned.
             # TODO(ekl) we should unify the code path more with the others
@@ -326,8 +325,7 @@ class Worker:
         # into pickle.loads (https://github.com/ray-project/ray/issues/16304)
         with self.function_actor_manager.lock:
             context = self.get_serialization_context()
-            return context.deserialize_objects(data_metadata_pairs,
-                                               object_refs)
+            return context.deserialize_objects(data_metadata_pairs, object_refs)
 
     def get_objects(self, object_refs, timeout=None):
         """Get the values in the object store associated with the IDs.
@@ -362,8 +360,8 @@ class Worker:
                 metadata_fields = metadata.split(b",")
                 if len(metadata_fields) >= 2 and metadata_fields[1].startswith(
                         ray_constants.OBJECT_METADATA_DEBUG_PREFIX):
-                    debugger_breakpoint = metadata_fields[1][len(
-                        ray_constants.OBJECT_METADATA_DEBUG_PREFIX):]
+                    debugger_breakpoint = metadata_fields[1][
+                        len(ray_constants.OBJECT_METADATA_DEBUG_PREFIX):]
         return self.deserialize_objects(data_metadata_pairs,
                                         object_refs), debugger_breakpoint
 
@@ -467,8 +465,8 @@ class Worker:
                     self.threads_stopped.wait(timeout=0.01)
                     continue
                 num_consecutive_messages_received += 1
-                if (num_consecutive_messages_received % 100 == 0
-                        and num_consecutive_messages_received > 0):
+                if (num_consecutive_messages_received % 100 == 0 and
+                        num_consecutive_messages_received > 0):
                     logger.warning(
                         "The driver may not be able to keep up with the "
                         "stdout/stderr of the workers. To avoid forwarding "
@@ -481,8 +479,8 @@ class Worker:
                     data = json.loads(ray._private.utils.decode(msg["data"]))
 
                 # Don't show logs from other drivers.
-                if (self.filter_logs_by_job and data["job"]
-                        and job_id_hex != data["job"]):
+                if (self.filter_logs_by_job and data["job"] and
+                        job_id_hex != data["job"]):
                     continue
                 data["localhost"] = localhost
                 global_worker_stdstream_dispatcher.emit(data)
@@ -525,8 +523,7 @@ def get_gpu_ids():
         # Note: We should only get the GPU ids from the placement
         # group resource that does not contain the bundle index!
         import re
-        if resource == "GPU" or re.match(r"^GPU_group_[0-9A-Za-z]+$",
-                                         resource):
+        if resource == "GPU" or re.match(r"^GPU_group_[0-9A-Za-z]+$", resource):
             for resource_id, _ in assignment:
                 assigned_ids.add(resource_id)
 
@@ -809,11 +806,10 @@ def init(
                 logger.debug("Failed to raise limit.")
         soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
         if soft < 4096:
-            logger.warning(
-                "File descriptor limit {} is too low for production "
-                "servers and may result in connection errors. "
-                "At least 8192 is recommended. --- "
-                "Fix with 'ulimit -n 8192'".format(soft))
+            logger.warning("File descriptor limit {} is too low for production "
+                           "servers and may result in connection errors. "
+                           "At least 8192 is recommended. --- "
+                           "Fix with 'ulimit -n 8192'".format(soft))
     except ImportError:
         logger.debug("Could not import resource module (on Windows)")
         pass
@@ -918,17 +914,15 @@ def init(
         # shutdown the node in the ray.shutdown call that happens in the atexit
         # handler. We still spawn a reaper process in case the atexit handler
         # isn't called.
-        _global_node = ray.node.Node(
-            head=True,
-            shutdown_at_exit=False,
-            spawn_reaper=True,
-            ray_params=ray_params)
+        _global_node = ray.node.Node(head=True,
+                                     shutdown_at_exit=False,
+                                     spawn_reaper=True,
+                                     ray_params=ray_params)
     else:
         # In this case, we are connecting to an existing cluster.
         if num_cpus is not None or num_gpus is not None:
-            raise ValueError(
-                "When connecting to an existing cluster, num_cpus "
-                "and num_gpus must not be provided.")
+            raise ValueError("When connecting to an existing cluster, num_cpus "
+                             "and num_gpus must not be provided.")
         if resources is not None:
             raise ValueError("When connecting to an existing cluster, "
                              "resources must not be provided.")
@@ -954,22 +948,20 @@ def init(
             _system_config=_system_config,
             enable_object_reconstruction=_enable_object_reconstruction,
             metrics_export_port=_metrics_export_port)
-        _global_node = ray.node.Node(
-            ray_params,
-            head=False,
-            shutdown_at_exit=False,
-            spawn_reaper=False,
-            connect_only=True)
+        _global_node = ray.node.Node(ray_params,
+                                     head=False,
+                                     shutdown_at_exit=False,
+                                     spawn_reaper=False,
+                                     connect_only=True)
 
-    connect(
-        _global_node,
-        mode=driver_mode,
-        log_to_driver=log_to_driver,
-        worker=global_worker,
-        driver_object_store_memory=_driver_object_store_memory,
-        job_id=None,
-        namespace=namespace,
-        job_config=job_config)
+    connect(_global_node,
+            mode=driver_mode,
+            log_to_driver=log_to_driver,
+            worker=global_worker,
+            driver_object_store_memory=_driver_object_store_memory,
+            job_id=None,
+            namespace=namespace,
+            job_config=job_config)
     if job_config and job_config.code_search_path:
         global_worker.set_load_code_from_local(True)
     else:
@@ -1192,24 +1184,22 @@ def print_worker_logs(data: Dict[str, str], print_file: Any):
 
     if data.get("ip") == data.get("localhost"):
         for line in lines:
-            print(
-                "{}{}({}{}){} {}".format(colorama.Style.DIM,
-                                         color_for(data,
-                                                   line), prefix_for(data),
-                                         pid, colorama.Style.RESET_ALL, line),
-                file=print_file,
-                end=end_for(line))
+            print("{}{}({}{}){} {}".format(colorama.Style.DIM,
+                                           color_for(data, line),
+                                           prefix_for(data), pid,
+                                           colorama.Style.RESET_ALL, line),
+                  file=print_file,
+                  end=end_for(line))
     else:
         for line in lines:
-            print(
-                "{}{}({}{}, ip={}){} {}".format(colorama.Style.DIM,
-                                                color_for(data, line),
-                                                prefix_for(data), pid,
-                                                data.get("ip"),
-                                                colorama.Style.RESET_ALL,
-                                                line),
-                file=print_file,
-                end=end_for(line))
+            print("{}{}({}{}, ip={}){} {}".format(colorama.Style.DIM,
+                                                  color_for(data, line),
+                                                  prefix_for(data), pid,
+                                                  data.get("ip"),
+                                                  colorama.Style.RESET_ALL,
+                                                  line),
+                  file=print_file,
+                  end=end_for(line))
 
 
 def listen_error_messages_raylet(worker, threads_stopped):
@@ -1413,8 +1403,7 @@ def connect(node,
     if mode is not SCRIPT_MODE and mode is not LOCAL_MODE and setproctitle:
         process_name = ray_constants.WORKER_PROCESS_TYPE_IDLE_WORKER
         if mode is SPILL_WORKER_MODE:
-            process_name = (
-                ray_constants.WORKER_PROCESS_TYPE_SPILL_WORKER_IDLE)
+            process_name = (ray_constants.WORKER_PROCESS_TYPE_SPILL_WORKER_IDLE)
         elif mode is RESTORE_WORKER_MODE:
             process_name = (
                 ray_constants.WORKER_PROCESS_TYPE_RESTORE_WORKER_IDLE)
@@ -1495,14 +1484,16 @@ def connect(node,
     # If it's a driver and it's not coming from ray client, we'll prepare the
     # environment here. If it's ray client, the environment will be prepared
     # at the server side.
-    if (mode == SCRIPT_MODE and not job_config.client_job
-            and job_config.runtime_env):
+    if (mode == SCRIPT_MODE and not job_config.client_job and
+            job_config.runtime_env):
         scratch_dir: str = worker.node.get_runtime_env_dir_path()
         runtime_env = job_config.runtime_env or {}
-        runtime_env = upload_py_modules_if_needed(
-            runtime_env, scratch_dir, logger=logger)
-        runtime_env = upload_working_dir_if_needed(
-            runtime_env, scratch_dir, logger=logger)
+        runtime_env = upload_py_modules_if_needed(runtime_env,
+                                                  scratch_dir,
+                                                  logger=logger)
+        runtime_env = upload_working_dir_if_needed(runtime_env,
+                                                   scratch_dir,
+                                                   logger=logger)
         # Remove excludes, it isn't relevant after the upload step.
         runtime_env.pop("excludes", None)
         job_config.set_runtime_env(runtime_env)
@@ -1546,8 +1537,8 @@ def connect(node,
         if log_to_driver:
             global_worker_stdstream_dispatcher.add_handler(
                 "ray_print_logs", print_to_stdstream)
-            worker.logger_thread = threading.Thread(
-                target=worker.print_logs, name="ray_print_logs")
+            worker.logger_thread = threading.Thread(target=worker.print_logs,
+                                                    name="ray_print_logs")
             worker.logger_thread.daemon = True
             worker.logger_thread.start()
 
@@ -1714,9 +1705,8 @@ def get(object_refs: Union[ray.ObjectRef, List[ray.ObjectRef]],
     worker = global_worker
     worker.check_connected()
 
-    if hasattr(
-            worker,
-            "core_worker") and worker.core_worker.current_actor_is_asyncio():
+    if hasattr(worker,
+               "core_worker") and worker.core_worker.current_actor_is_asyncio():
         global blocking_get_inside_async_warned
         if not blocking_get_inside_async_warned:
             logger.warning("Using blocking ray.get inside async actor. "
@@ -1735,8 +1725,8 @@ def get(object_refs: Union[ray.ObjectRef, List[ray.ObjectRef]],
                              "or a list of object refs.")
 
         # TODO(ujvl): Consider how to allow user to retrieve the ready objects.
-        values, debugger_breakpoint = worker.get_objects(
-            object_refs, timeout=timeout)
+        values, debugger_breakpoint = worker.get_objects(object_refs,
+                                                         timeout=timeout)
         for i, value in enumerate(values):
             if isinstance(value, RayError):
                 if isinstance(value, ray.exceptions.ObjectLostError):
@@ -1766,7 +1756,8 @@ def get(object_refs: Union[ray.ObjectRef, List[ray.ObjectRef]],
 
 @PublicAPI
 @client_mode_hook(auto_init=True)
-def put(value: Any, *,
+def put(value: Any,
+        *,
         _owner: Optional["ray.actor.ActorHandle"] = None) -> ray.ObjectRef:
     """Store an object in the object store.
 
@@ -1820,12 +1811,13 @@ blocking_wait_inside_async_warned = False
 
 @PublicAPI
 @client_mode_hook(auto_init=True)
-def wait(object_refs: List[ray.ObjectRef],
-         *,
-         num_returns: int = 1,
-         timeout: Optional[float] = None,
-         fetch_local: bool = True
-         ) -> Tuple[List[ray.ObjectRef], List[ray.ObjectRef]]:
+def wait(
+    object_refs: List[ray.ObjectRef],
+    *,
+    num_returns: int = 1,
+    timeout: Optional[float] = None,
+    fetch_local: bool = True
+) -> Tuple[List[ray.ObjectRef], List[ray.ObjectRef]]:
     """Return a list of IDs that are ready and a list of IDs that are not.
 
     If timeout is set, the function returns either when the requested number of
@@ -1877,9 +1869,8 @@ def wait(object_refs: List[ray.ObjectRef],
             blocking_wait_inside_async_warned = True
 
     if isinstance(object_refs, ObjectRef):
-        raise TypeError(
-            "wait() expected a list of ray.ObjectRef, got a single "
-            "ray.ObjectRef")
+        raise TypeError("wait() expected a list of ray.ObjectRef, got a single "
+                        "ray.ObjectRef")
 
     if not isinstance(object_refs, list):
         raise TypeError("wait() expected a list of ray.ObjectRef, "
@@ -1907,8 +1898,8 @@ def wait(object_refs: List[ray.ObjectRef],
         if len(object_refs) != len(set(object_refs)):
             raise ValueError("Wait requires a list of unique object refs.")
         if num_returns <= 0:
-            raise ValueError(
-                "Invalid number of objects to return %d." % num_returns)
+            raise ValueError("Invalid number of objects to return %d." %
+                             num_returns)
         if num_returns > len(object_refs):
             raise ValueError("num_returns cannot be greater than the number "
                              "of objects provided to ray.wait.")
@@ -2054,9 +2045,10 @@ def make_decorator(num_returns=None,
                    retry_exceptions=None,
                    concurrency_groups=None,
                    scheduling_strategy: SchedulingStrategyT = None):
+
     def decorator(function_or_class):
-        if (inspect.isfunction(function_or_class)
-                or is_cython(function_or_class)):
+        if (inspect.isfunction(function_or_class) or
+                is_cython(function_or_class)):
             # Set the remote function default resources.
             if max_restarts is not None:
                 raise ValueError("The keyword 'max_restarts' is not "
@@ -2064,18 +2056,17 @@ def make_decorator(num_returns=None,
             if max_task_retries is not None:
                 raise ValueError("The keyword 'max_task_retries' is not "
                                  "allowed for remote functions.")
-            if num_returns is not None and (not isinstance(num_returns, int)
-                                            or num_returns < 0):
-                raise ValueError(
-                    "The keyword 'num_returns' only accepts 0 or a"
-                    " positive integer")
-            if max_retries is not None and (not isinstance(max_retries, int)
-                                            or max_retries < -1):
+            if num_returns is not None and (not isinstance(num_returns, int) or
+                                            num_returns < 0):
+                raise ValueError("The keyword 'num_returns' only accepts 0 or a"
+                                 " positive integer")
+            if max_retries is not None and (not isinstance(max_retries, int) or
+                                            max_retries < -1):
                 raise ValueError(
                     "The keyword 'max_retries' only accepts 0, -1 or a"
                     " positive integer")
-            if max_calls is not None and (not isinstance(max_calls, int)
-                                          or max_calls < 0):
+            if max_calls is not None and (not isinstance(max_calls, int) or
+                                          max_calls < 0):
                 raise ValueError(
                     "The keyword 'max_calls' only accepts 0 or a positive"
                     " integer")
@@ -2108,11 +2099,11 @@ def make_decorator(num_returns=None,
                 raise ValueError(
                     "The keyword 'max_task_retries' only accepts -1, 0 or a"
                     " positive integer")
-            return ray.actor.make_actor(
-                function_or_class, num_cpus, num_gpus, memory,
-                object_store_memory, resources, accelerator_type, max_restarts,
-                max_task_retries, runtime_env, concurrency_groups,
-                scheduling_strategy)
+            return ray.actor.make_actor(function_or_class, num_cpus, num_gpus,
+                                        memory, object_store_memory, resources,
+                                        accelerator_type, max_restarts,
+                                        max_task_retries, runtime_env,
+                                        concurrency_groups, scheduling_strategy)
 
         raise TypeError("The @ray.remote decorator must be applied to "
                         "either a function or to a class.")
@@ -2295,21 +2286,20 @@ def remote(*args, **kwargs):
     concurrency_groups = kwargs.get("concurrency_groups")
     scheduling_strategy = kwargs.get("scheduling_strategy")
 
-    return make_decorator(
-        num_returns=num_returns,
-        num_cpus=num_cpus,
-        num_gpus=num_gpus,
-        memory=memory,
-        object_store_memory=object_store_memory,
-        resources=resources,
-        accelerator_type=accelerator_type,
-        max_calls=max_calls,
-        max_restarts=max_restarts,
-        max_task_retries=max_task_retries,
-        max_retries=max_retries,
-        runtime_env=runtime_env,
-        placement_group=placement_group,
-        worker=worker,
-        retry_exceptions=retry_exceptions,
-        concurrency_groups=concurrency_groups or [],
-        scheduling_strategy=scheduling_strategy)
+    return make_decorator(num_returns=num_returns,
+                          num_cpus=num_cpus,
+                          num_gpus=num_gpus,
+                          memory=memory,
+                          object_store_memory=object_store_memory,
+                          resources=resources,
+                          accelerator_type=accelerator_type,
+                          max_calls=max_calls,
+                          max_restarts=max_restarts,
+                          max_task_retries=max_task_retries,
+                          max_retries=max_retries,
+                          runtime_env=runtime_env,
+                          placement_group=placement_group,
+                          worker=worker,
+                          retry_exceptions=retry_exceptions,
+                          concurrency_groups=concurrency_groups or [],
+                          scheduling_strategy=scheduling_strategy)
