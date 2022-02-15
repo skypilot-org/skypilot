@@ -10,7 +10,7 @@ idle_timeout_minutes: 60
 provider:
   # We use a custom node provider for GCP to support instance stop and reuse.
   type: external  # type: gcp
-  module: sky.skylet.providers.GCPNodeProvider
+  module: sky.skylet.providers.gcp.GCPNodeProvider
   region: {{region}}
   availability_zone: {{zones}}
   project_id: intercloud-320520  # Globally unique project id
