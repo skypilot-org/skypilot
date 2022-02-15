@@ -1598,11 +1598,11 @@ class CloudVmRayBackend(backends.Backend):
                 zone = config['provider']['availability_zone']
                 query_cmd = (
                     f'gcloud compute instances list '
-                    f'--filter=(labels.ray-cluster-name={cluster_name}) '
-                    f'--zone {zone} --format=value(name)')
+                    f'--filter=\(labels.ray-cluster-name={cluster_name}\) '
+                    f'--zones={zone} --format=value\(name\)')
                 terminate_cmd = (
-                    f'gcloud compute instances delete --zone {zone} '
-                    f'$({query_cmd}) --quiet')
+                    f'gcloud compute instances delete --zone={zone} --quiet '
+                    f'$({query_cmd})')
                 backend_utils.run(terminate_cmd, check=True)
             else:
                 # TODO(suquark,zongheng): Support deleting stopped GCP clusters.
