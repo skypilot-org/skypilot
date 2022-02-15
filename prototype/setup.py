@@ -23,8 +23,8 @@ install_requires = [
 ]
 
 extras_require = {
-    'aws': ['awscli==1.22.55', 'boto3'],
-    'azure': ['azure-cli==2.33.1'],
+    'aws': ['awscli==1.22.17', 'boto3'],
+    'azure': ['azure-cli==2.30.0'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
 }
 
