@@ -60,7 +60,7 @@ ray attach config/gcp.yml
 ray down config/gcp.yml
 ```
 
-**Azure**. Install the Azure CLI (`pip install azure-cli==2.22.0`) then login using `az login`. Set the subscription to use from the command line (`az account set -s <subscription_id>`). Ray Autoscaler does not work with the latest version of `azure-cli` as of 1.9.1, hence the fixed Azure version.
+**Azure**. Install the Azure CLI (`pip install azure-cli==2.33.1`) then login using `az login`. Set the subscription to use from the command line (`az account set -s <subscription_id>`). Ray Autoscaler does not work with the latest version of `azure-cli` as of 1.10.0.
 
 ## Open issues
 
