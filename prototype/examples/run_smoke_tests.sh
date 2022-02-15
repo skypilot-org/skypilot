@@ -93,3 +93,11 @@ sky stop gcp-start-stop
 sky start gcp-start-stop
 sky exec gcp-start-stop "$DIR"/gcp_start_stop.yaml
 sky down gcp-start-stop
+
+## ---------- Testing Azure start and stop instances ----------
+sky launch -c azure-start-stop "$DIR"/azure_start_stop.yaml
+sky exec azure-start-stop "$DIR"/azure_start_stop.yaml
+sky stop azure-start-stop
+sky start azure-start-stop
+sky exec azure-start-stop "$DIR"/azure_start_stop.yaml
+sky down azure-start-stop
