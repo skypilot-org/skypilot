@@ -1587,8 +1587,7 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = f'az vm delete --yes --ids $({query_cmd})'
                 # Special handling because `ray down` is buggy with Azure.
                 # Set check=False to not error out on not found VMs.
-                backend_utils.run(terminate_cmd,
-                    check=False)
+                backend_utils.run(terminate_cmd, check=False)
             else:
                 # TODO(suquark,zongheng): Support deleting stopped GCP clusters.
                 # Tracked in issue #318.
