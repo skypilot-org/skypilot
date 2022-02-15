@@ -1,9 +1,9 @@
-SkyML reference documentation
+Sky reference documentation
 ===================================
 
-SkyML is a platform for infra-less machine learning on any cloud. It provides a
-set of APIs and interfaces to interact with multiple cloud backends in an agnostic
-way.
+Sky is a framework for easily running machine learning projects on any cloud.
+Sky exposes high-level interfaces to interact with clouds in a cloud-agnostic,
+transparent manner.
 
 
 .. toctree::

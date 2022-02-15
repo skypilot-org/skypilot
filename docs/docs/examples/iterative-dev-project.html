@@ -33,16 +33,13 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
-    <script>let toggleHintShow = 'Click to show';</script>
-    <script>let toggleHintHide = 'Click to hide';</script>
-    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="Launch Multiple Tasks on a VM" href="launch-many-tasks-vm.html" />
-    <link rel="prev" title="Auto-failover Provisioning" href="auto-failover.html" />
+    <link rel="prev" title="Auto-provisioning GPUs" href="auto-failover.html" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="docsearch:language" content="None">
     
@@ -109,7 +106,7 @@
 <ul class="current nav bd-sidenav">
  <li class="toctree-l1">
   <a class="reference internal" href="auto-failover.html">
-   Auto-failover Provisioning
+   Auto-provisioning GPUs
   </a>
  </li>
  <li class="toctree-l1 current active">
@@ -251,8 +248,8 @@
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#saving-code-and-transferring-artifacts">
-   Saving code and transferring artifacts
+  <a class="reference internal nav-link" href="#syncing-code-and-transferring-artifacts">
+   Syncing code and transferring artifacts
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
@@ -296,8 +293,8 @@
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#saving-code-and-transferring-artifacts">
-   Saving code and transferring artifacts
+  <a class="reference internal nav-link" href="#syncing-code-and-transferring-artifacts">
+   Syncing code and transferring artifacts
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
@@ -338,46 +335,47 @@ VSCode Remote.</p>
 </div>
 <div class="section" id="running-your-code">
 <h2>Running your code<a class="headerlink" href="#running-your-code" title="Permalink to this headline">¶</a></h2>
-<p>You can either run your project by directly logging into the VM and running shell commands, but Sky also
+<p>You can run your project by directly logging into the VM and running shell commands, but Sky also
 provides remote execution without logging in:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># run a command without logging in</span>
-<span class="c1"># this stays within the Sky framework and allows us</span>
-<span class="c1"># to provide other features such as job queueing and monitoring</span>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Run a bash command without logging in.</span>
 $ sky <span class="nb">exec</span> dev -- python train.py
+$ sky <span class="nb">exec</span> dev -- gpustat -i
 
-<span class="c1"># if you have a task.yaml, you can also directly execute the `run` section</span>
+<span class="c1"># If you have a task.yaml, you can also directly execute the `run` section</span>
 <span class="c1"># defined in the task specification.</span>
 $ sky <span class="nb">exec</span> dev task.yaml
 </pre></div>
 </div>
 </div>
-<div class="section" id="saving-code-and-transferring-artifacts">
-<h2>Saving code and transferring artifacts<a class="headerlink" href="#saving-code-and-transferring-artifacts" title="Permalink to this headline">¶</a></h2>
-<p>Sky automatically forwards your local SSH agent to the cluster, allowing for git access
-without the need to log in again. For more information on how to configure your local SSH agent
-for forwarding git credentials, please refer to <a class="reference external" href="https://code.visualstudio.com/docs/remote/remote-overview">GitHub’s tutorial</a>.</p>
-<p>Additionally, you can always use the following to transfer files between your local machine and remote VM:</p>
+<div class="section" id="syncing-code-and-transferring-artifacts">
+<h2>Syncing code and transferring artifacts<a class="headerlink" href="#syncing-code-and-transferring-artifacts" title="Permalink to this headline">¶</a></h2>
+<p>Use the familiar scp/rsync to transfer files between your local machine and remote VM:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ scp -r my_code/ dev:/path/to/destination  # copy files to remote VM
 $ scp -r dev:/path/to/source my_code/       # copy files from remote VM
 </pre></div>
 </div>
-<p>Sky also provides automatic transfer of working directory to the remote VM. This
-can be configured with the <code class="code docutils literal notranslate"><span class="pre">workdir</span></code> option in a task YAML file, or using the following
-command line options:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ sky exec --workdir=/path/to/code task.yaml
-$ sky launch --workdir=/path/to/code task.yaml
+<p>Sky <strong>simplifies code syncing</strong> by the automatic transfer of a working directory
+to the cluster.  The working directory can be configured with the
+<code class="code docutils literal notranslate"><span class="pre">workdir</span></code> option in a task YAML file, or using the following command line
+option:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ sky launch --workdir=/path/to/code task.yaml
+$ sky exec --workdir=/path/to/code task.yaml
 </pre></div>
 </div>
-<p>In both scenarios, the working directory is transferred to the remote VM and will override
-<code class="code docutils literal notranslate"><span class="pre">workdir</span></code> defaults specified in task.yaml</p>
+<p>These commands sync the working directory to a location on the remote VM, and
+the task is run under that working directory (e.g., to invoke scripts, access
+checkpoints, etc.).</p>
 </div>
 <div class="section" id="ending-a-development-session">
 <h2>Ending a development session<a class="headerlink" href="#ending-a-development-session" title="Permalink to this headline">¶</a></h2>
 <p>To end a development session, run the following command:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sky stop dev
+
+<span class="gp"># </span>Or, to terminate:
+<span class="gp">$ </span>sky down dev
 </pre></div>
 </div>
-<p>To restart the VM:</p>
+<p>To restart a stopped cluster:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sky start dev
 </pre></div>
 </div>
@@ -394,7 +392,7 @@ $ sky launch --workdir=/path/to/code task.yaml
         <i class="fas fa-angle-left"></i>
         <div class="prev-next-info">
             <p class="prev-next-subtitle">previous</p>
-            <p class="prev-next-title">Auto-failover Provisioning</p>
+            <p class="prev-next-title">Auto-provisioning GPUs</p>
         </div>
     </a>
     <a class='right-next' id="next-link" href="launch-many-tasks-vm.html" title="next page">

@@ -33,9 +33,6 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
-    <script>let toggleHintShow = 'Click to show';</script>
-    <script>let toggleHintHide = 'Click to hide';</script>
-    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -109,7 +106,7 @@
 <ul class="nav bd-sidenav">
  <li class="toctree-l1">
   <a class="reference internal" href="../examples/auto-failover.html">
-   Auto-failover Provisioning
+   Auto-provisioning GPUs
   </a>
  </li>
  <li class="toctree-l1">
@@ -297,9 +294,10 @@ Azure.</p>
 <ul class="simple">
 <li><p><strong>Run your code on the cloud with zero code changes</strong></p></li>
 <li><p><strong>Easy provisionioning of VMs</strong> across multiple cloud platforms (AWS, Azure or GCP)</p></li>
-<li><p><strong>Fast and iterative development</strong> with quick access to cloud instances for prototyping. If cloud is unavailable, a local development mode is also available</p></li>
+<li><p><strong>Easy management of multiple clusters</strong> to handle different projects</p></li>
+<li><p><strong>Fast and iterative development</strong> with quick access to cloud instances for prototyping</p></li>
 <li><p><strong>Store your datasets on the cloud</strong> and access them like you would on a local filesystem</p></li>
-<li><p><strong>No cloud lock-in</strong> - easily move your code from Azure GPUs to Google TPUs with one line change</p></li>
+<li><p><strong>No cloud lock-in</strong> - transparently run your code across AWS, Google Cloud, and Azure</p></li>
 </ul>
 </div>
 <div class="section" id="hello-sky">
@@ -307,47 +305,63 @@ Azure.</p>
 <p>We’ll start by launching our first cluster on Sky by defining a task.</p>
 <p>We can specify the following task attributes with a YAML file:</p>
 <ul class="simple">
-<li><p><code class="code docutils literal notranslate"><span class="pre">resources</span></code> (optional): what cloud resources the task must be run on (e.g. accelerators, instance type, etc.)</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">resources</span></code> (optional): what cloud resources the task must be run on (e.g., accelerators, instance type, etc.)</p></li>
 <li><p><code class="code docutils literal notranslate"><span class="pre">setup</span></code> (optional): commands that must be run before the task is executed</p></li>
-<li><p><code class="code docutils literal notranslate"><span class="pre">run</span></code>: specifies the commands that must be run as the actual ask</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">run</span></code> (optional): specifies the commands that must be run as the actual ask</p></li>
 </ul>
-<p>Below is a task YAML that prints “hello sky!” and pings localhost 5 times,
+<p>Below is a task YAML that prints “hello sky!” and shows installed Conda environments,
 requiring an NVIDIA Tesla K80 GPU on AWS.</p>
 <div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># hello_sky.yaml</span><span class="w"></span>
 
 <span class="nt">resources</span><span class="p">:</span><span class="w"></span>
+<span class="w">   </span><span class="c1"># Optional; if left out, pick from the available clouds.</span><span class="w"></span>
 <span class="w">   </span><span class="nt">cloud</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws</span><span class="w"></span>
+
+<span class="w">   </span><span class="c1"># Get more GPUs with</span><span class="w"></span>
+<span class="w">   </span><span class="c1">#   accelerators:</span><span class="w"></span>
+<span class="w">   </span><span class="c1">#     K80: 8</span><span class="w"></span>
 <span class="w">   </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">K80</span><span class="w"></span>
 
 <span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">   </span><span class="no"># Typical use: pip install -r requirements.txt</span><span class="w"></span>
 <span class="w">   </span><span class="no">echo &quot;running setup&quot;</span><span class="w"></span>
 
 <span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">   </span><span class="no"># Typical use: make use of resources, such as running training.</span><span class="w"></span>
 <span class="w">   </span><span class="no">echo &quot;hello sky!&quot;</span><span class="w"></span>
-<span class="w">   </span><span class="no">ping localhost -c 5</span><span class="w"></span>
+<span class="w">   </span><span class="no">conda env list</span><span class="w"></span>
 </pre></div>
 </div>
-<p>Sky handles selecting an appropriate cluster size based on user-specified
-resource constraints, launching the cluster on an appropriate cloud provider, and executing the task.</p>
-<p>To launch a task based on our above YAML spec, we can use sky launch.</p>
+<p>Sky handles selecting an appropriate VM based on user-specified resource
+constraints, launching the cluster on an appropriate cloud provider, and
+executing the task.</p>
+<p>To launch a task based on our above YAML spec, we can use <code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">launch</span></code>.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sky launch -c mycluster hello_sky.yaml
 </pre></div>
 </div>
 <p>The <code class="code docutils literal notranslate"><span class="pre">-c</span></code> option allows us to specify a cluster name. If a cluster with the
-same name already exists, Sky will reuse that cluster If no such cluster exists,
-a new cluster with that name will be provisioned. If no cluster name is provided,
-(e.g. <code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">launch</span> <span class="pre">hello_sky.yaml</span></code>), then a cluster name will be autogenerated.</p>
-<p>We can view our existing clusters by running:</p>
+same name already exists, Sky will reuse that cluster. If no such cluster
+exists, a new cluster with that name will be provisioned. If no cluster name is
+provided, (e.g., <code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">launch</span> <span class="pre">hello_sky.yaml</span></code>), a cluster name will be
+autogenerated.</p>
+<p>We can view our existing clusters by running <code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">status</span></code>:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sky status
 </pre></div>
 </div>
-<p>If you would like to log into the your cluster, Sky provides access with SSH:</p>
+<p>This may show multiple clusters, if you have created several:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">NAME</span>       <span class="n">LAUNCHED</span>     <span class="n">RESOURCES</span>             <span class="n">COMMAND</span>                                 <span class="n">STATUS</span>
+<span class="n">gcp</span>        <span class="mi">1</span> <span class="n">day</span> <span class="n">ago</span>    <span class="mi">1</span><span class="n">x</span> <span class="n">GCP</span><span class="p">(</span><span class="n">n1</span><span class="o">-</span><span class="n">highmem</span><span class="o">-</span><span class="mi">8</span><span class="p">)</span>  <span class="n">sky</span> <span class="n">cpunode</span> <span class="o">-</span><span class="n">c</span> <span class="n">gcp</span> <span class="o">--</span><span class="n">cloud</span> <span class="n">gcp</span>          <span class="n">STOPPED</span>
+<span class="n">mycluster</span>  <span class="mi">12</span> <span class="n">mins</span> <span class="n">ago</span>  <span class="mi">1</span><span class="n">x</span> <span class="n">AWS</span><span class="p">(</span><span class="n">p2</span><span class="o">.</span><span class="n">xlarge</span><span class="p">)</span>     <span class="n">sky</span> <span class="n">launch</span> <span class="o">-</span><span class="n">c</span> <span class="n">mycluster</span> <span class="n">hello_sky</span><span class="o">.</span><span class="n">yaml</span>  <span class="n">UP</span>
+</pre></div>
+</div>
+<p>If you would like to log into the a cluster, Sky provides convenient SSH access via <code class="code docutils literal notranslate"><span class="pre">ssh</span> <span class="pre">&lt;cluster_name&gt;</span></code>:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>ssh mycluster
 </pre></div>
 </div>
-<p>Sky is much more than a tool for provisioning and managing clusters easily.
-It also comes with a features for storing and moving data, queueing multiple jobs,
-iterative development, and interactive nodes for debugging.</p>
+<p>Sky is more than a tool for easily provisioning and managing multiple clusters
+on different clouds.  It also comes with features for storing and moving data,
+queueing multiple jobs, iterative development, and interactive nodes for
+debugging.</p>
 </div>
 </div>
 
