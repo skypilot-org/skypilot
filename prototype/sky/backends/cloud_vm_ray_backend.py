@@ -66,9 +66,9 @@ def _check_cluster_name_is_valid(cluster_name: str) -> None:
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
-        clouds.AWS: 'aws-ray.yml',
-        clouds.Azure: 'azure-ray.yml',
-        clouds.GCP: 'gcp-ray.yml',
+        clouds.AWS: 'aws-ray.yml.j2',
+        clouds.Azure: 'azure-ray.yml.j2',
+        clouds.GCP: 'gcp-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 

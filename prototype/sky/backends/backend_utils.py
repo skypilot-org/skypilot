@@ -51,8 +51,8 @@ def _fill_template(template_name: str,
                    variables: Dict,
                    output_path: Optional[str] = None) -> str:
     """Create a file from a Jinja template and return the filename."""
-    template_path = os.path.join(sky.__root_dir__, 'templates',
-                                 template_name + '.j2')
+    assert template_name.endswith('.j2'), template_name
+    template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
     if not os.path.exists(template_path):
         raise FileNotFoundError(f'Template "{template_name}" does not exist.')
     with open(template_path) as fin:
@@ -512,7 +512,8 @@ def write_cluster_config(task: task_lib.Task,
                 # with cluster yamls.
                 output_path=os.path.join(user_file_dir, template_name).replace(
                     '.sh', f'.{cluster_name}.sh'),
-            ) for template_name in ['gcp-tpu-create.sh', 'gcp-tpu-delete.sh'])
+            ) for template_name in
+            ['gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'])
         config_dict['tpu-create-script'] = scripts[0]
         config_dict['tpu-delete-script'] = scripts[1]
         config_dict['tpu_name'] = tpu_name
