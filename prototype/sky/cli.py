@@ -49,6 +49,7 @@ from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
+from sky.data import Storage
 from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -1388,6 +1389,103 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         for out in _output():
             click.echo(out, nl=False)
         click.echo()
+
+
+@cli.command()
+@click.option('--delete',
+              '-d',
+              default=False,
+              is_flag=True,
+              required=False,
+              type=str,
+              help='Delete the storage object.')
+@click.option('--ls',
+              '-ls',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all storage objects.')
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Used with --delete; Delete all storages.')
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help=('Name of storage object.'))
+def storage(all: bool, delete: bool, ls: bool, name: str):  # pylint: disable=redefined-builtin
+    """Show launched clusters."""
+    if ls:
+        if delete:
+            raise click.ClickException(
+                'Must specifiy only one of \'--ls\' or \'-d/--delete\'')
+        storage_ls()
+    elif delete:
+        storage_delete(all, name)
+    else:
+        raise click.ClickException(
+            'Must specifiy one of \'--ls\' or \'-d/--delete\'')
+
+
+def storage_ls():
+    """Lists Storages. 
+    """
+    click.echo('Listing storage objects.')
+    show_all = all
+    storage_status = global_user_state.get_storage()
+    storage_table = util_lib.create_table([
+        'NAME',
+        'CREATED',
+        'CLOUDS',
+        'COMMAND',
+        'STATUS',
+    ])
+
+    for status in storage_status:
+        launched_at = status['launched_at']
+        storage_table.add_row([
+            # NAME
+            status['name'],
+            # LAUNCHED
+            _readable_time_duration(launched_at),
+            # CLOUDS
+            str(status['handle'].clouds),
+            # COMMAND
+            status['last_use']
+            if show_all else _truncate_long_string(status['last_use']),
+            # STATUS
+            status['status'].value,
+        ])
+    if storage_status:
+        click.echo(storage_table)
+    else:
+        click.echo('No existing storage.')
+
+
+def storage_delete(all=False, name=None):
+    """Lists Storages. 
+    """
+    if all:
+        click.echo('Deleting all storage objects')
+        storages = global_user_state.get_storage()
+        for storage in storages:
+            store_object = Storage(name=storage['name'],
+                                   source=storage['handle'].source)
+            store_object.delete()
+    elif name:
+        handle = global_user_state.get_handle_from_storage_name(name)
+        if handle is None:
+            raise click.ClickException(f'Storage Name {name} not found!')
+        click.echo(f'Deleting storage object {name}')
+        store_object = Storage(name=handle.storage_name, source=handle.source)
+        store_object.delete()
+    else:
+        raise click.ClickException(
+            'Must pass in \'-a/--all\' or \'-n/--name\' to \'sky storage -d/--delete\''
+        )
 
 
 def main():

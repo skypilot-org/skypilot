@@ -1,9 +1,10 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 from sky.data import data_utils, data_transfer
+from sky import global_user_state
 from sky import sky_logging
 from sky.cloud_adaptors import aws, gcp
 
@@ -14,9 +15,9 @@ StorageHandle = Any
 
 
 class StorageType(enum.Enum):
-    S3 = 0
-    GCS = 1
-    AZURE = 2
+    S3 = 'S3'
+    GCS = 'GCS'
+    AZURE = 'AZURE'
 
 
 class AbstractStore:
@@ -106,6 +107,35 @@ class Storage(object):
         storage.delete()
     """
 
+    class StorageMetaData(object):
+        """A pickle-able tuple of:
+
+        - (required) Storage  name.
+        """
+
+        def __init__(self, *, storage_name: str, source: str,
+                     clouds: Set[StorageType]):
+            self.storage_name = storage_name
+            self.source = source
+            self.clouds = {} if clouds is None else clouds
+
+        def __repr__(self):
+            return (f'StorageMetaData('
+                    f'\n\tstorage_name={self.storage_name},'
+                    f'\n\tsource={self.source},'
+                    f'\n\tclouds={self.clouds})')
+
+        def add_cloud(self, cloud: StorageType) -> None:
+            if cloud.value not in self.clouds:
+                self.clouds.append(cloud.value)
+
+        def remove_cloud(self, cloud: StorageType) -> None:
+            if cloud.value in self.clouds:
+                self.clouds.remove(cloud.value)
+
+        def get_storage_name(self) -> str:
+            return self.storage_name
+
     def __init__(self,
                  name: str,
                  source: Path,
@@ -134,6 +164,41 @@ class Storage(object):
         # from existing ones
         self.stores = {} if stores is None else stores
 
+        # Logic to rebuild Storage is it is in global user state
+        self.handle = global_user_state.get_handle_from_storage_name(self.name)
+        if self.handle:
+            logger.info('Detected existing storage object, '
+                        f'loading Storage: {self.name}')
+            status = global_user_state.get_storage_status(self.name)
+            if self.source is None:
+                logger.info(
+                    'It looks like the Storage source has not been specified! \n'
+                    f'Fetching source {self.handle.source} from Sky database.')
+                self.source = self.handle.source
+            elif self.source != self.handle.source:
+                raise ValueError(
+                    'Declared Source is not equal to the original Storage source!'
+                )
+
+            if self.handle.clouds:
+                for i, s_type in enumerate(self.handle.clouds):
+                    if status == 'UPLOAD_FAIL' and i == len(
+                            self.handle.clouds) - 1:
+                        logger.info(
+                            f'Retrying upload on most recent cloud: {s_type}.')
+                    else:
+                        logger.info(f'Verifying Bucket Contents: {s_type}')
+                    if s_type == StorageType.S3.value:
+                        self.get_or_copy_to_s3()
+                    elif s_type == StorageType.GCS.value:
+                        self.get_or_copy_to_gcs()
+        else:
+            self.handle = self.StorageMetaData(storage_name=self.name,
+                                               source=self.source,
+                                               clouds=list(self.stores.keys()))
+            global_user_state.add_or_update_storage(self.name, self.handle,
+                                                    'INIT')
+
         # If source is a pre-existing bucket, connect to the bucket
         # If the bucket does not exist, this will error out
         if 's3://' in self.source:
@@ -144,14 +209,28 @@ class Storage(object):
     def get_or_copy_to_s3(self):
         """Adds AWS S3 Store to Storage
         """
-        s3_store = self.add_store(StorageType.S3)
-        return 's3://' + s3_store.name
+        try:
+            global_user_state.set_storage_status(self.name, 'UPLOAD_AWS')
+            s3_store = self.add_store(StorageType.S3)
+            global_user_state.set_storage_status(self.name, 'DONE')
+            return 's3://' + s3_store.name
+        except Exception as e:
+            logger.error('Sky could not upload to S3 Bucket')
+            global_user_state.set_storage_status(self.name, 'UPLOAD_FAIL')
+            raise e
 
     def get_or_copy_to_gcs(self):
         """Adds GCS Store to Storage
         """
-        gs_store = self.add_store(StorageType.GCS)
-        return 'gs://' + gs_store.name
+        try:
+            global_user_state.set_storage_status(self.name, 'UPLOAD_GCP')
+            gs_store = self.add_store(StorageType.GCS)
+            global_user_state.set_storage_status(self.name, 'DONE')
+            return 'gs://' + gs_store.name
+        except Exception as e:
+            logger.error('Sky could not upload to GCS Bucket')
+            global_user_state.set_storage_status(self.name, 'UPLOAD_FAIL')
+            raise e
 
     def get_or_copy_to_azure_blob(self):
         """Adds Azure Blob Store to Storage
@@ -169,6 +248,9 @@ class Storage(object):
         """
         store = None
 
+        self.handle.add_cloud(cloud_type)
+        global_user_state.set_storage_handle(self.name, self.handle)
+
         if cloud_type in self.stores:
             logger.info(f'Storage type {cloud_type} already exists!')
             return self.stores[cloud_type]
@@ -185,11 +267,18 @@ class Storage(object):
         self.stores[cloud_type] = store
         return store
 
-    def delete(self) -> None:
+    def delete(self, cloud_type: StorageType = None) -> None:
         """Deletes data for all storage objects.
         """
-        for _, store in self.stores.items():
-            store.delete()
+        if cloud_type:
+            self.stores[cloud_type].delete()
+            self.handle.remove_cloud(cloud_type)
+            global_user_state.set_storage_handle(self.name, self.handle)
+        else:
+            for _, store in self.stores.items():
+                store.delete()
+            # Delete entire store
+            global_user_state.remove_storage(self.name)
 
 
 class S3Store(AbstractStore):
