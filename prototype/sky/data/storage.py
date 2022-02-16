@@ -173,13 +173,14 @@ class Storage(object):
             status = global_user_state.get_storage_status(self.name)
             if self.source is None:
                 logger.info(
-                    'It looks like the Storage source has not been specified! \n'
-                    f'Fetching source {self.handle.source} from Sky database.')
+                    'It looks like the Storage source has not been specified! '
+                    f'\nFetching source {self.handle.source} from Sky database.'
+                )
                 self.source = self.handle.source
             elif self.source != self.handle.source:
                 raise ValueError(
-                    'Declared Source is not equal to the original Storage source!'
-                )
+                    'Declared Source is not equal to the original Storage '
+                    'source!')
 
             if self.handle.clouds:
                 for i, s_type in enumerate(self.handle.clouds):

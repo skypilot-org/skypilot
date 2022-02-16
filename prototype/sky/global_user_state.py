@@ -72,6 +72,8 @@ class ClusterStatus(enum.Enum):
 
 
 class StorageStatus(enum.Enum):
+    """Storage status as recorded in table 'storage'."""
+
     # Initializing Storage Class
     INIT = 'INIT'
 

@@ -1413,10 +1413,9 @@ def storage(all: bool, delete: bool, ls: bool, name: str):  # pylint: disable=re
 
 
 def storage_ls():
-    """Lists Storages. 
+    """Lists Storages.
     """
     click.echo('Listing storage objects.')
-    show_all = all
     storage_status = global_user_state.get_storage()
     storage_table = util_lib.create_table([
         'NAME',
@@ -1426,20 +1425,19 @@ def storage_ls():
         'STATUS',
     ])
 
-    for status in storage_status:
-        launched_at = status['launched_at']
+    for row in storage_status:
+        launched_at = row['launched_at']
         storage_table.add_row([
             # NAME
-            status['name'],
+            row['name'],
             # LAUNCHED
             _readable_time_duration(launched_at),
             # CLOUDS
-            str(status['handle'].clouds),
+            str(row['handle'].clouds),
             # COMMAND
-            status['last_use']
-            if show_all else _truncate_long_string(status['last_use']),
+            row['last_use'],
             # STATUS
-            status['status'].value,
+            row['status'].value,
         ])
     if storage_status:
         click.echo(storage_table)
@@ -1447,15 +1445,15 @@ def storage_ls():
         click.echo('No existing storage.')
 
 
-def storage_delete(all=False, name=None):
-    """Lists Storages. 
+def storage_delete(all_delete: bool, name: str):
+    """Deletes Storages.
     """
-    if all:
+    if all_delete:
         click.echo('Deleting all storage objects')
         storages = global_user_state.get_storage()
-        for storage in storages:
-            store_object = Storage(name=storage['name'],
-                                   source=storage['handle'].source)
+        for row in storages:
+            store_object = Storage(name=row['name'],
+                                   source=row['handle'].source)
             store_object.delete()
     elif name:
         handle = global_user_state.get_handle_from_storage_name(name)
@@ -1466,8 +1464,8 @@ def storage_delete(all=False, name=None):
         store_object.delete()
     else:
         raise click.ClickException(
-            'Must pass in \'-a/--all\' or \'-n/--name\' to \'sky storage -d/--delete\''
-        )
+            'Must pass in \'-a/--all\' or \'-n/--name\' to \'sky '
+            'storage -d/--delete\'')
 
 
 def main():
