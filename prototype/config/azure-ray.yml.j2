@@ -5,7 +5,8 @@ max_workers: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
 provider:
-    type: azure
+    type: external
+    module: sky.skylet.providers.azure.AzureNodeProvider
     location: {{region}}
     # Ref: https://github.com/ray-project/ray/blob/2367a2cb9033913b68b1230316496ae273c25b54/python/ray/autoscaler/_private/_azure/node_provider.py#L87
     # For Azure, ray distinguishes different instances by the resource_group,
@@ -18,6 +19,8 @@ provider:
     # Keep (otherwise cannot reuse when re-provisioning).
     # teardown(terminate=True) will override this.
     cache_stopped_nodes: True
+    # subscription id of the azure user
+    subscription_id: {{azure_subscription_id}}
 
 auth:
     ssh_user: azureuser
@@ -50,10 +53,10 @@ available_node_types:
         azure_arm_parameters:
             vmSize: {{instance_type}}
             # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
-            imagePublisher: microsoft-dsvm
-            imageOffer: ubuntu-1804
-            imageSku: 1804-gen2
-            imageVersion: 21.09.13
+            imagePublisher: {{image_publisher}}
+            imageOffer: {{image_offer}}
+            imageSku: "{{image_sku}}"
+            imageVersion: {{image_version}}
           {%- if use_spot %}
             priority: Spot
             # set a maximum price for spot instances if desired
@@ -83,9 +86,12 @@ initialization_commands:
 {%- for cmd in initialization_commands %}
   - {{cmd}}
 {%- endfor %}
+{%- else %}
+initialization_commands: []
 {%- endif %}
 
 # Patterns for files to exclude when running rsync up or rsync down
+rsync_exclude: []
 # rsync_exclude:
 #   - "**/.git"
 #   - "**/.git/**"
@@ -98,7 +104,8 @@ setup_commands:
   # This AMI's system Python is version 2+.
   # _gang_schedule_ray_up() requires first two lines; do not modify.
   - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful
-  - pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
+  # We have to install azure-cli because the Azure cluster does not pre-install it.
+  - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && pip3 install azure-cli==2.30.0 && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
 {%- if setup_sh_path is not none %}
   - cd ~/sky_workdir && bash /tmp/setup.sh  # FIXME: /tmp is volatile.
 {%- endif %}
@@ -110,4 +117,15 @@ head_start_ray_commands:
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
   - ray stop; ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
+{%- else %}
+worker_start_ray_commands: []
 {%- endif %}
+
+head_node: {}
+worker_nodes: {}
+
+# These fields are required for external cloud providers.
+head_setup_commands: []
+worker_setup_commands: []
+cluster_synced_files: []
+file_mounts_sync_continuously: False
