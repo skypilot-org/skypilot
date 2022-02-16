@@ -1581,8 +1581,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'--instance-ids $({query_cmd})')
                 backend_utils.run(terminate_cmd, check=True)
             elif isinstance(cloud, clouds.Azure):
-                region = config['provider']['location']
-                query_cmd = (f'az vm list -g {cluster_name}-{region} '
+                resource_group = config['provider']['resource_group']
+                query_cmd = (f'az vm list -g {resource_group} '
                              '--query "[].id" -o tsv')
                 terminate_cmd = f'az vm delete --yes --ids $({query_cmd})'
                 # Special handling because `ray down` is buggy with Azure.
