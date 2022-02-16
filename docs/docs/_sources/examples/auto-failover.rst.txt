@@ -1,14 +1,19 @@
-Auto-failover Provisioning
+Auto-provisioning GPUs
 ==========================
 
-Provisioning an instance on a cloud can be difficult due to a variety of reasons:
-lack of quota, instance capacity issues, or certain regions not containing the required resources.
+Provisioning an instance on a cloud can be difficult due to a variety of
+reasons: lack of quota, insufficient capacity in the clouds, or certain
+regions/clouds not providing the required resources.  These issues are
+especially true for scarce resources such as GPUs and other accelerators, which
+are required by many machine learning projects.
 
-Sky solves this issue with an auto-failover provisioner, which automatically retries
-provisioning on a different region (or cloud) if the requested resources cannot be provisioned.
+Sky solves this issue with an **auto-failover provisioner**, which automatically
+retries provisioning for the user on a different region (or cloud) if the
+requested resources cannot be provisioned.
 
-A common hardware configuration for deep learning workloads is to have a V100 GPU attached to an instance.
-These instances are often difficult to provision. Let's see how Sky's auto-failover provisioner handles this:
+A common high-end GPU to use in deep learning is a NVIDIA V100 GPU.  These GPUs
+are often in high demand and hard to get.  Let's see how Sky's auto-failover
+provisioner handles such a request:
 
 .. code-block::
 
@@ -41,4 +46,8 @@ These instances are often difficult to provision. Let's see how Sky's auto-failo
   I 02-11 21:18:38 cloud_vm_ray_backend.py:624] Launching on GCP us-west1 (us-west1-a)
   Successfully connected to 35.230.120.87.
 
-There was no capacity in any of the regions in central US, so the Sky auto-failover provisioner moved to US West instead, allowing for our instance to be successfully provisioned.
+There was no capacity in any of the regions in Central US, so the Sky auto-failover provisioner moved to West US instead, allowing for our instance to be successfully provisioned.
+
+This feature is automatically enabled in all commands that provision new
+resources, such as :code:`sky launch` or the interactive node commands
+:code:`sky {gpunode,tpunode,cpunode}`.

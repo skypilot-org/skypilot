@@ -1,25 +1,25 @@
-/**
- * Admonition-based toggles
- */
-
 /* Visibility of the target */
-.admonition.toggle .admonition-title ~ * {
-    transition: opacity .3s, height .3s;
+.toggle, div.admonition.toggle .admonition-title ~ * {
+    transition: opacity .5s, height .5s;
 }
 
-/* Toggle buttons inside admonitions so we see the title */
-.toggle.admonition {
-    position: relative;
+.toggle-hidden:not(.admonition) {
+    visibility: hidden;
+    opacity: 0;
+    height: 1.5em;
+    margin: 0px;
+    padding: 0px;
 }
+
+/* Overrides for admonition toggles */
 
 /* Titles should cut off earlier to avoid overlapping w/ button */
-.toggle.admonition .admonition-title {
+div.admonition.toggle p.admonition-title {
     padding-right: 25%;
-    cursor: pointer;
 }
 
 /* hides all the content of a page until de-toggled */
-.toggle-hidden.admonition .admonition-title ~ * {
+div.admonition.toggle-hidden .admonition-title ~ * {
     height: 0;
     margin: 0;
     float: left; /* so they overlap when hidden */
@@ -27,104 +27,64 @@
     visibility: hidden;
 }
 
-/* General button style and position*/
-button.toggle-button {
-    /**
-     * Background and shape. By default there's no background
-     * but users can style as they wish
-     */  
-    background: none;
-    border: none;
-    outline: none;
-
-    /* Positioning just inside the amonition title */
-    margin-right: 0.5em;
-    position: absolute;
-    right: 0em;
-    top: .5em;
-    float: right;
-    padding: 0px;
-    display: flex;
+/* Toggle buttons inside admonitions so we see the title */
+.toggle.admonition {
+    position: relative;
 }
 
-/* Display the toggle hint on wide screens */
+.toggle.admonition.admonition-title:after {
+    content: "" !important;
+}
+
+/* Note, we'll over-ride this in sphinx-book-theme */
+.toggle.admonition button.toggle-button {
+    margin-right: 0.5em;
+    right: 0em;
+    position: absolute;
+    top: .2em;
+}
+
+/* General button style */
+button.toggle-button {
+    background: #999;
+    border: none;
+    z-index: 100;
+    right: -2.5em;
+    margin-left: -2.5em; /* A hack to keep code blocks from being pushed left */
+    position: relative;
+    float: right;
+    border-radius: 100%;
+    width: 1.5em;
+    height: 1.5em;
+    padding: 0px;
+}
+
 @media (min-width: 768px) {
     button.toggle-button.toggle-button-hidden:before {
-        content: attr(data-toggle-hint);  /* This will be filled in by JS */
+        content: "Click to show";
+        position: absolute;
         font-size: .8em;
-        align-self: center;
+        left: -6.5em;
+        bottom: .4em;
     }
 }
 
-/* Icon behavior */
-.tb-icon {
-    transition: transform .2s ease-out;
-    height: 1.5em;
-    width: 1.5em;
-    stroke: currentColor;  /* So that we inherit the color of other text */
+
+/* Plus / minus toggles */
+.toggle-button .bar {
+    background-color: white;
+    position: absolute;
+    left: 15%;
+    top: 43%;
+    width: 16px;
+    height: 3px;
 }
 
-details.toggle-details .tb-icon {
-    height: 1.3em;
-    width: 1.3em;
+.toggle-button .vertical {
+    transition: all 0.25s ease-in-out;
+    transform-origin: center;
 }
 
-.toggle-button-hidden .tb-icon {
-    transform: rotate(90deg);
-}
-
-/**
- * Details-based toggles.
- * In this case, we wrap elements with `.toggle` in a details block.
- */
-
-/* Details blocks */
-details.toggle-details {
-    margin: 1em 0;
-}
-
-details.toggle-details summary {
-    display: flex;
-    align-items: center;
-    width: fit-content;
-    cursor: pointer;
-    list-style: none;
-    border-radius: .4em;
-    border: 1px solid #ccc;
-    background: #f8f8f8;
-    padding: 0.4em 1em 0.4em 0.5em; /* Less padding on left because the SVG has left margin */
-    font-size: .9em;
-}
-
-details.toggle-details summary:hover {
-    background: #f6f6f6;
-}
-
-details.toggle-details summary:active {
-    background: #eee;
-}
-
-details.toggle-details[open] summary {
-    margin-bottom: .5em;
-}
-
-details.toggle-details[open] summary .tb-icon {
-    transform: rotate(90deg);
-}
-
-details.toggle-details[open] summary ~ * {
-    animation: toggle-fade-in .3s ease-out;
-}
-
-@keyframes toggle-fade-in {
-  from {opacity: 0%;}
-  to {opacity: 100%;}
-}
-
-/* Print rules - we hide all toggle button elements at print */
-@media print {
-    /* Always hide the summary so the button doesn't show up */
-    details.toggle-details summary {
-        display: none;
-    }
+.toggle-button-hidden .vertical {
+    transform: rotate(-90deg);
 }
