@@ -686,9 +686,10 @@ class RetryingVmProvisioner(object):
                         continue
                 cluster_config_file = config_dict['ray']
 
-                # Record early, so if anything goes wrong, 'sky status' will show
-                # the cluster name and users can appropriately 'sky down'.  It also
-                # means a second 'sky launch -c <name>' will attempt to reuse.
+                # Record early, so if anything goes wrong, 'sky status' will
+                # show the cluster name and users can appropriately 'sky down'.
+                # It also means a second 'sky launch -c <name>' will attempt to
+                # reuse.
                 handle = CloudVmRayBackend.ResourceHandle(
                     cluster_name=cluster_name,
                     cluster_yaml=cluster_config_file,
@@ -709,9 +710,10 @@ class RetryingVmProvisioner(object):
                     if gang_failed:
                         # There exist partial nodes (e.g., head node) so we must
                         # down before moving on to other regions.
-                        # FIXME(zongheng): terminating a potentially live cluster
-                        # is scary.  Say: users have an existing cluster, do sky
-                        # launch, gang failed, then we are terminating it here.
+                        # FIXME(zongheng): terminating a potentially live
+                        # cluster is scary. Say: users have an existing cluster,
+                        # do sky launch, gang failed, then we are terminating it
+                        # here.
                         logger.error('*** Failed provisioning the cluster. ***')
                         logger.error('====== stdout ======')
                         logger.error(stdout)
@@ -741,7 +743,8 @@ class RetryingVmProvisioner(object):
                     plural = '' if num_nodes == 1 else 's'
                     logger.info(
                         f'{style.BRIGHT}Successfully provisioned or found'
-                        f' existing VM{plural}. Setup completed.{style.RESET_ALL}'
+                        f' existing VM{plural}. Setup completed.'
+                        f'{style.RESET_ALL}'
                     )
                     return config_dict
             message = (

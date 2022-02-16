@@ -1068,12 +1068,13 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         to_down = global_user_state.get_clusters()
         if len(names) > 0:
             console.log(
-                f'[yellow]Both --all and cluster(s) specified for sky {command}. '
-                'Letting --all take effect.')
+                '[yellow]Both --all and cluster(s) specified for '
+                f'sky {command}. Letting --all take effect.')
             names = []
     if not to_down and not names:
         console.log(
-            '[yellow]No existing clusters found (see [bold green]sky status[/]).'
+            '[yellow]No existing clusters found '
+            '(see [bold green]sky status[/]).'
         )
 
     for record in to_down:  # TODO: parallelize.
@@ -1090,7 +1091,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             continue
 
         teardown_verb = 'Terminating' if terminate else 'Stopping'
-        with console.status(f"[bold green]{teardown_verb} {name}..."):
+        with console.status(f'[bold green]{teardown_verb} {name}...'):
             # TODO: do not fail silently
             backend.teardown(handle, terminate=terminate)
 
@@ -1098,7 +1099,8 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
                 console.log(f'Terminated cluster {name}')
             else:
                 console.log(
-                    f'Stopped cluster {name}. To restart, run: [bold green]sky start {name}'
+                    f'Stopped cluster {name}. '
+                    f'To restart, run: [bold green]sky start {name}'
                 )
 
 
