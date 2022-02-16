@@ -2,24 +2,25 @@
 import collections
 import enum
 import pprint
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-import networkx as nx
 import numpy as np
 import tabulate
 
-import sky
 from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
-from sky import sky_logging
+from sky import global_user_state
+from sky import init
 from sky import resources as resources_lib
-from sky import task
+from sky import sky_logging
+from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
 
 Dag = dag_lib.Dag
 Resources = resources_lib.Resources
+Task = task_lib.Task
 
 _DUMMY_SOURCE_NAME = 'sky-dummy-source'
 _DUMMY_SINK_NAME = 'sky-dummy-sink'
@@ -112,7 +113,7 @@ class Optimizer:
                 zero_outdegree_nodes.append(node)
 
         def make_dummy(name):
-            dummy = task.Task(name)
+            dummy = Task(name)
             dummy.set_resources({DummyResources(DummyCloud(), None)})
             dummy.set_time_estimator(lambda _: 0)
             return dummy
@@ -137,8 +138,8 @@ class Optimizer:
         return dag
 
     @staticmethod
-    def _egress_cost_or_time(minimize_cost: bool, parent: task.Task,
-                             parent_resources: Resources, node: task.Task,
+    def _egress_cost_or_time(minimize_cost: bool, parent: Task,
+                             parent_resources: Resources, node: Task,
                              resources: Resources):
         """Computes the egress cost or time depending on 'minimize_cost'."""
         if isinstance(parent_resources.cloud, DummyCloud):
@@ -166,6 +167,7 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
     ):
+        import networkx as nx  # pylint: disable=import-outside-toplevel
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
         graph = dag.get_graph()
@@ -190,7 +192,7 @@ class Optimizer:
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources = \
-                    sky.registry.fill_in_launchable_resources(
+                    _fill_in_launchable_resources(
                         node,
                         blocked_launchable_resources
                     )
@@ -205,8 +207,8 @@ class Optimizer:
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     raise exceptions.ResourcesUnavailableError(
-                        f'No launchable resource found for task\n{node}; '
-                        f'To fix: relax its Resources() requirements.')
+                        f'No launchable resource found for task {node}. '
+                        'To fix: relax its resource requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.info('Defaulting estimated time to 1 hr. '
                                 'Call Task.set_time_estimator() to override.')
@@ -219,6 +221,9 @@ class Optimizer:
                     #    Resources(GCP, '...', 'V100'),
                     #    ...
                     # as having the same run time.
+                    # FIXME(zongheng): take 'num_nodes' as an arg/into
+                    # account. It may be another reason to treat num_nodes as
+                    # part of a Resources.
                     estimated_runtime = node.estimate_runtime(orig_resources)
                 for resources in launchable_list:
                     # Computes dp_best_cost[node][resources]
@@ -231,7 +236,8 @@ class Optimizer:
                         logger.debug(f'resources: {resources}')
 
                     if minimize_cost:
-                        estimated_cost = resources.get_cost(estimated_runtime)
+                        cost_per_node = resources.get_cost(estimated_runtime)
+                        estimated_cost = cost_per_node * node.num_nodes
                     else:
                         # Minimize run time; overload the term 'cost'.
                         estimated_cost = estimated_runtime
@@ -244,6 +250,7 @@ class Optimizer:
                                 '  estimated_cost (not incl. egress): ${:.1f}'.
                                 format(estimated_cost))
 
+                    # FIXME: Account for egress costs for multi-node clusters
                     sum_parent_cost_and_egress = 0
                     for parent in parents:
                         min_pred_cost_plus_egress = np.inf
@@ -320,8 +327,9 @@ class Optimizer:
                     overall_best / 3600))
         # Do not print Source or Sink.
         message_data = [
-            t for t in message_data
-            if t[0].name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
+            (t, f'{t.num_nodes}x {repr(r)}' if t.num_nodes > 1 else repr(r))
+            for (t, r) in message_data
+            if t.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
         ]
         message = tabulate.tabulate(reversed(message_data),
                                     headers=['TASK', 'BEST_RESOURCE'],
@@ -345,3 +353,62 @@ class DummyResources(Resources):
 class DummyCloud(clouds.Cloud):
     """A dummy Cloud that has zero egress cost from/to."""
     pass
+
+
+def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
+    return any(cloud.is_same_cloud(c) for c in lst)
+
+
+def _filter_out_blocked_launchable_resources(
+        launchable_resources: List[Resources],
+        blocked_launchable_resources: List[Resources]):
+    """Whether the resources are blocked."""
+    available_resources = []
+    for resources in launchable_resources:
+        for blocked_resources in blocked_launchable_resources:
+            if resources.is_launchable_fuzzy_equal(blocked_resources):
+                break
+        else:  # non-blokced launchable resources. (no break)
+            available_resources.append(resources)
+    return available_resources
+
+
+def _fill_in_launchable_resources(
+    task: Task,
+    blocked_launchable_resources: Optional[List[Resources]],
+    try_fix_with_sky_init: bool = True,
+) -> Dict[Resources, List[Resources]]:
+    enabled_clouds = global_user_state.get_enabled_clouds()
+    if len(enabled_clouds) == 0 and try_fix_with_sky_init:
+        init.init(quiet=True)
+        return _fill_in_launchable_resources(task, blocked_launchable_resources,
+                                             False)
+    launchable = collections.defaultdict(list)
+    if blocked_launchable_resources is None:
+        blocked_launchable_resources = []
+    for resources in task.get_resources():
+        if resources.cloud is not None and not _cloud_in_list(
+                resources.cloud, enabled_clouds):
+            if try_fix_with_sky_init:
+                init.init(quiet=True)
+                return _fill_in_launchable_resources(
+                    task, blocked_launchable_resources, False)
+            raise exceptions.ResourcesUnavailableError(
+                f'Task {task} requires {resources.cloud} which is not '
+                'enabled. Run `sky init` to enable access to it, '
+                'or change the cloud requirement.')
+        elif resources.is_launchable():
+            launchable[resources] = [resources]
+        elif resources.cloud is not None:
+            launchable[
+                resources] = resources.cloud.get_feasible_launchable_resources(
+                    resources)
+        else:
+            for cloud in enabled_clouds:
+                feasible_resources = cloud.get_feasible_launchable_resources(
+                    resources)
+                launchable[resources].extend(feasible_resources)
+        launchable[resources] = _filter_out_blocked_launchable_resources(
+            launchable[resources], blocked_launchable_resources)
+
+    return launchable

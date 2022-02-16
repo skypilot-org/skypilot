@@ -1,10 +1,8 @@
 import os
-from typing import Dict, List
+from typing import List, Optional
 
 import sky
 from sky import clouds
-
-IPAddr = str
 
 with sky.Dag() as dag:
     # Total Nodes, INCLUDING Head Node
@@ -21,8 +19,8 @@ with sky.Dag() as dag:
     head_run = 'python3 tune_ptl_example.py'
 
     # The command to run.  Will be run under the working directory.
-    def run_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
-        return {ip_list[0]: head_run}
+    def run_fn(node_rank: int, ip_list: List[str]) -> Optional[str]:
+        return head_run if node_rank == 0 else None
 
     train = sky.Task(
         'train',

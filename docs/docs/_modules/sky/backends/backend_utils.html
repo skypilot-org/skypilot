@@ -1,0 +1,1104 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sky.backends.backend_utils &#8212; Sky 0.1 documentation</title>
+    
+  <link href="../../../_static/css/theme.css" rel="stylesheet">
+  <link href="../../../_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
+
+    
+  <link rel="stylesheet"
+    href="../../../_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../../_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../../_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/sphinx-book-theme.css?digest=84ace793992934648b4de8eed757e5a2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.css" />
+    
+  <link rel="preload" as="script" href="../../../_static/js/index.be7d3bbb2ef33a8344ce.js">
+
+    <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/togglebutton.js"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="None">
+    
+
+    <!-- Google Analytics -->
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<!-- Checkboxes to toggle the left sidebar -->
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle navigation sidebar">
+<label class="overlay" for="__navigation">
+    <div class="visually-hidden">Toggle navigation sidebar</div>
+</label>
+<div class="col-12 col-md-3 bd-sidebar site-navigation " id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="../../../index.html">
+      
+      
+      
+      <h1 class="site-logo" id="site-title">Sky 0.1 documentation</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="../../../search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search the docs ..." aria-label="Search the docs ..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item active">
+        <p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Getting Started
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/installation.html">
+   Installation
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/quickstart.html">
+   Quickstart
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/tutorial.html">
+   Tutorial: DNN Training
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Use Cases
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/auto-failover.html">
+   Auto-provisioning GPUs
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/iterative-dev-project.html">
+   Iteratively Developing a Project
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/launch-many-tasks-vm.html">
+   Launch Multiple Tasks on a VM
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/grid-search.html">
+   Grid Search
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/distributed-jobs.html">
+   Distributed Jobs on many VMs
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Reference Documentation
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/interactive-nodes.html">
+   Interactive Nodes
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/iterative-development.html">
+   Iterative Development
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/storage.html">
+   Storage
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/job-queue.html">
+   Job Queue
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Theme by the <a href="https://ebp.jupyterbook.org">Executable Book Project</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<!-- This is an invisible pixel that we watch to see if we've scrolled. -->
+<div class="sbt-scroll-pixel-helper"></div>
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            <div class="topbar-left">
+                
+                <label class="nav-toggle-button" for="__navigation">
+                    <div class="visually-hidden">Toggle navigation</div>
+                    <i class="fas fa-bars"></i>
+                </label>
+                
+            </div>
+            
+            <!-- Source interaction buttons -->
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show noprint">
+            
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+            <!-- Table of contents that is only displayed when printing the page -->
+            <div id="jb-print-docs-body" class="onlyprint">
+                <h1></h1>
+                <!-- Table of contents -->
+                <div id="print-main-content">
+                    <div id="jb-print-toc">
+                        
+                    </div>
+                </div>
+            </div>
+            
+              <div>
+                
+  <h1>Source code for sky.backends.backend_utils</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Util constants/functions for the backends.&quot;&quot;&quot;</span>
+<span class="kn">import</span> <span class="nn">datetime</span>
+<span class="kn">import</span> <span class="nn">enum</span>
+<span class="kn">import</span> <span class="nn">getpass</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">pathlib</span>
+<span class="kn">import</span> <span class="nn">shlex</span>
+<span class="kn">import</span> <span class="nn">subprocess</span>
+<span class="kn">import</span> <span class="nn">tempfile</span>
+<span class="kn">import</span> <span class="nn">textwrap</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span>
+<span class="kn">import</span> <span class="nn">uuid</span>
+<span class="kn">import</span> <span class="nn">yaml</span>
+<span class="kn">import</span> <span class="nn">zlib</span>
+<span class="kn">import</span> <span class="nn">shutil</span>
+
+<span class="kn">import</span> <span class="nn">jinja2</span>
+
+<span class="kn">import</span> <span class="nn">sky</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">authentication</span> <span class="k">as</span> <span class="n">auth</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">backends</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">clouds</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">sky_logging</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">resources</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">task</span> <span class="k">as</span> <span class="n">task_lib</span>
+<span class="kn">from</span> <span class="nn">sky.skylet</span> <span class="kn">import</span> <span class="n">log_lib</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">sky_logging</span><span class="o">.</span><span class="n">init_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="n">Resources</span> <span class="o">=</span> <span class="n">resources</span><span class="o">.</span><span class="n">Resources</span>
+
+<span class="c1"># NOTE: keep in sync with the cluster template &#39;file_mounts&#39;.</span>
+<span class="n">SKY_REMOTE_WORKDIR</span> <span class="o">=</span> <span class="n">log_lib</span><span class="o">.</span><span class="n">SKY_REMOTE_WORKDIR</span>
+<span class="n">SKY_REMOTE_APP_DIR</span> <span class="o">=</span> <span class="s1">&#39;~/.sky/sky_app&#39;</span>
+<span class="n">IP_ADDR_REGEX</span> <span class="o">=</span> <span class="sa">r</span><span class="s1">&#39;\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}&#39;</span>
+<span class="n">SKY_REMOTE_RAY_VERSION</span> <span class="o">=</span> <span class="s1">&#39;1.9.2&#39;</span>
+<span class="n">SKY_REMOTE_PATH</span> <span class="o">=</span> <span class="s1">&#39;~/.sky/sky_wheels&#39;</span>
+<span class="n">SKY_USER_FILE_PATH</span> <span class="o">=</span> <span class="s1">&#39;~/.sky/generated&#39;</span>
+
+<span class="n">BOLD</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="se">\033</span><span class="s1">[1m&#39;</span>
+<span class="n">RESET_BOLD</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="se">\033</span><span class="s1">[0m&#39;</span>
+
+<span class="c1"># Do not use /tmp because it gets cleared on VM restart.</span>
+<span class="n">_SKY_REMOTE_FILE_MOUNTS_DIR</span> <span class="o">=</span> <span class="s1">&#39;~/.sky/file_mounts/&#39;</span>
+<span class="c1"># Keep the following two fields in sync with the cluster template:</span>
+
+
+<span class="k">def</span> <span class="nf">_fill_template</span><span class="p">(</span><span class="n">template_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                   <span class="n">variables</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
+                   <span class="n">output_path</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;Create a file from a Jinja template and return the filename.&quot;&quot;&quot;</span>
+    <span class="k">assert</span> <span class="n">template_path</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.j2&#39;</span><span class="p">),</span> <span class="n">template_path</span>
+
+    <span class="k">def</span> <span class="nf">to_absolute</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isabs</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+            <span class="n">path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">sky</span><span class="o">.</span><span class="n">__root_dir__</span><span class="p">),</span> <span class="n">path</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">path</span>
+
+    <span class="n">template_path</span> <span class="o">=</span> <span class="n">to_absolute</span><span class="p">(</span><span class="n">template_path</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">template_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">fin</span><span class="p">:</span>
+        <span class="n">template</span> <span class="o">=</span> <span class="n">fin</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+    <span class="n">template</span> <span class="o">=</span> <span class="n">jinja2</span><span class="o">.</span><span class="n">Template</span><span class="p">(</span><span class="n">template</span><span class="p">)</span>
+    <span class="n">content</span> <span class="o">=</span> <span class="n">template</span><span class="o">.</span><span class="n">render</span><span class="p">(</span><span class="o">**</span><span class="n">variables</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">output_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="s1">&#39;cluster_name&#39;</span> <span class="ow">in</span> <span class="n">variables</span><span class="p">,</span> <span class="s1">&#39;cluster_name is required.&#39;</span>
+        <span class="n">cluster_name</span> <span class="o">=</span> <span class="n">variables</span><span class="p">[</span><span class="s1">&#39;cluster_name&#39;</span><span class="p">]</span>
+        <span class="n">output_path</span> <span class="o">=</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">SKY_USER_FILE_PATH</span><span class="p">))</span> <span class="o">/</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">.yml&#39;</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">output_path</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">output_path</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">output_path</span><span class="p">)</span>
+    <span class="n">output_path</span> <span class="o">=</span> <span class="n">to_absolute</span><span class="p">(</span><span class="n">output_path</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fout</span><span class="p">:</span>
+        <span class="n">fout</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">content</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">output_path</span>
+
+
+<div class="viewcode-block" id="FileMountHelper"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.FileMountHelper">[docs]</a><span class="k">class</span> <span class="nc">FileMountHelper</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Helper for handling file mounts.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="FileMountHelper.wrap_file_mount"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.FileMountHelper.wrap_file_mount">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">wrap_file_mount</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Prepends ~/&lt;opaque dir&gt;/ to a path to work around permission issues.</span>
+
+<span class="sd">        Examples:</span>
+<span class="sd">        /root/hello.txt -&gt; ~/&lt;opaque dir&gt;/root/hello.txt</span>
+<span class="sd">        local.txt -&gt; ~/&lt;opaque dir&gt;/local.txt</span>
+
+<span class="sd">        After the path is synced, we can later create a symlink to this wrapped</span>
+<span class="sd">        path from the original path, e.g., in the initialization_commands of the</span>
+<span class="sd">        ray autoscaler YAML.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">_SKY_REMOTE_FILE_MOUNTS_DIR</span><span class="p">,</span> <span class="n">path</span><span class="o">.</span><span class="n">lstrip</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="FileMountHelper.make_safe_symlink_command"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.FileMountHelper.make_safe_symlink_command">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">make_safe_symlink_command</span><span class="p">(</span>
+            <span class="bp">cls</span><span class="p">,</span>
+            <span class="o">*</span><span class="p">,</span>
+            <span class="n">source</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+            <span class="n">target</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+            <span class="n">download_target_commands</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Returns a command that safely symlinks &#39;source&#39; to &#39;target&#39;.</span>
+
+<span class="sd">        All intermediate directories of &#39;source&#39; will be owned by $USER,</span>
+<span class="sd">        excluding the root directory (/).</span>
+
+<span class="sd">        &#39;source&#39; must be an absolute path; both &#39;source&#39; and &#39;target&#39; must not</span>
+<span class="sd">        end with a slash (/).</span>
+
+<span class="sd">        This function is needed because a simple &#39;ln -s target source&#39; may</span>
+<span class="sd">        fail: &#39;source&#39; can have multiple levels (/a/b/c), its parent dirs may</span>
+<span class="sd">        or may not exist, can end with a slash, or may need sudo access, etc.</span>
+
+<span class="sd">        Cases of &lt;target: local&gt; file mounts and their behaviors:</span>
+
+<span class="sd">            /existing_dir: ~/local/dir</span>
+<span class="sd">              - error out saying this cannot be done as LHS already exists</span>
+<span class="sd">            /existing_file: ~/local/file</span>
+<span class="sd">              - error out saying this cannot be done as LHS already exists</span>
+<span class="sd">            /existing_symlink: ~/local/file</span>
+<span class="sd">              - overwrite the existing symlink; this is important because sky</span>
+<span class="sd">                run can be run multiple times</span>
+<span class="sd">            Paths that start with ~/ and /tmp/ do not have the above</span>
+<span class="sd">            restrictions; just delegate to rsync behaviors.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isabs</span><span class="p">(</span><span class="n">source</span><span class="p">),</span> <span class="n">source</span>
+        <span class="k">assert</span> <span class="ow">not</span> <span class="n">source</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">target</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">),</span> <span class="p">(</span><span class="n">source</span><span class="p">,</span>
+                                                                       <span class="n">target</span><span class="p">)</span>
+        <span class="c1"># Below, use sudo in case the symlink needs sudo access to create.</span>
+        <span class="c1"># Prepare to create the symlink:</span>
+        <span class="c1">#  1. make sure its dir(s) exist &amp; are owned by $USER.</span>
+        <span class="n">dir_of_symlink</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">source</span><span class="p">)</span>
+        <span class="n">commands</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="c1"># mkdir, then loop over &#39;/a/b/c&#39; as /a, /a/b, /a/b/c.  For each,</span>
+            <span class="c1"># chown $USER on it so user can use these intermediate dirs</span>
+            <span class="c1"># (excluding /).</span>
+            <span class="sa">f</span><span class="s1">&#39;sudo mkdir -p </span><span class="si">{</span><span class="n">dir_of_symlink</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
+            <span class="c1"># p: path so far</span>
+            <span class="p">(</span><span class="s1">&#39;(p=&quot;&quot;; &#39;</span>
+             <span class="sa">f</span><span class="s1">&#39;for w in $(echo </span><span class="si">{</span><span class="n">dir_of_symlink</span><span class="si">}</span><span class="s1"> | tr &quot;/&quot; &quot; &quot;); do &#39;</span>
+             <span class="s1">&#39;p=$</span><span class="si">{p}</span><span class="s1">/$</span><span class="si">{w}</span><span class="s1">; sudo chown $USER $p; done)&#39;</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="c1">#  2. remove any existing symlink (ln -f may throw &#39;cannot</span>
+        <span class="c1">#     overwrite directory&#39;, if the link exists and points to a</span>
+        <span class="c1">#     directory).</span>
+        <span class="n">commands</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="c1"># Error out if source is an existing, non-symlink directory/file.</span>
+            <span class="sa">f</span><span class="s1">&#39;((test -L </span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s1"> &amp;&amp; sudo rm </span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s1"> &amp;&gt;/dev/null) || &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;(test ! -e </span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s1"> || &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;(echo &quot;!!! Failed mounting because path exists (</span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s1">)&quot;; &#39;</span>
+            <span class="s1">&#39;exit 1)))&#39;</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="k">if</span> <span class="n">download_target_commands</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">commands</span> <span class="o">+=</span> <span class="n">download_target_commands</span>
+        <span class="n">commands</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="c1"># Link.</span>
+            <span class="sa">f</span><span class="s1">&#39;sudo ln -s </span><span class="si">{</span><span class="n">target</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
+            <span class="c1"># chown.  -h to affect symlinks only.</span>
+            <span class="sa">f</span><span class="s1">&#39;sudo chown -h $USER </span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="k">return</span> <span class="s1">&#39; &amp;&amp; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">commands</span><span class="p">)</span></div></div>
+
+
+<div class="viewcode-block" id="SSHConfigHelper"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.SSHConfigHelper">[docs]</a><span class="k">class</span> <span class="nc">SSHConfigHelper</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Helper for handling local SSH configuration.&quot;&quot;&quot;</span>
+
+    <span class="n">ssh_conf_path</span> <span class="o">=</span> <span class="s1">&#39;~/.ssh/config&#39;</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">_get_generated_config</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">autogen_comment</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">host_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                              <span class="n">ip</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">ssh_key_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="n">codegen</span> <span class="o">=</span> <span class="n">textwrap</span><span class="o">.</span><span class="n">dedent</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">            </span><span class="si">{</span><span class="n">autogen_comment</span><span class="si">}</span><span class="s2"></span>
+<span class="s2">            Host </span><span class="si">{</span><span class="n">host_name</span><span class="si">}</span><span class="s2"></span>
+<span class="s2">              HostName </span><span class="si">{</span><span class="n">ip</span><span class="si">}</span><span class="s2"></span>
+<span class="s2">              User </span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s2"></span>
+<span class="s2">              IdentityFile </span><span class="si">{</span><span class="n">ssh_key_path</span><span class="si">}</span><span class="s2"></span>
+<span class="s2">              IdentitiesOnly yes</span>
+<span class="s2">              ForwardAgent yes</span>
+<span class="s2">              StrictHostKeyChecking no</span>
+<span class="s2">              Port 22</span>
+<span class="s2">            &quot;&quot;&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">codegen</span>
+
+<div class="viewcode-block" id="SSHConfigHelper.add_cluster"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.SSHConfigHelper.add_cluster">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">add_cluster</span><span class="p">(</span>
+        <span class="bp">cls</span><span class="p">,</span>
+        <span class="n">cluster_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">ip</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">auth_config</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span>
+    <span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add authentication information for cluster to local SSH config file.</span>
+
+<span class="sd">        If a host with `cluster_name` already exists and the configuration was</span>
+<span class="sd">        not added by sky, then `ip` is used to identify the host instead in the</span>
+<span class="sd">        file.</span>
+
+<span class="sd">        If a host with `cluster_name` already exists and the configuration was</span>
+<span class="sd">        added by sky (e.g. a spot instance), then the configuration is</span>
+<span class="sd">        overwritten.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            cluster_name: Cluster name (see `sky status`)</span>
+<span class="sd">            ip: IP address of head node associated with the cluster</span>
+<span class="sd">            auth_config: read_yaml(handle.cluster_yaml)[&#39;auth&#39;]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">username</span> <span class="o">=</span> <span class="n">auth_config</span><span class="p">[</span><span class="s1">&#39;ssh_user&#39;</span><span class="p">]</span>
+        <span class="n">key_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">auth_config</span><span class="p">[</span><span class="s1">&#39;ssh_private_key&#39;</span><span class="p">])</span>
+        <span class="n">host_name</span> <span class="o">=</span> <span class="n">cluster_name</span>
+        <span class="n">sky_autogen_comment</span> <span class="o">=</span> <span class="s1">&#39;# Added by sky (use `sky stop/down&#39;</span> <span class="o">+</span> \
+                            <span class="sa">f</span><span class="s1">&#39;-c </span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">` to remove)&#39;</span>
+        <span class="n">overwrite</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">overwrite_begin_idx</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="n">config_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="bp">cls</span><span class="o">.</span><span class="n">ssh_conf_path</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">config_path</span><span class="p">):</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">config_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">config</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">readlines</span><span class="p">()</span>
+
+            <span class="c1"># If an existing config with `cluster_name` exists, raise a warning.</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">config</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="sa">f</span><span class="s1">&#39;Host </span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">:</span>
+                    <span class="n">prev_line</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="n">i</span> <span class="o">-</span> <span class="mi">1</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span>
+                    <span class="k">if</span> <span class="n">prev_line</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">sky_autogen_comment</span><span class="p">):</span>
+                        <span class="n">overwrite</span> <span class="o">=</span> <span class="kc">True</span>
+                        <span class="n">overwrite_begin_idx</span> <span class="o">=</span> <span class="n">i</span> <span class="o">-</span> <span class="mi">1</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="bp">cls</span><span class="o">.</span><span class="n">ssh_conf_path</span><span class="si">}</span><span class="s1"> contains &#39;</span>
+                                       <span class="sa">f</span><span class="s1">&#39;host named </span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">.&#39;</span><span class="p">)</span>
+                        <span class="n">host_name</span> <span class="o">=</span> <span class="n">ip</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Using </span><span class="si">{</span><span class="n">ip</span><span class="si">}</span><span class="s1"> to identify host instead.&#39;</span><span class="p">)</span>
+                    <span class="k">break</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">config</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">]</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">config_path</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">writelines</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+
+        <span class="n">codegen</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_get_generated_config</span><span class="p">(</span><span class="n">sky_autogen_comment</span><span class="p">,</span> <span class="n">host_name</span><span class="p">,</span> <span class="n">ip</span><span class="p">,</span>
+                                            <span class="n">username</span><span class="p">,</span> <span class="n">key_path</span><span class="p">)</span>
+
+        <span class="c1"># Add (or overwrite) the new config.</span>
+        <span class="k">if</span> <span class="n">overwrite</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">overwrite_begin_idx</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="n">updated_lines</span> <span class="o">=</span> <span class="n">codegen</span><span class="o">.</span><span class="n">splitlines</span><span class="p">(</span><span class="n">keepends</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">]</span>
+            <span class="n">config</span><span class="p">[</span><span class="n">overwrite_begin_idx</span><span class="p">:</span><span class="n">overwrite_begin_idx</span> <span class="o">+</span>
+                   <span class="nb">len</span><span class="p">(</span><span class="n">updated_lines</span><span class="p">)]</span> <span class="o">=</span> <span class="n">updated_lines</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">config_path</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">config</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">config_path</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">config</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">config</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">):</span>
+                    <span class="c1"># Add trailing newline if it doesn&#39;t exist.</span>
+                    <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">codegen</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SSHConfigHelper.remove_cluster"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.SSHConfigHelper.remove_cluster">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">remove_cluster</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">ip</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">auth_config</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]):</span>
+        <span class="sd">&quot;&quot;&quot;Remove authentication information for cluster from local SSH config.</span>
+
+<span class="sd">        If no existing host matching the provided specification is found, then</span>
+<span class="sd">        nothing is removed.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            ip: IP address of a cluster&#39;s head node.</span>
+<span class="sd">            auth_config: read_yaml(handle.cluster_yaml)[&#39;auth&#39;]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">username</span> <span class="o">=</span> <span class="n">auth_config</span><span class="p">[</span><span class="s1">&#39;ssh_user&#39;</span><span class="p">]</span>
+
+        <span class="n">config_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="bp">cls</span><span class="o">.</span><span class="n">ssh_conf_path</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">config_path</span><span class="p">):</span>
+            <span class="k">return</span>
+
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">config_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">config</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">readlines</span><span class="p">()</span>
+
+        <span class="c1"># Scan the config for the cluster name.</span>
+        <span class="n">start_line_idx</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">config</span><span class="p">):</span>
+            <span class="n">next_line</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">config</span><span class="p">)</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span>
+            <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="sa">f</span><span class="s1">&#39;HostName </span><span class="si">{</span><span class="n">ip</span><span class="si">}</span><span class="s1">&#39;</span> <span class="ow">and</span> <span class="n">next_line</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span>
+            <span class="p">)</span> <span class="o">==</span> <span class="sa">f</span><span class="s1">&#39;User </span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">:</span>
+                <span class="n">start_line_idx</span> <span class="o">=</span> <span class="n">i</span> <span class="o">-</span> <span class="mi">1</span>
+                <span class="k">break</span>
+
+        <span class="k">if</span> <span class="n">start_line_idx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>  <span class="c1"># No config to remove.</span>
+            <span class="k">return</span>
+
+        <span class="c1"># Scan for end of previous config.</span>
+        <span class="n">cursor</span> <span class="o">=</span> <span class="n">start_line_idx</span>
+        <span class="k">while</span> <span class="n">cursor</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">config</span><span class="p">[</span><span class="n">cursor</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">cursor</span> <span class="o">-=</span> <span class="mi">1</span>
+        <span class="n">prev_end_line_idx</span> <span class="o">=</span> <span class="n">cursor</span>
+
+        <span class="c1"># Scan for end of the cluster config.</span>
+        <span class="n">end_line_idx</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">cursor</span> <span class="o">=</span> <span class="n">start_line_idx</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">start_line_idx</span> <span class="o">-=</span> <span class="mi">1</span>  <span class="c1"># remove auto-generated comment</span>
+        <span class="k">while</span> <span class="n">cursor</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">config</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">config</span><span class="p">[</span><span class="n">cursor</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span>
+                    <span class="s1">&#39;# &#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">config</span><span class="p">[</span><span class="n">cursor</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;Host &#39;</span><span class="p">):</span>
+                <span class="n">end_line_idx</span> <span class="o">=</span> <span class="n">cursor</span>
+                <span class="k">break</span>
+            <span class="n">cursor</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="c1"># Remove sky-generated config and update the file.</span>
+        <span class="n">config</span><span class="p">[</span><span class="n">prev_end_line_idx</span><span class="p">:</span><span class="n">end_line_idx</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span>
+        <span class="p">]</span> <span class="k">if</span> <span class="n">end_line_idx</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">[]</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">config_path</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">config</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span></div></div>
+
+
+<span class="c1"># TODO(suquark): once we have sky on PYPI, we should directly install sky</span>
+<span class="c1"># from PYPI</span>
+<span class="k">def</span> <span class="nf">_build_sky_wheel</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;Build a wheel for sky. This works correctly only when sky is installed</span>
+<span class="sd">    with development/editable mode.&quot;&quot;&quot;</span>
+    <span class="c1"># check if sky is installed under development mode.</span>
+    <span class="n">package_root</span> <span class="o">=</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span><span class="n">sky</span><span class="o">.</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span>
+    <span class="k">if</span> <span class="n">package_root</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s1">&#39;site-packages&#39;</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">EnvironmentError</span><span class="p">(</span><span class="s1">&#39;We can only build wheels for Sky when Sky is &#39;</span>
+                               <span class="s1">&#39;installed under development/editable mode.&#39;</span><span class="p">)</span>
+    <span class="c1"># It is important to normalize the path, otherwise &#39;pip wheel&#39; would treat</span>
+    <span class="c1"># the directory as a file and generate an empty wheel.</span>
+    <span class="n">norm_path</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">package_root</span><span class="p">)</span> <span class="o">+</span> <span class="n">os</span><span class="o">.</span><span class="n">sep</span>
+    <span class="n">username</span> <span class="o">=</span> <span class="n">getpass</span><span class="o">.</span><span class="n">getuser</span><span class="p">()</span>
+    <span class="n">wheel_dir</span> <span class="o">=</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span><span class="n">tempfile</span><span class="o">.</span><span class="n">gettempdir</span><span class="p">())</span> <span class="o">/</span> <span class="sa">f</span><span class="s1">&#39;sky_wheels_</span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s1">&#39;</span>
+    <span class="c1"># remove old wheels</span>
+    <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">wheel_dir</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s1">&#39;sky-*.whl&#39;</span><span class="p">):</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">unlink</span><span class="p">()</span>
+    <span class="c1"># remove pip wheels build directory, otherwise we may include outdated code</span>
+    <span class="n">shutil</span><span class="o">.</span><span class="n">rmtree</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">package_root</span> <span class="o">/</span> <span class="s1">&#39;build&#39;</span><span class="p">),</span> <span class="n">ignore_errors</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># TODO(suquark): For python&gt;=3.7, &#39;subprocess.run&#39; supports capture of</span>
+        <span class="c1"># the output.</span>
+        <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">([</span>
+            <span class="s1">&#39;pip3&#39;</span><span class="p">,</span> <span class="s1">&#39;wheel&#39;</span><span class="p">,</span> <span class="s1">&#39;--no-deps&#39;</span><span class="p">,</span> <span class="n">norm_path</span><span class="p">,</span> <span class="s1">&#39;--wheel-dir&#39;</span><span class="p">,</span>
+            <span class="nb">str</span><span class="p">(</span><span class="n">wheel_dir</span><span class="p">)</span>
+        <span class="p">],</span>
+                       <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
+                       <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+                       <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">CalledProcessError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Fail to build pip wheel for Sky. &#39;</span>
+                           <span class="sa">f</span><span class="s1">&#39;Error message: </span><span class="si">{</span><span class="n">e</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span> <span class="kn">from</span> <span class="nn">e</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">latest_wheel</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">wheel_dir</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s1">&#39;sky-*.whl&#39;</span><span class="p">),</span> <span class="n">key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getctime</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="s1">&#39;Could not find built Sky wheels.&#39;</span><span class="p">)</span> <span class="kn">from</span> <span class="bp">None</span>
+    <span class="c1"># cleanup older wheels</span>
+    <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">wheel_dir</span><span class="o">.</span><span class="n">iterdir</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">f</span> <span class="o">!=</span> <span class="n">latest_wheel</span><span class="p">:</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">unlink</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">wheel_dir</span><span class="o">.</span><span class="n">absolute</span><span class="p">()</span>
+
+
+<span class="c1"># TODO: too many things happening here - leaky abstraction. Refactor.</span>
+<div class="viewcode-block" id="write_cluster_config"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.write_cluster_config">[docs]</a><span class="k">def</span> <span class="nf">write_cluster_config</span><span class="p">(</span><span class="n">task</span><span class="p">:</span> <span class="n">task_lib</span><span class="o">.</span><span class="n">Task</span><span class="p">,</span>
+                         <span class="n">to_provision</span><span class="p">:</span> <span class="n">Resources</span><span class="p">,</span>
+                         <span class="n">num_nodes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                         <span class="n">cluster_config_template</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                         <span class="n">cluster_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                         <span class="n">region</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">clouds</span><span class="o">.</span><span class="n">Region</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                         <span class="n">zones</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                         <span class="n">dryrun</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Fills in cluster configuration templates and writes them out.</span>
+
+<span class="sd">    Returns: {provisioner: path to yaml, the provisioning spec}.</span>
+<span class="sd">      &#39;provisioner&#39; can be</span>
+<span class="sd">        - &#39;ray&#39;</span>
+<span class="sd">        - &#39;tpu-create-script&#39; (if TPU is requested)</span>
+<span class="sd">        - &#39;tpu-delete-script&#39; (if TPU is requested)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># task.best_resources may not be equal to to_provision if the user</span>
+    <span class="c1"># is running a job with less resources than the cluster has.</span>
+    <span class="n">cloud</span> <span class="o">=</span> <span class="n">to_provision</span><span class="o">.</span><span class="n">cloud</span>
+    <span class="n">resources_vars</span> <span class="o">=</span> <span class="n">cloud</span><span class="o">.</span><span class="n">make_deploy_resources_variables</span><span class="p">(</span><span class="n">to_provision</span><span class="p">)</span>
+    <span class="n">config_dict</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">if</span> <span class="n">region</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="n">zones</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">,</span> <span class="s1">&#39;Set either both or neither for: region, zones.&#39;</span>
+        <span class="n">region</span> <span class="o">=</span> <span class="n">cloud</span><span class="o">.</span><span class="n">get_default_region</span><span class="p">()</span>
+        <span class="n">zones</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">zones</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span>
+            <span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span>
+        <span class="p">)</span> <span class="ow">or</span> <span class="n">zones</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s1">&#39;Set either both or neither for: region, zones.&#39;</span>
+    <span class="n">region</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">name</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">):</span>
+        <span class="c1"># Only AWS supports multiple zones in the &#39;availability_zone&#39; field.</span>
+        <span class="n">zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">zone</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">zone</span> <span class="ow">in</span> <span class="n">zones</span><span class="p">]</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span><span class="p">):</span>
+        <span class="c1"># Azure does not support specific zones.</span>
+        <span class="n">zones</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">zones</span> <span class="o">=</span> <span class="p">[</span><span class="n">zones</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">name</span><span class="p">]</span>
+
+    <span class="n">aws_default_ami</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">):</span>
+        <span class="n">aws_default_ami</span> <span class="o">=</span> <span class="n">cloud</span><span class="o">.</span><span class="n">get_default_ami</span><span class="p">(</span><span class="n">region</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="n">cluster_name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+
+    <span class="n">setup_sh_path</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">task</span><span class="o">.</span><span class="n">setup</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">codegen</span> <span class="o">=</span> <span class="n">textwrap</span><span class="o">.</span><span class="n">dedent</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&quot;&quot;#!/bin/bash</span>
+<span class="s2">            . $(conda info --base)/etc/profile.d/conda.sh</span>
+<span class="s2">            </span><span class="si">{</span><span class="n">task</span><span class="o">.</span><span class="n">setup</span><span class="si">}</span><span class="s2"></span>
+<span class="s2">        &quot;&quot;&quot;</span><span class="p">)</span>
+        <span class="c1"># Use a stable path, /&lt;tempdir&gt;/sky_setup_&lt;checksum&gt;.sh, because</span>
+        <span class="c1"># rerunning the same task without any changes to the content of the</span>
+        <span class="c1"># setup command should skip the setup step.  Using NamedTemporaryFile()</span>
+        <span class="c1"># would generate a random path every time, hence re-triggering setup.</span>
+        <span class="n">checksum</span> <span class="o">=</span> <span class="n">zlib</span><span class="o">.</span><span class="n">crc32</span><span class="p">(</span><span class="n">codegen</span><span class="o">.</span><span class="n">encode</span><span class="p">())</span>
+        <span class="n">tempdir</span> <span class="o">=</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">gettempdir</span><span class="p">()</span>
+        <span class="c1"># TODO: file lock on this path, in case tasks have the same setup cmd.</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tempdir</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;sky_setup_</span><span class="si">{</span><span class="n">checksum</span><span class="si">}</span><span class="s1">.sh&#39;</span><span class="p">),</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">codegen</span><span class="p">)</span>
+        <span class="n">setup_sh_path</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
+
+    <span class="c1"># File mounts handling for remote paths possibly without write access:</span>
+    <span class="c1">#  (1) in &#39;file_mounts&#39; sections, add &lt;prefix&gt; to these target paths.</span>
+    <span class="c1">#  (2) then, create symlinks from &#39;/.../file&#39; to &#39;&lt;prefix&gt;/.../file&#39;.</span>
+    <span class="c1"># We need to do these since as of Ray 1.8, this is not supported natively</span>
+    <span class="c1"># (Docker works though, of course):</span>
+    <span class="c1">#  https://github.com/ray-project/ray/pull/9332</span>
+    <span class="c1">#  https://github.com/ray-project/ray/issues/9326</span>
+    <span class="n">mounts</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">get_local_to_remote_file_mounts</span><span class="p">()</span>
+    <span class="n">wrapped_file_mounts</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">initialization_commands</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="n">mounts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">remote</span><span class="p">,</span> <span class="n">local</span> <span class="ow">in</span> <span class="n">mounts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isabs</span><span class="p">(</span><span class="n">remote</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">remote</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;~/&#39;</span><span class="p">):</span>
+                <span class="n">remote</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;~/</span><span class="si">{</span><span class="n">remote</span><span class="si">}</span><span class="s1">&#39;</span>
+            <span class="k">if</span> <span class="n">remote</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;~/&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">remote</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;/tmp/&#39;</span><span class="p">):</span>
+                <span class="c1"># Skip as these should be writable locations.</span>
+                <span class="n">wrapped_file_mounts</span><span class="p">[</span><span class="n">remote</span><span class="p">]</span> <span class="o">=</span> <span class="n">local</span>
+                <span class="k">continue</span>
+            <span class="k">assert</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isabs</span><span class="p">(</span><span class="n">remote</span><span class="p">),</span> <span class="p">(</span><span class="n">remote</span><span class="p">,</span> <span class="n">local</span><span class="p">)</span>
+            <span class="n">wrapped_remote</span> <span class="o">=</span> <span class="n">FileMountHelper</span><span class="o">.</span><span class="n">wrap_file_mount</span><span class="p">(</span><span class="n">remote</span><span class="p">)</span>
+            <span class="n">wrapped_file_mounts</span><span class="p">[</span><span class="n">wrapped_remote</span><span class="p">]</span> <span class="o">=</span> <span class="n">local</span>
+            <span class="n">command</span> <span class="o">=</span> <span class="n">FileMountHelper</span><span class="o">.</span><span class="n">make_safe_symlink_command</span><span class="p">(</span>
+                <span class="n">source</span><span class="o">=</span><span class="n">remote</span><span class="p">,</span> <span class="n">target</span><span class="o">=</span><span class="n">wrapped_remote</span><span class="p">)</span>
+            <span class="n">initialization_commands</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+
+    <span class="c1"># TODO(suquark): Cache built wheels to prevent rebuilding.</span>
+    <span class="c1"># This may not be necessary because it&#39;s fast to build the wheel.</span>
+    <span class="n">local_wheel_path</span> <span class="o">=</span> <span class="n">_build_sky_wheel</span><span class="p">()</span>
+    <span class="n">yaml_path</span> <span class="o">=</span> <span class="n">_fill_template</span><span class="p">(</span>
+        <span class="n">cluster_config_template</span><span class="p">,</span>
+        <span class="nb">dict</span><span class="p">(</span>
+            <span class="n">resources_vars</span><span class="p">,</span>
+            <span class="o">**</span><span class="p">{</span>
+                <span class="s1">&#39;cluster_name&#39;</span><span class="p">:</span> <span class="n">cluster_name</span><span class="p">,</span>
+                <span class="s1">&#39;setup_sh_path&#39;</span><span class="p">:</span> <span class="n">setup_sh_path</span><span class="p">,</span>
+                <span class="s1">&#39;workdir&#39;</span><span class="p">:</span> <span class="n">task</span><span class="o">.</span><span class="n">workdir</span><span class="p">,</span>
+                <span class="s1">&#39;docker_image&#39;</span><span class="p">:</span> <span class="n">task</span><span class="o">.</span><span class="n">docker_image</span><span class="p">,</span>
+                <span class="s1">&#39;num_nodes&#39;</span><span class="p">:</span> <span class="n">num_nodes</span><span class="p">,</span>
+                <span class="c1"># File mounts handling.</span>
+                <span class="s1">&#39;file_mounts&#39;</span><span class="p">:</span> <span class="n">wrapped_file_mounts</span><span class="p">,</span>
+                <span class="s1">&#39;initialization_commands&#39;</span><span class="p">:</span> <span class="n">initialization_commands</span> <span class="ow">or</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="c1"># Region/zones.</span>
+                <span class="s1">&#39;region&#39;</span><span class="p">:</span> <span class="n">region</span><span class="p">,</span>
+                <span class="s1">&#39;zones&#39;</span><span class="p">:</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">zones</span><span class="p">),</span>
+                <span class="c1"># AWS only.</span>
+                <span class="s1">&#39;aws_default_ami&#39;</span><span class="p">:</span> <span class="n">aws_default_ami</span><span class="p">,</span>
+                <span class="c1"># Ray version.</span>
+                <span class="s1">&#39;ray_version&#39;</span><span class="p">:</span> <span class="n">SKY_REMOTE_RAY_VERSION</span><span class="p">,</span>
+                <span class="c1"># Sky remote utils.</span>
+                <span class="s1">&#39;sky_remote_path&#39;</span><span class="p">:</span> <span class="n">SKY_REMOTE_PATH</span><span class="p">,</span>
+                <span class="s1">&#39;sky_local_path&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">local_wheel_path</span><span class="p">),</span>
+            <span class="p">}))</span>
+    <span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;cluster_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cluster_name</span>
+    <span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;ray&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">yaml_path</span>
+    <span class="k">if</span> <span class="n">dryrun</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">config_dict</span>
+    <span class="n">_add_ssh_to_cluster_config</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">yaml_path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">resources_vars</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tpu_type&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">tpu_name</span> <span class="o">=</span> <span class="n">resources_vars</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;tpu_name&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">tpu_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">tpu_name</span> <span class="o">=</span> <span class="n">cluster_name</span>
+
+        <span class="n">scripts</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span>
+            <span class="n">_fill_template</span><span class="p">(</span>
+                <span class="n">path</span><span class="p">,</span>
+                <span class="nb">dict</span><span class="p">(</span><span class="n">resources_vars</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span>
+                    <span class="s1">&#39;zones&#39;</span><span class="p">:</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">zones</span><span class="p">),</span>
+                    <span class="s1">&#39;tpu_name&#39;</span><span class="p">:</span> <span class="n">tpu_name</span><span class="p">,</span>
+                <span class="p">}),</span>
+                <span class="c1"># Use new names for TPU scripts so that different runs can use</span>
+                <span class="c1"># different TPUs.  Put in ~/.sky/generated/ to be consistent</span>
+                <span class="c1"># with cluster yamls.</span>
+                <span class="n">output_path</span><span class="o">=</span><span class="n">path</span><span class="o">.</span>
+                <span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.sh.j2&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;.</span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">.sh&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span>
+                    <span class="s1">&#39;config/&#39;</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">SKY_USER_FILE_PATH</span><span class="si">}</span><span class="s1">/&#39;</span><span class="p">)),</span>
+            <span class="p">)</span> <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span>
+            <span class="p">[</span><span class="s1">&#39;config/gcp-tpu-create.sh.j2&#39;</span><span class="p">,</span> <span class="s1">&#39;config/gcp-tpu-delete.sh.j2&#39;</span><span class="p">])</span>
+        <span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;tpu-create-script&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">scripts</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;tpu-delete-script&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">scripts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;tpu_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">tpu_name</span>
+    <span class="k">return</span> <span class="n">config_dict</span></div>
+
+
+<span class="k">def</span> <span class="nf">_add_ssh_to_cluster_config</span><span class="p">(</span><span class="n">cloud_type</span><span class="p">,</span> <span class="n">cluster_config_file</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Adds SSH key info to the cluster config.</span>
+
+<span class="sd">    This function&#39;s output removes comments included in the jinja2 template.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">cluster_config_file</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    <span class="n">cloud_type</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">cloud_type</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">cloud_type</span> <span class="o">==</span> <span class="s1">&#39;AWS&#39;</span><span class="p">:</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">setup_aws_authentication</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">cloud_type</span> <span class="o">==</span> <span class="s1">&#39;GCP&#39;</span><span class="p">:</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">setup_gcp_authentication</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">cloud_type</span> <span class="o">==</span> <span class="s1">&#39;Azure&#39;</span><span class="p">:</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">setup_azure_authentication</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Cloud type not supported, must be [AWS, GCP, Azure]&#39;</span><span class="p">)</span>
+    <span class="n">dump_yaml</span><span class="p">(</span><span class="n">cluster_config_file</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="read_yaml"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.read_yaml">[docs]</a><span class="k">def</span> <span class="nf">read_yaml</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">config</span></div>
+
+
+<div class="viewcode-block" id="dump_yaml"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.dump_yaml">[docs]</a><span class="k">def</span> <span class="nf">dump_yaml</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">config</span><span class="p">):</span>
+    <span class="c1"># https://github.com/yaml/pyyaml/issues/127</span>
+    <span class="k">class</span> <span class="nc">LineBreakDumper</span><span class="p">(</span><span class="n">yaml</span><span class="o">.</span><span class="n">SafeDumper</span><span class="p">):</span>
+
+        <span class="k">def</span> <span class="nf">write_line_break</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">write_line_break</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">indents</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">write_line_break</span><span class="p">()</span>
+
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">yaml</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">config</span><span class="p">,</span>
+                  <span class="n">f</span><span class="p">,</span>
+                  <span class="n">Dumper</span><span class="o">=</span><span class="n">LineBreakDumper</span><span class="p">,</span>
+                  <span class="n">sort_keys</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                  <span class="n">default_flow_style</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="get_run_timestamp"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.get_run_timestamp">[docs]</a><span class="k">def</span> <span class="nf">get_run_timestamp</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="s1">&#39;sky-&#39;</span> <span class="o">+</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1">-%H-%M-%S-</span><span class="si">%f</span><span class="s1">&#39;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="wait_until_ray_cluster_ready"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.wait_until_ray_cluster_ready">[docs]</a><span class="k">def</span> <span class="nf">wait_until_ray_cluster_ready</span><span class="p">(</span><span class="n">cloud</span><span class="p">:</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">,</span> <span class="n">cluster_config_file</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                                 <span class="n">num_nodes</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;Returns whether the entire ray cluster is ready.&quot;&quot;&quot;</span>
+    <span class="c1"># FIXME: It may takes a while for the cluster to be available for ray,</span>
+    <span class="c1"># especially for Azure, causing `ray exec` to fail.</span>
+    <span class="k">if</span> <span class="n">num_nodes</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="n">expected_worker_count</span> <span class="o">=</span> <span class="n">num_nodes</span> <span class="o">-</span> <span class="mi">1</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="p">(</span><span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span><span class="p">)):</span>
+        <span class="n">worker_str</span> <span class="o">=</span> <span class="s1">&#39;ray.worker.default&#39;</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">GCP</span><span class="p">):</span>
+        <span class="n">worker_str</span> <span class="o">=</span> <span class="s1">&#39;ray_worker_default&#39;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="kc">False</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;No support for distributed clusters for </span><span class="si">{</span><span class="n">cloud</span><span class="si">}</span><span class="s1">.&#39;</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">proc</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;ray exec </span><span class="si">{</span><span class="n">cluster_config_file</span><span class="si">}</span><span class="s1"> &quot;ray status&quot;&#39;</span><span class="p">,</span>
+                              <span class="n">shell</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                              <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                              <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+                              <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">)</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">proc</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+        <span class="k">if</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">expected_worker_count</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">worker_str</span><span class="si">}</span><span class="s1">&#39;</span> <span class="ow">in</span> <span class="n">output</span><span class="p">:</span>
+            <span class="k">break</span>
+        <span class="k">if</span> <span class="s1">&#39;(no pending nodes)&#39;</span> <span class="ow">in</span> <span class="n">output</span> <span class="ow">and</span> <span class="s1">&#39;(no failures)&#39;</span> <span class="ow">in</span> <span class="n">output</span><span class="p">:</span>
+            <span class="c1"># Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that</span>
+            <span class="c1"># GCP can satisfy only by half, the worker node would be forgotten.</span>
+            <span class="c1"># The correct behavior should be for it to error out.</span>
+            <span class="k">return</span> <span class="kc">False</span>  <span class="c1"># failed</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+    <span class="k">return</span> <span class="kc">True</span>  <span class="c1"># success</span></div>
+
+
+<div class="viewcode-block" id="ssh_options_list"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.ssh_options_list">[docs]</a><span class="k">def</span> <span class="nf">ssh_options_list</span><span class="p">(</span><span class="n">ssh_private_key</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+                     <span class="n">ssh_control_name</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+                     <span class="o">*</span><span class="p">,</span>
+                     <span class="n">timeout</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="sd">&quot;&quot;&quot;Returns a list of sane options for &#39;ssh&#39;.&quot;&quot;&quot;</span>
+    <span class="c1"># Forked from Ray SSHOptions:</span>
+    <span class="c1"># https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py</span>
+    <span class="n">arg_dict</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="c1"># Supresses initial fingerprint verification.</span>
+        <span class="s1">&#39;StrictHostKeyChecking&#39;</span><span class="p">:</span> <span class="s1">&#39;no&#39;</span><span class="p">,</span>
+        <span class="c1"># SSH IP and fingerprint pairs no longer added to known_hosts.</span>
+        <span class="c1"># This is to remove a &#39;REMOTE HOST IDENTIFICATION HAS CHANGED&#39;</span>
+        <span class="c1"># warning if a new node has the same IP as a previously</span>
+        <span class="c1"># deleted node, because the fingerprints will not match in</span>
+        <span class="c1"># that case.</span>
+        <span class="s1">&#39;UserKnownHostsFile&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">devnull</span><span class="p">,</span>
+        <span class="c1"># Try fewer extraneous key pairs.</span>
+        <span class="s1">&#39;IdentitiesOnly&#39;</span><span class="p">:</span> <span class="s1">&#39;yes&#39;</span><span class="p">,</span>
+        <span class="c1"># Abort if port forwarding fails (instead of just printing to</span>
+        <span class="c1"># stderr).</span>
+        <span class="s1">&#39;ExitOnForwardFailure&#39;</span><span class="p">:</span> <span class="s1">&#39;yes&#39;</span><span class="p">,</span>
+        <span class="c1"># Quickly kill the connection if network connection breaks (as</span>
+        <span class="c1"># opposed to hanging/blocking).</span>
+        <span class="s1">&#39;ServerAliveInterval&#39;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
+        <span class="s1">&#39;ServerAliveCountMax&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
+        <span class="c1"># ConnectTimeout.</span>
+        <span class="s1">&#39;ConnectTimeout&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">timeout</span><span class="si">}</span><span class="s1">s&#39;</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="n">ssh_control_name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">arg_dict</span><span class="o">.</span><span class="n">update</span><span class="p">({</span>
+            <span class="c1"># Control path: important optimization as we do multiple ssh in one</span>
+            <span class="c1"># sky.launch().</span>
+            <span class="s1">&#39;ControlMaster&#39;</span><span class="p">:</span> <span class="s1">&#39;auto&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;ControlPath&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">_ssh_control_path</span><span class="p">(</span><span class="n">ssh_control_name</span><span class="p">)</span><span class="si">}</span><span class="s1">/%C&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;ControlPersist&#39;</span><span class="p">:</span> <span class="s1">&#39;30s&#39;</span><span class="p">,</span>
+        <span class="p">})</span>
+    <span class="n">ssh_key_option</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s1">&#39;-i&#39;</span><span class="p">,</span>
+        <span class="n">ssh_private_key</span><span class="p">,</span>
+    <span class="p">]</span> <span class="k">if</span> <span class="n">ssh_private_key</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">[]</span>
+    <span class="k">return</span> <span class="n">ssh_key_option</span> <span class="o">+</span> <span class="p">[</span>
+        <span class="n">x</span> <span class="k">for</span> <span class="n">y</span> <span class="ow">in</span> <span class="p">([</span><span class="s1">&#39;-o&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s1">=</span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">]</span>
+                    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">arg_dict</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">y</span>
+    <span class="p">]</span></div>
+
+
+<span class="k">def</span> <span class="nf">_ssh_control_path</span><span class="p">(</span><span class="n">ssh_control_filename</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="sd">&quot;&quot;&quot;Returns a temporary path to be used as the ssh control path.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">ssh_control_filename</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">username</span> <span class="o">=</span> <span class="n">getpass</span><span class="o">.</span><span class="n">getuser</span><span class="p">()</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="p">(</span><span class="sa">f</span><span class="s1">&#39;/tmp/sky_ssh_</span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">ssh_control_filename</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">path</span>
+
+
+<div class="viewcode-block" id="SshMode"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.SshMode">[docs]</a><span class="k">class</span> <span class="nc">SshMode</span><span class="p">(</span><span class="n">enum</span><span class="o">.</span><span class="n">Enum</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Enum for SSH mode.&quot;&quot;&quot;</span>
+    <span class="c1"># Do not allocating pseudo-tty to avoid user input corrupting the output.</span>
+    <span class="n">NON_INTERACTIVE</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="c1"># Allocate a pseudo-tty, quit the ssh session after the cmd finishes.</span>
+    <span class="n">INTERACTIVE</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="c1"># Allocate a pseudo-tty and log into the ssh session.</span>
+    <span class="n">LOGIN</span> <span class="o">=</span> <span class="mi">2</span></div>
+
+
+<span class="k">def</span> <span class="nf">_ssh_base_command</span><span class="p">(</span><span class="n">ip</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">ssh_private_key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">ssh_user</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span>
+                      <span class="n">ssh_mode</span><span class="p">:</span> <span class="n">SshMode</span><span class="p">,</span> <span class="n">port_forward</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]],</span>
+                      <span class="n">ssh_control_name</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="n">ssh</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;ssh&#39;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">ssh_mode</span> <span class="o">==</span> <span class="n">SshMode</span><span class="o">.</span><span class="n">NON_INTERACTIVE</span><span class="p">:</span>
+        <span class="c1"># Disable pseudo-terminal allocation. Otherwise, the output of</span>
+        <span class="c1"># ssh will be corrupted by the user&#39;s input.</span>
+        <span class="n">ssh</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;-T&#39;</span><span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Force pseudo-terminal allocation for interactive/login mode.</span>
+        <span class="n">ssh</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;-tt&#39;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">port_forward</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">port</span> <span class="ow">in</span> <span class="n">port_forward</span><span class="p">:</span>
+            <span class="n">local</span> <span class="o">=</span> <span class="n">remote</span> <span class="o">=</span> <span class="n">port</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s1">&#39;Forwarding port </span><span class="si">{</span><span class="n">local</span><span class="si">}</span><span class="s1"> to port </span><span class="si">{</span><span class="n">remote</span><span class="si">}</span><span class="s1"> on localhost.&#39;</span><span class="p">)</span>
+            <span class="n">ssh</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;-L&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">remote</span><span class="si">}</span><span class="s1">:localhost:</span><span class="si">{</span><span class="n">local</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">ssh</span> <span class="o">+</span> <span class="n">ssh_options_list</span><span class="p">(</span><span class="n">ssh_private_key</span><span class="p">,</span>
+                                  <span class="n">ssh_control_name</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">ssh_user</span><span class="si">}</span><span class="s1">@</span><span class="si">{</span><span class="n">ip</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="run_command_on_ip_via_ssh"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.run_command_on_ip_via_ssh">[docs]</a><span class="k">def</span> <span class="nf">run_command_on_ip_via_ssh</span><span class="p">(</span>
+    <span class="n">ip</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">cmd</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">ssh_user</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">ssh_private_key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">port_forward</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="c1"># Advanced options.</span>
+    <span class="n">log_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;/dev/null&#39;</span><span class="p">,</span>
+    <span class="n">stream_logs</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">check</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">ssh_mode</span><span class="p">:</span> <span class="n">SshMode</span> <span class="o">=</span> <span class="n">SshMode</span><span class="o">.</span><span class="n">NON_INTERACTIVE</span><span class="p">,</span>
+    <span class="n">ssh_control_name</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+    <span class="sd">&quot;&quot;&quot;Uses &#39;ssh&#39; to run &#39;cmd&#39; on a node with ip.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        ip: The IP address of the node.</span>
+<span class="sd">        cmd: The command to run.</span>
+<span class="sd">        ssh_private_key: The path to the private key to use for ssh.</span>
+<span class="sd">        ssh_user: The user to use for ssh.</span>
+<span class="sd">        port_forward: A list of ports to forward from the localhost to the</span>
+<span class="sd">        remote host.</span>
+
+<span class="sd">        Advanced options:</span>
+
+<span class="sd">        log_path: Redirect stdout/stderr to the log_path.</span>
+<span class="sd">        stream_logs: Stream logs to the stdout/stderr.</span>
+<span class="sd">        check: Check the success of the command.</span>
+<span class="sd">        ssh_mode: The mode to use for ssh.</span>
+<span class="sd">            See SSHMode for more details.</span>
+<span class="sd">        ssh_control_name: The files name of the ssh_control to use. This is used</span>
+<span class="sd">            for optimizing the ssh speed.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tuple of (process, stdout, stderr).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">base_ssh_command</span> <span class="o">=</span> <span class="n">_ssh_base_command</span><span class="p">(</span><span class="n">ip</span><span class="p">,</span>
+                                         <span class="n">ssh_private_key</span><span class="p">,</span>
+                                         <span class="n">ssh_user</span><span class="o">=</span><span class="n">ssh_user</span><span class="p">,</span>
+                                         <span class="n">ssh_mode</span><span class="o">=</span><span class="n">ssh_mode</span><span class="p">,</span>
+                                         <span class="n">port_forward</span><span class="o">=</span><span class="n">port_forward</span><span class="p">,</span>
+                                         <span class="n">ssh_control_name</span><span class="o">=</span><span class="n">ssh_control_name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">ssh_mode</span> <span class="o">==</span> <span class="n">SshMode</span><span class="o">.</span><span class="n">LOGIN</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span> <span class="nb">list</span><span class="p">),</span> <span class="s1">&#39;cmd must be a list for login mode.&#39;</span>
+        <span class="n">command</span> <span class="o">=</span> <span class="n">base_ssh_command</span> <span class="o">+</span> <span class="n">cmd</span>
+        <span class="n">proc</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">shell</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">check</span><span class="o">=</span><span class="n">check</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">proc</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+        <span class="n">cmd</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">cmd</span><span class="p">)</span>
+    <span class="c1"># We need this to correctly run the cmd, and get the output.</span>
+    <span class="n">command</span> <span class="o">=</span> <span class="n">base_ssh_command</span> <span class="o">+</span> <span class="p">[</span>
+        <span class="s1">&#39;bash&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;--login&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;-c&#39;</span><span class="p">,</span>
+        <span class="c1"># Need this `-i` option to make sure `source ~/.bashrc` work.</span>
+        <span class="s1">&#39;-i&#39;</span><span class="p">,</span>
+    <span class="p">]</span>
+    <span class="n">command</span> <span class="o">+=</span> <span class="p">[</span>
+        <span class="n">shlex</span><span class="o">.</span><span class="n">quote</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;true &amp;&amp; source ~/.bashrc &amp;&amp; export OMP_NUM_THREADS=1 &#39;</span>
+                    <span class="sa">f</span><span class="s1">&#39;PYTHONWARNINGS=ignore &amp;&amp; (</span><span class="si">{</span><span class="n">cmd</span><span class="si">}</span><span class="s1">)&#39;</span><span class="p">),</span>
+    <span class="p">]</span>
+    <span class="k">return</span> <span class="n">log_lib</span><span class="o">.</span><span class="n">run_with_log</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">log_path</span><span class="p">,</span> <span class="n">stream_logs</span><span class="p">,</span> <span class="n">check</span><span class="o">=</span><span class="n">check</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="run"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.run">[docs]</a><span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="c1"># Should be careful to use this function, as the child process cmd spawn may</span>
+    <span class="c1"># keep running in the background after the current program is killed. To get</span>
+    <span class="c1"># rid of this problem, use `log_lib.run_with_log`.</span>
+    <span class="n">shell</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;shell&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+    <span class="n">check</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;check&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+    <span class="n">executable</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;executable&#39;</span><span class="p">,</span> <span class="s1">&#39;/bin/bash&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">shell</span><span class="p">:</span>
+        <span class="n">executable</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span>
+                          <span class="n">shell</span><span class="o">=</span><span class="n">shell</span><span class="p">,</span>
+                          <span class="n">check</span><span class="o">=</span><span class="n">check</span><span class="p">,</span>
+                          <span class="n">executable</span><span class="o">=</span><span class="n">executable</span><span class="p">,</span>
+                          <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="run_no_outputs"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.run_no_outputs">[docs]</a><span class="k">def</span> <span class="nf">run_no_outputs</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">run</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span>
+               <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
+               <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
+               <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="check_local_gpus"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.check_local_gpus">[docs]</a><span class="k">def</span> <span class="nf">check_local_gpus</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Checks if GPUs are available locally.</span>
+
+<span class="sd">    Returns whether GPUs are available on the local machine by checking</span>
+<span class="sd">    if nvidia-smi is installed.</span>
+
+<span class="sd">    Returns True if nvidia-smi is installed, false if not.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">([</span><span class="s1">&#39;which&#39;</span><span class="p">,</span> <span class="s1">&#39;nvidia-smi&#39;</span><span class="p">],</span>
+                       <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
+                       <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
+                       <span class="n">check</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">p</span><span class="o">.</span><span class="n">returncode</span> <span class="o">==</span> <span class="mi">0</span></div>
+
+
+<div class="viewcode-block" id="generate_cluster_name"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.generate_cluster_name">[docs]</a><span class="k">def</span> <span class="nf">generate_cluster_name</span><span class="p">():</span>
+    <span class="c1"># TODO: change this ID formatting to something more pleasant.</span>
+    <span class="c1"># User name is helpful in non-isolated accounts, e.g., GCP, Azure.</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s1">&#39;sky-</span><span class="si">{</span><span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">()</span><span class="o">.</span><span class="n">hex</span><span class="p">[:</span><span class="mi">4</span><span class="p">]</span><span class="si">}</span><span class="s1">-</span><span class="si">{</span><span class="n">getpass</span><span class="o">.</span><span class="n">getuser</span><span class="p">()</span><span class="si">}</span><span class="s1">&#39;</span></div>
+
+
+<div class="viewcode-block" id="get_backend_from_handle"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.get_backend_from_handle">[docs]</a><span class="k">def</span> <span class="nf">get_backend_from_handle</span><span class="p">(</span>
+        <span class="n">handle</span><span class="p">:</span> <span class="n">backends</span><span class="o">.</span><span class="n">Backend</span><span class="o">.</span><span class="n">ResourceHandle</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">backends</span><span class="o">.</span><span class="n">Backend</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;Gets a Backend object corresponding to a handle.</span>
+
+<span class="sd">    Inspects handle type to infer the backend used for the resource.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span> <span class="n">backends</span><span class="o">.</span><span class="n">CloudVmRayBackend</span><span class="o">.</span><span class="n">ResourceHandle</span><span class="p">):</span>
+        <span class="n">backend</span> <span class="o">=</span> <span class="n">backends</span><span class="o">.</span><span class="n">CloudVmRayBackend</span><span class="p">()</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span> <span class="n">backends</span><span class="o">.</span><span class="n">LocalDockerBackend</span><span class="o">.</span><span class="n">ResourceHandle</span><span class="p">):</span>
+        <span class="n">backend</span> <span class="o">=</span> <span class="n">backends</span><span class="o">.</span><span class="n">LocalDockerBackend</span><span class="p">()</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;Handle type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">handle</span><span class="p">)</span><span class="si">}</span><span class="s1"> is not supported yet.&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">backend</span></div>
+
+
+<div class="viewcode-block" id="JobLibCodeGen"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.JobLibCodeGen">[docs]</a><span class="k">class</span> <span class="nc">JobLibCodeGen</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Code generator for job utility functions.</span>
+
+<span class="sd">    Usage:</span>
+
+<span class="sd">      &gt;&gt; codegen = JobLibCodeGen()</span>
+
+<span class="sd">      &gt;&gt; codegen.show_jobs(...)</span>
+<span class="sd">      &gt;&gt; codegen.add_job(...)</span>
+<span class="sd">      &gt;&gt; codegen.&lt;method&gt;(...)</span>
+
+<span class="sd">      &gt;&gt; code = codegen.build()</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_code</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;from sky.skylet import job_lib, log_lib&#39;</span><span class="p">]</span>
+
+<div class="viewcode-block" id="JobLibCodeGen.add_job"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.JobLibCodeGen.add_job">[docs]</a>    <span class="k">def</span> <span class="nf">add_job</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">job_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">run_timestamp</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">job_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">job_name</span> <span class="o">=</span> <span class="s1">&#39;-&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_code</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="s1">&#39;job_id = job_lib.add_job(&#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">job_name</span><span class="si">!r}</span><span class="s1">, </span><span class="si">{</span><span class="n">username</span><span class="si">!r}</span><span class="s1">, </span><span class="si">{</span><span class="n">run_timestamp</span><span class="si">!r}</span><span class="s1">)&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;print(job_id, flush=True)&#39;</span><span class="p">,</span>
+        <span class="p">]</span></div>
+
+<div class="viewcode-block" id="JobLibCodeGen.show_jobs"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.JobLibCodeGen.show_jobs">[docs]</a>    <span class="k">def</span> <span class="nf">show_jobs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">username</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">all_jobs</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_code</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;job_lib.show_jobs(</span><span class="si">{</span><span class="n">username</span><span class="si">!r}</span><span class="s1">, </span><span class="si">{</span><span class="n">all_jobs</span><span class="si">}</span><span class="s1">)&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="JobLibCodeGen.cancel_jobs"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.JobLibCodeGen.cancel_jobs">[docs]</a>    <span class="k">def</span> <span class="nf">cancel_jobs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">job_ids</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_code</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;job_lib.cancel_jobs(</span><span class="si">{</span><span class="n">job_ids</span><span class="si">!r}</span><span class="s1">)&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="JobLibCodeGen.tail_logs"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.JobLibCodeGen.tail_logs">[docs]</a>    <span class="k">def</span> <span class="nf">tail_logs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">job_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_code</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="sa">f</span><span class="s1">&#39;log_dir, status = job_lib.log_dir(</span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1">)&#39;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s1">&#39;log_lib.tail_logs(</span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1">, log_dir, status)&#39;</span><span class="p">,</span>
+        <span class="p">]</span></div>
+
+<div class="viewcode-block" id="JobLibCodeGen.get_log_path"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.JobLibCodeGen.get_log_path">[docs]</a>    <span class="k">def</span> <span class="nf">get_log_path</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">job_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_code</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="sa">f</span><span class="s1">&#39;log_dir, _ = job_lib.log_dir(</span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1">)&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;print(log_dir, flush=True)&#39;</span><span class="p">,</span>
+        <span class="p">]</span></div>
+
+<div class="viewcode-block" id="JobLibCodeGen.build"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.JobLibCodeGen.build">[docs]</a>    <span class="k">def</span> <span class="nf">build</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="n">code</span> <span class="o">=</span> <span class="s1">&#39;;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_code</span><span class="p">)</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s1">&#39;python3 -u -c </span><span class="si">{</span><span class="n">code</span><span class="si">!r}</span><span class="s1">&#39;</span></div></div>
+</pre></div>
+
+              </div>
+              
+            
+                <!-- Previous / next buttons -->
+<div class='prev-next-area'>
+</div>
+            
+        </div>
+    </div>
+    <footer class="footer">
+  <p>
+    
+      By the Sky authors<br/>
+    
+        &copy; Copyright 2022, Sky Team.<br/>
+  </p>
+</footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="../../../_static/js/index.be7d3bbb2ef33a8344ce.js"></script>
+
+  </body>
+</html>

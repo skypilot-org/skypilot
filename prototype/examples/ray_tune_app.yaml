@@ -1,0 +1,17 @@
+resources:
+    cloud: aws
+    accelerators:
+        V100: 1
+
+num_nodes: 2
+
+workdir: examples/ray_tune_examples
+
+setup: |
+    pip3 install --upgrade pip
+    pip3 install ray[tune] pytorch-lightning==1.4.9 lightning-bolts torchvision
+
+run: |
+    if [ "${SKY_NODE_RANK}" == "0" ]; then
+        python3 tune_ptl_example.py
+    fi

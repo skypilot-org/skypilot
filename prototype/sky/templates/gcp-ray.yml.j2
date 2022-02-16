@@ -1,0 +1,147 @@
+# Ref: https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/gcp/example-gpu-docker.yaml
+# FIXME: use variables for project_id, zone.
+
+cluster_name: {{cluster_name}}
+
+# The maximum number of workers nodes to launch in addition to the head node.
+max_workers: {{num_nodes - 1}}
+idle_timeout_minutes: 60
+
+provider:
+  # We use a custom node provider for GCP to support instance stop and reuse.
+  type: external  # type: gcp
+  module: sky.skylet.providers.gcp.GCPNodeProvider
+  region: {{region}}
+  availability_zone: {{zones}}
+  project_id: intercloud-320520  # Globally unique project id
+  # Keep (otherwise cannot reuse when re-provisioning).
+  # teardown(terminate=True) will override this.
+  cache_stopped_nodes: True
+
+auth:
+  ssh_user: ubuntu
+
+available_node_types:
+  ray_head_default:
+    resources: {}
+    node_config:
+      machineType: {{instance_type}}
+      disks:
+        - boot: true
+          autoDelete: true
+          type: PERSISTENT
+          initializeParams:
+            diskSizeGb: 256
+            # See https://cloud.google.com/deep-learning-vm/docs/images
+{%- if gpu is none %}
+            sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu
+{%- else %}
+            sourceImage: projects/deeplearning-platform-release/global/images/family/common-cu110
+      guestAccelerators:
+        - acceleratorType: projects/intercloud-320520/zones/{{zones}}/acceleratorTypes/{{gpu}}
+          acceleratorCount: {{gpu_count}}
+      metadata:
+        items:
+          - key: install-nvidia-driver
+            value: "True"
+      scheduling:
+{%- if use_spot %}
+        - preemptible: true
+{%- endif %}
+        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+{%- endif %}
+{% if num_nodes > 1 %}
+  ray_worker_default:
+    min_workers: {{num_nodes - 1}}
+    max_workers: {{num_nodes - 1}}
+    resources: {}
+    node_config:
+      machineType: {{instance_type}}
+      disks:
+        - boot: true
+          autoDelete: true
+          type: PERSISTENT
+          initializeParams:
+            diskSizeGb: 256
+            # See https://cloud.google.com/deep-learning-vm/docs/images
+{%- if gpu is none %}
+            sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu
+{%- else %}
+            sourceImage: projects/deeplearning-platform-release/global/images/family/common-cu110
+      guestAccelerators:
+        - acceleratorType: projects/intercloud-320520/zones/{{zones}}/acceleratorTypes/{{gpu}}
+          acceleratorCount: {{gpu_count}}
+      metadata:
+        items:
+          - key: install-nvidia-driver
+            value: "True"
+      scheduling:
+{%- if use_spot %}
+        - preemptible: true
+{%- endif %}
+        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+{%- endif %}
+{%- endif %}
+
+head_node_type: ray_head_default
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "{{sky_remote_path}}": "{{sky_local_path}}",
+{%- if workdir is not none %}
+  "~/sky_workdir": "{{workdir}}",
+{%- endif %}
+{%- if setup_sh_path is not none %}
+  "/tmp/setup.sh": "{{setup_sh_path}}",
+{%- endif %}
+{%- for remote_path, local_path in file_mounts.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
+}
+
+{%- if initialization_commands is not none %}
+initialization_commands:
+{%- for cmd in initialization_commands %}
+  - {{cmd}}
+{%- endfor %}
+{%- else %}
+initialization_commands: []
+{%- endif %}
+
+# Patterns for files to exclude when running rsync up or rsync down
+rsync_exclude: []
+# rsync_exclude:
+#   - "**/.git"
+#   - "**/.git/**"
+
+rsync_filter:
+  - .gitignore
+
+# List of shell commands to run to set up nodes.
+setup_commands:
+  # _gang_schedule_ray_up() requires first two lines; do not modify.
+  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
+  - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
+{%- if setup_sh_path is not none %}
+  - cd ~/sky_workdir && bash /tmp/setup.sh  # FIXME: /tmp is volatile.
+{%- endif %}
+
+# Command to start ray on the head node. You don't need to change this.
+head_start_ray_commands:
+  - ray stop; ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
+
+{%- if num_nodes > 1 %}
+worker_start_ray_commands:
+  - ray stop; ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
+{%- else %}
+worker_start_ray_commands: []
+{%- endif %}
+
+head_node: {}
+worker_nodes: {}
+
+# These fields are required for external cloud providers.
+head_setup_commands: []
+worker_setup_commands: []
+cluster_synced_files: []
+file_mounts_sync_continuously: False

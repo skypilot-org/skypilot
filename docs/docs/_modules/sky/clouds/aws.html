@@ -1,0 +1,505 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sky.clouds.aws &#8212; Sky 0.1 documentation</title>
+    
+  <link href="../../../_static/css/theme.css" rel="stylesheet">
+  <link href="../../../_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
+
+    
+  <link rel="stylesheet"
+    href="../../../_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../../_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../../_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/sphinx-book-theme.css?digest=84ace793992934648b4de8eed757e5a2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.css" />
+    
+  <link rel="preload" as="script" href="../../../_static/js/index.be7d3bbb2ef33a8344ce.js">
+
+    <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/togglebutton.js"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="None">
+    
+
+    <!-- Google Analytics -->
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<!-- Checkboxes to toggle the left sidebar -->
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle navigation sidebar">
+<label class="overlay" for="__navigation">
+    <div class="visually-hidden">Toggle navigation sidebar</div>
+</label>
+<div class="col-12 col-md-3 bd-sidebar site-navigation " id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="../../../index.html">
+      
+      
+      
+      <h1 class="site-logo" id="site-title">Sky 0.1 documentation</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="../../../search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search the docs ..." aria-label="Search the docs ..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item active">
+        <p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Getting Started
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/installation.html">
+   Installation
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/quickstart.html">
+   Quickstart
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/tutorial.html">
+   Tutorial: DNN Training
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Use Cases
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/auto-failover.html">
+   Auto-provisioning GPUs
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/iterative-dev-project.html">
+   Iteratively Developing a Project
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/launch-many-tasks-vm.html">
+   Launch Multiple Tasks on a VM
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/grid-search.html">
+   Grid Search
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/distributed-jobs.html">
+   Distributed Jobs on many VMs
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Reference Documentation
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/interactive-nodes.html">
+   Interactive Nodes
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/iterative-development.html">
+   Iterative Development
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/storage.html">
+   Storage
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/job-queue.html">
+   Job Queue
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Theme by the <a href="https://ebp.jupyterbook.org">Executable Book Project</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<!-- This is an invisible pixel that we watch to see if we've scrolled. -->
+<div class="sbt-scroll-pixel-helper"></div>
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            <div class="topbar-left">
+                
+                <label class="nav-toggle-button" for="__navigation">
+                    <div class="visually-hidden">Toggle navigation</div>
+                    <i class="fas fa-bars"></i>
+                </label>
+                
+            </div>
+            
+            <!-- Source interaction buttons -->
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show noprint">
+            
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+            <!-- Table of contents that is only displayed when printing the page -->
+            <div id="jb-print-docs-body" class="onlyprint">
+                <h1></h1>
+                <!-- Table of contents -->
+                <div id="print-main-content">
+                    <div id="jb-print-toc">
+                        
+                    </div>
+                </div>
+            </div>
+            
+              <div>
+                
+  <h1>Source code for sky.clouds.aws</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Amazon Web Services.&quot;&quot;&quot;</span>
+<span class="kn">import</span> <span class="nn">copy</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">subprocess</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Iterator</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">TYPE_CHECKING</span>
+
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">clouds</span>
+<span class="kn">from</span> <span class="nn">sky.clouds</span> <span class="kn">import</span> <span class="n">service_catalog</span>
+
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="c1"># renaming to avoid shadowing variables</span>
+    <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">resources</span> <span class="k">as</span> <span class="n">resources_lib</span>
+
+
+<span class="k">def</span> <span class="nf">_run_output</span><span class="p">(</span><span class="n">cmd</span><span class="p">):</span>
+    <span class="n">proc</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span>
+                          <span class="n">shell</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                          <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                          <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
+                          <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">proc</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="AWS"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS">[docs]</a><span class="k">class</span> <span class="nc">AWS</span><span class="p">(</span><span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Amazon Web Services.&quot;&quot;&quot;</span>
+
+    <span class="n">_REPR</span> <span class="o">=</span> <span class="s1">&#39;AWS&#39;</span>
+    <span class="n">_regions</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">clouds</span><span class="o">.</span><span class="n">Region</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="c1">#### Regions/Zones ####</span>
+
+<div class="viewcode-block" id="AWS.regions"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.regions">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">regions</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_regions</span><span class="p">:</span>
+            <span class="c1"># https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/</span>
+            <span class="bp">cls</span><span class="o">.</span><span class="n">_regions</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="c1"># TODO: troubles launching AMIs.</span>
+                <span class="c1"># clouds.Region(&#39;us-west-1&#39;).set_zones([</span>
+                <span class="c1">#     clouds.Zone(&#39;us-west-1a&#39;),</span>
+                <span class="c1">#     clouds.Zone(&#39;us-west-1b&#39;),</span>
+                <span class="c1"># ]),</span>
+                <span class="n">clouds</span><span class="o">.</span><span class="n">Region</span><span class="p">(</span><span class="s1">&#39;us-west-2&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">set_zones</span><span class="p">([</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-west-2a&#39;</span><span class="p">),</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-west-2b&#39;</span><span class="p">),</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-west-2c&#39;</span><span class="p">),</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-west-2d&#39;</span><span class="p">),</span>
+                <span class="p">]),</span>
+                <span class="n">clouds</span><span class="o">.</span><span class="n">Region</span><span class="p">(</span><span class="s1">&#39;us-east-2&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">set_zones</span><span class="p">([</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-east-2a&#39;</span><span class="p">),</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-east-2b&#39;</span><span class="p">),</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-east-2c&#39;</span><span class="p">),</span>
+                <span class="p">]),</span>
+                <span class="n">clouds</span><span class="o">.</span><span class="n">Region</span><span class="p">(</span><span class="s1">&#39;us-east-1&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">set_zones</span><span class="p">([</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-east-1a&#39;</span><span class="p">),</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-east-1b&#39;</span><span class="p">),</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-east-1c&#39;</span><span class="p">),</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-east-1d&#39;</span><span class="p">),</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-east-1e&#39;</span><span class="p">),</span>
+                    <span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">(</span><span class="s1">&#39;us-east-1f&#39;</span><span class="p">),</span>
+                <span class="p">]),</span>
+            <span class="p">]</span>
+        <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_regions</span></div>
+
+<div class="viewcode-block" id="AWS.region_zones_provision_loop"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.region_zones_provision_loop">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">region_zones_provision_loop</span><span class="p">(</span>
+        <span class="bp">cls</span><span class="p">,</span>
+        <span class="o">*</span><span class="p">,</span>
+        <span class="n">instance_type</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">accelerators</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">use_spot</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterator</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">clouds</span><span class="o">.</span><span class="n">Region</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="n">clouds</span><span class="o">.</span><span class="n">Zone</span><span class="p">]]]:</span>
+        <span class="c1"># AWS provisioner can handle batched requests, so yield all zones under</span>
+        <span class="c1"># each region.</span>
+        <span class="k">del</span> <span class="n">accelerators</span>  <span class="c1"># unused</span>
+
+        <span class="k">if</span> <span class="n">instance_type</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># fallback to manually specified region/zones</span>
+            <span class="n">regions</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="n">regions</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">regions</span> <span class="o">=</span> <span class="n">service_catalog</span><span class="o">.</span><span class="n">get_region_zones_for_instance_type</span><span class="p">(</span>
+                <span class="n">instance_type</span><span class="p">,</span> <span class="n">use_spot</span><span class="p">,</span> <span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">region</span> <span class="ow">in</span> <span class="n">regions</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">region</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s1">&#39;us-west-1&#39;</span><span class="p">:</span>
+                <span class="c1"># TODO: troubles launching AMIs.</span>
+                <span class="k">continue</span>
+            <span class="k">yield</span> <span class="n">region</span><span class="p">,</span> <span class="n">region</span><span class="o">.</span><span class="n">zones</span></div>
+
+<div class="viewcode-block" id="AWS.get_default_ami"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_default_ami">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">get_default_ami</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">region_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="c1"># AWS Deep Learning AMI (Ubuntu 18.04), version 50.0</span>
+        <span class="c1"># https://aws.amazon.com/marketplace/pp/prodview-x5nivojpquy6y</span>
+        <span class="n">amis</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;us-east-1&#39;</span><span class="p">:</span> <span class="s1">&#39;ami-0e3c68b57d50caf64&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;us-east-2&#39;</span><span class="p">:</span> <span class="s1">&#39;ami-0ae79682024fe31cd&#39;</span><span class="p">,</span>
+            <span class="c1"># &#39;us-west-1&#39;: &#39;TODO: cannot launch&#39;,</span>
+            <span class="s1">&#39;us-west-2&#39;</span><span class="p">:</span> <span class="s1">&#39;ami-0050625d58fa27b6d&#39;</span><span class="p">,</span>
+        <span class="p">}</span>
+        <span class="k">assert</span> <span class="n">region_name</span> <span class="ow">in</span> <span class="n">amis</span><span class="p">,</span> <span class="n">region_name</span>
+        <span class="k">return</span> <span class="n">amis</span><span class="p">[</span><span class="n">region_name</span><span class="p">]</span></div>
+
+    <span class="c1">#### Normal methods ####</span>
+
+<div class="viewcode-block" id="AWS.instance_type_to_hourly_cost"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.instance_type_to_hourly_cost">[docs]</a>    <span class="k">def</span> <span class="nf">instance_type_to_hourly_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">instance_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">use_spot</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">service_catalog</span><span class="o">.</span><span class="n">get_hourly_cost</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span>
+                                               <span class="n">region</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                                               <span class="n">use_spot</span><span class="o">=</span><span class="n">use_spot</span><span class="p">,</span>
+                                               <span class="n">clouds</span><span class="o">=</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AWS.accelerators_to_hourly_cost"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.accelerators_to_hourly_cost">[docs]</a>    <span class="k">def</span> <span class="nf">accelerators_to_hourly_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">accelerators</span><span class="p">):</span>
+        <span class="c1"># AWS includes accelerators as part of the instance type.  Implementing</span>
+        <span class="c1"># this is also necessary for e.g., the instance may have 4 GPUs, while</span>
+        <span class="c1"># the task specifies to use 1 GPU.</span>
+        <span class="k">return</span> <span class="mi">0</span></div>
+
+<div class="viewcode-block" id="AWS.get_egress_cost"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_egress_cost">[docs]</a>    <span class="k">def</span> <span class="nf">get_egress_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">num_gigabytes</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
+        <span class="c1"># In general, query this from the cloud:</span>
+        <span class="c1">#   https://aws.amazon.com/s3/pricing/</span>
+        <span class="c1"># NOTE: egress from US East (Ohio).</span>
+        <span class="c1"># NOTE: Not accurate as the pricing tier is based on cumulative monthly</span>
+        <span class="c1"># usage.</span>
+        <span class="k">if</span> <span class="n">num_gigabytes</span> <span class="o">&gt;</span> <span class="mi">150</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mf">0.05</span> <span class="o">*</span> <span class="n">num_gigabytes</span>
+        <span class="n">cost</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">if</span> <span class="n">num_gigabytes</span> <span class="o">&gt;=</span> <span class="mi">50</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">:</span>
+            <span class="n">cost</span> <span class="o">+=</span> <span class="p">(</span><span class="n">num_gigabytes</span> <span class="o">-</span> <span class="mi">50</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">)</span> <span class="o">*</span> <span class="mf">0.07</span>
+            <span class="n">num_gigabytes</span> <span class="o">-=</span> <span class="mi">50</span> <span class="o">*</span> <span class="mi">1024</span>
+
+        <span class="k">if</span> <span class="n">num_gigabytes</span> <span class="o">&gt;=</span> <span class="mi">10</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">:</span>
+            <span class="n">cost</span> <span class="o">+=</span> <span class="p">(</span><span class="n">num_gigabytes</span> <span class="o">-</span> <span class="mi">10</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">)</span> <span class="o">*</span> <span class="mf">0.085</span>
+            <span class="n">num_gigabytes</span> <span class="o">-=</span> <span class="mi">10</span> <span class="o">*</span> <span class="mi">1024</span>
+
+        <span class="k">if</span> <span class="n">num_gigabytes</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">cost</span> <span class="o">+=</span> <span class="p">(</span><span class="n">num_gigabytes</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="mf">0.09</span>
+
+        <span class="n">cost</span> <span class="o">+=</span> <span class="mf">0.0</span>
+        <span class="k">return</span> <span class="n">cost</span></div>
+
+    <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">AWS</span><span class="o">.</span><span class="n">_REPR</span>
+
+<div class="viewcode-block" id="AWS.is_same_cloud"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.is_same_cloud">[docs]</a>    <span class="k">def</span> <span class="nf">is_same_cloud</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">AWS</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AWS.get_default_instance_type"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_default_instance_type">[docs]</a>    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">get_default_instance_type</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="c1"># 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.</span>
+        <span class="k">return</span> <span class="s1">&#39;m4.2xlarge&#39;</span></div>
+
+    <span class="c1"># TODO: factor the following three methods, as they are the same logic</span>
+    <span class="c1"># between Azure and AWS.</span>
+
+<div class="viewcode-block" id="AWS.get_accelerators_from_instance_type"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_accelerators_from_instance_type">[docs]</a>    <span class="k">def</span> <span class="nf">get_accelerators_from_instance_type</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">instance_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]:</span>
+        <span class="k">return</span> <span class="n">service_catalog</span><span class="o">.</span><span class="n">get_accelerators_from_instance_type</span><span class="p">(</span>
+            <span class="n">instance_type</span><span class="p">,</span> <span class="n">clouds</span><span class="o">=</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AWS.make_deploy_resources_variables"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.make_deploy_resources_variables">[docs]</a>    <span class="k">def</span> <span class="nf">make_deploy_resources_variables</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                                        <span class="n">resources</span><span class="p">:</span> <span class="s1">&#39;resources_lib.Resources&#39;</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">resources</span>
+        <span class="c1"># r.accelerators is cleared but .instance_type encodes the info.</span>
+        <span class="n">acc_dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_accelerators_from_instance_type</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">instance_type</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">acc_dict</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">custom_resources</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">acc_dict</span><span class="p">,</span> <span class="n">separators</span><span class="o">=</span><span class="p">(</span><span class="s1">&#39;,&#39;</span><span class="p">,</span> <span class="s1">&#39;:&#39;</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">custom_resources</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;instance_type&#39;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">instance_type</span><span class="p">,</span>
+            <span class="s1">&#39;custom_resources&#39;</span><span class="p">:</span> <span class="n">custom_resources</span><span class="p">,</span>
+            <span class="s1">&#39;use_spot&#39;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">use_spot</span><span class="p">,</span>
+        <span class="p">}</span></div>
+
+<div class="viewcode-block" id="AWS.get_feasible_launchable_resources"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_feasible_launchable_resources">[docs]</a>    <span class="k">def</span> <span class="nf">get_feasible_launchable_resources</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                                          <span class="n">resources</span><span class="p">:</span> <span class="s1">&#39;resources_lib.Resources&#39;</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">resources</span><span class="o">.</span><span class="n">instance_type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">resources</span><span class="o">.</span><span class="n">is_launchable</span><span class="p">(),</span> <span class="n">resources</span>
+            <span class="c1"># Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).</span>
+            <span class="n">resources</span><span class="o">.</span><span class="n">accelerators</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">resources</span><span class="p">]</span>
+
+        <span class="k">def</span> <span class="nf">_make</span><span class="p">(</span><span class="n">instance_type</span><span class="p">):</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="n">copy</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="n">resources</span><span class="p">)</span>
+            <span class="n">r</span><span class="o">.</span><span class="n">cloud</span> <span class="o">=</span> <span class="n">AWS</span><span class="p">()</span>
+            <span class="n">r</span><span class="o">.</span><span class="n">instance_type</span> <span class="o">=</span> <span class="n">instance_type</span>
+            <span class="c1"># Setting this to None as AWS doesn&#39;t separately bill / attach the</span>
+            <span class="c1"># accelerators.  Billed as part of the VM type.</span>
+            <span class="n">r</span><span class="o">.</span><span class="n">accelerators</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">r</span><span class="p">]</span>
+
+        <span class="c1"># Currently, handle a filter on accelerators only.</span>
+        <span class="n">accelerators</span> <span class="o">=</span> <span class="n">resources</span><span class="o">.</span><span class="n">get_accelerators</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">accelerators</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># No requirements to filter, so just return a default VM type.</span>
+            <span class="k">return</span> <span class="n">_make</span><span class="p">(</span><span class="n">AWS</span><span class="o">.</span><span class="n">get_default_instance_type</span><span class="p">())</span>
+
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">accelerators</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="n">resources</span>
+        <span class="n">acc</span><span class="p">,</span> <span class="n">acc_count</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">accelerators</span><span class="o">.</span><span class="n">items</span><span class="p">())[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">instance_type</span> <span class="o">=</span> <span class="n">service_catalog</span><span class="o">.</span><span class="n">get_instance_type_for_accelerator</span><span class="p">(</span>
+            <span class="n">acc</span><span class="p">,</span> <span class="n">acc_count</span><span class="p">,</span> <span class="n">clouds</span><span class="o">=</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">instance_type</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[]</span>
+        <span class="k">return</span> <span class="n">_make</span><span class="p">(</span><span class="n">instance_type</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="AWS.check_credentials"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.check_credentials">[docs]</a>    <span class="k">def</span> <span class="nf">check_credentials</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+        <span class="sd">&quot;&quot;&quot;Checks if the user has access credentials to this cloud.&quot;&quot;&quot;</span>
+        <span class="n">help_str</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">    For more info: &#39;</span>
+            <span class="s1">&#39;https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html&#39;</span>  <span class="c1"># pylint: disable=line-too-long</span>
+        <span class="p">)</span>
+        <span class="c1"># This file is required because it will be synced to remote VMs for</span>
+        <span class="c1"># `aws` to access private storage buckets.</span>
+        <span class="c1"># `aws configure list` does not guarantee this file exists.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="s1">&#39;~/.aws/credentials&#39;</span><span class="p">)):</span>
+            <span class="k">return</span> <span class="p">(</span><span class="kc">False</span><span class="p">,</span>
+                    <span class="s1">&#39;~/.aws/credentials does not exist. Run `aws configure`.&#39;</span> <span class="o">+</span>
+                    <span class="n">help_str</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">output</span> <span class="o">=</span> <span class="n">_run_output</span><span class="p">(</span><span class="s1">&#39;aws configure list&#39;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">CalledProcessError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;AWS CLI not installed properly.&#39;</span>
+        <span class="c1"># Configured correctly, the AWS output should look like this:</span>
+        <span class="c1">#   ...</span>
+        <span class="c1">#   access_key     ******************** shared-credentials-file</span>
+        <span class="c1">#   secret_key     ******************** shared-credentials-file</span>
+        <span class="c1">#   ...</span>
+        <span class="c1"># Otherwise, one or both keys will show as &#39;&lt;not set&gt;&#39;.</span>
+        <span class="n">lines</span> <span class="o">=</span> <span class="n">output</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;AWS CLI output invalid.&#39;</span>
+        <span class="n">access_key_ok</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">secret_key_ok</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">[</span><span class="mi">2</span><span class="p">:]:</span>
+            <span class="n">line</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">lstrip</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;access_key&#39;</span><span class="p">):</span>
+                <span class="k">if</span> <span class="s1">&#39;&lt;not set&gt;&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">line</span><span class="p">:</span>
+                    <span class="n">access_key_ok</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">elif</span> <span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;secret_key&#39;</span><span class="p">):</span>
+                <span class="k">if</span> <span class="s1">&#39;&lt;not set&gt;&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">line</span><span class="p">:</span>
+                    <span class="n">secret_key_ok</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">if</span> <span class="n">access_key_ok</span> <span class="ow">and</span> <span class="n">secret_key_ok</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;AWS credentials not set. Run `aws configure`.&#39;</span> <span class="o">+</span> <span class="n">help_str</span></div>
+
+<div class="viewcode-block" id="AWS.get_credential_file_mounts"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_credential_file_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">get_credential_file_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;~/.aws&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.aws&#39;</span><span class="p">}</span></div></div>
+</pre></div>
+
+              </div>
+              
+            
+                <!-- Previous / next buttons -->
+<div class='prev-next-area'>
+</div>
+            
+        </div>
+    </div>
+    <footer class="footer">
+  <p>
+    
+      By the Sky authors<br/>
+    
+        &copy; Copyright 2022, Sky Team.<br/>
+  </p>
+</footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="../../../_static/js/index.be7d3bbb2ef33a8344ce.js"></script>
+
+  </body>
+</html>

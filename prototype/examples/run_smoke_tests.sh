@@ -14,8 +14,8 @@ python "$DIR"/example_app.py
 # Simple apps.
 time sky launch -c min "$DIR"/minimal.yaml
 sky down min &
-time sky launch -c sc "$DIR"/source_check.yaml
-sky down sc &
+time sky launch -c env "$DIR"/env_check.yaml
+sky down env &
 time sky launch -c fm "$DIR"/using_file_mounts.yaml
 sky down fm &
 
@@ -85,3 +85,19 @@ sky queue mjq
 sky down mjq &
 
 wait
+
+## ---------- Testing GCP start and stop instances ----------
+sky launch -c gcp-start-stop "$DIR"/gcp_start_stop.yaml
+sky exec gcp-start-stop "$DIR"/gcp_start_stop.yaml
+sky stop gcp-start-stop
+sky start gcp-start-stop
+sky exec gcp-start-stop "$DIR"/gcp_start_stop.yaml
+sky down gcp-start-stop
+
+## ---------- Testing Azure start and stop instances ----------
+sky launch -c azure-start-stop "$DIR"/azure_start_stop.yaml
+sky exec azure-start-stop "$DIR"/azure_start_stop.yaml
+sky stop azure-start-stop
+sky start azure-start-stop
+sky exec azure-start-stop "$DIR"/azure_start_stop.yaml
+sky down azure-start-stop

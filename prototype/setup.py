@@ -24,7 +24,9 @@ install_requires = [
 
 extras_require = {
     'aws': ['awscli==1.22.17', 'boto3'],
-    'azure': ['azure-cli'],
+    # ray <= 1.9.1 requires an older version of azure-cli. We can get rid of
+    # this version requirement once ray 1.10 is adopted as our local version.
+    'azure': ['azure-cli==2.30.0'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
 }
 

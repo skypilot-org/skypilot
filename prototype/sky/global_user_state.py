@@ -7,6 +7,7 @@ Concepts:
   interact with a cluster.
 """
 import enum
+import json
 import os
 import pathlib
 import pickle
@@ -16,6 +17,9 @@ import time
 from typing import Any, Dict, List, Optional
 
 from sky import backends
+from sky import clouds
+
+_ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
@@ -23,17 +27,16 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
 
-try:
-    _CURSOR.execute('select * from clusters limit 0')
-except sqlite3.OperationalError:
-    # Tables do not exist, create them.
-    _CURSOR.execute("""\
-      CREATE TABLE clusters (
-        name TEXT PRIMARY KEY,
-        launched_at INTEGER,
-        handle BLOB,
-        last_use TEXT,
-        status TEXT)""")
+_CURSOR.execute("""\
+    CREATE TABLE IF NOT EXISTS clusters (
+    name TEXT PRIMARY KEY,
+    lauched_at INTEGER,
+    handle BLOB,
+    last_use TEXT,
+    status TEXT)""")
+_CURSOR.execute("""\
+    CREATE TABLE IF NOT EXISTS config (
+    key TEXT PRIMARY KEY, value TEXT)""")
 
 _CONN.commit()
 
@@ -127,7 +130,7 @@ def get_handle_from_cluster_name(
 
 
 def get_cluster_name_from_handle(
-    cluster_handle: backends.Backend.ResourceHandle,) -> Optional[str]:
+        cluster_handle: backends.Backend.ResourceHandle) -> Optional[str]:
     handle = pickle.dumps(cluster_handle)
     rows = _CURSOR.execute('SELECT name FROM clusters WHERE handle=(?)',
                            (handle,))
@@ -140,6 +143,18 @@ def get_status_from_cluster_name(cluster_name: str) -> ClusterStatus:
                            (cluster_name,))
     for (status,) in rows:
         return ClusterStatus[status]
+
+
+def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
+    _CURSOR.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
+        status.value,
+        cluster_name,
+    ))
+    count = _CURSOR.rowcount
+    _CONN.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 def get_clusters() -> List[Dict[str, Any]]:
@@ -155,3 +170,19 @@ def get_clusters() -> List[Dict[str, Any]]:
             'status': ClusterStatus[status],
         })
     return records
+
+
+def get_enabled_clouds() -> List[clouds.Cloud]:
+    rows = _CURSOR.execute('SELECT value FROM config WHERE key = ?',
+                           (_ENABLED_CLOUDS_KEY,))
+    ret = []
+    for (value,) in rows:
+        ret = json.loads(value)
+        break
+    return [clouds.from_str(cloud) for cloud in ret]
+
+
+def set_enabled_clouds(enabled_clouds: List[str]) -> None:
+    _CURSOR.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
+                    (_ENABLED_CLOUDS_KEY, json.dumps(enabled_clouds)))
+    _CONN.commit()

@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 import zlib
+import shutil
 
 import jinja2
 
@@ -23,6 +24,7 @@ from sky import clouds
 from sky import sky_logging
 from sky import resources
 from sky import task as task_lib
+from sky.cloud_adaptors import azure
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -30,11 +32,12 @@ logger = sky_logging.init_logger(__name__)
 Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.2'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
+SKY_USER_FILE_PATH = '~/.sky/generated'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
@@ -43,27 +46,15 @@ RESET_BOLD = '\033[0m'
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
 
-run_with_log = log_lib.run_with_log
 
-
-def get_rel_path(path: str) -> str:
-    cwd = os.getcwd()
-    common = os.path.commonpath([path, cwd])
-    return os.path.relpath(path, common)
-
-
-def _fill_template(template_path: str,
+def _fill_template(template_name: str,
                    variables: Dict,
                    output_path: Optional[str] = None) -> str:
     """Create a file from a Jinja template and return the filename."""
-    assert template_path.endswith('.j2'), template_path
-
-    def to_absolute(path):
-        if not os.path.isabs(path):
-            path = os.path.join(os.path.dirname(sky.__root_dir__), path)
-        return path
-
-    template_path = to_absolute(template_path)
+    assert template_name.endswith('.j2'), template_name
+    template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
     template = jinja2.Template(template)
@@ -72,10 +63,10 @@ def _fill_template(template_path: str,
         assert 'cluster_name' in variables, 'cluster_name is required.'
         cluster_name = variables['cluster_name']
         output_path = pathlib.Path(
-            template_path).parents[0] / 'user' / f'{cluster_name}.yml'
+            os.path.expanduser(SKY_USER_FILE_PATH)) / f'{cluster_name}.yml'
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
-    output_path = to_absolute(output_path)
+    output_path = os.path.abspath(output_path)
     with open(output_path, 'w') as fout:
         fout.write(content)
     return output_path
@@ -236,6 +227,10 @@ class SSHConfigHelper(object):
                         host_name = ip
                         logger.warning(f'Using {ip} to identify host instead.')
                     break
+        else:
+            config = ['\n']
+            with open(config_path, 'w') as f:
+                f.writelines(config)
 
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
                                             username, key_path)
@@ -251,7 +246,7 @@ class SSHConfigHelper(object):
                 f.write('\n')
         else:
             with open(config_path, 'a') as f:
-                if not config[-1].endswith('\n'):
+                if len(config) > 0 and not config[-1].endswith('\n'):
                     # Add trailing newline if it doesn't exist.
                     f.write('\n')
                 f.write('\n')
@@ -330,6 +325,11 @@ def _build_sky_wheel() -> pathlib.Path:
     norm_path = str(package_root) + os.sep
     username = getpass.getuser()
     wheel_dir = pathlib.Path(tempfile.gettempdir()) / f'sky_wheels_{username}'
+    # remove old wheels
+    for f in wheel_dir.glob('sky-*.whl'):
+        f.unlink()
+    # remove pip wheels build directory, otherwise we may include outdated code
+    shutil.rmtree(str(package_root / 'build'), ignore_errors=True)
     try:
         # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
         # the output.
@@ -399,6 +399,22 @@ def write_cluster_config(task: task_lib.Task,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
+    azure_subscription_id = None
+    if isinstance(cloud, clouds.Azure):
+        if dryrun:
+            azure_subscription_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+        else:
+            try:
+                azure_subscription_id = azure.get_subscription_id()
+                if not azure_subscription_id:
+                    raise ValueError  # The error message will be replaced.
+            except Exception:
+                raise RuntimeError(
+                    'Fail to get subscription id from azure cli. '
+                    'Make sure you have login in and fix it with this Azure '
+                    'cli command: "az account set -s <subscription_id>".'
+                ) from None
+
     assert cluster_name is not None
 
     setup_sh_path = None
@@ -464,6 +480,9 @@ def write_cluster_config(task: task_lib.Task,
                 'zones': ','.join(zones),
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
+                # Azure only.
+                'azure_subscription_id': azure_subscription_id,
+                'resource_group': f'{cluster_name}-{region}',
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Sky remote utils.
@@ -480,20 +499,21 @@ def write_cluster_config(task: task_lib.Task,
         if tpu_name is None:
             tpu_name = cluster_name
 
+        user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
         scripts = tuple(
             _fill_template(
-                path,
+                template_name,
                 dict(resources_vars, **{
                     'zones': ','.join(zones),
                     'tpu_name': tpu_name,
                 }),
                 # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in config/user/ to be consistent with
-                # cluster yamls.
-                output_path=path.replace('.sh.j2', f'.{cluster_name}.sh').
-                replace('config/', 'config/user/'),
-            ) for path in
-            ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
+                # different TPUs.  Put in ~/.sky/generated/ to be consistent
+                # with cluster yamls.
+                output_path=os.path.join(user_file_dir, template_name).replace(
+                    '.sh.j2', f'.{cluster_name}.sh'),
+            ) for template_name in
+            ['gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'])
         config_dict['tpu-create-script'] = scripts[0]
         config_dict['tpu-delete-script'] = scripts[1]
         config_dict['tpu_name'] = tpu_name
@@ -765,22 +785,10 @@ def check_local_gpus() -> bool:
     Returns True if nvidia-smi is installed, false if not.
     """
     p = subprocess.run(['which', 'nvidia-smi'],
-                       capture_output=True,
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
                        check=False)
     return p.returncode == 0
-
-
-def make_task_bash_script(codegen: str) -> str:
-    script = [
-        textwrap.dedent(f"""\
-                #!/bin/bash
-                source ~/.bashrc
-                . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
-                cd {SKY_REMOTE_WORKDIR}"""),
-        codegen,
-    ]
-    script = '\n'.join(script)
-    return script
 
 
 def generate_cluster_name():
@@ -789,9 +797,9 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def get_backend_from_handle(handle: backends.Backend.ResourceHandle):
-    """
-    Get a backend object from a handle.
+def get_backend_from_handle(
+        handle: backends.Backend.ResourceHandle) -> backends.Backend:
+    """Gets a Backend object corresponding to a handle.
 
     Inspects handle type to infer the backend used for the resource.
     """

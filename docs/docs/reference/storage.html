@@ -1,0 +1,342 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Storage &#8212; Sky 0.1 documentation</title>
+    
+  <link href="../_static/css/theme.css" rel="stylesheet">
+  <link href="../_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
+
+    
+  <link rel="stylesheet"
+    href="../_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-book-theme.css?digest=84ace793992934648b4de8eed757e5a2" />
+    <link rel="stylesheet" type="text/css" href="../_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.css" />
+    
+  <link rel="preload" as="script" href="../_static/js/index.be7d3bbb2ef33a8344ce.js">
+
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/togglebutton.js"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Job Queue" href="job-queue.html" />
+    <link rel="prev" title="Iterative Development" href="iterative-development.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="None">
+    
+
+    <!-- Google Analytics -->
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<!-- Checkboxes to toggle the left sidebar -->
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle navigation sidebar">
+<label class="overlay" for="__navigation">
+    <div class="visually-hidden">Toggle navigation sidebar</div>
+</label>
+<div class="col-12 col-md-3 bd-sidebar site-navigation " id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="../index.html">
+      
+      
+      
+      <h1 class="site-logo" id="site-title">Sky 0.1 documentation</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="../search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search the docs ..." aria-label="Search the docs ..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item active">
+        <p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Getting Started
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../getting-started/installation.html">
+   Installation
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../getting-started/quickstart.html">
+   Quickstart
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../getting-started/tutorial.html">
+   Tutorial: DNN Training
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Use Cases
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../examples/auto-failover.html">
+   Auto-provisioning GPUs
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../examples/iterative-dev-project.html">
+   Iteratively Developing a Project
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../examples/launch-many-tasks-vm.html">
+   Launch Multiple Tasks on a VM
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../examples/grid-search.html">
+   Grid Search
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../examples/distributed-jobs.html">
+   Distributed Jobs on many VMs
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Reference Documentation
+ </span>
+</p>
+<ul class="current nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="interactive-nodes.html">
+   Interactive Nodes
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="iterative-development.html">
+   Iterative Development
+  </a>
+ </li>
+ <li class="toctree-l1 current active">
+  <a class="current reference internal" href="#">
+   Storage
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="job-queue.html">
+   Job Queue
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Theme by the <a href="https://ebp.jupyterbook.org">Executable Book Project</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<!-- This is an invisible pixel that we watch to see if we've scrolled. -->
+<div class="sbt-scroll-pixel-helper"></div>
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            <div class="topbar-left">
+                
+                <label class="nav-toggle-button" for="__navigation">
+                    <div class="visually-hidden">Toggle navigation</div>
+                    <i class="fas fa-bars"></i>
+                </label>
+                
+            </div>
+            
+<div class="dropdown-buttons-trigger">
+    <button id="dropdown-buttons-trigger" class="btn btn-secondary topbarbtn" aria-label="Download this page"><i
+            class="fas fa-download"></i></button>
+
+    <div class="dropdown-buttons">
+        <!-- ipynb file if we had a myst markdown file -->
+        
+        <!-- Download raw file -->
+        <a class="dropdown-buttons" href="../_sources/reference/storage.rst.txt"><button type="button"
+                class="btn btn-secondary topbarbtn" title="Download source file" data-toggle="tooltip"
+                data-placement="left">.rst</button></a>
+        <!-- Download PDF via print -->
+        <button type="button" id="download-print" class="btn btn-secondary topbarbtn" title="Print to PDF"
+                onclick="printPdf(this)" data-toggle="tooltip" data-placement="left">.pdf</button>
+    </div>
+</div>
+
+            <!-- Source interaction buttons -->
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show noprint">
+            
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+            <!-- Table of contents that is only displayed when printing the page -->
+            <div id="jb-print-docs-body" class="onlyprint">
+                <h1>Storage</h1>
+                <!-- Table of contents -->
+                <div id="print-main-content">
+                    <div id="jb-print-toc">
+                        
+                    </div>
+                </div>
+            </div>
+            
+              <div>
+                
+  <div class="section" id="storage">
+<h1>Storage<a class="headerlink" href="#storage" title="Permalink to this headline">¶</a></h1>
+<p>A Sky Storage object represents an abstract data store containing large data files
+required by the task. Compared to file_mounts, storage is faster and
+can persist across runs, requiring fewer uploads from your local machine.
+A storage object is used by “mounting” it to a task. On mounting, the data
+specified in the source becomes available at the destination mount_path.
+Please note that sky.Storage does not guarantee preservation of file
+permissions - you may need to set file permissions during task execution. These are specified
+in Sky YAML configurations with <code class="code docutils literal notranslate"><span class="pre">storage</span></code>.</p>
+<p>Behind the scenes, storage automatically uploads all data in the source
+to a backing object store in a particular cloud (S3/GCS/Azure Blob).</p>
+<p>Storage mounts specify where the storage objects defined above should be
+mounted when the task is run. These are specified with <code class="code docutils literal notranslate"><span class="pre">storage_mounts</span></code>.</p>
+<p>In YAML form, this looks something like:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">storage</span><span class="p">:</span><span class="w"></span>
+<span class="w">   </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">imagenet-bucket</span><span class="w"></span>
+<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">source</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">s3://imagenet-bucket</span><span class="w"></span>
+<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">force_stores</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">s3</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># Could be [s3, gcs], [gcs] default: None</span><span class="w"></span>
+<span class="w">      </span><span class="nt">persistent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span><span class="w"></span>
+
+<span class="nt">storage_mounts</span><span class="p">:</span><span class="w"></span>
+<span class="w">   </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">storage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">imagenet-bucket</span><span class="w"></span>
+<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">mount_path</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/tmp/imagenet</span><span class="w"></span>
+
+<span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">   </span><span class="no">. $(conda info --base)/etc/profile.d/conda.sh</span><span class="w"></span>
+<span class="w">   </span><span class="no">pip install --upgrade pip</span><span class="w"></span>
+<span class="w">   </span><span class="no">conda activate resnet</span><span class="w"></span>
+<span class="w">   </span><span class="no">if [ $? -eq 0 ]; then</span><span class="w"></span>
+<span class="w">      </span><span class="no">echo &quot;conda env exists&quot;</span><span class="w"></span>
+<span class="w">   </span><span class="no">else</span><span class="w"></span>
+<span class="w">      </span><span class="no">conda create -n resnet python=3.7 -y</span><span class="w"></span>
+<span class="w">      </span><span class="no">conda activate resnet</span><span class="w"></span>
+<span class="w">      </span><span class="no">pip install tensorflow==2.4.0 pyyaml</span><span class="w"></span>
+<span class="w">      </span><span class="no">cd models</span><span class="w"></span>
+<span class="w">      </span><span class="no">pip install -e .</span><span class="w"></span>
+<span class="w">   </span><span class="no">fi</span><span class="w"></span>
+
+<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">   </span><span class="no">. $(conda info --base)/etc/profile.d/conda.sh</span><span class="w"></span>
+<span class="w">   </span><span class="no">conda activate resnet</span><span class="w"></span>
+<span class="w">   </span><span class="no">export XLA_FLAGS=&#39;--xla_gpu_cuda_data_dir=/usr/local/cuda/&#39;</span><span class="w"></span>
+<span class="w">   </span><span class="no">python -u models/official/resnet/resnet_main.py --use_tpu=False \</span><span class="w"></span>
+<span class="w">         </span><span class="no">--mode=train --train_batch_size=256 --train_steps=250 \</span><span class="w"></span>
+<span class="w">         </span><span class="no">--iterations_per_loop=125 \</span><span class="w"></span>
+<span class="w">         </span><span class="no">--data_dir=/tmp/imagenet \</span><span class="w"></span>
+<span class="w">         </span><span class="no">--model_dir=resnet-model-dir \</span><span class="w"></span>
+<span class="w">         </span><span class="no">--amp --xla --loss_scale=128</span><span class="w"></span>
+</pre></div>
+</div>
+</div>
+
+
+              </div>
+              
+            
+                <!-- Previous / next buttons -->
+<div class='prev-next-area'> 
+    <a class='left-prev' id="prev-link" href="iterative-development.html" title="previous page">
+        <i class="fas fa-angle-left"></i>
+        <div class="prev-next-info">
+            <p class="prev-next-subtitle">previous</p>
+            <p class="prev-next-title">Iterative Development</p>
+        </div>
+    </a>
+    <a class='right-next' id="next-link" href="job-queue.html" title="next page">
+    <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Job Queue</p>
+    </div>
+    <i class="fas fa-angle-right"></i>
+    </a>
+</div>
+            
+        </div>
+    </div>
+    <footer class="footer">
+  <p>
+    
+      By the Sky authors<br/>
+    
+        &copy; Copyright 2022, Sky Team.<br/>
+  </p>
+</footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="../_static/js/index.be7d3bbb2ef33a8344ce.js"></script>
+
+  </body>
+</html>

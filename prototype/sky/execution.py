@@ -19,6 +19,7 @@ from typing import Any, List, Optional
 
 import sky
 from sky import backends
+from sky import init
 from sky import global_user_state
 from sky import sky_logging
 from sky import optimizer
@@ -35,9 +36,8 @@ class Stage(enum.Enum):
     PROVISION = 1
     SYNC_WORKDIR = 2
     SYNC_FILE_MOUNTS = 3
-    PRE_EXEC = 4
-    EXEC = 5
-    TEARDOWN = 6
+    EXEC = 4
+    TEARDOWN = 5
 
 
 def _execute(dag: sky.Dag,
@@ -84,14 +84,20 @@ def _execute(dag: sky.Dag,
             cluster_name)
         cluster_exists = existing_handle is not None
 
+    backend = backend if backend is not None else backends.CloudVmRayBackend()
+
     if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
         if task.best_resources is None:
             # TODO: fix this for the situation where number of requested
             # accelerators is not an integer.
-            dag = sky.optimize(dag, minimize=optimize_target)
+            if isinstance(backend, backends.CloudVmRayBackend):
+                # TODO: adding this check because docker backend on a
+                # no-credential machine should not enter optimize(), which
+                # would directly error out ('No cloud is enabled...').  Fix by
+                # moving sky init checks out of optimize()?
+                dag = sky.optimize(dag, minimize=optimize_target)
             task = dag.tasks[0]  # Keep: dag may have been deep-copied.
 
-    backend = backend if backend is not None else backends.CloudVmRayBackend()
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
     if task.storage_mounts is not None:
@@ -111,11 +117,16 @@ def _execute(dag: sky.Dag,
                 # sync all files.  They are mitigations because if one manually
                 # changes the cluster AND passing in a handle, the cluster still
                 # would not be updated correctly.
+                prev_file_mounts = task.file_mounts
+                if prev_file_mounts is not None:
+                    prev_file_mounts = dict(task.file_mounts)
+                task.update_file_mounts(init.get_cloud_credential_file_mounts())
                 handle = backend.provision(task,
                                            task.best_resources,
                                            dryrun=dryrun,
                                            stream_logs=stream_logs,
                                            cluster_name=cluster_name)
+                task.set_file_mounts(prev_file_mounts)
 
         if dryrun:
             logger.info('Dry run finished.')
@@ -128,9 +139,6 @@ def _execute(dag: sky.Dag,
         if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.get_cloud_to_remote_file_mounts())
-
-        if stages is None or Stage.PRE_EXEC in stages:
-            backend.run_post_setup(handle, task.post_setup_fn)
 
         if stages is None or Stage.EXEC in stages:
             try:

@@ -36,12 +36,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
-import pandas as pd
 import pendulum
 
 import sky
 from sky import backends
 from sky import global_user_state
+from sky import init as sky_init
 from sky import sky_logging
 from sky import clouds
 from sky.backends import backend as backend_lib
@@ -79,7 +79,7 @@ def _truncate_long_string(s: str, max_length: int = 50) -> str:
         return s
     splits = s.split(' ')
     if len(splits[0]) > max_length:
-        return splits[0][:max_length] + '...'
+        return splits[0][:max_length] + '...'  # Use '…'?
     # Truncate on word boundary.
     i = 0
     total = 0
@@ -279,6 +279,7 @@ def _create_and_ssh_into_node(
             run='',
         )
         task.set_resources(resources)
+        task.update_file_mounts(sky_init.get_cloud_credential_file_mounts())
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -852,7 +853,7 @@ def stop(
     CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
     supplied, the latter takes precedence.
 
-    Limitation: this currently only works for AWS clusters.
+    Limitation: this currently only works for AWS/GCP non-spot clusters.
 
     Examples:
 
@@ -911,7 +912,8 @@ def start(clusters: Tuple[str]):
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
-            #    (currently, only AWS clusters can be in this state)
+            #    (currently, only AWS/GCP non-spot clusters can be in this
+            #    state)
             #
             #  UP - skipped, see below
             #
@@ -1000,26 +1002,7 @@ def down(
       # Tear down all existing clusters.
       sky down -a
     """
-    names = []
-    # TODO(suquark,zongheng): try using aws cli to terminate stopped nodes:
-    # aws ec2 describe-instances --query 'Reservations[].Instances[].InstanceId' --filters "Name=tag:ray-cluster-name,Values=<cluster_name>" --output text  # pylint: disable=line-too-long
-    # Tricky cases to test:
-    #   - Does the above only query the default region? Test on a stopped
-    #     cluster in a non-default region.
-    #   - Is it possible for Ray to launch a same-name cluster on two regions?
-    #     If so, what happens with the above call?
-    # Tracked by Issue #240.
-    for cluster_name in clusters:
-        cluster_status = global_user_state.get_status_from_cluster_name(
-            cluster_name)
-        if cluster_status == global_user_state.ClusterStatus.STOPPED:
-            click.secho(
-                f'Cannot terminate cluster {cluster_name!r} because it '
-                'is STOPPED. To fix: manually terminate in the cloud\'s '
-                'UI. (This limitation will be addressed in the future.)',
-                fg='yellow')
-        else:
-            names.append(cluster_name)
+    names = clusters
     if not all and not names:
         return
     _terminate_or_stop_clusters(names, apply_to_all=all, terminate=True)
@@ -1055,7 +1038,9 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         name = record['name']
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
-        if handle.launched_resources.use_spot and not terminate:
+        if (isinstance(backend, backends.CloudVmRayBackend) and
+                handle.launched_resources.use_spot and not terminate):
+            # TODO(suquark): enable GCP+spot to be stopped in the future.
             click.secho(
                 f'Stopping cluster {name}... skipped, because spot instances '
                 'may lose attached volumes. ',
@@ -1291,6 +1276,17 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
 
 
 @cli.command()
+def init():
+    """Determines a set of clouds that Sky will use.
+
+    It checks access credentials for AWS, Azure and GCP. Sky tasks will only
+    run in clouds that you have access to. After configuring access for a
+    cloud, rerun `sky init` to reflect the changes.
+    """
+    sky_init.init()
+
+
+@cli.command()
 @click.argument('gpu_name', required=False)
 @click.option('--all',
               '-a',
@@ -1346,6 +1342,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name)
+        import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = util_lib.create_table([
                 'GPU',

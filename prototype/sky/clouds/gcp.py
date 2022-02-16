@@ -1,10 +1,13 @@
 """Google Cloud Platform."""
 import copy
 import json
+import os
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from google import auth
+
 from sky import clouds
-from sky.clouds.service_catalog import gcp_catalog
+from sky.clouds import service_catalog
 
 
 class GCP(clouds.Cloud):
@@ -116,8 +119,8 @@ class GCP(clouds.Cloud):
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
             acc_count = list(accelerators.values())[0]
-            regions = gcp_catalog.get_region_zones_for_accelerators(
-                acc, acc_count, use_spot)
+            regions = service_catalog.get_region_zones_for_accelerators(
+                acc, acc_count, use_spot, clouds='gcp')
 
         for region in regions:
             for zone in region.zones:
@@ -133,7 +136,9 @@ class GCP(clouds.Cloud):
     def accelerators_to_hourly_cost(self, accelerators):
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
-        return gcp_catalog.get_accelerator_hourly_cost(acc, acc_count)
+        return service_catalog.get_accelerator_hourly_cost(acc,
+                                                           acc_count,
+                                                           clouds='gcp')
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -197,7 +202,8 @@ class GCP(clouds.Cloud):
             assert resources.is_launchable(), resources
             return [resources]
         if resources.accelerators is not None:
-            available_accelerators = gcp_catalog.list_accelerators()
+            available_accelerators = service_catalog.list_accelerators(
+                gpus_only=False, clouds='gcp')
             for acc, acc_count in resources.accelerators.items():
                 if acc not in available_accelerators or not any(
                         acc_count == info.accelerator_count
@@ -217,3 +223,37 @@ class GCP(clouds.Cloud):
         # GCP handles accelerators separately from regular instance types,
         # hence return none here.
         return None
+
+    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud."""
+        try:
+            # These files are required because they will be synced to remote
+            # VMs for `gsutil` to access private storage buckets.
+            # `auth.default()` does not guarantee these files exist.
+            for file in [
+                    '~/.config/gcloud/access_tokens.db',
+                    '~/.config/gcloud/credentials.db'
+            ]:
+                assert os.path.isfile(os.path.expanduser(file))
+            # Calling `auth.default()` ensures the GCP client library works,
+            # which is used by Ray Autoscaler to launch VMs.
+            auth.default()
+        except (AssertionError, auth.exceptions.DefaultCredentialsError):
+            # See also: https://stackoverflow.com/a/53307505/1165051
+            return False, (
+                'GCP credentials not set. Run the following commands:\n    '
+                # This authenticates the CLI to make `gsutil` work:
+                '$ gcloud auth login\n    '
+                '$ gcloud config set project <proj>\n    '
+                # These two commands setup the client library to make
+                # Ray Autoscaler work:
+                '$ gcloud auth application-default login\n    '
+                '$ gcloud auth application-default set-quota-project '
+                '<proj>\n    '
+                'For more info: '
+                'https://googleapis.dev/python/google-api-core/latest/auth.html'
+            )
+        return True, None
+
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        return {'~/.config/gcloud': '~/.config/gcloud'}
