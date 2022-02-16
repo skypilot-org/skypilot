@@ -486,6 +486,7 @@ def write_cluster_config(task: task_lib.Task,
                 'aws_default_ami': aws_default_ami,
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
+                'resource_group': f'{cluster_name}-{region}',
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Sky remote utils.
