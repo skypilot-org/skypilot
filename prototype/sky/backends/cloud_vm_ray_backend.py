@@ -66,12 +66,11 @@ def _check_cluster_name_is_valid(cluster_name: str) -> None:
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
-        clouds.AWS: 'config/aws-ray.yml.j2',
-        clouds.Azure: 'config/azure-ray.yml.j2',
-        clouds.GCP: 'config/gcp-ray.yml.j2',
+        clouds.AWS: 'aws-ray.yml.j2',
+        clouds.Azure: 'azure-ray.yml.j2',
+        clouds.GCP: 'gcp-ray.yml.j2',
     }
-    path = cloud_to_template[type(cloud)]
-    return os.path.join(os.path.dirname(sky.__root_dir__), path)
+    return cloud_to_template[type(cloud)]
 
 
 def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
