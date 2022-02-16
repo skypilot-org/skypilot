@@ -1,8 +1,6 @@
-from typing import Dict, List
+from typing import List, Optional
 
 import sky
-
-IPAddr = str
 
 with sky.Dag() as dag:
     # Total Nodes, INCLUDING Head Node
@@ -10,32 +8,28 @@ with sky.Dag() as dag:
 
     # The setup command.  Will be run under the working directory.
     setup = 'echo \"alias python=python3\" >> ~/.bashrc && pip3 install --upgrade pip && \
-      git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet && \
+      [ -d pytorch-distributed-resnet ] || \
+      (git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet && \
       cd pytorch-distributed-resnet && pip3 install -r requirements.txt && \
       mkdir -p data  && mkdir -p saved_models && cd data && \
       wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz && \
-      tar -xvzf cifar-10-python.tar.gz'
+      tar -xvzf cifar-10-python.tar.gz)'
 
     # The command to run.  Will be run under the working directory.
-    def run_fn(ip_list: List[IPAddr]) -> Dict[IPAddr, str]:
-        run_dict = {}
+    def run_fn(node_rank: int, ip_list: List[str]) -> Optional[str]:
         num_nodes = len(ip_list)
-        master_ip = ip_list[0]
-        for i, ip in enumerate(ip_list):
-            run_dict[ip] = f'cd pytorch-distributed-resnet && \
-            python3 -m torch.distributed.launch --nproc_per_node=1 \
-            --nnodes={num_nodes} --node_rank={i} --master_addr=\"{master_ip}\" \
-            --master_port=8008 resnet_ddp.py --num_epochs 20'
-
-        return run_dict
-
-    run = run_fn
+        return f"""\
+        cd pytorch-distributed-resnet
+        python3 -m torch.distributed.launch --nproc_per_node=1 \
+        --nnodes={num_nodes} --node_rank={node_rank} --master_addr={ip_list[0]} \
+        --master_port=8008 resnet_ddp.py --num_epochs 20
+        """
 
     train = sky.Task(
         'train',
         setup=setup,
         num_nodes=num_nodes,
-        run=run,
+        run=run_fn,
     )
 
     train.set_resources({
@@ -55,4 +49,5 @@ with sky.Dag() as dag:
         # sky.Resources(sky.AWS(), accelerators='V100'),
     })
 
-sky.launch(dag)
+sky.launch(dag, cluster_name='dtf')
+# sky.exec(dag, cluster_name='dtf')

@@ -1,0 +1,672 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sky.optimizer &#8212; Sky 0.1 documentation</title>
+    
+  <link href="../../_static/css/theme.css" rel="stylesheet">
+  <link href="../../_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
+
+    
+  <link rel="stylesheet"
+    href="../../_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-book-theme.css?digest=84ace793992934648b4de8eed757e5a2" />
+    <link rel="stylesheet" type="text/css" href="../../_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/mystnb.css" />
+    
+  <link rel="preload" as="script" href="../../_static/js/index.be7d3bbb2ef33a8344ce.js">
+
+    <script data-url_root="../../" id="documentation_options" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/togglebutton.js"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="None">
+    
+
+    <!-- Google Analytics -->
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<!-- Checkboxes to toggle the left sidebar -->
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle navigation sidebar">
+<label class="overlay" for="__navigation">
+    <div class="visually-hidden">Toggle navigation sidebar</div>
+</label>
+<div class="col-12 col-md-3 bd-sidebar site-navigation " id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="../../index.html">
+      
+      
+      
+      <h1 class="site-logo" id="site-title">Sky 0.1 documentation</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="../../search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search the docs ..." aria-label="Search the docs ..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item active">
+        <p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Getting Started
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../getting-started/installation.html">
+   Installation
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../getting-started/quickstart.html">
+   Quickstart
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../getting-started/tutorial.html">
+   Tutorial: DNN Training
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Use Cases
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../examples/auto-failover.html">
+   Auto-provisioning GPUs
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../examples/iterative-dev-project.html">
+   Iteratively Developing a Project
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../examples/launch-many-tasks-vm.html">
+   Launch Multiple Tasks on a VM
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../examples/grid-search.html">
+   Grid Search
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../examples/distributed-jobs.html">
+   Distributed Jobs on many VMs
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Reference Documentation
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../reference/interactive-nodes.html">
+   Interactive Nodes
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../reference/iterative-development.html">
+   Iterative Development
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../reference/storage.html">
+   Storage
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../reference/job-queue.html">
+   Job Queue
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Theme by the <a href="https://ebp.jupyterbook.org">Executable Book Project</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<!-- This is an invisible pixel that we watch to see if we've scrolled. -->
+<div class="sbt-scroll-pixel-helper"></div>
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            <div class="topbar-left">
+                
+                <label class="nav-toggle-button" for="__navigation">
+                    <div class="visually-hidden">Toggle navigation</div>
+                    <i class="fas fa-bars"></i>
+                </label>
+                
+            </div>
+            
+            <!-- Source interaction buttons -->
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show noprint">
+            
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+            <!-- Table of contents that is only displayed when printing the page -->
+            <div id="jb-print-docs-body" class="onlyprint">
+                <h1></h1>
+                <!-- Table of contents -->
+                <div id="print-main-content">
+                    <div id="jb-print-toc">
+                        
+                    </div>
+                </div>
+            </div>
+            
+              <div>
+                
+  <h1>Source code for sky.optimizer</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;The Sky optimizer: assigns best resources to user tasks.&quot;&quot;&quot;</span>
+<span class="kn">import</span> <span class="nn">collections</span>
+<span class="kn">import</span> <span class="nn">enum</span>
+<span class="kn">import</span> <span class="nn">pprint</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">tabulate</span>
+
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">clouds</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">dag</span> <span class="k">as</span> <span class="n">dag_lib</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">exceptions</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">global_user_state</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">init</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">resources</span> <span class="k">as</span> <span class="n">resources_lib</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">sky_logging</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">task</span> <span class="k">as</span> <span class="n">task_lib</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">sky_logging</span><span class="o">.</span><span class="n">init_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="n">Dag</span> <span class="o">=</span> <span class="n">dag_lib</span><span class="o">.</span><span class="n">Dag</span>
+<span class="n">Resources</span> <span class="o">=</span> <span class="n">resources_lib</span><span class="o">.</span><span class="n">Resources</span>
+<span class="n">Task</span> <span class="o">=</span> <span class="n">task_lib</span><span class="o">.</span><span class="n">Task</span>
+
+<span class="n">_DUMMY_SOURCE_NAME</span> <span class="o">=</span> <span class="s1">&#39;sky-dummy-source&#39;</span>
+<span class="n">_DUMMY_SINK_NAME</span> <span class="o">=</span> <span class="s1">&#39;sky-dummy-sink&#39;</span>
+
+
+<span class="c1"># Constants: minimize what target?</span>
+<div class="viewcode-block" id="OptimizeTarget"><a class="viewcode-back" href="../../sky.html#sky.optimizer.OptimizeTarget">[docs]</a><span class="k">class</span> <span class="nc">OptimizeTarget</span><span class="p">(</span><span class="n">enum</span><span class="o">.</span><span class="n">Enum</span><span class="p">):</span>
+    <span class="n">COST</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">TIME</span> <span class="o">=</span> <span class="mi">1</span></div>
+
+
+<div class="viewcode-block" id="Optimizer"><a class="viewcode-back" href="../../sky.html#sky.optimizer.Optimizer">[docs]</a><span class="k">class</span> <span class="nc">Optimizer</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;The Sky optimizer: assigns best resources to user tasks.&quot;&quot;&quot;</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_egress_cost</span><span class="p">(</span><span class="n">src_cloud</span><span class="p">:</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">,</span> <span class="n">dst_cloud</span><span class="p">:</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">,</span>
+                     <span class="n">gigabytes</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">src_cloud</span><span class="p">,</span> <span class="n">DummyCloud</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span>
+                <span class="n">dst_cloud</span><span class="p">,</span> <span class="n">DummyCloud</span><span class="p">):</span>
+            <span class="k">return</span> <span class="mf">0.0</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">src_cloud</span><span class="o">.</span><span class="n">is_same_cloud</span><span class="p">(</span><span class="n">dst_cloud</span><span class="p">):</span>
+            <span class="n">egress_cost</span> <span class="o">=</span> <span class="n">src_cloud</span><span class="o">.</span><span class="n">get_egress_cost</span><span class="p">(</span><span class="n">num_gigabytes</span><span class="o">=</span><span class="n">gigabytes</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">egress_cost</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">if</span> <span class="n">egress_cost</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;  </span><span class="si">{</span><span class="n">src_cloud</span><span class="si">}</span><span class="s1"> -&gt; </span><span class="si">{</span><span class="n">dst_cloud</span><span class="si">}</span><span class="s1"> egress cost: &#39;</span>
+                        <span class="sa">f</span><span class="s1">&#39;$</span><span class="si">{</span><span class="n">egress_cost</span><span class="si">}</span><span class="s1"> for </span><span class="si">{</span><span class="n">gigabytes</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1"> GB&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">egress_cost</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_egress_time</span><span class="p">(</span><span class="n">src_cloud</span><span class="p">:</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">,</span> <span class="n">dst_cloud</span><span class="p">:</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">,</span>
+                     <span class="n">gigabytes</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns estimated egress time in seconds.&quot;&quot;&quot;</span>
+        <span class="c1"># FIXME: estimate bandwidth between each cloud-region pair.</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">src_cloud</span><span class="p">,</span> <span class="n">DummyCloud</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span>
+                <span class="n">dst_cloud</span><span class="p">,</span> <span class="n">DummyCloud</span><span class="p">):</span>
+            <span class="k">return</span> <span class="mf">0.0</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">src_cloud</span><span class="o">.</span><span class="n">is_same_cloud</span><span class="p">(</span><span class="n">dst_cloud</span><span class="p">):</span>
+            <span class="c1"># 10Gbps is close to the average of observed b/w from S3</span>
+            <span class="c1"># (us-west,east-2) to GCS us-central1, assuming highly sharded files</span>
+            <span class="c1"># (~128MB per file).</span>
+            <span class="n">bandwidth_gbps</span> <span class="o">=</span> <span class="mi">10</span>
+            <span class="n">egress_time</span> <span class="o">=</span> <span class="n">gigabytes</span> <span class="o">*</span> <span class="mi">8</span> <span class="o">/</span> <span class="n">bandwidth_gbps</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;  </span><span class="si">{</span><span class="n">src_cloud</span><span class="si">}</span><span class="s1"> -&gt; </span><span class="si">{</span><span class="n">dst_cloud</span><span class="si">}</span><span class="s1"> egress time: &#39;</span>
+                        <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">egress_time</span><span class="si">}</span><span class="s1"> s for </span><span class="si">{</span><span class="n">gigabytes</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1"> GB&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">egress_time</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">return</span> <span class="n">egress_time</span>
+
+<div class="viewcode-block" id="Optimizer.optimize"><a class="viewcode-back" href="../../sky.html#sky.optimizer.Optimizer.optimize">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">optimize</span><span class="p">(</span>
+            <span class="n">dag</span><span class="p">:</span> <span class="n">Dag</span><span class="p">,</span>
+            <span class="n">minimize</span><span class="o">=</span><span class="n">OptimizeTarget</span><span class="o">.</span><span class="n">COST</span><span class="p">,</span>
+            <span class="n">blocked_launchable_resources</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Resources</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="c1"># This function is effectful: mutates every node in &#39;dag&#39; by setting</span>
+        <span class="c1"># node.best_resources if it is None.</span>
+        <span class="n">dag</span> <span class="o">=</span> <span class="n">Optimizer</span><span class="o">.</span><span class="n">_add_dummy_source_sink_nodes</span><span class="p">(</span><span class="n">dag</span><span class="p">)</span>
+        <span class="n">optimized_dag</span><span class="p">,</span> <span class="n">unused_best_plan</span> <span class="o">=</span> <span class="n">Optimizer</span><span class="o">.</span><span class="n">_optimize_cost</span><span class="p">(</span>
+            <span class="n">dag</span><span class="p">,</span>
+            <span class="n">minimize_cost</span><span class="o">=</span><span class="n">minimize</span> <span class="o">==</span> <span class="n">OptimizeTarget</span><span class="o">.</span><span class="n">COST</span><span class="p">,</span>
+            <span class="n">blocked_launchable_resources</span><span class="o">=</span><span class="n">blocked_launchable_resources</span><span class="p">)</span>
+        <span class="n">optimized_dag</span> <span class="o">=</span> <span class="n">Optimizer</span><span class="o">.</span><span class="n">_remove_dummy_source_sink_nodes</span><span class="p">(</span><span class="n">optimized_dag</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">optimized_dag</span></div>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_add_dummy_source_sink_nodes</span><span class="p">(</span><span class="n">dag</span><span class="p">:</span> <span class="n">Dag</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Adds special Source and Sink nodes.</span>
+
+<span class="sd">        The two special nodes are for conveniently handling cases such as</span>
+
+<span class="sd">          { A, B } --&gt; C (multiple sources)</span>
+
+<span class="sd">        or</span>
+
+<span class="sd">          A --&gt; { B, C } (multiple sinks)</span>
+
+<span class="sd">        Adds new edges:</span>
+<span class="sd">            Source --&gt; for all node with in degree 0</span>
+<span class="sd">            For all node with out degree 0 --&gt; Sink</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">graph</span> <span class="o">=</span> <span class="n">dag</span><span class="o">.</span><span class="n">get_graph</span><span class="p">()</span>
+        <span class="n">zero_indegree_nodes</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">zero_outdegree_nodes</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">node</span><span class="p">,</span> <span class="n">in_degree</span> <span class="ow">in</span> <span class="n">graph</span><span class="o">.</span><span class="n">in_degree</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">in_degree</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">zero_indegree_nodes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">node</span><span class="p">,</span> <span class="n">out_degree</span> <span class="ow">in</span> <span class="n">graph</span><span class="o">.</span><span class="n">out_degree</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">out_degree</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">zero_outdegree_nodes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+
+        <span class="k">def</span> <span class="nf">make_dummy</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+            <span class="n">dummy</span> <span class="o">=</span> <span class="n">Task</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+            <span class="n">dummy</span><span class="o">.</span><span class="n">set_resources</span><span class="p">({</span><span class="n">DummyResources</span><span class="p">(</span><span class="n">DummyCloud</span><span class="p">(),</span> <span class="kc">None</span><span class="p">)})</span>
+            <span class="n">dummy</span><span class="o">.</span><span class="n">set_time_estimator</span><span class="p">(</span><span class="k">lambda</span> <span class="n">_</span><span class="p">:</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">dummy</span>
+
+        <span class="k">with</span> <span class="n">dag</span><span class="p">:</span>
+            <span class="n">source</span> <span class="o">=</span> <span class="n">make_dummy</span><span class="p">(</span><span class="n">_DUMMY_SOURCE_NAME</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">real_source_node</span> <span class="ow">in</span> <span class="n">zero_indegree_nodes</span><span class="p">:</span>
+                <span class="n">source</span> <span class="o">&gt;&gt;</span> <span class="n">real_source_node</span>  <span class="c1"># pylint: disable=pointless-statement</span>
+            <span class="n">sink</span> <span class="o">=</span> <span class="n">make_dummy</span><span class="p">(</span><span class="n">_DUMMY_SINK_NAME</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">real_sink_node</span> <span class="ow">in</span> <span class="n">zero_outdegree_nodes</span><span class="p">:</span>
+                <span class="n">real_sink_node</span> <span class="o">&gt;&gt;</span> <span class="n">sink</span>  <span class="c1"># pylint: disable=pointless-statement</span>
+        <span class="k">return</span> <span class="n">dag</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_remove_dummy_source_sink_nodes</span><span class="p">(</span><span class="n">dag</span><span class="p">:</span> <span class="n">Dag</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Removes special Source and Sink nodes.&quot;&quot;&quot;</span>
+        <span class="n">source</span> <span class="o">=</span> <span class="p">[</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">dag</span><span class="o">.</span><span class="n">tasks</span> <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">_DUMMY_SOURCE_NAME</span><span class="p">]</span>
+        <span class="n">sink</span> <span class="o">=</span> <span class="p">[</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">dag</span><span class="o">.</span><span class="n">tasks</span> <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">_DUMMY_SINK_NAME</span><span class="p">]</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">source</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">sink</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dag</span><span class="o">.</span><span class="n">tasks</span>
+        <span class="n">dag</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">source</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">dag</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">sink</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="k">return</span> <span class="n">dag</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_egress_cost_or_time</span><span class="p">(</span><span class="n">minimize_cost</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">parent</span><span class="p">:</span> <span class="n">Task</span><span class="p">,</span>
+                             <span class="n">parent_resources</span><span class="p">:</span> <span class="n">Resources</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="n">Task</span><span class="p">,</span>
+                             <span class="n">resources</span><span class="p">:</span> <span class="n">Resources</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Computes the egress cost or time depending on &#39;minimize_cost&#39;.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">parent_resources</span><span class="o">.</span><span class="n">cloud</span><span class="p">,</span> <span class="n">DummyCloud</span><span class="p">):</span>
+            <span class="c1"># Special case.  The current &#39;node&#39; is a real</span>
+            <span class="c1"># source node, and its input may be on a different</span>
+            <span class="c1"># cloud from &#39;resources&#39;.</span>
+            <span class="k">if</span> <span class="n">node</span><span class="o">.</span><span class="n">get_inputs</span><span class="p">()</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># A Task may have no inputs specified.</span>
+                <span class="k">return</span> <span class="mi">0</span>
+            <span class="n">src_cloud</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">get_inputs_cloud</span><span class="p">()</span>
+            <span class="n">nbytes</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">get_estimated_inputs_size_gigabytes</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">src_cloud</span> <span class="o">=</span> <span class="n">parent_resources</span><span class="o">.</span><span class="n">cloud</span>
+            <span class="n">nbytes</span> <span class="o">=</span> <span class="n">parent</span><span class="o">.</span><span class="n">get_estimated_outputs_size_gigabytes</span><span class="p">()</span>
+        <span class="n">dst_cloud</span> <span class="o">=</span> <span class="n">resources</span><span class="o">.</span><span class="n">cloud</span>
+        <span class="k">if</span> <span class="n">minimize_cost</span><span class="p">:</span>
+            <span class="n">fn</span> <span class="o">=</span> <span class="n">Optimizer</span><span class="o">.</span><span class="n">_egress_cost</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">fn</span> <span class="o">=</span> <span class="n">Optimizer</span><span class="o">.</span><span class="n">_egress_time</span>
+        <span class="k">return</span> <span class="n">fn</span><span class="p">(</span><span class="n">src_cloud</span><span class="p">,</span> <span class="n">dst_cloud</span><span class="p">,</span> <span class="n">nbytes</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_optimize_cost</span><span class="p">(</span>
+        <span class="n">dag</span><span class="p">:</span> <span class="n">Dag</span><span class="p">,</span>
+        <span class="n">minimize_cost</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+        <span class="n">blocked_launchable_resources</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Resources</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="kn">import</span> <span class="nn">networkx</span> <span class="k">as</span> <span class="nn">nx</span>  <span class="c1"># pylint: disable=import-outside-toplevel</span>
+        <span class="c1"># TODO: The output of this function is useful. Should generate a</span>
+        <span class="c1"># text plan and print to both console and a log file.</span>
+        <span class="n">graph</span> <span class="o">=</span> <span class="n">dag</span><span class="o">.</span><span class="n">get_graph</span><span class="p">()</span>
+        <span class="n">topo_order</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">nx</span><span class="o">.</span><span class="n">topological_sort</span><span class="p">(</span><span class="n">graph</span><span class="p">))</span>
+
+        <span class="c1"># FIXME: write to (node, cloud) as egress cost depends only on clouds.</span>
+        <span class="c1"># node -&gt; {resources -&gt; best estimated cost}</span>
+        <span class="n">dp_best_cost</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="nb">dict</span><span class="p">)</span>
+        <span class="c1"># d[node][resources][parent] = (best parent resources, best parent cost)</span>
+        <span class="n">dp_point_backs</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span>
+            <span class="k">lambda</span><span class="p">:</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="nb">dict</span><span class="p">))</span>
+
+        <span class="k">for</span> <span class="n">node_i</span><span class="p">,</span> <span class="n">node</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">topo_order</span><span class="p">):</span>
+            <span class="c1"># Base case: a special source node.</span>
+            <span class="k">if</span> <span class="n">node_i</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">dp_best_cost</span><span class="p">[</span><span class="n">node</span><span class="p">][</span><span class="nb">list</span><span class="p">(</span><span class="n">node</span><span class="o">.</span><span class="n">get_resources</span><span class="p">())[</span><span class="mi">0</span><span class="p">]]</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="k">continue</span>
+            <span class="c1"># Don&#39;t print for the last node, Sink.</span>
+            <span class="n">do_print</span> <span class="o">=</span> <span class="n">node_i</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">topo_order</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">do_print</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;#### </span><span class="si">{}</span><span class="s1"> ####&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">node</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">node_i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">topo_order</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="c1"># Convert partial resource labels to launchable resources.</span>
+                <span class="n">launchable_resources</span> <span class="o">=</span> \
+                    <span class="n">_fill_in_launchable_resources</span><span class="p">(</span>
+                        <span class="n">node</span><span class="p">,</span>
+                        <span class="n">blocked_launchable_resources</span>
+                    <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># Dummy sink node.</span>
+                <span class="n">launchable_resources</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">get_resources</span><span class="p">()</span>
+                <span class="n">launchable_resources</span> <span class="o">=</span> <span class="p">{</span>
+                    <span class="nb">list</span><span class="p">(</span><span class="n">node</span><span class="o">.</span><span class="n">get_resources</span><span class="p">())[</span><span class="mi">0</span><span class="p">]:</span> <span class="n">launchable_resources</span>
+                <span class="p">}</span>
+            <span class="n">num_resources</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">node</span><span class="o">.</span><span class="n">get_resources</span><span class="p">())</span>
+            <span class="n">parents</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">graph</span><span class="o">.</span><span class="n">predecessors</span><span class="p">(</span><span class="n">node</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">orig_resources</span><span class="p">,</span> <span class="n">launchable_list</span> <span class="ow">in</span> <span class="n">launchable_resources</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">launchable_list</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="n">exceptions</span><span class="o">.</span><span class="n">ResourcesUnavailableError</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s1">&#39;No launchable resource found for task </span><span class="si">{</span><span class="n">node</span><span class="si">}</span><span class="s1">. &#39;</span>
+                        <span class="s1">&#39;To fix: relax its resource requirements.&#39;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">num_resources</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">node</span><span class="o">.</span><span class="n">time_estimator_func</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Defaulting estimated time to 1 hr. &#39;</span>
+                                <span class="s1">&#39;Call Task.set_time_estimator() to override.&#39;</span><span class="p">)</span>
+                    <span class="n">estimated_runtime</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">*</span> <span class="mi">3600</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="c1"># We assume the time estimator takes in a partial resource</span>
+                    <span class="c1">#    Resources(&#39;V100&#39;)</span>
+                    <span class="c1"># and treats their launchable versions</span>
+                    <span class="c1">#    Resources(AWS, &#39;p3.2xlarge&#39;),</span>
+                    <span class="c1">#    Resources(GCP, &#39;...&#39;, &#39;V100&#39;),</span>
+                    <span class="c1">#    ...</span>
+                    <span class="c1"># as having the same run time.</span>
+                    <span class="c1"># FIXME(zongheng): take &#39;num_nodes&#39; as an arg/into</span>
+                    <span class="c1"># account. It may be another reason to treat num_nodes as</span>
+                    <span class="c1"># part of a Resources.</span>
+                    <span class="n">estimated_runtime</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">estimate_runtime</span><span class="p">(</span><span class="n">orig_resources</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">resources</span> <span class="ow">in</span> <span class="n">launchable_list</span><span class="p">:</span>
+                    <span class="c1"># Computes dp_best_cost[node][resources]</span>
+                    <span class="c1"># = my estimated cost +</span>
+                    <span class="c1">#      sum_p min_phw { dp_best_cost(p, phw) +</span>
+                    <span class="c1">#                      egress_cost(p, phw, hw) }</span>
+                    <span class="c1"># where p in Parents(node).</span>
+                    <span class="k">assert</span> <span class="n">resources</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">dp_best_cost</span><span class="p">[</span><span class="n">node</span><span class="p">]</span>
+                    <span class="k">if</span> <span class="n">do_print</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;resources: </span><span class="si">{</span><span class="n">resources</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+                    <span class="k">if</span> <span class="n">minimize_cost</span><span class="p">:</span>
+                        <span class="n">cost_per_node</span> <span class="o">=</span> <span class="n">resources</span><span class="o">.</span><span class="n">get_cost</span><span class="p">(</span><span class="n">estimated_runtime</span><span class="p">)</span>
+                        <span class="n">estimated_cost</span> <span class="o">=</span> <span class="n">cost_per_node</span> <span class="o">*</span> <span class="n">node</span><span class="o">.</span><span class="n">num_nodes</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="c1"># Minimize run time; overload the term &#39;cost&#39;.</span>
+                        <span class="n">estimated_cost</span> <span class="o">=</span> <span class="n">estimated_runtime</span>
+                    <span class="k">if</span> <span class="n">do_print</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                            <span class="s1">&#39;  estimated_runtime: </span><span class="si">{:.0f}</span><span class="s1"> s (</span><span class="si">{:.1f}</span><span class="s1"> hr)&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                                <span class="n">estimated_runtime</span><span class="p">,</span> <span class="n">estimated_runtime</span> <span class="o">/</span> <span class="mi">3600</span><span class="p">))</span>
+                        <span class="k">if</span> <span class="n">minimize_cost</span><span class="p">:</span>
+                            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+                                <span class="s1">&#39;  estimated_cost (not incl. egress): $</span><span class="si">{:.1f}</span><span class="s1">&#39;</span><span class="o">.</span>
+                                <span class="nb">format</span><span class="p">(</span><span class="n">estimated_cost</span><span class="p">))</span>
+
+                    <span class="c1"># FIXME: Account for egress costs for multi-node clusters</span>
+                    <span class="n">sum_parent_cost_and_egress</span> <span class="o">=</span> <span class="mi">0</span>
+                    <span class="k">for</span> <span class="n">parent</span> <span class="ow">in</span> <span class="n">parents</span><span class="p">:</span>
+                        <span class="n">min_pred_cost_plus_egress</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">inf</span>
+                        <span class="k">for</span> <span class="n">parent_resources</span><span class="p">,</span> <span class="n">parent_cost</span> <span class="ow">in</span> <span class="n">dp_best_cost</span><span class="p">[</span>
+                                <span class="n">parent</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                            <span class="n">egress_cost</span> <span class="o">=</span> <span class="n">Optimizer</span><span class="o">.</span><span class="n">_egress_cost_or_time</span><span class="p">(</span>
+                                <span class="n">minimize_cost</span><span class="p">,</span> <span class="n">parent</span><span class="p">,</span> <span class="n">parent_resources</span><span class="p">,</span> <span class="n">node</span><span class="p">,</span>
+                                <span class="n">resources</span><span class="p">)</span>
+                            <span class="k">if</span> <span class="n">parent_cost</span> <span class="o">+</span> <span class="n">egress_cost</span> <span class="o">&lt;</span> \
+                               <span class="n">min_pred_cost_plus_egress</span><span class="p">:</span>
+                                <span class="n">min_pred_cost_plus_egress</span> <span class="o">=</span> \
+                                    <span class="n">parent_cost</span> <span class="o">+</span> <span class="n">egress_cost</span>
+                                <span class="n">best_parent_hardware</span> <span class="o">=</span> <span class="n">parent_resources</span>
+                        <span class="n">sum_parent_cost_and_egress</span> <span class="o">+=</span> <span class="n">min_pred_cost_plus_egress</span>
+                        <span class="n">dp_point_backs</span><span class="p">[</span><span class="n">node</span><span class="p">][</span><span class="n">resources</span><span class="p">][</span><span class="n">parent</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                            <span class="n">best_parent_hardware</span><span class="p">,</span> <span class="n">min_pred_cost_plus_egress</span><span class="p">)</span>
+                    <span class="n">dp_best_cost</span><span class="p">[</span><span class="n">node</span><span class="p">][</span>
+                        <span class="n">resources</span><span class="p">]</span> <span class="o">=</span> <span class="n">estimated_cost</span> <span class="o">+</span> <span class="n">sum_parent_cost_and_egress</span>
+
+        <span class="c1"># Dict: node -&gt; (resources, cost).</span>
+        <span class="n">best_plan</span> <span class="o">=</span> <span class="n">Optimizer</span><span class="o">.</span><span class="n">read_optimized_plan</span><span class="p">(</span><span class="n">dp_best_cost</span><span class="p">,</span> <span class="n">topo_order</span><span class="p">,</span>
+                                                  <span class="n">dp_point_backs</span><span class="p">,</span> <span class="n">minimize_cost</span><span class="p">)</span>
+
+        <span class="c1"># If it&#39;s 1 resource choice, the info is already printed.</span>
+        <span class="n">should_print</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">dp_best_cost</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+        <span class="k">if</span> <span class="n">should_print</span><span class="p">:</span>
+            <span class="n">dp_best_cost</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="n">k</span><span class="p">:</span> <span class="n">v</span>
+                <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">dp_best_cost</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="n">_DUMMY_SOURCE_NAME</span><span class="p">,</span> <span class="n">_DUMMY_SINK_NAME</span><span class="p">)</span>
+            <span class="p">}</span>
+            <span class="n">metric</span> <span class="o">=</span> <span class="s1">&#39;cost&#39;</span> <span class="k">if</span> <span class="n">minimize_cost</span> <span class="k">else</span> <span class="s1">&#39;time&#39;</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">dp_best_cost</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Details: task -&gt; </span><span class="se">{{</span><span class="s1">resources -&gt; </span><span class="si">{</span><span class="n">metric</span><span class="si">}</span><span class="se">}}</span><span class="s1">&#39;</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%s</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">pprint</span><span class="o">.</span><span class="n">pformat</span><span class="p">(</span><span class="n">dp_best_cost</span><span class="p">))</span>
+            <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">dp_best_cost</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Considered resources -&gt; </span><span class="si">{</span><span class="n">metric</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%s</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span>
+                            <span class="n">pprint</span><span class="o">.</span><span class="n">pformat</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">dp_best_cost</span><span class="o">.</span><span class="n">values</span><span class="p">())[</span><span class="mi">0</span><span class="p">]))</span>
+
+        <span class="k">return</span> <span class="n">dag</span><span class="p">,</span> <span class="n">best_plan</span>
+
+<div class="viewcode-block" id="Optimizer.read_optimized_plan"><a class="viewcode-back" href="../../sky.html#sky.optimizer.Optimizer.read_optimized_plan">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">read_optimized_plan</span><span class="p">(</span><span class="n">dp_best_cost</span><span class="p">,</span> <span class="n">topo_order</span><span class="p">,</span> <span class="n">dp_point_backs</span><span class="p">,</span>
+                            <span class="n">minimize_cost</span><span class="p">):</span>
+        <span class="n">message_data</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">best_plan</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">def</span> <span class="nf">_walk</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">best_hardware</span><span class="p">,</span> <span class="n">best_cost</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">node</span><span class="o">.</span><span class="n">best_resources</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># Record the best decision for &#39;node&#39;.</span>
+                <span class="n">message_data</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">node</span><span class="p">,</span> <span class="n">best_hardware</span><span class="p">))</span>
+                <span class="n">best_plan</span><span class="p">[</span><span class="n">node</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">best_hardware</span><span class="p">,</span> <span class="n">best_cost</span><span class="p">)</span>
+                <span class="n">node</span><span class="o">.</span><span class="n">best_resources</span> <span class="o">=</span> <span class="n">best_hardware</span>
+            <span class="c1"># Recurse back to parent(s).</span>
+            <span class="k">for</span> <span class="n">tup</span> <span class="ow">in</span> <span class="n">dp_point_backs</span><span class="p">[</span><span class="n">node</span><span class="p">][</span><span class="n">best_hardware</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">parent</span><span class="p">,</span> <span class="p">(</span><span class="n">parent_best_hardware</span><span class="p">,</span> <span class="n">parent_best_cost</span><span class="p">)</span> <span class="o">=</span> <span class="n">tup</span>
+                <span class="n">_walk</span><span class="p">(</span><span class="n">parent</span><span class="p">,</span> <span class="n">parent_best_hardware</span><span class="p">,</span> <span class="n">parent_best_cost</span><span class="p">)</span>
+
+        <span class="c1"># Start at Sink, the last node in the topo order.</span>
+        <span class="n">node</span> <span class="o">=</span> <span class="n">topo_order</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="c1"># Find the best (hardware, cost) for node.</span>
+        <span class="n">best_costs</span> <span class="o">=</span> <span class="n">dp_best_cost</span><span class="p">[</span><span class="n">node</span><span class="p">]</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">best_costs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;Should be DummyCloud: </span><span class="si">{</span><span class="n">best_costs</span><span class="si">}</span><span class="s1">&#39;</span>
+        <span class="n">h</span><span class="p">,</span> <span class="n">overall_best</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">best_costs</span><span class="o">.</span><span class="n">items</span><span class="p">())[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">_walk</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">h</span><span class="p">,</span> <span class="n">overall_best</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">minimize_cost</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Optimizer - plan minimizing cost (~$</span><span class="si">{:.1f}</span><span class="s1">):&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                <span class="n">overall_best</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="s1">&#39;Optimizer - plan minimizing run time (~</span><span class="si">{:.1f}</span><span class="s1"> hr):&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="n">overall_best</span> <span class="o">/</span> <span class="mi">3600</span><span class="p">))</span>
+        <span class="c1"># Do not print Source or Sink.</span>
+        <span class="n">message_data</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">t</span><span class="o">.</span><span class="n">num_nodes</span><span class="si">}</span><span class="s1">x </span><span class="si">{</span><span class="nb">repr</span><span class="p">(</span><span class="n">r</span><span class="p">)</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">num_nodes</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="nb">repr</span><span class="p">(</span><span class="n">r</span><span class="p">))</span>
+            <span class="k">for</span> <span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">r</span><span class="p">)</span> <span class="ow">in</span> <span class="n">message_data</span>
+            <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="n">_DUMMY_SOURCE_NAME</span><span class="p">,</span> <span class="n">_DUMMY_SINK_NAME</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">message</span> <span class="o">=</span> <span class="n">tabulate</span><span class="o">.</span><span class="n">tabulate</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">message_data</span><span class="p">),</span>
+                                    <span class="n">headers</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;TASK&#39;</span><span class="p">,</span> <span class="s1">&#39;BEST_RESOURCE&#39;</span><span class="p">],</span>
+                                    <span class="n">tablefmt</span><span class="o">=</span><span class="s1">&#39;plain&#39;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="se">\n</span><span class="si">{</span><span class="n">message</span><span class="si">}</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">best_plan</span></div></div>
+
+
+<div class="viewcode-block" id="DummyResources"><a class="viewcode-back" href="../../sky.html#sky.optimizer.DummyResources">[docs]</a><span class="k">class</span> <span class="nc">DummyResources</span><span class="p">(</span><span class="n">Resources</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A dummy Resources that has zero egress cost from/to.&quot;&quot;&quot;</span>
+
+    <span class="n">_REPR</span> <span class="o">=</span> <span class="s1">&#39;DummyCloud&#39;</span>
+
+    <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">DummyResources</span><span class="o">.</span><span class="n">_REPR</span>
+
+<div class="viewcode-block" id="DummyResources.get_cost"><a class="viewcode-back" href="../../sky.html#sky.optimizer.DummyResources.get_cost">[docs]</a>    <span class="k">def</span> <span class="nf">get_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seconds</span><span class="p">):</span>
+        <span class="k">return</span> <span class="mi">0</span></div></div>
+
+
+<div class="viewcode-block" id="DummyCloud"><a class="viewcode-back" href="../../sky.html#sky.optimizer.DummyCloud">[docs]</a><span class="k">class</span> <span class="nc">DummyCloud</span><span class="p">(</span><span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;A dummy Cloud that has zero egress cost from/to.&quot;&quot;&quot;</span>
+    <span class="k">pass</span></div>
+
+
+<span class="k">def</span> <span class="nf">_cloud_in_list</span><span class="p">(</span><span class="n">cloud</span><span class="p">:</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">,</span> <span class="n">lst</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">return</span> <span class="nb">any</span><span class="p">(</span><span class="n">cloud</span><span class="o">.</span><span class="n">is_same_cloud</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">lst</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_filter_out_blocked_launchable_resources</span><span class="p">(</span>
+        <span class="n">launchable_resources</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Resources</span><span class="p">],</span>
+        <span class="n">blocked_launchable_resources</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Resources</span><span class="p">]):</span>
+    <span class="sd">&quot;&quot;&quot;Whether the resources are blocked.&quot;&quot;&quot;</span>
+    <span class="n">available_resources</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">resources</span> <span class="ow">in</span> <span class="n">launchable_resources</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">blocked_resources</span> <span class="ow">in</span> <span class="n">blocked_launchable_resources</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">resources</span><span class="o">.</span><span class="n">is_launchable_fuzzy_equal</span><span class="p">(</span><span class="n">blocked_resources</span><span class="p">):</span>
+                <span class="k">break</span>
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># non-blokced launchable resources. (no break)</span>
+            <span class="n">available_resources</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">resources</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">available_resources</span>
+
+
+<span class="k">def</span> <span class="nf">_fill_in_launchable_resources</span><span class="p">(</span>
+    <span class="n">task</span><span class="p">:</span> <span class="n">Task</span><span class="p">,</span>
+    <span class="n">blocked_launchable_resources</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Resources</span><span class="p">]],</span>
+    <span class="n">try_fix_with_sky_init</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="n">Resources</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="n">Resources</span><span class="p">]]:</span>
+    <span class="n">enabled_clouds</span> <span class="o">=</span> <span class="n">global_user_state</span><span class="o">.</span><span class="n">get_enabled_clouds</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">enabled_clouds</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">try_fix_with_sky_init</span><span class="p">:</span>
+        <span class="n">init</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">quiet</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_fill_in_launchable_resources</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">blocked_launchable_resources</span><span class="p">,</span>
+                                             <span class="kc">False</span><span class="p">)</span>
+    <span class="n">launchable</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">blocked_launchable_resources</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">blocked_launchable_resources</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">resources</span> <span class="ow">in</span> <span class="n">task</span><span class="o">.</span><span class="n">get_resources</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">resources</span><span class="o">.</span><span class="n">cloud</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">_cloud_in_list</span><span class="p">(</span>
+                <span class="n">resources</span><span class="o">.</span><span class="n">cloud</span><span class="p">,</span> <span class="n">enabled_clouds</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">try_fix_with_sky_init</span><span class="p">:</span>
+                <span class="n">init</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">quiet</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">_fill_in_launchable_resources</span><span class="p">(</span>
+                    <span class="n">task</span><span class="p">,</span> <span class="n">blocked_launchable_resources</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">exceptions</span><span class="o">.</span><span class="n">ResourcesUnavailableError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s1">&#39;Task </span><span class="si">{</span><span class="n">task</span><span class="si">}</span><span class="s1"> requires </span><span class="si">{</span><span class="n">resources</span><span class="o">.</span><span class="n">cloud</span><span class="si">}</span><span class="s1"> which is not &#39;</span>
+                <span class="s1">&#39;enabled. Run `sky init` to enable access to it, &#39;</span>
+                <span class="s1">&#39;or change the cloud requirement.&#39;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">resources</span><span class="o">.</span><span class="n">is_launchable</span><span class="p">():</span>
+            <span class="n">launchable</span><span class="p">[</span><span class="n">resources</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">resources</span><span class="p">]</span>
+        <span class="k">elif</span> <span class="n">resources</span><span class="o">.</span><span class="n">cloud</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">launchable</span><span class="p">[</span>
+                <span class="n">resources</span><span class="p">]</span> <span class="o">=</span> <span class="n">resources</span><span class="o">.</span><span class="n">cloud</span><span class="o">.</span><span class="n">get_feasible_launchable_resources</span><span class="p">(</span>
+                    <span class="n">resources</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">cloud</span> <span class="ow">in</span> <span class="n">enabled_clouds</span><span class="p">:</span>
+                <span class="n">feasible_resources</span> <span class="o">=</span> <span class="n">cloud</span><span class="o">.</span><span class="n">get_feasible_launchable_resources</span><span class="p">(</span>
+                    <span class="n">resources</span><span class="p">)</span>
+                <span class="n">launchable</span><span class="p">[</span><span class="n">resources</span><span class="p">]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">feasible_resources</span><span class="p">)</span>
+        <span class="n">launchable</span><span class="p">[</span><span class="n">resources</span><span class="p">]</span> <span class="o">=</span> <span class="n">_filter_out_blocked_launchable_resources</span><span class="p">(</span>
+            <span class="n">launchable</span><span class="p">[</span><span class="n">resources</span><span class="p">],</span> <span class="n">blocked_launchable_resources</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">launchable</span>
+</pre></div>
+
+              </div>
+              
+            
+                <!-- Previous / next buttons -->
+<div class='prev-next-area'>
+</div>
+            
+        </div>
+    </div>
+    <footer class="footer">
+  <p>
+    
+      By the Sky authors<br/>
+    
+        &copy; Copyright 2022, Sky Team.<br/>
+  </p>
+</footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="../../_static/js/index.be7d3bbb2ef33a8344ce.js"></script>
+
+  </body>
+</html>

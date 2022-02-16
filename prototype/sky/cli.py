@@ -36,7 +36,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
-import pandas as pd
 import pendulum
 
 import sky
@@ -1004,26 +1003,7 @@ def down(
       # Tear down all existing clusters.
       sky down -a
     """
-    names = []
-    # TODO(suquark,zongheng): try using aws cli to terminate stopped nodes:
-    # aws ec2 describe-instances --query 'Reservations[].Instances[].InstanceId' --filters "Name=tag:ray-cluster-name,Values=<cluster_name>" --output text  # pylint: disable=line-too-long
-    # Tricky cases to test:
-    #   - Does the above only query the default region? Test on a stopped
-    #     cluster in a non-default region.
-    #   - Is it possible for Ray to launch a same-name cluster on two regions?
-    #     If so, what happens with the above call?
-    # Tracked by Issue #240.
-    for cluster_name in clusters:
-        cluster_status = global_user_state.get_status_from_cluster_name(
-            cluster_name)
-        if cluster_status == global_user_state.ClusterStatus.STOPPED:
-            click.secho(
-                f'Cannot terminate cluster {cluster_name!r} because it '
-                'is STOPPED. To fix: manually terminate in the cloud\'s '
-                'UI. (This limitation will be addressed in the future.)',
-                fg='yellow')
-        else:
-            names.append(cluster_name)
+    names = clusters
     if not all and not names:
         return
     _terminate_or_stop_clusters(names, apply_to_all=all, terminate=True)
@@ -1307,6 +1287,7 @@ def init():
     sky_init.init()
 
 
+@cli.command()
 @click.argument('gpu_name', required=False)
 @click.option('--all',
               '-a',
@@ -1362,6 +1343,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name)
+        import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = util_lib.create_table([
                 'GPU',

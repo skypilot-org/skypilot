@@ -7,8 +7,8 @@ import textwrap
 from typing import Optional
 
 import colorama
-import docker
 
+from sky import docker_adaptor
 from sky import sky_logging
 from sky import task as task_mod
 
@@ -122,11 +122,11 @@ def _execute_build(tag, context_path):
     """
     assert tag is not None, 'Image tag cannot be None - have you specified a ' \
                             'task name? '
-    docker_client = docker.from_env()
+    docker_client = docker_adaptor.from_env()
     try:
         unused_image, unused_build_logs = docker_client.images.build(
             path=context_path, tag=tag, rm=True, quiet=False)
-    except docker.errors.BuildError as e:
+    except docker_adaptor.build_error() as e:
         colorama.init()
         style = colorama.Style
         fore = colorama.Fore

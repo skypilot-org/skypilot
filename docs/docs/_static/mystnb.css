@@ -1,0 +1,183 @@
+/* Whole cell */
+div.container.cell {
+  padding-left: 0;
+  margin-bottom: 1em;
+}
+
+/* Removing all background formatting so we can control at the div level */
+.cell_input div.highlight, .cell_output pre, .cell_input pre, .cell_output .output {
+  border: none;
+  box-shadow: none;
+}
+
+.cell_output .output pre, .cell_input pre {
+  margin: 0px;
+}
+
+/* Input cells */
+div.cell div.cell_input {
+  padding-left: 0em;
+  padding-right: 0em;
+  border: 1px #ccc solid;
+  background-color: #f7f7f7;
+  border-left-color: green;
+  border-left-width: medium;
+}
+
+div.cell_input > div, div.cell_output div.output > div.highlight {
+  margin: 0em !important;
+  border: none !important;
+}
+
+/* All cell outputs */
+.cell_output {
+  padding-left: 1em;
+  padding-right: 0em;
+  margin-top: 1em;
+}
+
+/* Outputs from jupyter_sphinx overrides to remove extra CSS */
+div.section div.jupyter_container {
+  padding: .4em;
+  margin: 0 0 .4em 0;
+  background-color: none;
+  border: none;
+  -moz-box-shadow: none;
+  -webkit-box-shadow: none;
+  box-shadow: none;
+}
+
+/* Text outputs from cells */
+.cell_output .output.text_plain,
+.cell_output .output.traceback,
+.cell_output .output.stream,
+.cell_output .output.stderr
+  {
+  background: #fcfcfc;
+  margin-top: 1em;
+  margin-bottom: 0em;
+  box-shadow: none;
+}
+
+.cell_output .output.text_plain,
+.cell_output .output.stream,
+.cell_output .output.stderr {
+  border: 1px solid #f7f7f7;
+}
+
+.cell_output .output.stderr {
+  background: #fdd;
+}
+
+.cell_output .output.traceback {
+  border: 1px solid #ffd6d6;
+}
+
+/* Math align to the left */
+.cell_output .MathJax_Display {
+  text-align: left !important;
+}
+
+/* Pandas tables. Pulled from the Jupyter / nbsphinx CSS */
+div.cell_output table {
+    border: none;
+    border-collapse: collapse;
+    border-spacing: 0;
+    color: black;
+    font-size: 1em;
+    table-layout: fixed;
+  }
+  div.cell_output thead {
+    border-bottom: 1px solid black;
+    vertical-align: bottom;
+  }
+  div.cell_output tr,
+  div.cell_output th,
+  div.cell_output td {
+    text-align: right;
+    vertical-align: middle;
+    padding: 0.5em 0.5em;
+    line-height: normal;
+    white-space: normal;
+    max-width: none;
+    border: none;
+  }
+  div.cell_output th {
+    font-weight: bold;
+  }
+  div.cell_output tbody tr:nth-child(odd) {
+    background: #f5f5f5;
+  }
+  div.cell_output tbody tr:hover {
+    background: rgba(66, 165, 245, 0.2);
+  }
+
+
+/* Inline text from `paste` operation */
+
+span.pasted-text {
+  font-weight: bold;
+}
+
+span.pasted-inline img {
+  max-height: 2em;
+}
+
+tbody span.pasted-inline img {
+  max-height: none;
+}
+
+/* Font colors for translated ANSI escape sequences
+Color values are adapted from share/jupyter/nbconvert/templates/classic/static/style.css
+*/
+div.highlight .-Color-Bold {
+  font-weight: bold;
+}
+div.highlight .-Color[class*=-Black] {
+  color :#3E424D
+}
+div.highlight .-Color[class*=-Red] {
+  color: #E75C58
+}
+div.highlight .-Color[class*=-Green] {
+  color: #00A250
+}
+div.highlight .-Color[class*=-Yellow] {
+  color: yellow
+}
+div.highlight .-Color[class*=-Blue] {
+  color: #208FFB
+}
+div.highlight .-Color[class*=-Magenta] {
+  color: #D160C4
+}
+div.highlight .-Color[class*=-Cyan] {
+  color: #60C6C8
+}
+div.highlight .-Color[class*=-White] {
+  color: #C5C1B4
+}
+div.highlight .-Color[class*=-BGBlack] {
+  background-color: #3E424D
+}
+div.highlight .-Color[class*=-BGRed] {
+  background-color: #E75C58
+}
+div.highlight .-Color[class*=-BGGreen] {
+  background-color: #00A250
+}
+div.highlight .-Color[class*=-BGYellow] {
+  background-color: yellow
+}
+div.highlight .-Color[class*=-BGBlue] {
+  background-color: #208FFB
+}
+div.highlight .-Color[class*=-BGMagenta] {
+  background-color: #D160C4
+}
+div.highlight .-Color[class*=-BGCyan] {
+  background-color: #60C6C8
+}
+div.highlight .-Color[class*=-BGWhite] {
+  background-color: #C5C1B4
+}

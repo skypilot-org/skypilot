@@ -1,0 +1,1109 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CLI Reference &#8212; Sky 0.1 documentation</title>
+    
+  <link href="../_static/css/theme.css" rel="stylesheet">
+  <link href="../_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
+
+    
+  <link rel="stylesheet"
+    href="../_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-book-theme.css?digest=84ace793992934648b4de8eed757e5a2" />
+    <link rel="stylesheet" type="text/css" href="../_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.css" />
+    
+  <link rel="preload" as="script" href="../_static/js/index.be7d3bbb2ef33a8344ce.js">
+
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/togglebutton.js"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Job Queue" href="job-queue.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="None">
+    
+
+    <!-- Google Analytics -->
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<!-- Checkboxes to toggle the left sidebar -->
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle navigation sidebar">
+<label class="overlay" for="__navigation">
+    <div class="visually-hidden">Toggle navigation sidebar</div>
+</label>
+<div class="col-12 col-md-3 bd-sidebar site-navigation " id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="../index.html">
+      
+      
+      
+      <h1 class="site-logo" id="site-title">Sky 0.1 documentation</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="../search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search the docs ..." aria-label="Search the docs ..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item active">
+        <p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Getting Started
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../getting-started/installation.html">
+   Installation
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../getting-started/quickstart.html">
+   Quickstart
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../getting-started/tutorial.html">
+   Tutorial: DNN Training
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Use Cases
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../examples/auto-failover.html">
+   Auto-provisioning GPUs
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../examples/iterative-dev-project.html">
+   Iteratively Developing a Project
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../examples/launch-many-tasks-vm.html">
+   Launch Multiple Tasks on a VM
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../examples/grid-search.html">
+   Grid Search
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../examples/distributed-jobs.html">
+   Distributed Jobs on many VMs
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Reference Documentation
+ </span>
+</p>
+<ul class="current nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="interactive-nodes.html">
+   Interactive Nodes
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="iterative-development.html">
+   Iterative Development
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="storage.html">
+   Storage
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="job-queue.html">
+   Job Queue
+  </a>
+ </li>
+ <li class="toctree-l1 current active">
+  <a class="current reference internal" href="#">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Theme by the <a href="https://ebp.jupyterbook.org">Executable Book Project</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<!-- This is an invisible pixel that we watch to see if we've scrolled. -->
+<div class="sbt-scroll-pixel-helper"></div>
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            <div class="topbar-left">
+                
+                <label class="nav-toggle-button" for="__navigation">
+                    <div class="visually-hidden">Toggle navigation</div>
+                    <i class="fas fa-bars"></i>
+                </label>
+                
+            </div>
+            
+<div class="dropdown-buttons-trigger">
+    <button id="dropdown-buttons-trigger" class="btn btn-secondary topbarbtn" aria-label="Download this page"><i
+            class="fas fa-download"></i></button>
+
+    <div class="dropdown-buttons">
+        <!-- ipynb file if we had a myst markdown file -->
+        
+        <!-- Download raw file -->
+        <a class="dropdown-buttons" href="../_sources/reference/cli.rst.txt"><button type="button"
+                class="btn btn-secondary topbarbtn" title="Download source file" data-toggle="tooltip"
+                data-placement="left">.rst</button></a>
+        <!-- Download PDF via print -->
+        <button type="button" id="download-print" class="btn btn-secondary topbarbtn" title="Print to PDF"
+                onclick="printPdf(this)" data-toggle="tooltip" data-placement="left">.pdf</button>
+    </div>
+</div>
+
+            <!-- Source interaction buttons -->
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show noprint">
+            
+            <div class="tocsection onthispage pt-5 pb-3">
+                <i class="fas fa-list"></i> Contents
+            </div>
+            <nav id="bd-toc-nav" aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#core">
+   Core
+  </a>
+  <ul class="nav section-nav flex-column">
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-launch">
+     sky launch
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-exec">
+     sky exec
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-start">
+     sky start
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-stop">
+     sky stop
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-down">
+     sky down
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-status">
+     sky status
+    </a>
+   </li>
+  </ul>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#interactive-nodes">
+   Interactive Nodes
+  </a>
+  <ul class="nav section-nav flex-column">
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-cpunode">
+     sky cpunode
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-gpunode">
+     sky gpunode
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-tpunode">
+     sky tpunode
+    </a>
+   </li>
+  </ul>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#job-queue">
+   Job Queue
+  </a>
+  <ul class="nav section-nav flex-column">
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-queue">
+     sky queue
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-logs">
+     sky logs
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-cancel">
+     sky cancel
+    </a>
+   </li>
+  </ul>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#miscellaneous">
+   Miscellaneous
+  </a>
+  <ul class="nav section-nav flex-column">
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-show-gpus">
+     sky show-gpus
+    </a>
+   </li>
+  </ul>
+ </li>
+</ul>
+
+            </nav>
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+            <!-- Table of contents that is only displayed when printing the page -->
+            <div id="jb-print-docs-body" class="onlyprint">
+                <h1>CLI Reference</h1>
+                <!-- Table of contents -->
+                <div id="print-main-content">
+                    <div id="jb-print-toc">
+                        
+                        <div>
+                            <h2> Contents </h2>
+                        </div>
+                        <nav aria-label="Page">
+                            <ul class="visible nav section-nav flex-column">
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#core">
+   Core
+  </a>
+  <ul class="nav section-nav flex-column">
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-launch">
+     sky launch
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-exec">
+     sky exec
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-start">
+     sky start
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-stop">
+     sky stop
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-down">
+     sky down
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-status">
+     sky status
+    </a>
+   </li>
+  </ul>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#interactive-nodes">
+   Interactive Nodes
+  </a>
+  <ul class="nav section-nav flex-column">
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-cpunode">
+     sky cpunode
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-gpunode">
+     sky gpunode
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-tpunode">
+     sky tpunode
+    </a>
+   </li>
+  </ul>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#job-queue">
+   Job Queue
+  </a>
+  <ul class="nav section-nav flex-column">
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-queue">
+     sky queue
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-logs">
+     sky logs
+    </a>
+   </li>
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-cancel">
+     sky cancel
+    </a>
+   </li>
+  </ul>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#miscellaneous">
+   Miscellaneous
+  </a>
+  <ul class="nav section-nav flex-column">
+   <li class="toc-h3 nav-item toc-entry">
+    <a class="reference internal nav-link" href="#sky-show-gpus">
+     sky show-gpus
+    </a>
+   </li>
+  </ul>
+ </li>
+</ul>
+
+                        </nav>
+                    </div>
+                </div>
+            </div>
+            
+              <div>
+                
+  <div class="section" id="cli-reference">
+<h1>CLI Reference<a class="headerlink" href="#cli-reference" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="core">
+<h2>Core<a class="headerlink" href="#core" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="sky-launch">
+<h3>sky launch<a class="headerlink" href="#sky-launch" title="Permalink to this headline">¶</a></h3>
+<p>Launch a task from a YAML or command (rerun setup if cluster exists).</p>
+<p>If entrypoint points to a valid YAML file, it is read in as the task
+specification. Otherwise, it is interpreted as a bash command to be
+executed on the head node of the cluster.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky launch <span class="o">[</span>OPTIONS<span class="o">]</span> ENTRYPOINT...
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-launch-c">
+<span id="cmdoption-sky-launch-cluster"></span><span class="sig-name descname"><span class="pre">-c</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--cluster</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;cluster&gt;</span></span><a class="headerlink" href="#cmdoption-sky-launch-c" title="Permalink to this definition">¶</a></dt>
+<dd><p>A cluster name. If provided, either reuse an existing cluster with that name or
+provision a new cluster with that name. Otherwise provision a new cluster with
+an autogenerated name.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-launch-dryrun">
+<span class="sig-name descname"><span class="pre">--dryrun</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-launch-dryrun" title="Permalink to this definition">¶</a></dt>
+<dd><p>If True, do not actually run the job.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-launch-d">
+<span id="cmdoption-sky-launch-detach-run"></span><span class="sig-name descname"><span class="pre">-d</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--detach-run</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-launch-d" title="Permalink to this definition">¶</a></dt>
+<dd><p>If True, run setup first (blocking), then detach from the job’s execution.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-launch-docker">
+<span class="sig-name descname"><span class="pre">--docker</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-launch-docker" title="Permalink to this definition">¶</a></dt>
+<dd><p>If used, runs locally inside a docker container.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-launch-workdir">
+<span class="sig-name descname"><span class="pre">--workdir</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;workdir&gt;</span></span><a class="headerlink" href="#cmdoption-sky-launch-workdir" title="Permalink to this definition">¶</a></dt>
+<dd><p>If specified, sync this dir to the remote working directory, where the task will be invoked. Overrides the “workdir” config in the YAML if both are supplied.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-launch-cloud">
+<span class="sig-name descname"><span class="pre">--cloud</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;cloud&gt;</span></span><a class="headerlink" href="#cmdoption-sky-launch-cloud" title="Permalink to this definition">¶</a></dt>
+<dd><p>The cloud to use. If specified, override the “resources.cloud”.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-launch-gpus">
+<span class="sig-name descname"><span class="pre">--gpus</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;gpus&gt;</span></span><a class="headerlink" href="#cmdoption-sky-launch-gpus" title="Permalink to this definition">¶</a></dt>
+<dd><p>Type and number of GPUs to use. Example values: “V100:8”, “V100” (short for a count of 1), or “V100:0.5” (fractional counts are supported by the scheduling framework). If a new cluster is being launched by this command, this is the resources to provision. If an existing cluster is being reused, this is seen as the task demand, which must fit the cluster’s total resources and is used for scheduling the task. Overrides the “accelerators” config in the YAML if both are supplied.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-launch-use-spot">
+<span id="cmdoption-sky-launch-no-use-spot"></span><span class="sig-name descname"><span class="pre">--use-spot</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--no-use-spot</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-launch-use-spot" title="Permalink to this definition">¶</a></dt>
+<dd><p>Whether to request spot instances. If specified, override the “resources.use_spot”.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-launch-n">
+<span id="cmdoption-sky-launch-name"></span><span class="sig-name descname"><span class="pre">-n</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--name</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;name&gt;</span></span><a class="headerlink" href="#cmdoption-sky-launch-n" title="Permalink to this definition">¶</a></dt>
+<dd><p>Task name. Overrides the “name” config in the YAML if both are supplied.</p>
+</dd></dl>
+
+<p class="rubric">Arguments</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-launch-arg-ENTRYPOINT">
+<span id="cmdoption-sky-launch-arg-entrypoint"></span><span class="sig-name descname"><span class="pre">ENTRYPOINT</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-launch-arg-ENTRYPOINT" title="Permalink to this definition">¶</a></dt>
+<dd><p>Required argument(s)</p>
+</dd></dl>
+
+</div>
+<div class="section" id="sky-exec">
+<h3>sky exec<a class="headerlink" href="#sky-exec" title="Permalink to this headline">¶</a></h3>
+<p>Execute a task or a command on a cluster (skip setup).</p>
+<p>If entrypoint points to a valid YAML file, it is read in as the task
+specification. Otherwise, it is interpreted as a bash command to be
+executed on the head node of the cluster. The task will be submitted to
+the job queue of the cluster, except if the bash command is used without
+providing –gpus.</p>
+<div class="line-block">
+<div class="line">Actions performed by this command only include:</div>
+<div class="line">- workdir syncing (optional; specified in the YAML spec or via –workdir)</div>
+<div class="line">- executing the task’s run command (if entrypoint is a yaml; executed</div>
+<div class="line-block">
+<div class="line">either on the cluster’s head node or optionally on all nodes), or a</div>
+<div class="line">bash command (only executed on the head node)</div>
+</div>
+</div>
+<p><cite>sky exec</cite> is thus typically faster than <cite>sky launch</cite>, provided a cluster
+already exists.</p>
+<p>All setup steps (provisioning, setup commands, file mounts syncing) are
+skipped.  If any of those specifications changed, this command will not
+reflect those changes.  To ensure a cluster’s setup is up to date, use <cite>sky
+launch</cite> instead.</p>
+<p>Typical workflow:</p>
+<blockquote>
+<div><p># First command: set up the cluster once.</p>
+<p>&gt;&gt; sky launch -c mycluster app.yaml</p>
+</div></blockquote>
+<div class="line-block">
+<div class="line"># Starting iterative development…</div>
+<div class="line"># For example, modify local workdir code.</div>
+<div class="line"># Future commands: simply execute the task on the launched cluster.</div>
+</div>
+<blockquote>
+<div><p>&gt;&gt; sky exec mycluster app.yaml</p>
+<p># Do “sky launch” again if anything other than Task.run is modified:</p>
+<p>&gt;&gt; sky launch -c mycluster app.yaml</p>
+</div></blockquote>
+<p>Advanced use cases:</p>
+<blockquote>
+<div><p>#  Pass in commands for execution</p>
+<p>&gt;&gt; sky exec mycluster – echo Hello World</p>
+</div></blockquote>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky <span class="nb">exec</span> <span class="o">[</span>OPTIONS<span class="o">]</span> CLUSTER ENTRYPOINT...
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-exec-d">
+<span id="cmdoption-sky-exec-detach-run"></span><span class="sig-name descname"><span class="pre">-d</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--detach-run</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-exec-d" title="Permalink to this definition">¶</a></dt>
+<dd><p>If True, run setup first (blocking), then detach from the job’s execution.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-exec-workdir">
+<span class="sig-name descname"><span class="pre">--workdir</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;workdir&gt;</span></span><a class="headerlink" href="#cmdoption-sky-exec-workdir" title="Permalink to this definition">¶</a></dt>
+<dd><p>If specified, sync this dir to the remote working directory, where the task will be invoked. Overrides the “workdir” config in the YAML if both are supplied.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-exec-gpus">
+<span class="sig-name descname"><span class="pre">--gpus</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;gpus&gt;</span></span><a class="headerlink" href="#cmdoption-sky-exec-gpus" title="Permalink to this definition">¶</a></dt>
+<dd><p>Task demands: Type and number of GPUs to use. Example values: “V100:8”, “V100” (short for a count of 1), or “V100:0.5” (fractional counts are supported by the scheduling framework). This is used for scheduling the task, so it must fit the cluster’s total resources. Overrides the “accelerators” config in the YAML if both are supplied.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-exec-n">
+<span id="cmdoption-sky-exec-name"></span><span class="sig-name descname"><span class="pre">-n</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--name</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;name&gt;</span></span><a class="headerlink" href="#cmdoption-sky-exec-n" title="Permalink to this definition">¶</a></dt>
+<dd><p>Task name. Overrides the “name” config in the YAML if both are supplied.</p>
+</dd></dl>
+
+<p class="rubric">Arguments</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-exec-arg-CLUSTER">
+<span id="cmdoption-sky-exec-arg-cluster"></span><span class="sig-name descname"><span class="pre">CLUSTER</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-exec-arg-CLUSTER" title="Permalink to this definition">¶</a></dt>
+<dd><p>Required argument</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-exec-arg-ENTRYPOINT">
+<span id="cmdoption-sky-exec-arg-entrypoint"></span><span class="sig-name descname"><span class="pre">ENTRYPOINT</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-exec-arg-ENTRYPOINT" title="Permalink to this definition">¶</a></dt>
+<dd><p>Required argument(s)</p>
+</dd></dl>
+
+</div>
+<div class="section" id="sky-start">
+<h3>sky start<a class="headerlink" href="#sky-start" title="Permalink to this headline">¶</a></h3>
+<p>Restart cluster(s).</p>
+<p>If a cluster is previously stopped (status == STOPPED) or failed in
+provisioning/a task’s setup (status == INIT), this command will attempt to
+start the cluster.  (In the second case, any failed setup steps are not
+performed and only a request to start the machines is attempted.)</p>
+<p>If a cluster is already in an UP status, this command has no effect on it.</p>
+<p>Examples:</p>
+<blockquote>
+<div><p>
+# Restart a specific cluster.
+sky start cluster_name</p>
+<p>
+# Restart multiple clusters.
+sky start cluster1 cluster2</p>
+</div></blockquote>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky start <span class="o">[</span>OPTIONS<span class="o">]</span> <span class="o">[</span>CLUSTERS<span class="o">]</span>...
+</pre></div>
+</div>
+<p class="rubric">Arguments</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-start-arg-CLUSTERS">
+<span id="cmdoption-sky-start-arg-clusters"></span><span class="sig-name descname"><span class="pre">CLUSTERS</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-start-arg-CLUSTERS" title="Permalink to this definition">¶</a></dt>
+<dd><p>Optional argument(s)</p>
+</dd></dl>
+
+</div>
+<div class="section" id="sky-stop">
+<h3>sky stop<a class="headerlink" href="#sky-stop" title="Permalink to this headline">¶</a></h3>
+<p>Stop cluster(s).</p>
+<p>CLUSTER is the name of the cluster to stop.  If both CLUSTER and –all are
+supplied, the latter takes precedence.</p>
+<p>Limitation: this currently only works for AWS/GCP non-spot clusters.</p>
+<p>Examples:</p>
+<blockquote>
+<div><p>
+# Stop a specific cluster.
+sky stop cluster_name</p>
+<p>
+# Stop multiple clusters.
+sky stop cluster1 cluster2</p>
+<p>
+# Stop all existing clusters.
+sky stop -a</p>
+</div></blockquote>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky stop <span class="o">[</span>OPTIONS<span class="o">]</span> <span class="o">[</span>CLUSTERS<span class="o">]</span>...
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-stop-a">
+<span id="cmdoption-sky-stop-all"></span><span class="sig-name descname"><span class="pre">-a</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--all</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-stop-a" title="Permalink to this definition">¶</a></dt>
+<dd><p>Tear down all existing clusters.</p>
+</dd></dl>
+
+<p class="rubric">Arguments</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-stop-arg-CLUSTERS">
+<span id="cmdoption-sky-stop-arg-clusters"></span><span class="sig-name descname"><span class="pre">CLUSTERS</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-stop-arg-CLUSTERS" title="Permalink to this definition">¶</a></dt>
+<dd><p>Optional argument(s)</p>
+</dd></dl>
+
+</div>
+<div class="section" id="sky-down">
+<h3>sky down<a class="headerlink" href="#sky-down" title="Permalink to this headline">¶</a></h3>
+<p>Tear down cluster(s).</p>
+<p>CLUSTER is the name of the cluster to tear down.  If both CLUSTER and –all
+are supplied, the latter takes precedence.</p>
+<p>Accelerators (e.g., TPU) that are part of the cluster will be deleted too.</p>
+<p>Limitation: this does not work for stopped clusters for now.</p>
+<p>Examples:</p>
+<blockquote>
+<div><p>
+# Tear down a specific cluster.
+sky down cluster_name</p>
+<p>
+# Tear down multiple clusters.
+sky down cluster1 cluster2</p>
+<p>
+# Tear down all existing clusters.
+sky down -a</p>
+</div></blockquote>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky down <span class="o">[</span>OPTIONS<span class="o">]</span> <span class="o">[</span>CLUSTERS<span class="o">]</span>...
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-down-a">
+<span id="cmdoption-sky-down-all"></span><span class="sig-name descname"><span class="pre">-a</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--all</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-down-a" title="Permalink to this definition">¶</a></dt>
+<dd><p>Tear down all existing clusters.</p>
+</dd></dl>
+
+<p class="rubric">Arguments</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-down-arg-CLUSTERS">
+<span id="cmdoption-sky-down-arg-clusters"></span><span class="sig-name descname"><span class="pre">CLUSTERS</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-down-arg-CLUSTERS" title="Permalink to this definition">¶</a></dt>
+<dd><p>Optional argument(s)</p>
+</dd></dl>
+
+</div>
+<div class="section" id="sky-status">
+<h3>sky status<a class="headerlink" href="#sky-status" title="Permalink to this headline">¶</a></h3>
+<p>Show launched clusters.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky status <span class="o">[</span>OPTIONS<span class="o">]</span>
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-status-a">
+<span id="cmdoption-sky-status-all"></span><span class="sig-name descname"><span class="pre">-a</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--all</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-status-a" title="Permalink to this definition">¶</a></dt>
+<dd><p>Show all information in full.</p>
+</dd></dl>
+
+</div>
+</div>
+<div class="section" id="interactive-nodes">
+<h2>Interactive Nodes<a class="headerlink" href="#interactive-nodes" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="sky-cpunode">
+<h3>sky cpunode<a class="headerlink" href="#sky-cpunode" title="Permalink to this headline">¶</a></h3>
+<p>Launch or attach to an interactive CPU node.</p>
+<p>Example:</p>
+<blockquote>
+<div><p>
+# Launch a default cpunode.
+$ sky cpunode</p>
+<p>
+# Do work, then log out.  The node is kept running.</p>
+<p>
+# Attach back to the same node and do more work.
+$ sky cpunode</p>
+<p>
+# Alternatively, create multiple interactive nodes by specifying names
+# via –cluster (-c).
+$ sky cpunode -c node0
+$ sky cpunode -c node1</p>
+<p>
+# Port forward.
+sky cpunode –port-forward 8080 –port-forward 4650 -c cluster_name
+sky cpunode -p 8080 -p 4650 -c cluster_name</p>
+<p>
+# Sync current working directory to ~/workdir on the node.
+rsync -r . cluster_name:~/workdir</p>
+</div></blockquote>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky cpunode <span class="o">[</span>OPTIONS<span class="o">]</span>
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-cpunode-c">
+<span id="cmdoption-sky-cpunode-cluster"></span><span class="sig-name descname"><span class="pre">-c</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--cluster</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;cluster&gt;</span></span><a class="headerlink" href="#cmdoption-sky-cpunode-c" title="Permalink to this definition">¶</a></dt>
+<dd><p>A cluster name. If provided, either reuse an existing cluster with that name or
+provision a new cluster with that name. Otherwise provision a new cluster with
+an autogenerated name.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-cpunode-p">
+<span id="cmdoption-sky-cpunode-port-forward"></span><span class="sig-name descname"><span class="pre">-p</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--port-forward</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;port_forward&gt;</span></span><a class="headerlink" href="#cmdoption-sky-cpunode-p" title="Permalink to this definition">¶</a></dt>
+<dd><p>Port to be forwarded. To forward multiple ports, use this option multiple times.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-cpunode-cloud">
+<span class="sig-name descname"><span class="pre">--cloud</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;cloud&gt;</span></span><a class="headerlink" href="#cmdoption-sky-cpunode-cloud" title="Permalink to this definition">¶</a></dt>
+<dd><p>Cloud provider to use.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-cpunode-t">
+<span id="cmdoption-sky-cpunode-instance-type"></span><span class="sig-name descname"><span class="pre">-t</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--instance-type</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;instance_type&gt;</span></span><a class="headerlink" href="#cmdoption-sky-cpunode-t" title="Permalink to this definition">¶</a></dt>
+<dd><p>Instance type to use.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-cpunode-spot">
+<span class="sig-name descname"><span class="pre">--spot</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-cpunode-spot" title="Permalink to this definition">¶</a></dt>
+<dd><p>If true, use spot instances.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-cpunode-screen">
+<span class="sig-name descname"><span class="pre">--screen</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-cpunode-screen" title="Permalink to this definition">¶</a></dt>
+<dd><p>If true, attach using screen.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-cpunode-tmux">
+<span class="sig-name descname"><span class="pre">--tmux</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-cpunode-tmux" title="Permalink to this definition">¶</a></dt>
+<dd><p>If true, attach using tmux.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="sky-gpunode">
+<h3>sky gpunode<a class="headerlink" href="#sky-gpunode" title="Permalink to this headline">¶</a></h3>
+<p>Launch or attach to an interactive GPU node.</p>
+<p>Example:</p>
+<blockquote>
+<div><p>
+# Launch a default gpunode.
+$ sky gpunode</p>
+<p>
+# Do work, then log out.  The node is kept running.</p>
+<p>
+# Attach back to the same node and do more work.
+$ sky gpunode</p>
+<p>
+# Alternatively, create multiple interactive nodes by specifying names
+# via –cluster (-c).
+$ sky gpunode -c node0
+$ sky gpunode -c node1</p>
+<p>
+# Port forward.
+sky gpunode –port-forward 8080 –port-forward 4650 -c cluster_name
+sky gpunode -p 8080 -p 4650 -c cluster_name</p>
+<p>
+# Sync current working directory to ~/workdir on the node.
+rsync -r . cluster_name:~/workdir</p>
+</div></blockquote>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky gpunode <span class="o">[</span>OPTIONS<span class="o">]</span>
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-gpunode-c">
+<span id="cmdoption-sky-gpunode-cluster"></span><span class="sig-name descname"><span class="pre">-c</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--cluster</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;cluster&gt;</span></span><a class="headerlink" href="#cmdoption-sky-gpunode-c" title="Permalink to this definition">¶</a></dt>
+<dd><p>A cluster name. If provided, either reuse an existing cluster with that name or
+provision a new cluster with that name. Otherwise provision a new cluster with
+an autogenerated name.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-gpunode-p">
+<span id="cmdoption-sky-gpunode-port-forward"></span><span class="sig-name descname"><span class="pre">-p</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--port-forward</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;port_forward&gt;</span></span><a class="headerlink" href="#cmdoption-sky-gpunode-p" title="Permalink to this definition">¶</a></dt>
+<dd><p>Port to be forwarded. To forward multiple ports, use this option multiple times.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-gpunode-cloud">
+<span class="sig-name descname"><span class="pre">--cloud</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;cloud&gt;</span></span><a class="headerlink" href="#cmdoption-sky-gpunode-cloud" title="Permalink to this definition">¶</a></dt>
+<dd><p>Cloud provider to use.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-gpunode-t">
+<span id="cmdoption-sky-gpunode-instance-type"></span><span class="sig-name descname"><span class="pre">-t</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--instance-type</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;instance_type&gt;</span></span><a class="headerlink" href="#cmdoption-sky-gpunode-t" title="Permalink to this definition">¶</a></dt>
+<dd><p>Instance type to use.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-gpunode-gpus">
+<span class="sig-name descname"><span class="pre">--gpus</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;gpus&gt;</span></span><a class="headerlink" href="#cmdoption-sky-gpunode-gpus" title="Permalink to this definition">¶</a></dt>
+<dd><p>Type and number of GPUs to use (e.g., –gpus=V100:8 or –gpus=V100).</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-gpunode-spot">
+<span class="sig-name descname"><span class="pre">--spot</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-gpunode-spot" title="Permalink to this definition">¶</a></dt>
+<dd><p>If true, use spot instances.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-gpunode-screen">
+<span class="sig-name descname"><span class="pre">--screen</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-gpunode-screen" title="Permalink to this definition">¶</a></dt>
+<dd><p>If true, attach using screen.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-gpunode-tmux">
+<span class="sig-name descname"><span class="pre">--tmux</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-gpunode-tmux" title="Permalink to this definition">¶</a></dt>
+<dd><p>If true, attach using tmux.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="sky-tpunode">
+<h3>sky tpunode<a class="headerlink" href="#sky-tpunode" title="Permalink to this headline">¶</a></h3>
+<p>Launch or attach to an interactive TPU node.</p>
+<p>Example:</p>
+<blockquote>
+<div><p>
+# Launch a default tpunode.
+$ sky tpunode</p>
+<p>
+# Do work, then log out.  The node is kept running.</p>
+<p>
+# Attach back to the same node and do more work.
+$ sky tpunode</p>
+<p>
+# Alternatively, create multiple interactive nodes by specifying names
+# via –cluster (-c).
+$ sky tpunode -c node0
+$ sky tpunode -c node1</p>
+<p>
+# Port forward.
+sky tpunode –port-forward 8080 –port-forward 4650 -c cluster_name
+sky tpunode -p 8080 -p 4650 -c cluster_name</p>
+<p>
+# Sync current working directory to ~/workdir on the node.
+rsync -r . cluster_name:~/workdir</p>
+</div></blockquote>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky tpunode <span class="o">[</span>OPTIONS<span class="o">]</span>
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-tpunode-c">
+<span id="cmdoption-sky-tpunode-cluster"></span><span class="sig-name descname"><span class="pre">-c</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--cluster</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;cluster&gt;</span></span><a class="headerlink" href="#cmdoption-sky-tpunode-c" title="Permalink to this definition">¶</a></dt>
+<dd><p>A cluster name. If provided, either reuse an existing cluster with that name or
+provision a new cluster with that name. Otherwise provision a new cluster with
+an autogenerated name.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-tpunode-p">
+<span id="cmdoption-sky-tpunode-port-forward"></span><span class="sig-name descname"><span class="pre">-p</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--port-forward</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;port_forward&gt;</span></span><a class="headerlink" href="#cmdoption-sky-tpunode-p" title="Permalink to this definition">¶</a></dt>
+<dd><p>Port to be forwarded. To forward multiple ports, use this option multiple times.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-tpunode-t">
+<span id="cmdoption-sky-tpunode-instance-type"></span><span class="sig-name descname"><span class="pre">-t</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--instance-type</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;instance_type&gt;</span></span><a class="headerlink" href="#cmdoption-sky-tpunode-t" title="Permalink to this definition">¶</a></dt>
+<dd><p>Instance type to use.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-tpunode-tpus">
+<span class="sig-name descname"><span class="pre">--tpus</span></span><span class="sig-prename descclassname"> <span class="pre">&lt;tpus&gt;</span></span><a class="headerlink" href="#cmdoption-sky-tpunode-tpus" title="Permalink to this definition">¶</a></dt>
+<dd><p>Type and number of TPUs to use (e.g., –tpus=tpu-v3-8:4 or –tpus=tpu-v3-8).</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-tpunode-spot">
+<span class="sig-name descname"><span class="pre">--spot</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-tpunode-spot" title="Permalink to this definition">¶</a></dt>
+<dd><p>If true, use spot instances.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-tpunode-screen">
+<span class="sig-name descname"><span class="pre">--screen</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-tpunode-screen" title="Permalink to this definition">¶</a></dt>
+<dd><p>If true, attach using screen.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-tpunode-tmux">
+<span class="sig-name descname"><span class="pre">--tmux</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-tpunode-tmux" title="Permalink to this definition">¶</a></dt>
+<dd><p>If true, attach using tmux.</p>
+</dd></dl>
+
+</div>
+</div>
+<div class="section" id="job-queue">
+<h2>Job Queue<a class="headerlink" href="#job-queue" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="sky-queue">
+<h3>sky queue<a class="headerlink" href="#sky-queue" title="Permalink to this headline">¶</a></h3>
+<p>Show the job queue for cluster(s).</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky queue <span class="o">[</span>OPTIONS<span class="o">]</span> <span class="o">[</span>CLUSTERS<span class="o">]</span>...
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-queue-a">
+<span id="cmdoption-sky-queue-all-users"></span><span class="sig-name descname"><span class="pre">-a</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--all-users</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-queue-a" title="Permalink to this definition">¶</a></dt>
+<dd><p>Show all users’ information in full.</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-queue-s">
+<span id="cmdoption-sky-queue-skip-finished"></span><span class="sig-name descname"><span class="pre">-s</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--skip-finished</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-queue-s" title="Permalink to this definition">¶</a></dt>
+<dd><p>Show only pending/running jobs’ information.</p>
+</dd></dl>
+
+<p class="rubric">Arguments</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-queue-arg-CLUSTERS">
+<span id="cmdoption-sky-queue-arg-clusters"></span><span class="sig-name descname"><span class="pre">CLUSTERS</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-queue-arg-CLUSTERS" title="Permalink to this definition">¶</a></dt>
+<dd><p>Optional argument(s)</p>
+</dd></dl>
+
+</div>
+<div class="section" id="sky-logs">
+<h3>sky logs<a class="headerlink" href="#sky-logs" title="Permalink to this headline">¶</a></h3>
+<p>Tail the log of a job.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky logs <span class="o">[</span>OPTIONS<span class="o">]</span> CLUSTER JOB_ID
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-logs-s">
+<span id="cmdoption-sky-logs-sync-down"></span><span class="sig-name descname"><span class="pre">-s</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--sync-down</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-logs-s" title="Permalink to this definition">¶</a></dt>
+<dd><p>Sync down the logs of the job (This is useful for distributed jobs todownload separate log for each job from all the workers).</p>
+</dd></dl>
+
+<p class="rubric">Arguments</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-logs-arg-CLUSTER">
+<span id="cmdoption-sky-logs-arg-cluster"></span><span class="sig-name descname"><span class="pre">CLUSTER</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-logs-arg-CLUSTER" title="Permalink to this definition">¶</a></dt>
+<dd><p>Required argument</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-logs-arg-JOB_ID">
+<span id="cmdoption-sky-logs-arg-job-id"></span><span class="sig-name descname"><span class="pre">JOB_ID</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-logs-arg-JOB_ID" title="Permalink to this definition">¶</a></dt>
+<dd><p>Required argument</p>
+</dd></dl>
+
+</div>
+<div class="section" id="sky-cancel">
+<h3>sky cancel<a class="headerlink" href="#sky-cancel" title="Permalink to this headline">¶</a></h3>
+<p>Cancel job(s).</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky cancel <span class="o">[</span>OPTIONS<span class="o">]</span> CLUSTER <span class="o">[</span>JOBS<span class="o">]</span>...
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-cancel-a">
+<span id="cmdoption-sky-cancel-all"></span><span class="sig-name descname"><span class="pre">-a</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--all</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-cancel-a" title="Permalink to this definition">¶</a></dt>
+<dd><p>Cancel all jobs.</p>
+</dd></dl>
+
+<p class="rubric">Arguments</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-cancel-arg-CLUSTER">
+<span id="cmdoption-sky-cancel-arg-cluster"></span><span class="sig-name descname"><span class="pre">CLUSTER</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-cancel-arg-CLUSTER" title="Permalink to this definition">¶</a></dt>
+<dd><p>Required argument</p>
+</dd></dl>
+
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-cancel-arg-JOBS">
+<span id="cmdoption-sky-cancel-arg-jobs"></span><span class="sig-name descname"><span class="pre">JOBS</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-cancel-arg-JOBS" title="Permalink to this definition">¶</a></dt>
+<dd><p>Optional argument(s)</p>
+</dd></dl>
+
+</div>
+</div>
+<div class="section" id="miscellaneous">
+<h2>Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="sky-show-gpus">
+<h3>sky show-gpus<a class="headerlink" href="#sky-show-gpus" title="Permalink to this headline">¶</a></h3>
+<p>List GPU/TPU/accelerators supported by Sky.</p>
+<p>To show what cloud offers a GPU/TPU type, use <cite>sky show-gpus &lt;gpu&gt;</cite>.</p>
+<p>To show all GPUs, including less common ones and their detailed
+information, use <cite>sky show-gpus –all</cite>.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>sky show-gpus <span class="o">[</span>OPTIONS<span class="o">]</span> <span class="o">[</span>GPU_NAME<span class="o">]</span>
+</pre></div>
+</div>
+<p class="rubric">Options</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-show-gpus-a">
+<span id="cmdoption-sky-show-gpus-all"></span><span class="sig-name descname"><span class="pre">-a</span></span><span class="sig-prename descclassname"></span><span class="sig-prename descclassname"><span class="pre">,</span> </span><span class="sig-name descname"><span class="pre">--all</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-show-gpus-a" title="Permalink to this definition">¶</a></dt>
+<dd><p>Show details of all GPU/TPU/accelerator offerings.</p>
+</dd></dl>
+
+<p class="rubric">Arguments</p>
+<dl class="std option">
+<dt class="sig sig-object std" id="cmdoption-sky-show-gpus-arg-GPU_NAME">
+<span id="cmdoption-sky-show-gpus-arg-gpu-name"></span><span class="sig-name descname"><span class="pre">GPU_NAME</span></span><span class="sig-prename descclassname"></span><a class="headerlink" href="#cmdoption-sky-show-gpus-arg-GPU_NAME" title="Permalink to this definition">¶</a></dt>
+<dd><p>Optional argument</p>
+</dd></dl>
+
+</div>
+</div>
+</div>
+
+
+              </div>
+              
+            
+                <!-- Previous / next buttons -->
+<div class='prev-next-area'> 
+    <a class='left-prev' id="prev-link" href="job-queue.html" title="previous page">
+        <i class="fas fa-angle-left"></i>
+        <div class="prev-next-info">
+            <p class="prev-next-subtitle">previous</p>
+            <p class="prev-next-title">Job Queue</p>
+        </div>
+    </a>
+</div>
+            
+        </div>
+    </div>
+    <footer class="footer">
+  <p>
+    
+      By the Sky authors<br/>
+    
+        &copy; Copyright 2022, Sky Team.<br/>
+  </p>
+</footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="../_static/js/index.be7d3bbb2ef33a8344ce.js"></script>
+
+  </body>
+</html>

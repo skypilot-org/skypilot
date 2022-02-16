@@ -14,9 +14,11 @@ _DEFAULT_REGION = 'us-west-2'
 
 
 def get_hourly_cost(instance_type: str,
-                    region: str = _DEFAULT_REGION,
+                    region: Optional[str] = None,
                     use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
+    if region is None:
+        region = _DEFAULT_REGION
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
 

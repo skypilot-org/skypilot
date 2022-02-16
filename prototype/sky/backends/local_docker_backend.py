@@ -4,9 +4,9 @@ import tempfile
 from typing import Any, Callable, Dict, Optional, Union
 
 import colorama
-import docker
 
 from sky import backends
+from sky import docker_adaptor
 from sky import global_user_state
 from sky import sky_logging
 from sky import resources
@@ -110,7 +110,7 @@ class LocalDockerBackend(backends.Backend):
         self.volume_mounts = {}  # Stores the ResourceHandle->volume mounts map
         self.images = {}  # Stores the ResourceHandle->[image_tag, metadata] map
         self.containers = {}
-        self.client = docker.from_env()
+        self.client = docker_adaptor.from_env()
         self._update_state()
 
     def _update_state(self):
@@ -202,8 +202,10 @@ class LocalDockerBackend(backends.Backend):
                 }
         self.volume_mounts[handle] = docker_mounts
 
-    def run_post_setup(self, handle: ResourceHandle,
-                       post_setup_fn: Optional[PostSetupFn]) -> None:
+        # TODO (zhwu): Room for refactorization here.
+        self._run_post_setup(handle)
+
+    def _run_post_setup(self, handle: ResourceHandle) -> None:
         """
         Launches a container and runs a sleep command on it.
 
@@ -211,9 +213,6 @@ class LocalDockerBackend(backends.Backend):
         so that the container is kept alive and we can issue docker exec cmds
         to it to handle sky exec commands.
         """
-        if post_setup_fn is not None:
-            raise ValueError('post_setup_fn is not supported in'
-                             ' LocalDockerBackend.')
         colorama.init()
         style = colorama.Style
         assert handle in self.images, \
@@ -231,7 +230,7 @@ class LocalDockerBackend(backends.Backend):
             # Check if a container exists and remove it to create new one
             _ = self.client.containers.get(handle)  # Throws NotFound error
             self.teardown(handle, terminate=True)
-        except docker.errors.NotFound:
+        except docker_adaptor.not_found_error():
             # Container does not exist, we're good to go
             pass
         try:
@@ -245,7 +244,7 @@ class LocalDockerBackend(backends.Backend):
                 volumes=volumes,
                 runtime=runtime,
                 labels=labels)
-        except docker.errors.APIError as e:
+        except docker_adaptor.api_error() as e:
             if 'Unknown runtime specified nvidia' in e.explanation:
                 logger.error(
                     'Unable to run container - nvidia runtime for docker not '

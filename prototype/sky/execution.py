@@ -36,9 +36,8 @@ class Stage(enum.Enum):
     PROVISION = 1
     SYNC_WORKDIR = 2
     SYNC_FILE_MOUNTS = 3
-    PRE_EXEC = 4
-    EXEC = 5
-    TEARDOWN = 6
+    EXEC = 4
+    TEARDOWN = 5
 
 
 def _execute(dag: sky.Dag,
@@ -101,9 +100,6 @@ def _execute(dag: sky.Dag,
 
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
-    # FIXME: test on some node where the mounts do not exist.
-    task.update_file_mounts(init.get_cloud_credential_file_mounts())
-
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
         task.add_storage_mounts()
@@ -121,11 +117,16 @@ def _execute(dag: sky.Dag,
                 # sync all files.  They are mitigations because if one manually
                 # changes the cluster AND passing in a handle, the cluster still
                 # would not be updated correctly.
+                prev_file_mounts = task.file_mounts
+                if prev_file_mounts is not None:
+                    prev_file_mounts = dict(task.file_mounts)
+                task.update_file_mounts(init.get_cloud_credential_file_mounts())
                 handle = backend.provision(task,
                                            task.best_resources,
                                            dryrun=dryrun,
                                            stream_logs=stream_logs,
                                            cluster_name=cluster_name)
+                task.set_file_mounts(prev_file_mounts)
 
         if dryrun:
             logger.info('Dry run finished.')
@@ -138,9 +139,6 @@ def _execute(dag: sky.Dag,
         if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.get_cloud_to_remote_file_mounts())
-
-        if stages is None or Stage.PRE_EXEC in stages:
-            backend.run_post_setup(handle, task.post_setup_fn)
 
         if stages is None or Stage.EXEC in stages:
             try:

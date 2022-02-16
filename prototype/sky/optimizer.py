@@ -4,7 +4,6 @@ import enum
 import pprint
 from typing import Dict, List, Optional
 
-import networkx as nx
 import numpy as np
 import tabulate
 
@@ -168,6 +167,7 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
     ):
+        import networkx as nx  # pylint: disable=import-outside-toplevel
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
         graph = dag.get_graph()
@@ -221,6 +221,9 @@ class Optimizer:
                     #    Resources(GCP, '...', 'V100'),
                     #    ...
                     # as having the same run time.
+                    # FIXME(zongheng): take 'num_nodes' as an arg/into
+                    # account. It may be another reason to treat num_nodes as
+                    # part of a Resources.
                     estimated_runtime = node.estimate_runtime(orig_resources)
                 for resources in launchable_list:
                     # Computes dp_best_cost[node][resources]

@@ -1,0 +1,556 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sky.skylet.job_lib &#8212; Sky 0.1 documentation</title>
+    
+  <link href="../../../_static/css/theme.css" rel="stylesheet">
+  <link href="../../../_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
+
+    
+  <link rel="stylesheet"
+    href="../../../_static/vendor/fontawesome/5.13.0/css/all.min.css">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../../_static/vendor/fontawesome/5.13.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+    href="../../../_static/vendor/fontawesome/5.13.0/webfonts/fa-brands-400.woff2">
+
+    
+      
+
+    
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/sphinx-book-theme.css?digest=84ace793992934648b4de8eed757e5a2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/togglebutton.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/mystnb.css" />
+    
+  <link rel="preload" as="script" href="../../../_static/js/index.be7d3bbb2ef33a8344ce.js">
+
+    <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/togglebutton.js"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
+    <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="docsearch:language" content="None">
+    
+
+    <!-- Google Analytics -->
+    
+  </head>
+  <body data-spy="scroll" data-target="#bd-toc-nav" data-offset="80">
+    
+    <div class="container-fluid" id="banner"></div>
+
+    
+
+    <div class="container-xl">
+      <div class="row">
+          
+<!-- Checkboxes to toggle the left sidebar -->
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle navigation sidebar">
+<label class="overlay" for="__navigation">
+    <div class="visually-hidden">Toggle navigation sidebar</div>
+</label>
+<div class="col-12 col-md-3 bd-sidebar site-navigation " id="site-navigation">
+    
+        <div class="navbar-brand-box">
+    <a class="navbar-brand text-wrap" href="../../../index.html">
+      
+      
+      
+      <h1 class="site-logo" id="site-title">Sky 0.1 documentation</h1>
+      
+    </a>
+</div><form class="bd-search d-flex align-items-center" action="../../../search.html" method="get">
+  <i class="icon fas fa-search"></i>
+  <input type="search" class="form-control" name="q" id="search-input" placeholder="Search the docs ..." aria-label="Search the docs ..." autocomplete="off" >
+</form><nav class="bd-links" id="bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item active">
+        <p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Getting Started
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/installation.html">
+   Installation
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/quickstart.html">
+   Quickstart
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../getting-started/tutorial.html">
+   Tutorial: DNN Training
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Use Cases
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/auto-failover.html">
+   Auto-provisioning GPUs
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/iterative-dev-project.html">
+   Iteratively Developing a Project
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/launch-many-tasks-vm.html">
+   Launch Multiple Tasks on a VM
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/grid-search.html">
+   Grid Search
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../examples/distributed-jobs.html">
+   Distributed Jobs on many VMs
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Reference Documentation
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/interactive-nodes.html">
+   Interactive Nodes
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/iterative-development.html">
+   Iterative Development
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/storage.html">
+   Storage
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/job-queue.html">
+   Job Queue
+  </a>
+ </li>
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+
+    </div>
+</nav> <!-- To handle the deprecated key -->
+
+<div class="navbar_extra_footer">
+  Theme by the <a href="https://ebp.jupyterbook.org">Executable Book Project</a>
+</div>
+
+</div>
+
+
+          
+
+
+          
+<!-- This is an invisible pixel that we watch to see if we've scrolled. -->
+<div class="sbt-scroll-pixel-helper"></div>
+<main class="col py-md-3 pl-md-4 bd-content overflow-auto" role="main">
+    
+    <div class="topbar container-xl fixed-top">
+    <div class="topbar-contents row">
+        <div class="col-12 col-md-3 bd-topbar-whitespace site-navigation show"></div>
+        <div class="col pl-md-4 topbar-main">
+            <div class="topbar-left">
+                
+                <label class="nav-toggle-button" for="__navigation">
+                    <div class="visually-hidden">Toggle navigation</div>
+                    <i class="fas fa-bars"></i>
+                </label>
+                
+            </div>
+            
+            <!-- Source interaction buttons -->
+
+            <!-- Full screen (wrap in <a> to have style consistency -->
+
+<a class="full-screen-button"><button type="button" class="btn btn-secondary topbarbtn" data-toggle="tooltip"
+        data-placement="bottom" onclick="toggleFullScreen()" aria-label="Fullscreen mode"
+        title="Fullscreen mode"><i
+            class="fas fa-expand"></i></button></a>
+
+            <!-- Launch buttons -->
+
+        </div>
+
+        <!-- Table of contents -->
+        <div class="d-none d-md-block col-md-2 bd-toc show noprint">
+            
+        </div>
+    </div>
+</div>
+    <div id="main-content" class="row">
+        <div class="col-12 col-md-9 pl-md-3 pr-md-0">
+            <!-- Table of contents that is only displayed when printing the page -->
+            <div id="jb-print-docs-body" class="onlyprint">
+                <h1></h1>
+                <!-- Table of contents -->
+                <div id="print-main-content">
+                    <div id="jb-print-toc">
+                        
+                    </div>
+                </div>
+            </div>
+            
+              <div>
+                
+  <h1>Source code for sky.skylet.job_lib</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Sky job lib, backed by a sqlite database.</span>
+
+<span class="sd">This is a remote utility module that provides job queue functionality.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span> <span class="nn">enum</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">pathlib</span>
+<span class="kn">import</span> <span class="nn">sqlite3</span>
+<span class="kn">import</span> <span class="nn">subprocess</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span>
+
+<span class="kn">import</span> <span class="nn">pendulum</span>
+
+<span class="kn">from</span> <span class="nn">sky.skylet</span> <span class="kn">import</span> <span class="n">util_lib</span>
+
+<span class="n">SKY_LOGS_DIRECTORY</span> <span class="o">=</span> <span class="s1">&#39;sky_logs&#39;</span>
+<span class="n">SKY_REMOTE_LOGS_ROOT</span> <span class="o">=</span> <span class="s1">&#39;~&#39;</span>
+
+
+<div class="viewcode-block" id="JobStatus"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.JobStatus">[docs]</a><span class="k">class</span> <span class="nc">JobStatus</span><span class="p">(</span><span class="n">enum</span><span class="o">.</span><span class="n">Enum</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Job status&quot;&quot;&quot;</span>
+    <span class="n">INIT</span> <span class="o">=</span> <span class="s1">&#39;INIT&#39;</span>
+    <span class="n">PENDING</span> <span class="o">=</span> <span class="s1">&#39;PENDING&#39;</span>
+    <span class="n">RUNNING</span> <span class="o">=</span> <span class="s1">&#39;RUNNING&#39;</span>
+    <span class="n">SUCCEEDED</span> <span class="o">=</span> <span class="s1">&#39;SUCCEEDED&#39;</span>
+    <span class="n">FAILED</span> <span class="o">=</span> <span class="s1">&#39;FAILED&#39;</span>
+    <span class="n">CANCELLED</span> <span class="o">=</span> <span class="s1">&#39;CANCELLED&#39;</span></div>
+
+
+<span class="n">_RAY_TO_JOB_STATUS_MAP</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;RUNNING&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">,</span>
+    <span class="s1">&#39;SUCCEEDED&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">SUCCEEDED</span><span class="p">,</span>
+    <span class="s1">&#39;FAILED&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">FAILED</span><span class="p">,</span>
+    <span class="s1">&#39;STOPPED&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">CANCELLED</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<div class="viewcode-block" id="JobInfoLoc"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.JobInfoLoc">[docs]</a><span class="k">class</span> <span class="nc">JobInfoLoc</span><span class="p">(</span><span class="n">enum</span><span class="o">.</span><span class="n">IntEnum</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Job Info&#39;s Location in the DB record&quot;&quot;&quot;</span>
+    <span class="n">JOB_ID</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">JOB_NAME</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">USERNAME</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">SUBMITTED_AT</span> <span class="o">=</span> <span class="mi">3</span>
+    <span class="n">STATUS</span> <span class="o">=</span> <span class="mi">4</span>
+    <span class="n">RUN_TIMESTAMP</span> <span class="o">=</span> <span class="mi">5</span>
+    <span class="n">START_AT</span> <span class="o">=</span> <span class="mi">6</span></div>
+
+
+<span class="n">_DB_PATH</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="s1">&#39;~/.sky/jobs.db&#39;</span><span class="p">)</span>
+<span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span><span class="n">_DB_PATH</span><span class="p">)</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">_CONN</span> <span class="o">=</span> <span class="n">sqlite3</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">_DB_PATH</span><span class="p">)</span>
+<span class="n">_CURSOR</span> <span class="o">=</span> <span class="n">_CONN</span><span class="o">.</span><span class="n">cursor</span><span class="p">()</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s1">&#39;select * from jobs limit 0&#39;</span><span class="p">)</span>
+<span class="k">except</span> <span class="n">sqlite3</span><span class="o">.</span><span class="n">OperationalError</span><span class="p">:</span>
+    <span class="c1"># Tables do not exist, create them.</span>
+    <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">      CREATE TABLE jobs (</span>
+<span class="s2">        job_id INTEGER PRIMARY KEY AUTOINCREMENT,</span>
+<span class="s2">        job_name TEXT,</span>
+<span class="s2">        username TEXT,</span>
+<span class="s2">        submitted_at INTEGER,</span>
+<span class="s2">        status TEXT,</span>
+<span class="s2">        run_timestamp TEXT CANDIDATE KEY,</span>
+<span class="s2">        start_at INTEGER)&quot;&quot;&quot;</span><span class="p">)</span>
+
+<span class="n">_CONN</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="add_job"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.add_job">[docs]</a><span class="k">def</span> <span class="nf">add_job</span><span class="p">(</span><span class="n">job_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">username</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">run_timestamp</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;Atomically reserve the next available job id for the user.&quot;&quot;&quot;</span>
+    <span class="n">job_submitted_at</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">())</span>
+    <span class="c1"># job_id will autoincrement with the null value</span>
+    <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s1">&#39;INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?)&#39;</span><span class="p">,</span>
+                    <span class="p">(</span><span class="n">job_name</span><span class="p">,</span> <span class="n">username</span><span class="p">,</span> <span class="n">job_submitted_at</span><span class="p">,</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">INIT</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                     <span class="n">run_timestamp</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+    <span class="n">_CONN</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s1">&#39;SELECT job_id FROM jobs WHERE run_timestamp=(?)&#39;</span><span class="p">,</span>
+                           <span class="p">(</span><span class="n">run_timestamp</span><span class="p">,))</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="n">job_id</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">assert</span> <span class="n">job_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">job_id</span></div>
+
+
+<div class="viewcode-block" id="set_status"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.set_status">[docs]</a><span class="k">def</span> <span class="nf">set_status</span><span class="p">(</span><span class="n">job_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">status</span><span class="p">:</span> <span class="n">JobStatus</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">assert</span> <span class="n">status</span> <span class="o">!=</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">,</span> <span class="p">(</span>
+        <span class="s1">&#39;Please use set_job_started() to set job status to RUNNING&#39;</span><span class="p">)</span>
+    <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s1">&#39;UPDATE jobs SET status=(?) WHERE job_id=(?)&#39;</span><span class="p">,</span>
+                    <span class="p">(</span><span class="n">status</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">job_id</span><span class="p">))</span>
+    <span class="n">_CONN</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="set_job_started"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.set_job_started">[docs]</a><span class="k">def</span> <span class="nf">set_job_started</span><span class="p">(</span><span class="n">job_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s1">&#39;UPDATE jobs SET status=(?), start_at=(?) WHERE job_id=(?)&#39;</span><span class="p">,</span>
+                    <span class="p">(</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()),</span> <span class="n">job_id</span><span class="p">))</span>
+    <span class="n">_CONN</span><span class="o">.</span><span class="n">commit</span><span class="p">()</span></div>
+
+
+<span class="k">def</span> <span class="nf">_get_records_from_rows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+    <span class="n">records</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">break</span>
+        <span class="c1"># TODO: use namedtuple instead of dict</span>
+        <span class="n">records</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s1">&#39;job_id&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">JOB_ID</span><span class="o">.</span><span class="n">value</span><span class="p">],</span>
+            <span class="s1">&#39;job_name&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">JOB_NAME</span><span class="o">.</span><span class="n">value</span><span class="p">],</span>
+            <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">USERNAME</span><span class="o">.</span><span class="n">value</span><span class="p">],</span>
+            <span class="s1">&#39;submitted_at&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">SUBMITTED_AT</span><span class="o">.</span><span class="n">value</span><span class="p">],</span>
+            <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="p">[</span><span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">STATUS</span><span class="o">.</span><span class="n">value</span><span class="p">]],</span>
+            <span class="s1">&#39;run_timestamp&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">RUN_TIMESTAMP</span><span class="o">.</span><span class="n">value</span><span class="p">],</span>
+            <span class="s1">&#39;start_at&#39;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">START_AT</span><span class="o">.</span><span class="n">value</span><span class="p">],</span>
+        <span class="p">})</span>
+    <span class="k">return</span> <span class="n">records</span>
+
+
+<span class="k">def</span> <span class="nf">_get_jobs</span><span class="p">(</span>
+        <span class="n">username</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+        <span class="n">status_list</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">JobStatus</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+    <span class="k">if</span> <span class="n">status_list</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">status_list</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">JobStatus</span><span class="p">)</span>
+    <span class="n">status_str_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">status</span><span class="o">.</span><span class="n">value</span> <span class="k">for</span> <span class="n">status</span> <span class="ow">in</span> <span class="n">status_list</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">username</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">            SELECT * FROM jobs</span>
+<span class="s2">            WHERE status IN (</span><span class="si">{</span><span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="s1">&#39;?&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">status_list</span><span class="p">))</span><span class="si">}</span><span class="s2">)</span>
+<span class="s2">            ORDER BY job_id DESC&quot;&quot;&quot;</span><span class="p">,</span>
+            <span class="p">(</span><span class="o">*</span><span class="n">status_str_list</span><span class="p">,),</span>
+        <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">            SELECT * FROM jobs</span>
+<span class="s2">            WHERE status IN (</span><span class="si">{</span><span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="s1">&#39;?&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">status_list</span><span class="p">))</span><span class="si">}</span><span class="s2">)</span>
+<span class="s2">            AND username=(?)</span>
+<span class="s2">            ORDER BY job_id DESC&quot;&quot;&quot;</span><span class="p">,</span>
+            <span class="p">(</span><span class="o">*</span><span class="n">status_str_list</span><span class="p">,</span> <span class="n">username</span><span class="p">),</span>
+        <span class="p">)</span>
+
+    <span class="n">records</span> <span class="o">=</span> <span class="n">_get_records_from_rows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">records</span>
+
+
+<span class="k">def</span> <span class="nf">_get_jobs_by_ids</span><span class="p">(</span><span class="n">job_ids</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">        SELECT * FROM jobs</span>
+<span class="s2">        WHERE job_id IN (</span><span class="si">{</span><span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="s1">&#39;?&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">job_ids</span><span class="p">))</span><span class="si">}</span><span class="s2">)</span>
+<span class="s2">        ORDER BY job_id DESC&quot;&quot;&quot;</span><span class="p">,</span>
+        <span class="p">(</span><span class="o">*</span><span class="n">job_ids</span><span class="p">,),</span>
+    <span class="p">)</span>
+    <span class="n">records</span> <span class="o">=</span> <span class="n">_get_records_from_rows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">records</span>
+
+
+<div class="viewcode-block" id="query_job_status"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.query_job_status">[docs]</a><span class="k">def</span> <span class="nf">query_job_status</span><span class="p">(</span><span class="n">job_ids</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">JobStatus</span><span class="p">]:</span>
+    <span class="sd">&quot;&quot;&quot;Return the status of the jobs based on the `ray job status` command.</span>
+
+<span class="sd">    Though we update job status actively in ray program and job cancelling,</span>
+<span class="sd">    we still need this to handle staleness problem, caused by instance</span>
+<span class="sd">    restarting and other corner cases (if any).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">job_ids</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+
+    <span class="c1"># TODO: if too slow, directly query against redis.</span>
+    <span class="n">test_cmd</span> <span class="o">=</span> <span class="p">[(</span><span class="sa">f</span><span class="s1">&#39;(ray job status --address 127.0.0.1:8265 </span><span class="si">{</span><span class="n">job</span><span class="si">}</span><span class="s1"> 2&gt;&amp;1 | &#39;</span>
+                 <span class="s1">&#39;grep &quot;Job status&quot; || echo &quot;not found&quot;)&#39;</span><span class="p">)</span> <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">job_ids</span><span class="p">]</span>
+    <span class="n">test_cmd</span> <span class="o">=</span> <span class="s1">&#39; &amp;&amp; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">test_cmd</span><span class="p">)</span>
+    <span class="n">proc</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">test_cmd</span><span class="p">,</span>
+                          <span class="n">shell</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                          <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                          <span class="n">executable</span><span class="o">=</span><span class="s1">&#39;/bin/bash&#39;</span><span class="p">,</span>
+                          <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">)</span>
+    <span class="n">stdout</span> <span class="o">=</span> <span class="n">proc</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+
+    <span class="n">results</span> <span class="o">=</span> <span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">job_ids</span><span class="p">),</span> <span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">job_ids</span><span class="p">)</span>
+
+    <span class="c1"># Process the results</span>
+    <span class="n">job_status_list</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">job_id</span><span class="p">,</span> <span class="n">res</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">job_ids</span><span class="p">,</span> <span class="n">results</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;not found&#39;</span><span class="p">:</span>
+            <span class="c1"># The job may be stale, when the instance is restarted (the ray</span>
+            <span class="c1"># redis is volatile). We need to reset the status of the task to</span>
+            <span class="c1"># FAILED if its original status is RUNNING or PENDING.</span>
+            <span class="n">rows</span> <span class="o">=</span> <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s1">&#39;SELECT * FROM jobs WHERE job_id=(?)&#39;</span><span class="p">,</span>
+                                   <span class="p">(</span><span class="n">job_id</span><span class="p">,))</span>
+            <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+                <span class="n">status</span> <span class="o">=</span> <span class="n">JobStatus</span><span class="p">[</span><span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">STATUS</span><span class="o">.</span><span class="n">value</span><span class="p">]]</span>
+            <span class="k">if</span> <span class="n">status</span> <span class="ow">in</span> <span class="p">[</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">,</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">PENDING</span><span class="p">]:</span>
+                <span class="n">status</span> <span class="o">=</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">FAILED</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ray_status</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)</span>
+            <span class="n">ray_status</span> <span class="o">=</span> <span class="n">ray_status</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">status</span> <span class="o">=</span> <span class="n">_RAY_TO_JOB_STATUS_MAP</span><span class="p">[</span><span class="n">ray_status</span><span class="p">]</span>
+        <span class="n">job_status_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">status</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">job_status_list</span></div>
+
+
+<span class="k">def</span> <span class="nf">_update_status</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">running_jobs</span> <span class="o">=</span> <span class="n">_get_jobs</span><span class="p">(</span><span class="n">username</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">status_list</span><span class="o">=</span><span class="p">[</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">])</span>
+    <span class="n">running_job_ids</span> <span class="o">=</span> <span class="p">[</span><span class="n">job</span><span class="p">[</span><span class="s1">&#39;job_id&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">running_jobs</span><span class="p">]</span>
+
+    <span class="n">job_status</span> <span class="o">=</span> <span class="n">query_job_status</span><span class="p">(</span><span class="n">running_job_ids</span><span class="p">)</span>
+    <span class="c1"># Process the results</span>
+    <span class="k">for</span> <span class="n">job</span><span class="p">,</span> <span class="n">status</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">running_jobs</span><span class="p">,</span> <span class="n">job_status</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">status</span> <span class="o">!=</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">:</span>
+            <span class="n">set_status</span><span class="p">(</span><span class="n">job</span><span class="p">[</span><span class="s1">&#39;job_id&#39;</span><span class="p">],</span> <span class="n">status</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_readable_time_duration</span><span class="p">(</span><span class="n">start</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">start</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s1">&#39;-&#39;</span>
+    <span class="n">duration</span> <span class="o">=</span> <span class="n">pendulum</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">subtract</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span>
+    <span class="n">diff</span> <span class="o">=</span> <span class="n">duration</span><span class="o">.</span><span class="n">diff_for_humans</span><span class="p">()</span>
+    <span class="n">diff</span> <span class="o">=</span> <span class="n">diff</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;second&#39;</span><span class="p">,</span> <span class="s1">&#39;sec&#39;</span><span class="p">)</span>
+    <span class="n">diff</span> <span class="o">=</span> <span class="n">diff</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;minute&#39;</span><span class="p">,</span> <span class="s1">&#39;min&#39;</span><span class="p">)</span>
+    <span class="n">diff</span> <span class="o">=</span> <span class="n">diff</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;hour&#39;</span><span class="p">,</span> <span class="s1">&#39;hr&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">diff</span>
+
+
+<span class="k">def</span> <span class="nf">_show_job_queue</span><span class="p">(</span><span class="n">jobs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">job_table</span> <span class="o">=</span> <span class="n">util_lib</span><span class="o">.</span><span class="n">create_table</span><span class="p">(</span>
+        <span class="p">[</span><span class="s1">&#39;ID&#39;</span><span class="p">,</span> <span class="s1">&#39;NAME&#39;</span><span class="p">,</span> <span class="s1">&#39;USER&#39;</span><span class="p">,</span> <span class="s1">&#39;SUBMITTED&#39;</span><span class="p">,</span> <span class="s1">&#39;STARTED&#39;</span><span class="p">,</span> <span class="s1">&#39;STATUS&#39;</span><span class="p">,</span> <span class="s1">&#39;LOG&#39;</span><span class="p">])</span>
+
+    <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">jobs</span><span class="p">:</span>
+        <span class="n">job_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">([</span>
+            <span class="n">job</span><span class="p">[</span><span class="s1">&#39;job_id&#39;</span><span class="p">],</span>
+            <span class="n">job</span><span class="p">[</span><span class="s1">&#39;job_name&#39;</span><span class="p">],</span>
+            <span class="n">job</span><span class="p">[</span><span class="s1">&#39;username&#39;</span><span class="p">],</span>
+            <span class="n">_readable_time_duration</span><span class="p">(</span><span class="n">job</span><span class="p">[</span><span class="s1">&#39;submitted_at&#39;</span><span class="p">]),</span>
+            <span class="n">_readable_time_duration</span><span class="p">(</span><span class="n">job</span><span class="p">[</span><span class="s1">&#39;start_at&#39;</span><span class="p">]),</span>
+            <span class="n">job</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">SKY_LOGS_DIRECTORY</span><span class="p">,</span> <span class="n">job</span><span class="p">[</span><span class="s1">&#39;run_timestamp&#39;</span><span class="p">]),</span>
+        <span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">job_table</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="show_jobs"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.show_jobs">[docs]</a><span class="k">def</span> <span class="nf">show_jobs</span><span class="p">(</span><span class="n">username</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">all_jobs</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;Show the job queue.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        username: The username to show jobs for. Show all the users if None.</span>
+<span class="sd">        all_jobs: Whether to show all jobs, not just the pending/running ones.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_update_status</span><span class="p">()</span>
+    <span class="n">status_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">PENDING</span><span class="p">,</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">all_jobs</span><span class="p">:</span>
+        <span class="n">status_list</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="n">jobs</span> <span class="o">=</span> <span class="n">_get_jobs</span><span class="p">(</span><span class="n">username</span><span class="p">,</span> <span class="n">status_list</span><span class="o">=</span><span class="n">status_list</span><span class="p">)</span>
+    <span class="n">_show_job_queue</span><span class="p">(</span><span class="n">jobs</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="cancel_jobs"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.cancel_jobs">[docs]</a><span class="k">def</span> <span class="nf">cancel_jobs</span><span class="p">(</span><span class="n">jobs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;Cancel the jobs.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        jobs: The job ids to cancel. If None, cancel all the jobs.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Update the status of the jobs to avoid setting the status of staled</span>
+    <span class="c1"># jobs to CANCELLED.</span>
+    <span class="n">_update_status</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">jobs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">job_records</span> <span class="o">=</span> <span class="n">_get_jobs</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="p">[</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">PENDING</span><span class="p">,</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">job_records</span> <span class="o">=</span> <span class="n">_get_jobs_by_ids</span><span class="p">(</span><span class="n">jobs</span><span class="p">)</span>
+    <span class="n">jobs</span> <span class="o">=</span> <span class="p">[</span><span class="n">job</span><span class="p">[</span><span class="s1">&#39;job_id&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">job_records</span><span class="p">]</span>
+    <span class="n">cancel_cmd</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="sa">f</span><span class="s1">&#39;ray job stop --address 127.0.0.1:8265 </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">for</span> <span class="n">job_id</span> <span class="ow">in</span> <span class="n">jobs</span>
+    <span class="p">]</span>
+    <span class="n">cancel_cmd</span> <span class="o">=</span> <span class="s1">&#39;;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">cancel_cmd</span><span class="p">)</span>
+    <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">cancel_cmd</span><span class="p">,</span> <span class="n">shell</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">check</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">executable</span><span class="o">=</span><span class="s1">&#39;/bin/bash&#39;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">job_records</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">job</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="ow">in</span> <span class="p">[</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">PENDING</span><span class="p">,</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">]:</span>
+            <span class="n">set_status</span><span class="p">(</span><span class="n">job</span><span class="p">[</span><span class="s1">&#39;job_id&#39;</span><span class="p">],</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">CANCELLED</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="log_dir"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.log_dir">[docs]</a><span class="k">def</span> <span class="nf">log_dir</span><span class="p">(</span><span class="n">job_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">Optional</span><span class="p">[</span><span class="n">JobStatus</span><span class="p">]]:</span>
+    <span class="sd">&quot;&quot;&quot;Returns the relative path to the log file for a job and the status.&quot;&quot;&quot;</span>
+    <span class="n">_update_status</span><span class="p">()</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+        <span class="sd">&quot;&quot;&quot;\</span>
+<span class="sd">            SELECT * FROM jobs</span>
+<span class="sd">            WHERE job_id=(?)&quot;&quot;&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">job_id</span><span class="p">,))</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+        <span class="n">status</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">STATUS</span><span class="o">.</span><span class="n">value</span><span class="p">]</span>
+        <span class="n">status</span> <span class="o">=</span> <span class="n">JobStatus</span><span class="p">[</span><span class="n">status</span><span class="p">]</span>
+        <span class="n">run_timestamp</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">RUN_TIMESTAMP</span><span class="o">.</span><span class="n">value</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">SKY_LOGS_DIRECTORY</span><span class="p">,</span> <span class="n">run_timestamp</span><span class="p">),</span> <span class="n">status</span></div>
+</pre></div>
+
+              </div>
+              
+            
+                <!-- Previous / next buttons -->
+<div class='prev-next-area'>
+</div>
+            
+        </div>
+    </div>
+    <footer class="footer">
+  <p>
+    
+      By the Sky authors<br/>
+    
+        &copy; Copyright 2022, Sky Team.<br/>
+  </p>
+</footer>
+</main>
+
+
+      </div>
+    </div>
+  
+  <script src="../../../_static/js/index.be7d3bbb2ef33a8344ce.js"></script>
+
+  </body>
+</html>

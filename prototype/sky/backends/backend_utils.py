@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 import zlib
+import shutil
 
 import jinja2
 
@@ -23,6 +24,7 @@ from sky import clouds
 from sky import sky_logging
 from sky import resources
 from sky import task as task_lib
+from sky.cloud_adaptors import azure
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -30,7 +32,7 @@ logger = sky_logging.init_logger(__name__)
 Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_WORKDIR = '~/sky_workdir'
+SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.9.2'
@@ -43,14 +45,6 @@ RESET_BOLD = '\033[0m'
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
-
-run_with_log = log_lib.run_with_log
-
-
-def get_rel_path(path: str) -> str:
-    cwd = os.getcwd()
-    common = os.path.commonpath([path, cwd])
-    return os.path.relpath(path, common)
 
 
 def _fill_template(template_path: str,
@@ -335,6 +329,11 @@ def _build_sky_wheel() -> pathlib.Path:
     norm_path = str(package_root) + os.sep
     username = getpass.getuser()
     wheel_dir = pathlib.Path(tempfile.gettempdir()) / f'sky_wheels_{username}'
+    # remove old wheels
+    for f in wheel_dir.glob('sky-*.whl'):
+        f.unlink()
+    # remove pip wheels build directory, otherwise we may include outdated code
+    shutil.rmtree(str(package_root / 'build'), ignore_errors=True)
     try:
         # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
         # the output.
@@ -404,6 +403,22 @@ def write_cluster_config(task: task_lib.Task,
     if isinstance(cloud, clouds.AWS):
         aws_default_ami = cloud.get_default_ami(region)
 
+    azure_subscription_id = None
+    if isinstance(cloud, clouds.Azure):
+        if dryrun:
+            azure_subscription_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+        else:
+            try:
+                azure_subscription_id = azure.get_subscription_id()
+                if not azure_subscription_id:
+                    raise ValueError  # The error message will be replaced.
+            except Exception:
+                raise RuntimeError(
+                    'Fail to get subscription id from azure cli. '
+                    'Make sure you have login in and fix it with this Azure '
+                    'cli command: "az account set -s <subscription_id>".'
+                ) from None
+
     assert cluster_name is not None
 
     setup_sh_path = None
@@ -469,6 +484,8 @@ def write_cluster_config(task: task_lib.Task,
                 'zones': ','.join(zones),
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
+                # Azure only.
+                'azure_subscription_id': azure_subscription_id,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Sky remote utils.
@@ -771,22 +788,10 @@ def check_local_gpus() -> bool:
     Returns True if nvidia-smi is installed, false if not.
     """
     p = subprocess.run(['which', 'nvidia-smi'],
-                       capture_output=True,
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
                        check=False)
     return p.returncode == 0
-
-
-def make_task_bash_script(codegen: str) -> str:
-    script = [
-        textwrap.dedent(f"""\
-                #!/bin/bash
-                source ~/.bashrc
-                . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
-                cd {SKY_REMOTE_WORKDIR}"""),
-        codegen,
-    ]
-    script = '\n'.join(script)
-    return script
 
 
 def generate_cluster_name():
