@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import tabulate
+from rich.console import Console
 
 from sky import check
 from sky import clouds
@@ -17,6 +18,7 @@ from sky import sky_logging
 from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
+console = Console()
 
 Dag = dag_lib.Dag
 Resources = resources_lib.Resources
@@ -210,7 +212,7 @@ class Optimizer:
                         f'No launchable resource found for task {node}. '
                         'To fix: relax its resource requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:
-                    logger.info('Defaulting estimated time to 1 hr. '
+                    console.log('[grey50 italic]Defaulting estimated time to 1 hr. '
                                 'Call Task.set_time_estimator() to override.')
                     estimated_runtime = 1 * 3600
                 else:
@@ -284,12 +286,11 @@ class Optimizer:
             }
             metric = 'cost' if minimize_cost else 'time'
             if len(dp_best_cost) > 1:
-                logger.info(f'Details: task -> {{resources -> {metric}}}')
-                logger.info('%s\n', pprint.pformat(dp_best_cost))
+                console.log(f'[cyan bold]Details: task -> {{resources -> {metric}}}')
+                console.log(f'[cyan bold]{pprint.pformat(dp_best_cost)}\n')
             elif len(dp_best_cost) == 1:
-                logger.info(f'Considered resources -> {metric}')
-                logger.info('%s\n',
-                            pprint.pformat(list(dp_best_cost.values())[0]))
+                console.log(f'[cyan bold]Considered resources -> {metric}')
+                console.log(f'[cyan bold]{pprint.pformat(list(dp_best_cost.values())[0])}\n')
 
         return dag, best_plan
 
@@ -319,11 +320,11 @@ class Optimizer:
         _walk(node, h, overall_best)
 
         if minimize_cost:
-            logger.info('Optimizer - plan minimizing cost (~${:.1f}):'.format(
+            console.log('Optimizer - plan minimizing cost [green](~${:.1f}):'.format(
                 overall_best))
         else:
-            logger.info(
-                'Optimizer - plan minimizing run time (~{:.1f} hr):'.format(
+            console.log(
+                'Optimizer - plan minimizing run time [green](~{:.1f} hr):'.format(
                     overall_best / 3600))
         # Do not print Source or Sink.
         message_data = [
@@ -334,7 +335,7 @@ class Optimizer:
         message = tabulate.tabulate(reversed(message_data),
                                     headers=['TASK', 'BEST_RESOURCE'],
                                     tablefmt='plain')
-        logger.info(f'\n{message}\n')
+        console.log(f'[cyan bold]\n{message}\n')
         return best_plan
 
 

@@ -37,6 +37,7 @@ import yaml
 
 import click
 import pendulum
+from rich.console import Console
 
 import sky
 from sky import backends
@@ -51,6 +52,7 @@ from sky.clouds import service_catalog
 from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
+console = Console()
 
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -316,7 +318,7 @@ def _create_and_ssh_into_node(
         handle = backend.provision(task,
                                    to_provision=to_provision,
                                    dryrun=False,
-                                   stream_logs=True,
+                                   stream_logs=False,
                                    cluster_name=cluster_name)
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
@@ -941,7 +943,7 @@ def start(clusters: Tuple[str]):
         for name in clusters:
             record = _filter(name, all_clusters)
             if record is None:
-                print(f'Cluster {name} was not found.')
+                console.log(f'[red]Cluster {name} was not found.')
                 continue
             # A cluster may have one of the following states:
             #
@@ -977,7 +979,7 @@ def start(clusters: Tuple[str]):
                 #    zombied (remains as stopped in the cloud's UI).
                 #
                 #    This is dangerous and unwanted behavior!
-                print(f'Cluster {name} already has status UP.')
+                console.log(f'[yellow]Cluster {name} already has status UP.')
                 continue
             assert record['status'] in (
                 global_user_state.ClusterStatus.INIT,
@@ -993,13 +995,14 @@ def start(clusters: Tuple[str]):
         with sky.Dag():
             dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
-        click.secho(f'Starting cluster {name}...', bold=True)
-        backend.provision(dummy_task,
-                          to_provision=handle.launched_resources,
-                          dryrun=False,
-                          stream_logs=True,
-                          cluster_name=name)
-        click.secho(f'Cluster {name} started.', fg='green')
+
+        with console.status(f'[bold green]Starting {name}...') as status:
+            backend.provision(dummy_task,
+                            to_provision=handle.launched_resources,
+                            dryrun=False,
+                            stream_logs=False,
+                            cluster_name=name)
+            console.log(f'[green]Cluster {name} started.')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1060,15 +1063,15 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             if handle is not None:
                 to_down.append({'name': name, 'handle': handle})
             else:
-                print(f'Cluster {name} not found.')
+                console.log(f'[red]Cluster {name} not found.')
     if apply_to_all:
         to_down = global_user_state.get_clusters()
         if len(names) > 0:
-            print(f'Both --all and cluster(s) specified for sky {command}. '
+            console.log(f'[yellow]Both --all and cluster(s) specified for sky {command}. '
                   'Letting --all take effect.')
             names = []
     if not to_down and not names:
-        print('No existing clusters found (see `sky status`).')
+        console.log('[yellow]No existing clusters found (see [bold green]sky status[/]).')
 
     for record in to_down:  # TODO: parallelize.
         name = record['name']
@@ -1077,20 +1080,21 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         if (isinstance(backend, backends.CloudVmRayBackend) and
                 handle.launched_resources.use_spot and not terminate):
             # TODO(suquark): enable GCP+spot to be stopped in the future.
-            click.secho(
-                f'Stopping cluster {name}... skipped, because spot instances '
-                'may lose attached volumes. ',
-                fg='green')
-            click.echo('  To terminate the cluster, run: ', nl=False)
-            click.secho(f'sky down {name}', bold=True)
+            console.log(
+                f'[yellow]Stopping cluster {name}... skipped, because spot '
+                '[yellow]instances may lose attached volumes. ')
+            console.log(f'To terminate the cluster, run: [bold]sky down {name}')
             continue
-        backend.teardown(handle, terminate=terminate)
-        if terminate:
-            click.secho(f'Terminating cluster {name}...done.', fg='green')
-        else:
-            click.secho(f'Stopping cluster {name}...done.', fg='green')
-            click.echo('  To restart the cluster, run: ', nl=False)
-            click.secho(f'sky start {name}', bold=True)
+
+        teardown_verb = 'Terminating' if terminate else 'Stopping'
+        with console.status(f"[bold green]{teardown_verb} {name}...") as status:
+            # TODO: do not fail silently
+            backend.teardown(handle, terminate=terminate)
+
+            if terminate:
+                console.log(f'Terminated cluster {name}')
+            else:
+                console.log(f'Stopped cluster {name}. To restart, run: [bold green]sky start {name}')
 
 
 @_interactive_node_cli_command

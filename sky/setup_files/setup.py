@@ -17,6 +17,7 @@ install_requires = [
     'pendulum',
     'PrettyTable',
     'ray[default]',
+    'rich',
     'tabulate',
 ]
 
