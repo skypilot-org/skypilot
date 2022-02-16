@@ -1194,8 +1194,10 @@ class CloudVmRayBackend(backends.Backend):
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
-        # 'all_file_mounts' should be handled, since the provision will not
-        # update the file_mounts for workers.
+        # Note that 2nd+ provision()/'ray up' will not update (refresh) the
+        # file_mounts for workers.  1st launch does indeed sync file_mounts to
+        # all nodes.  Thus, we here rsync the file mounts.
+        del cloud_to_remote_file_mounts  # Unused.
         mounts = all_file_mounts
         if mounts is None or not mounts:
             return
@@ -1204,7 +1206,7 @@ class CloudVmRayBackend(backends.Backend):
         cyan = fore.CYAN
         reset = style.RESET_ALL
         bright = style.BRIGHT
-        logger.info(f'{cyan}Processing cloud to VM file mounts.{reset}')
+        logger.info(f'{cyan}Processing file mounts.{reset}')
 
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         ssh_user, ssh_private_key = self._get_ssh_credential(
