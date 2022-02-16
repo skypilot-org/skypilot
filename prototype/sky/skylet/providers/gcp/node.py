@@ -144,6 +144,10 @@ class GCPNode(UserDict, metaclass=abc.ABCMeta):
     def is_terminated(self) -> bool:
         return self.get(self.STATUS_FIELD) not in self.NON_TERMINATED_STATUSES
 
+    @property
+    def id(self) -> str:
+        return self["name"]
+
     @abc.abstractmethod
     def get_labels(self) -> dict:
         return
@@ -162,7 +166,7 @@ class GCPNode(UserDict, metaclass=abc.ABCMeta):
 
 class GCPComputeNode(GCPNode):
     """Abstraction around compute nodes"""
-
+    # https://cloud.google.com/compute/docs/instances/instance-life-cycle
     NON_TERMINATED_STATUSES = {"PROVISIONING", "STAGING", "RUNNING"}
     RUNNING_STATUSES = {"RUNNING"}
     STATUS_FIELD = "status"
@@ -278,6 +282,16 @@ class GCPResource(metaclass=abc.ABCMeta):
         return results
 
     @abc.abstractmethod
+    def start_instance(self, node_id: str,
+                       wait_for_operation: bool = True) -> dict:
+        """Start an instance and return result."""
+
+    @abc.abstractmethod
+    def stop_instance(self, node_id: str,
+                      wait_for_operation: bool = True) -> dict:
+        """Stop an instance and return result."""
+
+    @abc.abstractmethod
     def delete_instance(self, node_id: str,
                         wait_for_operation: bool = True) -> dict:
         """Deletes an instance and returns result."""
@@ -312,8 +326,13 @@ class GCPCompute(GCPResource):
 
         return result
 
-    def list_instances(self, label_filters: Optional[dict] = None
+    def list_instances(self, label_filters: Optional[dict] = None,
                        ) -> List[GCPComputeNode]:
+        non_terminated_status = list(GCPComputeNode.NON_TERMINATED_STATUSES)
+        return self._list_instances(label_filters, non_terminated_status)
+
+    def _list_instances(self, label_filters: Optional[dict],
+                        status_filter: List[str]) -> List[GCPComputeNode]:
         label_filters = label_filters or {}
 
         if label_filters:
@@ -326,7 +345,7 @@ class GCPCompute(GCPResource):
 
         instance_state_filter_expr = "(" + " OR ".join([
             "(status = {status})".format(status=status)
-            for status in GCPComputeNode.NON_TERMINATED_STATUSES
+            for status in status_filter
         ]) + ")"
 
         cluster_name_filter_expr = ("(labels.{key} = {value})"
@@ -465,6 +484,36 @@ class GCPCompute(GCPResource):
             result = operation
 
         return result, name
+
+    def start_instance(self, node_id: str,
+                       wait_for_operation: bool = True) -> dict:
+        operation = self.resource.instances().start(
+            project=self.project_id,
+            zone=self.availability_zone,
+            instance=node_id,
+        ).execute()
+
+        if wait_for_operation:
+            result = self.wait_for_operation(operation)
+        else:
+            result = operation
+
+        return result
+
+    def stop_instance(self, node_id: str,
+                      wait_for_operation: bool = True) -> dict:
+        operation = self.resource.instances().stop(
+            project=self.project_id,
+            zone=self.availability_zone,
+            instance=node_id,
+        ).execute()
+
+        if wait_for_operation:
+            result = self.wait_for_operation(operation)
+        else:
+            result = operation
+
+        return result
 
     def delete_instance(self, node_id: str,
                         wait_for_operation: bool = True) -> dict:
@@ -613,6 +662,32 @@ class GCPTPU(GCPResource):
             result = operation
 
         return result, name
+
+    def start_instance(self, node_id: str,
+                       wait_for_operation: bool = True) -> dict:
+        operation = self.resource.projects().locations().nodes().start(
+            name=node_id).execute()
+
+        # No need to increase MAX_POLLS for deletion
+        if wait_for_operation:
+            result = self.wait_for_operation(operation, max_polls=MAX_POLLS)
+        else:
+            result = operation
+
+        return result
+
+    def stop_instance(self, node_id: str,
+                      wait_for_operation: bool = True) -> dict:
+        operation = self.resource.projects().locations().nodes().stop(
+            name=node_id).execute()
+
+        # No need to increase MAX_POLLS for deletion
+        if wait_for_operation:
+            result = self.wait_for_operation(operation, max_polls=MAX_POLLS)
+        else:
+            result = operation
+
+        return result
 
     def delete_instance(self, node_id: str,
                         wait_for_operation: bool = True) -> dict:
