@@ -47,18 +47,14 @@ _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
 
 
-def _fill_template(template_path: str,
+def _fill_template(template_name: str,
                    variables: Dict,
                    output_path: Optional[str] = None) -> str:
     """Create a file from a Jinja template and return the filename."""
-    assert template_path.endswith('.j2'), template_path
-
-    def to_absolute(path):
-        if not os.path.isabs(path):
-            path = os.path.join(os.path.dirname(sky.__root_dir__), path)
-        return path
-
-    template_path = to_absolute(template_path)
+    template_path = os.path.join(sky.__root_dir__, 'templates',
+                                 template_name + '.j2')
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
     template = jinja2.Template(template)
@@ -70,7 +66,7 @@ def _fill_template(template_path: str,
             os.path.expanduser(SKY_USER_FILE_PATH)) / f'{cluster_name}.yml'
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
-    output_path = to_absolute(output_path)
+    output_path = os.path.abspath(output_path)
     with open(output_path, 'w') as fout:
         fout.write(content)
     return output_path
@@ -503,9 +499,10 @@ def write_cluster_config(task: task_lib.Task,
         if tpu_name is None:
             tpu_name = cluster_name
 
+        user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
         scripts = tuple(
             _fill_template(
-                path,
+                template_name,
                 dict(resources_vars, **{
                     'zones': ','.join(zones),
                     'tpu_name': tpu_name,
@@ -513,11 +510,9 @@ def write_cluster_config(task: task_lib.Task,
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in ~/.sky/generated/ to be consistent
                 # with cluster yamls.
-                output_path=path.
-                replace('.sh.j2', f'.{cluster_name}.sh').replace(
-                    'config/', os.path.expanduser(f'{SKY_USER_FILE_PATH}/')),
-            ) for path in
-            ['config/gcp-tpu-create.sh.j2', 'config/gcp-tpu-delete.sh.j2'])
+                output_path=os.path.join(user_file_dir, template_name).replace(
+                    '.sh', f'.{cluster_name}.sh'),
+            ) for template_name in ['gcp-tpu-create.sh', 'gcp-tpu-delete.sh'])
         config_dict['tpu-create-script'] = scripts[0]
         config_dict['tpu-delete-script'] = scripts[1]
         config_dict['tpu_name'] = tpu_name
