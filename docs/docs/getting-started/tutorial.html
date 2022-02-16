@@ -33,15 +33,12 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
-    <script>let toggleHintShow = 'Click to show';</script>
-    <script>let toggleHintHide = 'Click to hide';</script>
-    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Auto-failover Provisioning" href="../examples/auto-failover.html" />
+    <link rel="next" title="Auto-provisioning GPUs" href="../examples/auto-failover.html" />
     <link rel="prev" title="Quickstart" href="quickstart.html" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="docsearch:language" content="None">
@@ -109,7 +106,7 @@
 <ul class="nav bd-sidenav">
  <li class="toctree-l1">
   <a class="reference internal" href="../examples/auto-failover.html">
-   Auto-failover Provisioning
+   Auto-provisioning GPUs
   </a>
  </li>
  <li class="toctree-l1">
@@ -323,16 +320,17 @@ and run command:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sky launch -c lm-cluster dnn.yaml
 </pre></div>
 </div>
-<p>The above will kick off a single training run after provisioning a cluster. But
-what if we would like to run multiple runs on the same cluster scheduled back-to-back
-for common workflows such as hyperparameter tuning? This is where Sky’s job queue steps in.</p>
+<p>This will kick off a single training run after provisioning a cluster.</p>
 </div>
 <div class="section" id="scheduling-multiple-training-jobs">
 <h2>Scheduling Multiple Training Jobs<a class="headerlink" href="#scheduling-multiple-training-jobs" title="Permalink to this headline">¶</a></h2>
-<p>We can schedule multiple jobs by using <code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">exec</span></code>, which will automatically queue
-each job for execution on the cluster. The <code class="code docutils literal notranslate"><span class="pre">-d</span></code> flag can be used to detach logging
-from the terminal, which is useful for launching long-running jobs concurrently.</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Launch the job 5 times</span>
+<p>What if we would like to run multiple runs on the same cluster scheduled back-to-back
+for hyperparameter tuning? This is where Sky’s job queue steps in.</p>
+<p>We can schedule multiple jobs by using <code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">exec</span></code>, which will
+automatically queue each job on the cluster based on their resource
+requirements. The <code class="code docutils literal notranslate"><span class="pre">-d</span></code> flag can be used to detach logging from the
+terminal, which is useful for launching long-running jobs concurrently.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Launch 5 jobs, perhaps with different hyperparameters.</span>
 sky <span class="nb">exec</span> lm-cluster dnn.yaml -d
 sky <span class="nb">exec</span> lm-cluster dnn.yaml -d
 sky <span class="nb">exec</span> lm-cluster dnn.yaml -d
@@ -340,6 +338,8 @@ sky <span class="nb">exec</span> lm-cluster dnn.yaml -d
 sky <span class="nb">exec</span> lm-cluster dnn.yaml -d
 </pre></div>
 </div>
+<p>Because the cluster has 1 V100 GPU, and each job takes 1 V100 GPU, one job will
+start running while the other four will be pending.</p>
 <p>If we wish to view the output for each run after it has completed we can use:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># View the jobs in the queue</span>
 sky queue lm-cluster
@@ -367,7 +367,7 @@ sky logs lm-cluster JOB_ID
     <a class='right-next' id="next-link" href="../examples/auto-failover.html" title="next page">
     <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Auto-failover Provisioning</p>
+        <p class="prev-next-title">Auto-provisioning GPUs</p>
     </div>
     <i class="fas fa-angle-right"></i>
     </a>

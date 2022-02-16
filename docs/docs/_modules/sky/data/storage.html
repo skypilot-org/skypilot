@@ -33,9 +33,6 @@
     <script src="../../../_static/jquery.js"></script>
     <script src="../../../_static/underscore.js"></script>
     <script src="../../../_static/doctools.js"></script>
-    <script>let toggleHintShow = 'Click to show';</script>
-    <script>let toggleHintHide = 'Click to hide';</script>
-    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../../../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -107,7 +104,7 @@
 <ul class="nav bd-sidenav">
  <li class="toctree-l1">
   <a class="reference internal" href="../../../examples/auto-failover.html">
-   Auto-failover Provisioning
+   Auto-provisioning GPUs
   </a>
  </li>
  <li class="toctree-l1">
@@ -249,7 +246,7 @@
 <span class="n">StorageHandle</span> <span class="o">=</span> <span class="n">Any</span>
 
 
-<div class="viewcode-block" id="StorageType"><a class="viewcode-back" href="../../../sky.html#sky.StorageType">[docs]</a><span class="k">class</span> <span class="nc">StorageType</span><span class="p">(</span><span class="n">enum</span><span class="o">.</span><span class="n">Enum</span><span class="p">):</span>
+<div class="viewcode-block" id="StorageType"><a class="viewcode-back" href="../../../sky.data.html#sky.StorageType">[docs]</a><span class="k">class</span> <span class="nc">StorageType</span><span class="p">(</span><span class="n">enum</span><span class="o">.</span><span class="n">Enum</span><span class="p">):</span>
     <span class="n">S3</span> <span class="o">=</span> <span class="mi">0</span>
     <span class="n">GCS</span> <span class="o">=</span> <span class="mi">1</span>
     <span class="n">AZURE</span> <span class="o">=</span> <span class="mi">2</span></div>
@@ -319,7 +316,7 @@
         <span class="k">return</span> <span class="bp">self</span></div>
 
 
-<div class="viewcode-block" id="Storage"><a class="viewcode-back" href="../../../sky.html#sky.Storage">[docs]</a><span class="k">class</span> <span class="nc">Storage</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+<div class="viewcode-block" id="Storage"><a class="viewcode-back" href="../../../sky.data.html#sky.Storage">[docs]</a><span class="k">class</span> <span class="nc">Storage</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot;Storage objects handle persistent and large volume storage in the sky.</span>
 
 <span class="sd">    Users create Storage objects by defining the storage object name and the</span>
@@ -382,26 +379,26 @@
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
                     <span class="sa">f</span><span class="s1">&#39;Local source path does not exist: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
 
-<div class="viewcode-block" id="Storage.get_or_copy_to_s3"><a class="viewcode-back" href="../../../sky.html#sky.Storage.get_or_copy_to_s3">[docs]</a>    <span class="k">def</span> <span class="nf">get_or_copy_to_s3</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<div class="viewcode-block" id="Storage.get_or_copy_to_s3"><a class="viewcode-back" href="../../../sky.data.html#sky.Storage.get_or_copy_to_s3">[docs]</a>    <span class="k">def</span> <span class="nf">get_or_copy_to_s3</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="sd">&quot;&quot;&quot;Adds AWS S3 Store to Storage</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">s3_store</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">add_store</span><span class="p">(</span><span class="n">StorageType</span><span class="o">.</span><span class="n">S3</span><span class="p">)</span>
         <span class="k">return</span> <span class="s1">&#39;s3://&#39;</span> <span class="o">+</span> <span class="n">s3_store</span><span class="o">.</span><span class="n">name</span></div>
 
-<div class="viewcode-block" id="Storage.get_or_copy_to_gcs"><a class="viewcode-back" href="../../../sky.html#sky.Storage.get_or_copy_to_gcs">[docs]</a>    <span class="k">def</span> <span class="nf">get_or_copy_to_gcs</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<div class="viewcode-block" id="Storage.get_or_copy_to_gcs"><a class="viewcode-back" href="../../../sky.data.html#sky.Storage.get_or_copy_to_gcs">[docs]</a>    <span class="k">def</span> <span class="nf">get_or_copy_to_gcs</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="sd">&quot;&quot;&quot;Adds GCS Store to Storage</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">gs_store</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">add_store</span><span class="p">(</span><span class="n">StorageType</span><span class="o">.</span><span class="n">GCS</span><span class="p">)</span>
         <span class="k">return</span> <span class="s1">&#39;gs://&#39;</span> <span class="o">+</span> <span class="n">gs_store</span><span class="o">.</span><span class="n">name</span></div>
 
-<div class="viewcode-block" id="Storage.get_or_copy_to_azure_blob"><a class="viewcode-back" href="../../../sky.html#sky.Storage.get_or_copy_to_azure_blob">[docs]</a>    <span class="k">def</span> <span class="nf">get_or_copy_to_azure_blob</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<div class="viewcode-block" id="Storage.get_or_copy_to_azure_blob"><a class="viewcode-back" href="../../../sky.data.html#sky.Storage.get_or_copy_to_azure_blob">[docs]</a>    <span class="k">def</span> <span class="nf">get_or_copy_to_azure_blob</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="sd">&quot;&quot;&quot;Adds Azure Blob Store to Storage</span>
 
 <span class="sd">        TODO: Finish Azure Blob Backend class</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="k">raise</span> <span class="ne">NotImplementedError</span></div>
 
-<div class="viewcode-block" id="Storage.add_store"><a class="viewcode-back" href="../../../sky.html#sky.Storage.add_store">[docs]</a>    <span class="k">def</span> <span class="nf">add_store</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cloud_type</span><span class="p">:</span> <span class="n">StorageType</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AbstractStore</span><span class="p">:</span>
+<div class="viewcode-block" id="Storage.add_store"><a class="viewcode-back" href="../../../sky.data.html#sky.Storage.add_store">[docs]</a>    <span class="k">def</span> <span class="nf">add_store</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cloud_type</span><span class="p">:</span> <span class="n">StorageType</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AbstractStore</span><span class="p">:</span>
         <span class="sd">&quot;&quot;&quot;Invoked by the optimizer after it has selected a store to</span>
 <span class="sd">        add it to Storage.</span>
 
@@ -426,7 +423,7 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">stores</span><span class="p">[</span><span class="n">cloud_type</span><span class="p">]</span> <span class="o">=</span> <span class="n">store</span>
         <span class="k">return</span> <span class="n">store</span></div>
 
-<div class="viewcode-block" id="Storage.delete"><a class="viewcode-back" href="../../../sky.html#sky.Storage.delete">[docs]</a>    <span class="k">def</span> <span class="nf">delete</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<div class="viewcode-block" id="Storage.delete"><a class="viewcode-back" href="../../../sky.data.html#sky.Storage.delete">[docs]</a>    <span class="k">def</span> <span class="nf">delete</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="sd">&quot;&quot;&quot;Deletes data for all storage objects.&quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">stores</span><span class="p">:</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;No backing stores found.&#39;</span><span class="p">)</span>

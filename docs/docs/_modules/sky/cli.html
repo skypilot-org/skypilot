@@ -33,9 +33,6 @@
     <script src="../../_static/jquery.js"></script>
     <script src="../../_static/underscore.js"></script>
     <script src="../../_static/doctools.js"></script>
-    <script>let toggleHintShow = 'Click to show';</script>
-    <script>let toggleHintHide = 'Click to hide';</script>
-    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -107,7 +104,7 @@
 <ul class="nav bd-sidenav">
  <li class="toctree-l1">
   <a class="reference internal" href="../../examples/auto-failover.html">
-   Auto-failover Provisioning
+   Auto-provisioning GPUs
   </a>
  </li>
  <li class="toctree-l1">
@@ -1234,26 +1231,7 @@
 <span class="sd">      # Tear down all existing clusters.</span>
 <span class="sd">      sky down -a</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">names</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="c1"># TODO(suquark,zongheng): try using aws cli to terminate stopped nodes:</span>
-    <span class="c1"># aws ec2 describe-instances --query &#39;Reservations[].Instances[].InstanceId&#39; --filters &quot;Name=tag:ray-cluster-name,Values=&lt;cluster_name&gt;&quot; --output text  # pylint: disable=line-too-long</span>
-    <span class="c1"># Tricky cases to test:</span>
-    <span class="c1">#   - Does the above only query the default region? Test on a stopped</span>
-    <span class="c1">#     cluster in a non-default region.</span>
-    <span class="c1">#   - Is it possible for Ray to launch a same-name cluster on two regions?</span>
-    <span class="c1">#     If so, what happens with the above call?</span>
-    <span class="c1"># Tracked by Issue #240.</span>
-    <span class="k">for</span> <span class="n">cluster_name</span> <span class="ow">in</span> <span class="n">clusters</span><span class="p">:</span>
-        <span class="n">cluster_status</span> <span class="o">=</span> <span class="n">global_user_state</span><span class="o">.</span><span class="n">get_status_from_cluster_name</span><span class="p">(</span>
-            <span class="n">cluster_name</span><span class="p">)</span>
-        <span class="k">if</span> <span class="n">cluster_status</span> <span class="o">==</span> <span class="n">global_user_state</span><span class="o">.</span><span class="n">ClusterStatus</span><span class="o">.</span><span class="n">STOPPED</span><span class="p">:</span>
-            <span class="n">click</span><span class="o">.</span><span class="n">secho</span><span class="p">(</span>
-                <span class="sa">f</span><span class="s1">&#39;Cannot terminate cluster </span><span class="si">{</span><span class="n">cluster_name</span><span class="si">!r}</span><span class="s1"> because it &#39;</span>
-                <span class="s1">&#39;is STOPPED. To fix: manually terminate in the cloud</span><span class="se">\&#39;</span><span class="s1">s &#39;</span>
-                <span class="s1">&#39;UI. (This limitation will be addressed in the future.)&#39;</span><span class="p">,</span>
-                <span class="n">fg</span><span class="o">=</span><span class="s1">&#39;yellow&#39;</span><span class="p">)</span>
-        <span class="k">else</span><span class="p">:</span>
-            <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cluster_name</span><span class="p">)</span>
+    <span class="n">names</span> <span class="o">=</span> <span class="n">clusters</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="nb">all</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">names</span><span class="p">:</span>
         <span class="k">return</span>
     <span class="n">_terminate_or_stop_clusters</span><span class="p">(</span><span class="n">names</span><span class="p">,</span> <span class="n">apply_to_all</span><span class="o">=</span><span class="nb">all</span><span class="p">,</span> <span class="n">terminate</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>

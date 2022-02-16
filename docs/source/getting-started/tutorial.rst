@@ -1,12 +1,9 @@
 Tutorial: DNN Training
 ======================
-
 In this tutorial, we'll train a Transformer-based language model from HuggingFace.
-
 
 Defining our Training Task
 --------------------------
-
 We'll start by specifying a Sky task YAML with our resource requirements, cluster setup script,
 and run command:
 
@@ -46,25 +43,29 @@ We can launch training by running:
 
    $ sky launch -c lm-cluster dnn.yaml
 
-The above will kick off a single training run after provisioning a cluster. But
-what if we would like to run multiple runs on the same cluster scheduled back-to-back
-for common workflows such as hyperparameter tuning? This is where Sky's job queue steps in.
+This will kick off a single training run after provisioning a cluster.
 
 Scheduling Multiple Training Jobs
 ---------------------------------
+What if we would like to run multiple runs on the same cluster scheduled back-to-back
+for hyperparameter tuning? This is where Sky's job queue steps in.
 
-We can schedule multiple jobs by using :code:`sky exec`, which will automatically queue
-each job for execution on the cluster. The :code:`-d` flag can be used to detach logging
-from the terminal, which is useful for launching long-running jobs concurrently.
+We can schedule multiple jobs by using :code:`sky exec`, which will
+automatically queue each job on the cluster based on their resource
+requirements. The :code:`-d` flag can be used to detach logging from the
+terminal, which is useful for launching long-running jobs concurrently.
 
 .. code-block:: bash
 
-   # Launch the job 5 times
+   # Launch 5 jobs, perhaps with different hyperparameters.
    sky exec lm-cluster dnn.yaml -d
    sky exec lm-cluster dnn.yaml -d
    sky exec lm-cluster dnn.yaml -d
    sky exec lm-cluster dnn.yaml -d
    sky exec lm-cluster dnn.yaml -d
+
+Because the cluster has 1 V100 GPU, and each job takes 1 V100 GPU, one job will
+start running while the other four will be pending.
 
 If we wish to view the output for each run after it has completed we can use:
 

@@ -33,16 +33,13 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
-    <script>let toggleHintShow = 'Click to show';</script>
-    <script>let toggleHintHide = 'Click to hide';</script>
-    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="Quickstart" href="quickstart.html" />
-    <link rel="prev" title="SkyML reference documentation" href="../index.html" />
+    <link rel="prev" title="Sky reference documentation" href="../index.html" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="docsearch:language" content="None">
     
@@ -109,7 +106,7 @@
 <ul class="nav bd-sidenav">
  <li class="toctree-l1">
   <a class="reference internal" href="../examples/auto-failover.html">
-   Auto-failover Provisioning
+   Auto-provisioning GPUs
   </a>
  </li>
  <li class="toctree-l1">
@@ -277,15 +274,18 @@
   <div class="section" id="installation">
 <span id="id1"></span><h1>Installation<a class="headerlink" href="#installation" title="Permalink to this headline">¶</a></h1>
 <p>Install Sky using pip:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip install -e <span class="s2">&quot;.[all]&quot;</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="c1"># Sky requires python &gt;= 3.6.</span>
+<span class="gp">$ </span>pip install -e <span class="s2">&quot;.[all]&quot;</span>
 </pre></div>
 </div>
 <p>If you only want the dependencies for certain clouds, you can also use
 <code class="code docutils literal notranslate"><span class="pre">&quot;.[aws,azure,gcp]&quot;</span></code>.</p>
 <div class="section" id="cloud-account-setup">
 <h2>Cloud account setup<a class="headerlink" href="#cloud-account-setup" title="Permalink to this headline">¶</a></h2>
+<p>Sky currently supports three major cloud providers: AWS, GCP, and Azure.  To run
+tasks in the clouds, configure access to at least one cloud:</p>
 <p><strong>AWS</strong>: Install boto with <code class="code docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">boto3</span></code> and configure your AWS
-credentials in <code class="code docutils literal notranslate"><span class="pre">~/.aws/credentials</span></code> using <code class="code docutils literal notranslate"><span class="pre">aws</span> <span class="pre">configure</span></code>.</p>
+credentials using <code class="code docutils literal notranslate"><span class="pre">aws</span> <span class="pre">configure</span></code>.</p>
 <p><strong>GCP</strong>: Run the following:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pip</span> <span class="n">install</span> <span class="n">google</span><span class="o">-</span><span class="n">api</span><span class="o">-</span><span class="n">python</span><span class="o">-</span><span class="n">client</span>
 <span class="c1"># Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart</span>
@@ -300,12 +300,8 @@ credentials in <code class="code docutils literal notranslate"><span class="pre"
 </pre></div>
 </div>
 <p><strong>Azure</strong>: Install the Azure CLI with <code class="code docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">azure-cli</span></code> and then
-login using <code class="code docutils literal notranslate"><span class="pre">az</span> <span class="pre">login</span> <span class="pre">--use-device-code</span></code>. Set the subscription to use from the command line
-(<code class="code docutils literal notranslate"><span class="pre">az</span> <span class="pre">account</span> <span class="pre">set</span> <span class="pre">-s</span> <span class="pre">&lt;subscription_id&gt;</span></code>) or by modifying the provider
-section of the Azure template (<code class="code docutils literal notranslate"><span class="pre">config/azure.yml.j2</span></code>). <em>NOTE</em>: Ray
-Autoscaler does not work with the latest version of <code class="code docutils literal notranslate"><span class="pre">azure-cli</span></code>. Hotfix:
-<code class="code docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">azure-cli-core==2.22.0</span></code> (this will make Ray work but at the
-cost of making the <code class="code docutils literal notranslate"><span class="pre">az</span></code> CLI tool unusable).</p>
+login using <code class="code docutils literal notranslate"><span class="pre">az</span> <span class="pre">login</span> <span class="pre">--use-device-code</span></code>. Set the subscription to use from
+the command line (<code class="code docutils literal notranslate"><span class="pre">az</span> <span class="pre">account</span> <span class="pre">set</span> <span class="pre">-s</span> <span class="pre">&lt;subscription_id&gt;</span></code>).</p>
 </div>
 </div>
 
@@ -319,7 +315,7 @@ cost of making the <code class="code docutils literal notranslate"><span class="
         <i class="fas fa-angle-left"></i>
         <div class="prev-next-info">
             <p class="prev-next-subtitle">previous</p>
-            <p class="prev-next-title">SkyML reference documentation</p>
+            <p class="prev-next-title">Sky reference documentation</p>
         </div>
     </a>
     <a class='right-next' id="next-link" href="quickstart.html" title="next page">
