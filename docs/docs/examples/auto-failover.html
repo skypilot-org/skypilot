@@ -5,7 +5,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Auto-failover Provisioning &#8212; Sky 0.1 documentation</title>
+    <title>Auto-provisioning GPUs &#8212; Sky 0.1 documentation</title>
     
   <link href="../_static/css/theme.css" rel="stylesheet">
   <link href="../_static/css/index.ff1ffe594081f20da1ef19478df9384b.css" rel="stylesheet">
@@ -33,9 +33,6 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
-    <script>let toggleHintShow = 'Click to show';</script>
-    <script>let toggleHintHide = 'Click to hide';</script>
-    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -109,7 +106,7 @@
 <ul class="current nav bd-sidenav">
  <li class="toctree-l1 current active">
   <a class="current reference internal" href="#">
-   Auto-failover Provisioning
+   Auto-provisioning GPUs
   </a>
  </li>
  <li class="toctree-l1">
@@ -237,7 +234,7 @@
         <div class="col-12 col-md-9 pl-md-3 pr-md-0">
             <!-- Table of contents that is only displayed when printing the page -->
             <div id="jb-print-docs-body" class="onlyprint">
-                <h1>Auto-failover Provisioning</h1>
+                <h1>Auto-provisioning GPUs</h1>
                 <!-- Table of contents -->
                 <div id="print-main-content">
                     <div id="jb-print-toc">
@@ -248,14 +245,19 @@
             
               <div>
                 
-  <div class="section" id="auto-failover-provisioning">
-<h1>Auto-failover Provisioning<a class="headerlink" href="#auto-failover-provisioning" title="Permalink to this headline">¶</a></h1>
-<p>Provisioning an instance on a cloud can be difficult due to a variety of reasons:
-lack of quota, instance capacity issues, or certain regions not containing the required resources.</p>
-<p>Sky solves this issue with an auto-failover provisioner, which automatically retries
-provisioning on a different region (or cloud) if the requested resources cannot be provisioned.</p>
-<p>A common hardware configuration for deep learning workloads is to have a V100 GPU attached to an instance.
-These instances are often difficult to provision. Let’s see how Sky’s auto-failover provisioner handles this:</p>
+  <div class="section" id="auto-provisioning-gpus">
+<h1>Auto-provisioning GPUs<a class="headerlink" href="#auto-provisioning-gpus" title="Permalink to this headline">¶</a></h1>
+<p>Provisioning an instance on a cloud can be difficult due to a variety of
+reasons: lack of quota, insufficient capacity in the clouds, or certain
+regions/clouds not providing the required resources.  These issues are
+especially true for scarce resources such as GPUs and other accelerators, which
+are required by many machine learning projects.</p>
+<p>Sky solves this issue with an <strong>auto-failover provisioner</strong>, which automatically
+retries provisioning for the user on a different region (or cloud) if the
+requested resources cannot be provisioned.</p>
+<p>A common high-end GPU to use in deep learning is a NVIDIA V100 GPU.  These GPUs
+are often in high demand and hard to get.  Let’s see how Sky’s auto-failover
+provisioner handles such a request:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>$ sky gpunode -c gpu --gpus V100
 I 02-11 21:17:43 optimizer.py:211] Defaulting estimated time to 1 hr. Call Task.set_time_estimator() to override.
 I 02-11 21:17:43 optimizer.py:317] Optimizer - plan minimizing cost (~$3.0):
@@ -286,7 +288,10 @@ I 02-11 21:18:38 cloud_vm_ray_backend.py:624] Launching on GCP us-west1 (us-west
 Successfully connected to 35.230.120.87.
 </pre></div>
 </div>
-<p>There was no capacity in any of the regions in central US, so the Sky auto-failover provisioner moved to US West instead, allowing for our instance to be successfully provisioned.</p>
+<p>There was no capacity in any of the regions in Central US, so the Sky auto-failover provisioner moved to West US instead, allowing for our instance to be successfully provisioned.</p>
+<p>This feature is automatically enabled in all commands that provision new
+resources, such as <code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">launch</span></code> or the interactive node commands
+<code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">{gpunode,tpunode,cpunode}</span></code>.</p>
 </div>
 
 

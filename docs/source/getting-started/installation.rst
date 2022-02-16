@@ -7,6 +7,7 @@ Install Sky using pip:
 
 .. code-block:: console
 
+   $ # Sky requires python >= 3.6.
    $ pip install -e ".[all]"
 
 If you only want the dependencies for certain clouds, you can also use
@@ -15,8 +16,11 @@ If you only want the dependencies for certain clouds, you can also use
 Cloud account setup
 -------------------
 
+Sky currently supports three major cloud providers: AWS, GCP, and Azure.  To run
+tasks in the clouds, configure access to at least one cloud:
+
 **AWS**: Install boto with :code:`pip install boto3` and configure your AWS
-credentials in :code:`~/.aws/credentials` using :code:`aws configure`.
+credentials using :code:`aws configure`.
 
 **GCP**: Run the following:
 
@@ -34,9 +38,5 @@ credentials in :code:`~/.aws/credentials` using :code:`aws configure`.
    gcloud auth application-default login
 
 **Azure**: Install the Azure CLI with :code:`pip install azure-cli` and then
-login using :code:`az login --use-device-code`. Set the subscription to use from the command line
-(:code:`az account set -s <subscription_id>`) or by modifying the provider
-section of the Azure template (:code:`config/azure.yml.j2`). *NOTE*: Ray
-Autoscaler does not work with the latest version of :code:`azure-cli`. Hotfix:
-:code:`pip install azure-cli-core==2.22.0` (this will make Ray work but at the
-cost of making the :code:`az` CLI tool unusable).
+login using :code:`az login --use-device-code`. Set the subscription to use from
+the command line (:code:`az account set -s <subscription_id>`).

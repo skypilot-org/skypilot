@@ -33,9 +33,6 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
-    <script>let toggleHintShow = 'Click to show';</script>
-    <script>let toggleHintHide = 'Click to hide';</script>
-    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -109,7 +106,7 @@
 <ul class="current nav bd-sidenav">
  <li class="toctree-l1">
   <a class="reference internal" href="auto-failover.html">
-   Auto-failover Provisioning
+   Auto-provisioning GPUs
   </a>
  </li>
  <li class="toctree-l1">
@@ -250,66 +247,40 @@
                 
   <div class="section" id="distributed-jobs-on-many-vms">
 <h1>Distributed Jobs on many VMs<a class="headerlink" href="#distributed-jobs-on-many-vms" title="Permalink to this headline">¶</a></h1>
-<p>For certain workloads, a single node may not be sufficient. Sky supports multi-node cluster
-provisioning and distributed execution on many VMs. Currently, this functionality is only
-supported using the Python API.</p>
-<p>We define a simple distributed training example below:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">sky</span>
+<p>Sky supports multi-node cluster
+provisioning and distributed execution on many VMs.</p>
+<p>For example, here is a simple PyTorch Distributed training example:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resnet-distributed-app</span><span class="w"></span>
 
-<span class="k">with</span> <span class="n">sky</span><span class="o">.</span><span class="n">Dag</span><span class="p">()</span> <span class="k">as</span> <span class="n">dag</span><span class="p">:</span>
-  <span class="n">num_nodes</span> <span class="o">=</span> <span class="mi">2</span>  <span class="c1"># total nodes, INCLUDING head node</span>
+<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
+<span class="w">    </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V100</span><span class="w"></span>
 
-  <span class="n">setup</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
-<span class="s2">  #!/bin/bash</span>
-<span class="s2">  pip3 install --upgrade pip</span>
-<span class="s2">  git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet</span>
-<span class="s2">  cd pytorch-distributed-resnet</span>
-<span class="s2">  pip3 install -r requirements.txt</span>
-<span class="s2">  mkdir -p data</span>
-<span class="s2">  mkdir -p saved_models</span>
-<span class="s2">  mkdir -p data</span>
-<span class="s2">  wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz</span>
-<span class="s2">  tar -xvzf cifar-10-python.tar.gz</span>
-<span class="s2">  &quot;&quot;&quot;</span>
+<span class="nt">num_nodes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span><span class="w"></span>
 
-  <span class="c1"># Define a distributed training job by providing a dictionary of</span>
-  <span class="c1"># commands to run on each distributed node along with its IP address.</span>
-  <span class="k">def</span> <span class="nf">run_fn</span><span class="p">(</span><span class="n">ip_list</span><span class="p">):</span>
-    <span class="n">run_dict</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># dictionary of ip -&gt; run command mapping</span>
-    <span class="n">num_workers</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ip_list</span><span class="p">)</span>
-    <span class="n">master_ip</span> <span class="o">=</span> <span class="n">ip_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ip</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">ip_list</span><span class="p">):</span>
-      <span class="n">run_dict</span><span class="p">[</span><span class="n">ip</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
-<span class="s2">      cd pytorch-distributed-resnet</span>
-<span class="s2">      python3 -m torch.distributed.launch resnet_ddp.py </span><span class="se">\</span>
-<span class="s2">        --nproc_per_node=1 </span><span class="se">\</span>
-<span class="s2">        --nnodes=</span><span class="si">{</span><span class="n">num_workers</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
-<span class="s2">        --node_rank=</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
-<span class="s2">        --master_addr=</span><span class="se">\&quot;</span><span class="si">{</span><span class="n">master_ip</span><span class="si">}</span><span class="se">\&quot;</span><span class="s2"> </span><span class="se">\</span>
-<span class="s2">        --master_port=8008 </span><span class="se">\</span>
-<span class="s2">        --num_epochs 20</span>
-<span class="s2">      &quot;&quot;&quot;</span>
+<span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">    </span><span class="no">pip3 install --upgrade pip</span><span class="w"></span>
+<span class="w">    </span><span class="no">git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet</span><span class="w"></span>
+<span class="w">    </span><span class="no">cd pytorch-distributed-resnet &amp;&amp; pip3 install -r requirements.txt</span><span class="w"></span>
+<span class="w">    </span><span class="no">mkdir -p data  &amp;&amp; mkdir -p saved_models &amp;&amp; cd data &amp;&amp; \</span><span class="w"></span>
+<span class="w">      </span><span class="no">wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz</span><span class="w"></span>
+<span class="w">    </span><span class="no">tar -xvzf cifar-10-python.tar.gz</span><span class="w"></span>
 
-    <span class="k">return</span> <span class="n">run_dict</span>
-
-  <span class="c1"># Create a Sky task</span>
-  <span class="n">task</span> <span class="o">=</span> <span class="n">sky</span><span class="o">.</span><span class="n">Task</span><span class="p">(</span>
-    <span class="s1">&#39;distributed_training&#39;</span><span class="p">,</span>
-    <span class="n">setup</span><span class="o">=</span><span class="n">setup</span><span class="p">,</span>
-    <span class="n">num_nodes</span><span class="o">=</span><span class="n">num_nodes</span><span class="p">,</span>
-    <span class="n">run</span><span class="o">=</span><span class="n">run_fn</span><span class="p">,</span>
-  <span class="p">)</span>
-
-  <span class="c1"># Set task resources</span>
-  <span class="c1"># Each node on the cluster will use the resources specified below</span>
-  <span class="n">resources</span> <span class="o">=</span> <span class="n">sky</span><span class="o">.</span><span class="n">Resources</span><span class="p">(</span><span class="n">sky</span><span class="o">.</span><span class="n">AWS</span><span class="p">(),</span> <span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">)</span>
-  <span class="n">train</span><span class="o">.</span><span class="n">set_resources</span><span class="p">(</span><span class="n">resources</span><span class="p">)</span>
-
-
-<span class="c1"># Launch the task!</span>
-<span class="n">sky</span><span class="o">.</span><span class="n">launch</span><span class="p">(</span><span class="n">dag</span><span class="p">)</span>
+<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">    </span><span class="no">cd pytorch-distributed-resnet</span><span class="w"></span>
+<span class="w">    </span><span class="no">python3 -m torch.distributed.launch --nproc_per_node=1 \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--nnodes=${#SKY_NODE_IPS[@]} --node_rank=${SKY_NODE_RANK} --master_addr=${SKY_NODE_IPS[0]} \</span><span class="w"></span>
+<span class="w">    </span><span class="no">--master_port=8008 resnet_ddp.py --num_epochs 20</span><span class="w"></span>
 </pre></div>
 </div>
+<p>In the above, <code class="code docutils literal notranslate"><span class="pre">num_nodes:</span> <span class="pre">2</span></code> specifies that this task is to be run on 2
+nodes. The commands in <code class="code docutils literal notranslate"><span class="pre">run</span></code> are executed on both nodes.  Several useful
+environment variables are available to distinguish per-node commands:</p>
+<ul class="simple">
+<li><p><code class="code docutils literal notranslate"><span class="pre">SKY_NODE_RANK</span></code>: rank (an integer ID from 0 to <code class="code docutils literal notranslate"><span class="pre">num_nodes-1</span></code>) of
+the node executing the task</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">SKY_NODE_IPS</span></code>: a list of IP addresses of the nodes reserved to execute
+the task</p></li>
+</ul>
 </div>
 
 
