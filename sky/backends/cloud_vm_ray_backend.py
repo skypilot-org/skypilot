@@ -465,7 +465,7 @@ class RetryingVmProvisioner(object):
             # away after a few minutes.  Should we auto retry other regions, or
             # let the user retry.
             logger.info('====== stdout ======')
-            for s in stdout.split('\n'):
+            for s in stdout_splits:
                 print(s)
             logger.info('====== stderr ======')
             for s in stderr_splits:
@@ -656,8 +656,8 @@ class RetryingVmProvisioner(object):
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
         tail_cmd = f'tail -n100 -f {log_path}'
-        # logger.info('To view detailed progress: '
-        #             f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+        logger.info('To view detailed progress: '
+                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
