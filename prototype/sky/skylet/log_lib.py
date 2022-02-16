@@ -227,6 +227,7 @@ def _follow_job_logs(file,
 
 def tail_logs(job_id: int, log_dir: Optional[str],
               status: Optional[job_lib.JobStatus]):
+    # TODO (zhwu): Maybe switch to `ray job logs` according to the performance.
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
