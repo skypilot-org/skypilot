@@ -400,9 +400,9 @@ class RetryingVmProvisioner(object):
             for error in exception_dict['errors']:
                 code = error['code']
                 message = error['message']
-                console.log(f'Got {code} in {zone.name} '
-                            f'{style.DIM}(message: {message})'
-                            f'{style.RESET_ALL}')
+                logger.warning(f'Got {code} in {zone.name} '
+                               f'{style.DIM}(message: {message})'
+                               f'{style.RESET_ALL}')
                 if code == 'QUOTA_EXCEEDED':
                     if '\'GPUS_ALL_REGIONS\' exceeded' in message:
                         # Global quota.  All regions in GCP will fail.  Ex:
@@ -464,12 +464,12 @@ class RetryingVmProvisioner(object):
             # TODO: Got transient 'Failed to create security group' that goes
             # away after a few minutes.  Should we auto retry other regions, or
             # let the user retry.
-            console.log('====== stdout ======')
-            for s in stdout_splits:
-                console.log(s)
-            console.log('[red]====== stderr ======')
+            logger.info('====== stdout ======')
+            for s in stdout.split('\n'):
+                print(s)
+            logger.info('====== stderr ======')
             for s in stderr_splits:
-                console.log(f'[red]{s}')
+                print(s)
             raise RuntimeError(
                 'Errors occurred during provision/file_mounts/setup; '
                 'check logs above.')
@@ -664,11 +664,9 @@ class RetryingVmProvisioner(object):
                                                       cluster_name):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
-            zone_str = ','.join(
-                z.name for z in zones) if zones is not None else 'all zones'
 
             with console.status(f'[turqoise]Launching on {to_provision.cloud}'
-                                f'[bold green] {region.name}') as status:
+                                f'[bold green] {region.name}\n'):
 
                 config_dict = backend_utils.write_cluster_config(
                     task,
@@ -1088,12 +1086,13 @@ class CloudVmRayBackend(backends.Backend):
             return (cluster_name, handle.launched_resources,
                     handle.launched_nodes)
 
-        console.log(f'[green]Creating a new cluster: "{cluster_name}" '
-                    f'[bold][{task.num_nodes}x {to_provision}][/].\n'
-                    '[grey50 italic]Tip: to reuse an existing cluster, '
-                    'specify --cluster-name (-c) in the CLI or use '
-                    'sky.launch(.., cluster_name=..) in the Python API. '
-                    'Run `sky status` to see existing clusters.')
+        logger.info(
+            f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
+            f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
+            'Tip: to reuse an existing cluster, '
+            'specify --cluster-name (-c) in the CLI or use '
+            'sky.launch(.., cluster_name=..) in the Python API. '
+            'Run `sky status` to see existing clusters.')
         return cluster_name, to_provision, task.num_nodes
 
     def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
