@@ -511,7 +511,7 @@ def write_cluster_config(task: task_lib.Task,
                 # different TPUs.  Put in ~/.sky/generated/ to be consistent
                 # with cluster yamls.
                 output_path=os.path.join(user_file_dir, template_name).replace(
-                    '.sh', f'.{cluster_name}.sh'),
+                    '.sh.j2', f'.{cluster_name}.sh'),
             ) for template_name in
             ['gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'])
         config_dict['tpu-create-script'] = scripts[0]
