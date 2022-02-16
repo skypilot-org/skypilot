@@ -998,10 +998,10 @@ def start(clusters: Tuple[str]):
 
         with console.status(f'[bold green]Starting {name}...') as status:
             backend.provision(dummy_task,
-                            to_provision=handle.launched_resources,
-                            dryrun=False,
-                            stream_logs=False,
-                            cluster_name=name)
+                              to_provision=handle.launched_resources,
+                              dryrun=False,
+                              stream_logs=False,
+                              cluster_name=name)
             console.log(f'[green]Cluster {name} started.')
 
 
@@ -1067,11 +1067,14 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
     if apply_to_all:
         to_down = global_user_state.get_clusters()
         if len(names) > 0:
-            console.log(f'[yellow]Both --all and cluster(s) specified for sky {command}. '
-                  'Letting --all take effect.')
+            console.log(
+                f'[yellow]Both --all and cluster(s) specified for sky {command}. '
+                'Letting --all take effect.')
             names = []
     if not to_down and not names:
-        console.log('[yellow]No existing clusters found (see [bold green]sky status[/]).')
+        console.log(
+            '[yellow]No existing clusters found (see [bold green]sky status[/]).'
+        )
 
     for record in to_down:  # TODO: parallelize.
         name = record['name']
@@ -1094,7 +1097,9 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             if terminate:
                 console.log(f'Terminated cluster {name}')
             else:
-                console.log(f'Stopped cluster {name}. To restart, run: [bold green]sky start {name}')
+                console.log(
+                    f'Stopped cluster {name}. To restart, run: [bold green]sky start {name}'
+                )
 
 
 @_interactive_node_cli_command

@@ -212,8 +212,9 @@ class Optimizer:
                         f'No launchable resource found for task {node}. '
                         'To fix: relax its resource requirements.')
                 if num_resources == 1 and node.time_estimator_func is None:
-                    console.log('[grey50 italic]Defaulting estimated time to 1 hr. '
-                                'Call Task.set_time_estimator() to override.')
+                    console.log(
+                        '[grey50 italic]Defaulting estimated time to 1 hr. '
+                        'Call Task.set_time_estimator() to override.')
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource
@@ -286,11 +287,14 @@ class Optimizer:
             }
             metric = 'cost' if minimize_cost else 'time'
             if len(dp_best_cost) > 1:
-                console.log(f'[cyan bold]Details: task -> {{resources -> {metric}}}')
+                console.log(
+                    f'[cyan bold]Details: task -> {{resources -> {metric}}}')
                 console.log(f'[cyan bold]{pprint.pformat(dp_best_cost)}\n')
             elif len(dp_best_cost) == 1:
                 console.log(f'[cyan bold]Considered resources -> {metric}')
-                console.log(f'[cyan bold]{pprint.pformat(list(dp_best_cost.values())[0])}\n')
+                console.log(
+                    f'[cyan bold]{pprint.pformat(list(dp_best_cost.values())[0])}\n'
+                )
 
         return dag, best_plan
 
@@ -320,12 +324,13 @@ class Optimizer:
         _walk(node, h, overall_best)
 
         if minimize_cost:
-            console.log('Optimizer - plan minimizing cost [green](~${:.1f}):'.format(
-                overall_best))
+            console.log(
+                'Optimizer - plan minimizing cost [green](~${:.1f}):'.format(
+                    overall_best))
         else:
             console.log(
-                'Optimizer - plan minimizing run time [green](~{:.1f} hr):'.format(
-                    overall_best / 3600))
+                'Optimizer - plan minimizing run time [green](~{:.1f} hr):'.
+                format(overall_best / 3600))
         # Do not print Source or Sink.
         message_data = [
             (t, f'{t.num_nodes}x {repr(r)}' if t.num_nodes > 1 else repr(r))

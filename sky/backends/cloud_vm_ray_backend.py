@@ -401,8 +401,8 @@ class RetryingVmProvisioner(object):
                 code = error['code']
                 message = error['message']
                 console.log(f'Got {code} in {zone.name} '
-                               f'{style.DIM}(message: {message})'
-                               f'{style.RESET_ALL}')
+                            f'{style.DIM}(message: {message})'
+                            f'{style.RESET_ALL}')
                 if code == 'QUOTA_EXCEEDED':
                     if '\'GPUS_ALL_REGIONS\' exceeded' in message:
                         # Global quota.  All regions in GCP will fail.  Ex:
@@ -729,8 +729,9 @@ class RetryingVmProvisioner(object):
                             stdout=None,
                             stderr=None)
                     else:
-                        self._update_blocklist_on_error(to_provision.cloud, region,
-                                                        zones, stdout, stderr)
+                        self._update_blocklist_on_error(to_provision.cloud,
+                                                        region, zones, stdout,
+                                                        stderr)
                 else:
                     # Success.
 
@@ -742,11 +743,13 @@ class RetryingVmProvisioner(object):
                     plural = '' if num_nodes == 1 else 's'
                     logger.info(
                         f'{style.BRIGHT}Successfully provisioned or found'
-                        f' existing VM{plural}. Setup completed.{style.RESET_ALL}')
+                        f' existing VM{plural}. Setup completed.{style.RESET_ALL}'
+                    )
                     return config_dict
-            message = ('Failed to acquire resources in all regions/zones'
-                    f' (requested {to_provision}).'
-                    ' Try changing resource requirements or use another cloud.')
+            message = (
+                'Failed to acquire resources in all regions/zones'
+                f' (requested {to_provision}).'
+                ' Try changing resource requirements or use another cloud.')
             logger.error(message)
             raise exceptions.ResourcesUnavailableError()
 
@@ -1085,13 +1088,12 @@ class CloudVmRayBackend(backends.Backend):
             return (cluster_name, handle.launched_resources,
                     handle.launched_nodes)
 
-        console.log(
-            f'[green]Creating a new cluster: "{cluster_name}" '
-            f'[bold][{task.num_nodes}x {to_provision}][/].\n'
-            '[grey50 italic]Tip: to reuse an existing cluster, '
-            'specify --cluster-name (-c) in the CLI or use '
-            'sky.launch(.., cluster_name=..) in the Python API. '
-            'Run `sky status` to see existing clusters.')
+        console.log(f'[green]Creating a new cluster: "{cluster_name}" '
+                    f'[bold][{task.num_nodes}x {to_provision}][/].\n'
+                    '[grey50 italic]Tip: to reuse an existing cluster, '
+                    'specify --cluster-name (-c) in the CLI or use '
+                    'sky.launch(.., cluster_name=..) in the Python API. '
+                    'Run `sky status` to see existing clusters.')
         return cluster_name, to_provision, task.num_nodes
 
     def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
@@ -1614,9 +1616,13 @@ class CloudVmRayBackend(backends.Backend):
                                              suffix='.yml') as f:
                 backend_utils.dump_yaml(f.name, config)
                 f.flush()
-                backend_utils.run(f'ray down -y {f.name}', stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+                backend_utils.run(f'ray down -y {f.name}',
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.STDOUT)
             if handle.tpu_delete_script is not None:
-                backend_utils.run(f'bash {handle.tpu_delete_script}', stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+                backend_utils.run(f'bash {handle.tpu_delete_script}',
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.STDOUT)
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)
