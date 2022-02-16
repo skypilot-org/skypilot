@@ -28,44 +28,41 @@ VSCode Remote.
 
 Running your code
 --------------------
-You can either run your project by directly logging into the VM and running shell commands, but Sky also
+You can run your project by directly logging into the VM and running shell commands, but Sky also
 provides remote execution without logging in:
 
 .. code-block:: bash
 
-  # run a command without logging in
-  # this stays within the Sky framework and allows us
-  # to provide other features such as job queueing and monitoring
+  # Run a bash command without logging in.
   $ sky exec dev -- python train.py
+  $ sky exec dev -- gpustat -i
 
-  # if you have a task.yaml, you can also directly execute the `run` section
+  # If you have a task.yaml, you can also directly execute the `run` section
   # defined in the task specification.
   $ sky exec dev task.yaml
 
-Saving code and transferring artifacts
+Syncing code and transferring artifacts
 --------------------------------------
-Sky automatically forwards your local SSH agent to the cluster, allowing for git access
-without the need to log in again. For more information on how to configure your local SSH agent
-for forwarding git credentials, please refer to `GitHub's tutorial <https://code.visualstudio.com/docs/remote/remote-overview>`_.
-
-Additionally, you can always use the following to transfer files between your local machine and remote VM:
+Use the familiar scp/rsync to transfer files between your local machine and remote VM:
 
 .. code-block::
 
     $ scp -r my_code/ dev:/path/to/destination  # copy files to remote VM
     $ scp -r dev:/path/to/source my_code/       # copy files from remote VM
 
-Sky also provides automatic transfer of working directory to the remote VM. This
-can be configured with the :code:`workdir` option in a task YAML file, or using the following
-command line options:
+Sky **simplifies code syncing** by the automatic transfer of a working directory
+to the cluster.  The working directory can be configured with the
+:code:`workdir` option in a task YAML file, or using the following command line
+option:
 
 .. code-block::
 
-    $ sky exec --workdir=/path/to/code task.yaml
     $ sky launch --workdir=/path/to/code task.yaml
+    $ sky exec --workdir=/path/to/code task.yaml
 
-In both scenarios, the working directory is transferred to the remote VM and will override
-:code:`workdir` defaults specified in task.yaml
+These commands sync the working directory to a location on the remote VM, and
+the task is run under that working directory (e.g., to invoke scripts, access
+checkpoints, etc.).
 
 Ending a development session
 -----------------------------
@@ -75,7 +72,10 @@ To end a development session, run the following command:
 
   $ sky stop dev
 
-To restart the VM:
+  # Or, to terminate:
+  $ sky down dev
+
+To restart a stopped cluster:
 
 .. code-block:: console
 
