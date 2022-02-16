@@ -996,7 +996,7 @@ def start(clusters: Tuple[str]):
             dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
 
-        with console.status(f'[bold green]Starting {name}...') as status:
+        with console.status(f'[bold green]Starting {name}...'):
             backend.provision(dummy_task,
                               to_provision=handle.launched_resources,
                               dryrun=False,
@@ -1090,7 +1090,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             continue
 
         teardown_verb = 'Terminating' if terminate else 'Stopping'
-        with console.status(f"[bold green]{teardown_verb} {name}...") as status:
+        with console.status(f"[bold green]{teardown_verb} {name}..."):
             # TODO: do not fail silently
             backend.teardown(handle, terminate=terminate)
 
