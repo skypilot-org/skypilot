@@ -744,8 +744,7 @@ class RetryingVmProvisioner(object):
                     logger.info(
                         f'{style.BRIGHT}Successfully provisioned or found'
                         f' existing VM{plural}. Setup completed.'
-                        f'{style.RESET_ALL}'
-                    )
+                        f'{style.RESET_ALL}')
                     return config_dict
             message = (
                 'Failed to acquire resources in all regions/zones'
