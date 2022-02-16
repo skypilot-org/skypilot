@@ -501,7 +501,7 @@ class GcsStore(AbstractStore):
           bucket_name: str; Name of bucket
         """
         try:
-            bucket = self.client.get_bucket(self.name)
+            bucket = self.client.get_bucket(bucket_name)
             bucket.delete(force=True)
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
