@@ -1,21 +1,15 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
-<<<<<<< HEAD
 from typing import Any, Dict, Optional, Set, Tuple
-
-from sky.data import data_utils, data_transfer
-from sky import global_user_state
-=======
 import subprocess
-from typing import Any, Dict, Optional, Tuple
 import urllib.parse
 
 from sky.cloud_adaptors import aws
 from sky.cloud_adaptors import gcp
 from sky.data import data_transfer
 from sky.data import data_utils
->>>>>>> 999471409aae207a21f3f505bdcad225d1810b31
+from sky import global_user_state
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
@@ -296,7 +290,6 @@ class Storage(object):
                 store.delete()
             # Delete entire store
             global_user_state.remove_storage(self.name)
-
 
 
 class S3Store(AbstractStore):
