@@ -10,7 +10,7 @@ def test_bucket_creation():
 def test_bucket_deletion():
     storage_1 = storage.Storage(name='mluo-data', source='~/Downloads/temp/')
     storage_1.get_or_copy_to_s3()
-    #storage_1.get_or_copy_to_gcs()
+    storage_1.get_or_copy_to_gcs()
     storage_1.delete()  # Deletes Data
 
 
