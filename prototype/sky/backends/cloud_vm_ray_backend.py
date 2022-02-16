@@ -1595,8 +1595,6 @@ class CloudVmRayBackend(backends.Backend):
                 query_cmd = (f'az vm list -g {resource_group} '
                              '--query "[].id" -o tsv')
                 terminate_cmd = f'az vm delete --yes --ids $({query_cmd})'
-                # Special handling because `ray down` is buggy with Azure.
-                # Set check=False to not error out on not found VMs.
                 backend_utils.run(terminate_cmd, check=True)
             else:
                 raise ValueError(f'Unsupported cloud {cloud} for stopped '
