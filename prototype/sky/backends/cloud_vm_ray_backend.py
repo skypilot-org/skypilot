@@ -1598,15 +1598,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'"[? contains(name, \'{cluster_name}\')].id" -o tsv)',
                     check=False)
             else:
-                # TODO(suquark,zongheng): Support deleting stopped GCP clusters.
-                # Tracked in issue #318.
-                logger.info(
-                    f'Cannot terminate {cloud} cluster {cluster_name!r} '
-                    'because it is STOPPED. \nTo fix: manually terminate in '
-                    'the cloud\'s UI or '
-                    f'`sky start {cluster_name}; sky down {cluster_name}` '
-                    '(This limitation will be addressed in the future.)')
-                return
+                raise ValueError(f'Unsupported cloud {cloud} for stopped '
+                                 f'cluster {cluster_name!r}.')
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
