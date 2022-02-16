@@ -16,7 +16,7 @@ install_requires = [
     'pendulum',
     'PrettyTable',
     'pytest',
-    'ray[default]==1.10.0',
+    'ray[default]',
     'tabulate',
     'docker',
     'wheel',
