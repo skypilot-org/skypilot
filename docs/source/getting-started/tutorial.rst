@@ -44,7 +44,7 @@ We can launch training by running:
 
    $ sky launch -c lm-cluster dnn.yaml
 
-This will kick off a single training run after provisioning a cluster.
+This will kick off a single training run after provisioning a cluster. You can safely Ctrl-C after the training job starts printing, the job will be run in the backgroun on the cluster (to stop the job, refer to the `sky cancel` below).
 
 Scheduling Multiple Training Jobs
 ---------------------------------
