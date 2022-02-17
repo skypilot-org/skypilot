@@ -253,26 +253,26 @@
 <p>Sky supports multi-node cluster
 provisioning and distributed execution on many VMs.</p>
 <p>For example, here is a simple PyTorch Distributed training example:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">resnet-distributed-app</span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resnet-distributed-app</span><span class="w"></span>
 
-<span class="nt">resources</span><span class="p">:</span>
-    <span class="nt">accelerators</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">V100</span>
+<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
+<span class="w">    </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V100</span><span class="w"></span>
 
-<span class="nt">num_nodes</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="nt">num_nodes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span><span class="w"></span>
 
-<span class="nt">setup</span><span class="p">:</span> <span class="p p-Indicator">|</span>
-    <span class="no">pip3 install --upgrade pip</span>
-    <span class="no">git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet</span>
-    <span class="no">cd pytorch-distributed-resnet &amp;&amp; pip3 install -r requirements.txt</span>
-    <span class="no">mkdir -p data  &amp;&amp; mkdir -p saved_models &amp;&amp; cd data &amp;&amp; \</span>
-      <span class="no">wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz</span>
-    <span class="no">tar -xvzf cifar-10-python.tar.gz</span>
+<span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">    </span><span class="no">pip3 install --upgrade pip</span><span class="w"></span>
+<span class="w">    </span><span class="no">git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet</span><span class="w"></span>
+<span class="w">    </span><span class="no">cd pytorch-distributed-resnet &amp;&amp; pip3 install -r requirements.txt</span><span class="w"></span>
+<span class="w">    </span><span class="no">mkdir -p data  &amp;&amp; mkdir -p saved_models &amp;&amp; cd data &amp;&amp; \</span><span class="w"></span>
+<span class="w">      </span><span class="no">wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz</span><span class="w"></span>
+<span class="w">    </span><span class="no">tar -xvzf cifar-10-python.tar.gz</span><span class="w"></span>
 
-<span class="nt">run</span><span class="p">:</span> <span class="p p-Indicator">|</span>
-    <span class="no">cd pytorch-distributed-resnet</span>
-    <span class="no">python3 -m torch.distributed.launch --nproc_per_node=1 \</span>
-      <span class="no">--nnodes=${#SKY_NODE_IPS[@]} --node_rank=${SKY_NODE_RANK} --master_addr=${SKY_NODE_IPS[0]} \</span>
-    <span class="no">--master_port=8008 resnet_ddp.py --num_epochs 20</span>
+<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">    </span><span class="no">cd pytorch-distributed-resnet</span><span class="w"></span>
+<span class="w">    </span><span class="no">python3 -m torch.distributed.launch --nproc_per_node=1 \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--nnodes=${#SKY_NODE_IPS[@]} --node_rank=${SKY_NODE_RANK} --master_addr=${SKY_NODE_IPS[0]} \</span><span class="w"></span>
+<span class="w">    </span><span class="no">--master_port=8008 resnet_ddp.py --num_epochs 20</span><span class="w"></span>
 </pre></div>
 </div>
 <p>In the above, <code class="code docutils literal notranslate"><span class="pre">num_nodes:</span> <span class="pre">2</span></code> specifies that this task is to be run on 2

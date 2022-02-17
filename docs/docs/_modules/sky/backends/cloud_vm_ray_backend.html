@@ -298,11 +298,12 @@
 
 <span class="k">def</span> <span class="nf">_get_cluster_config_template</span><span class="p">(</span><span class="n">cloud</span><span class="p">):</span>
     <span class="n">cloud_to_template</span> <span class="o">=</span> <span class="p">{</span>
-        <span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">:</span> <span class="s1">&#39;aws-ray.yml.j2&#39;</span><span class="p">,</span>
-        <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span><span class="p">:</span> <span class="s1">&#39;azure-ray.yml.j2&#39;</span><span class="p">,</span>
-        <span class="n">clouds</span><span class="o">.</span><span class="n">GCP</span><span class="p">:</span> <span class="s1">&#39;gcp-ray.yml.j2&#39;</span><span class="p">,</span>
+        <span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">:</span> <span class="s1">&#39;config/aws-ray.yml.j2&#39;</span><span class="p">,</span>
+        <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span><span class="p">:</span> <span class="s1">&#39;config/azure-ray.yml.j2&#39;</span><span class="p">,</span>
+        <span class="n">clouds</span><span class="o">.</span><span class="n">GCP</span><span class="p">:</span> <span class="s1">&#39;config/gcp-ray.yml.j2&#39;</span><span class="p">,</span>
     <span class="p">}</span>
-    <span class="k">return</span> <span class="n">cloud_to_template</span><span class="p">[</span><span class="nb">type</span><span class="p">(</span><span class="n">cloud</span><span class="p">)]</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">cloud_to_template</span><span class="p">[</span><span class="nb">type</span><span class="p">(</span><span class="n">cloud</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">sky</span><span class="o">.</span><span class="n">__root_dir__</span><span class="p">),</span> <span class="n">path</span><span class="p">)</span>
 
 
 <span class="k">def</span> <span class="nf">_get_task_demands_dict</span><span class="p">(</span><span class="n">task</span><span class="p">:</span> <span class="n">Task</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">int</span><span class="p">]]:</span>
@@ -446,9 +447,7 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">_code</span> <span class="o">+=</span> <span class="p">[</span>
             <span class="n">textwrap</span><span class="o">.</span><span class="n">dedent</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
 <span class="s2">                pg = ray_util.placement_group(</span><span class="si">{</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">bundles</span><span class="p">)</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">pack_mode</span><span class="si">!r}</span><span class="s2">)</span>
-<span class="s2">                plural = &#39;s&#39; if </span><span class="si">{</span><span class="n">num_nodes</span><span class="si">}</span><span class="s2"> &gt; 1 else &#39;&#39;</span>
-<span class="s2">                node_str = f&#39;</span><span class="si">{</span><span class="n">num_nodes</span><span class="si">}</span><span class="s2"> node&#39; + plural + &#39;.&#39;</span>
-<span class="s2">                print(&#39;SKY INFO: Reserving task slots on &#39; + node_str,</span>
+<span class="s2">                print(&#39;SKY INFO: Reserving task slots on </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">bundles</span><span class="p">)</span><span class="si">}</span><span class="s2"> nodes.&#39;,</span>
 <span class="s2">                      file=sys.stderr,</span>
 <span class="s2">                      flush=True)</span>
 <span class="s2">                # FIXME: This will print the error message from autoscaler if</span>
@@ -1590,8 +1589,8 @@
 
         <span class="n">job_submit_cmd</span> <span class="o">=</span> <span class="p">(</span>
             <span class="sa">f</span><span class="s1">&#39;mkdir -p </span><span class="si">{</span><span class="n">remote_log_dir</span><span class="si">}</span><span class="s1"> &amp;&amp; ray job submit &#39;</span>
-            <span class="sa">f</span><span class="s1">&#39;--address=127.0.0.1:8265 --job-id </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1"> --no-wait &#39;</span>
-            <span class="sa">f</span><span class="s1">&#39;-- &quot;</span><span class="si">{</span><span class="n">executable</span><span class="si">}</span><span class="s1"> -u </span><span class="si">{</span><span class="n">script_path</span><span class="si">}</span><span class="s1"> &gt; </span><span class="si">{</span><span class="n">remote_log_path</span><span class="si">}</span><span class="s1"> 2&gt;&amp;1&quot;&#39;</span><span class="p">)</span>
+            <span class="sa">f</span><span class="s1">&#39;--address=127.0.0.1:8265 --job-id </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1"> -- &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;&quot;</span><span class="si">{</span><span class="n">executable</span><span class="si">}</span><span class="s1"> -u </span><span class="si">{</span><span class="n">script_path</span><span class="si">}</span><span class="s1"> &gt; </span><span class="si">{</span><span class="n">remote_log_path</span><span class="si">}</span><span class="s1"> 2&gt;&amp;1&quot;&#39;</span><span class="p">)</span>
 
         <span class="bp">self</span><span class="o">.</span><span class="n">run_on_head</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span>
                          <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">cd</span><span class="si">}</span><span class="s1"> &amp;&amp; </span><span class="si">{</span><span class="n">job_submit_cmd</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
