@@ -1281,7 +1281,7 @@ def check():
     the reason and suggests correction steps. Sky tasks will only run on clouds
     that you have access to.
     """
-    sky_check.init()
+    sky_check.check()
 
 
 @cli.command()
