@@ -33,6 +33,9 @@
     <script src="../../../_static/jquery.js"></script>
     <script src="../../../_static/underscore.js"></script>
     <script src="../../../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../../../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -130,7 +133,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -152,11 +167,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../../../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../../../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -295,12 +305,11 @@
 
 <span class="k">def</span> <span class="nf">_get_cluster_config_template</span><span class="p">(</span><span class="n">cloud</span><span class="p">):</span>
     <span class="n">cloud_to_template</span> <span class="o">=</span> <span class="p">{</span>
-        <span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">:</span> <span class="s1">&#39;config/aws-ray.yml.j2&#39;</span><span class="p">,</span>
-        <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span><span class="p">:</span> <span class="s1">&#39;config/azure-ray.yml.j2&#39;</span><span class="p">,</span>
-        <span class="n">clouds</span><span class="o">.</span><span class="n">GCP</span><span class="p">:</span> <span class="s1">&#39;config/gcp-ray.yml.j2&#39;</span><span class="p">,</span>
+        <span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">:</span> <span class="s1">&#39;aws-ray.yml.j2&#39;</span><span class="p">,</span>
+        <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span><span class="p">:</span> <span class="s1">&#39;azure-ray.yml.j2&#39;</span><span class="p">,</span>
+        <span class="n">clouds</span><span class="o">.</span><span class="n">GCP</span><span class="p">:</span> <span class="s1">&#39;gcp-ray.yml.j2&#39;</span><span class="p">,</span>
     <span class="p">}</span>
-    <span class="n">path</span> <span class="o">=</span> <span class="n">cloud_to_template</span><span class="p">[</span><span class="nb">type</span><span class="p">(</span><span class="n">cloud</span><span class="p">)]</span>
-    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">sky</span><span class="o">.</span><span class="n">__root_dir__</span><span class="p">),</span> <span class="n">path</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">cloud_to_template</span><span class="p">[</span><span class="nb">type</span><span class="p">(</span><span class="n">cloud</span><span class="p">)]</span>
 
 
 <span class="k">def</span> <span class="nf">_get_task_demands_dict</span><span class="p">(</span><span class="n">task</span><span class="p">:</span> <span class="n">Task</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">int</span><span class="p">]]:</span>
@@ -444,7 +453,9 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">_code</span> <span class="o">+=</span> <span class="p">[</span>
             <span class="n">textwrap</span><span class="o">.</span><span class="n">dedent</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
 <span class="s2">                pg = ray_util.placement_group(</span><span class="si">{</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">bundles</span><span class="p">)</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">pack_mode</span><span class="si">!r}</span><span class="s2">)</span>
-<span class="s2">                print(&#39;SKY INFO: Reserving task slots on </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">bundles</span><span class="p">)</span><span class="si">}</span><span class="s2"> nodes.&#39;,</span>
+<span class="s2">                plural = &#39;s&#39; if </span><span class="si">{</span><span class="n">num_nodes</span><span class="si">}</span><span class="s2"> &gt; 1 else &#39;&#39;</span>
+<span class="s2">                node_str = f&#39;</span><span class="si">{</span><span class="n">num_nodes</span><span class="si">}</span><span class="s2"> node&#39; + plural + &#39;.&#39;</span>
+<span class="s2">                print(&#39;SKY INFO: Reserving task slots on &#39; + node_str,</span>
 <span class="s2">                      file=sys.stderr,</span>
 <span class="s2">                      flush=True)</span>
 <span class="s2">                # FIXME: This will print the error message from autoscaler if</span>
@@ -1423,8 +1434,10 @@
         <span class="n">all_file_mounts</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="n">Path</span><span class="p">,</span> <span class="n">Path</span><span class="p">],</span>
         <span class="n">cloud_to_remote_file_mounts</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="n">Path</span><span class="p">,</span> <span class="n">Path</span><span class="p">]],</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="c1"># &#39;all_file_mounts&#39; should be handled, since the provision will not</span>
-        <span class="c1"># update the file_mounts for workers.</span>
+        <span class="c1"># Note that 2nd+ provision()/&#39;ray up&#39; will not update (refresh) the</span>
+        <span class="c1"># file_mounts for workers.  1st launch does indeed sync file_mounts to</span>
+        <span class="c1"># all nodes.  Thus, we here rsync the file mounts.</span>
+        <span class="k">del</span> <span class="n">cloud_to_remote_file_mounts</span>  <span class="c1"># Unused.</span>
         <span class="n">mounts</span> <span class="o">=</span> <span class="n">all_file_mounts</span>
         <span class="k">if</span> <span class="n">mounts</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">mounts</span><span class="p">:</span>
             <span class="k">return</span>
@@ -1433,7 +1446,7 @@
         <span class="n">cyan</span> <span class="o">=</span> <span class="n">fore</span><span class="o">.</span><span class="n">CYAN</span>
         <span class="n">reset</span> <span class="o">=</span> <span class="n">style</span><span class="o">.</span><span class="n">RESET_ALL</span>
         <span class="n">bright</span> <span class="o">=</span> <span class="n">style</span><span class="o">.</span><span class="n">BRIGHT</span>
-        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">cyan</span><span class="si">}</span><span class="s1">Processing cloud to VM file mounts.</span><span class="si">{</span><span class="n">reset</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">cyan</span><span class="si">}</span><span class="s1">Processing file mounts.</span><span class="si">{</span><span class="n">reset</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
 
         <span class="n">ip_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_node_ips</span><span class="p">(</span><span class="n">handle</span><span class="o">.</span><span class="n">cluster_yaml</span><span class="p">,</span> <span class="n">handle</span><span class="o">.</span><span class="n">launched_nodes</span><span class="p">)</span>
         <span class="n">ssh_user</span><span class="p">,</span> <span class="n">ssh_private_key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_ssh_credential</span><span class="p">(</span>
@@ -1586,8 +1599,8 @@
 
         <span class="n">job_submit_cmd</span> <span class="o">=</span> <span class="p">(</span>
             <span class="sa">f</span><span class="s1">&#39;mkdir -p </span><span class="si">{</span><span class="n">remote_log_dir</span><span class="si">}</span><span class="s1"> &amp;&amp; ray job submit &#39;</span>
-            <span class="sa">f</span><span class="s1">&#39;--address=127.0.0.1:8265 --job-id </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1"> -- &#39;</span>
-            <span class="sa">f</span><span class="s1">&#39;&quot;</span><span class="si">{</span><span class="n">executable</span><span class="si">}</span><span class="s1"> -u </span><span class="si">{</span><span class="n">script_path</span><span class="si">}</span><span class="s1"> &gt; </span><span class="si">{</span><span class="n">remote_log_path</span><span class="si">}</span><span class="s1"> 2&gt;&amp;1&quot;&#39;</span><span class="p">)</span>
+            <span class="sa">f</span><span class="s1">&#39;--address=127.0.0.1:8265 --job-id </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1"> --no-wait &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;-- &quot;</span><span class="si">{</span><span class="n">executable</span><span class="si">}</span><span class="s1"> -u </span><span class="si">{</span><span class="n">script_path</span><span class="si">}</span><span class="s1"> &gt; </span><span class="si">{</span><span class="n">remote_log_path</span><span class="si">}</span><span class="s1"> 2&gt;&amp;1&quot;&#39;</span><span class="p">)</span>
 
         <span class="bp">self</span><span class="o">.</span><span class="n">run_on_head</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span>
                          <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">cd</span><span class="si">}</span><span class="s1"> &amp;&amp; </span><span class="si">{</span><span class="n">job_submit_cmd</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
@@ -1781,7 +1794,7 @@
 <div class="viewcode-block" id="CloudVmRayBackend.teardown_ephemeral_storage"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.cloud_vm_ray_backend.CloudVmRayBackend.teardown_ephemeral_storage">[docs]</a>    <span class="k">def</span> <span class="nf">teardown_ephemeral_storage</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task</span><span class="p">:</span> <span class="n">Task</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">storage_mounts</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">storage_mounts</span>
         <span class="k">if</span> <span class="n">storage_mounts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="k">for</span> <span class="n">storage</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">storage_mounts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">storage</span> <span class="ow">in</span> <span class="n">storage_mounts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
                 <span class="k">if</span> <span class="ow">not</span> <span class="n">storage</span><span class="o">.</span><span class="n">persistent</span><span class="p">:</span>
                     <span class="n">storage</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span></div>
 
@@ -1791,22 +1804,8 @@
         <span class="n">prev_status</span> <span class="o">=</span> <span class="n">global_user_state</span><span class="o">.</span><span class="n">get_status_from_cluster_name</span><span class="p">(</span>
             <span class="n">handle</span><span class="o">.</span><span class="n">cluster_name</span><span class="p">)</span>
         <span class="n">cluster_name</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;cluster_name&#39;</span><span class="p">]</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">terminate</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="p">(</span><span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">GCP</span><span class="p">)):</span>
-            <span class="c1"># FIXME: no mentions of cache_stopped_nodes in</span>
-            <span class="c1"># https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/_azure/node_provider.py</span>
-            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-                <span class="sa">f</span><span class="s1">&#39;Stopping cluster </span><span class="si">{</span><span class="n">handle</span><span class="o">.</span><span class="n">cluster_name</span><span class="si">!r}</span><span class="s1">: not supported on &#39;</span>
-                <span class="s1">&#39;non-AWS and non-GCP clusters yet. Try manually stopping, &#39;</span>
-                <span class="sa">f</span><span class="s1">&#39;or terminate by: sky down </span><span class="si">{</span><span class="n">handle</span><span class="o">.</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
-        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span><span class="p">):</span>
-            <span class="c1"># Special handling because `ray down` is buggy with Azure.</span>
-            <span class="c1"># Set check=False to not error out on not found VMs.</span>
-            <span class="n">backend_utils</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
-                <span class="s1">&#39;az vm delete --yes --ids $(az vm list --query &#39;</span>
-                <span class="sa">f</span><span class="s1">&#39;&quot;[? contains(name, </span><span class="se">\&#39;</span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="se">\&#39;</span><span class="s1">)].id&quot; -o tsv)&#39;</span><span class="p">,</span>
-                <span class="n">check</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-        <span class="k">elif</span> <span class="p">(</span><span class="n">terminate</span> <span class="ow">and</span>
-              <span class="n">prev_status</span> <span class="o">==</span> <span class="n">global_user_state</span><span class="o">.</span><span class="n">ClusterStatus</span><span class="o">.</span><span class="n">STOPPED</span><span class="p">):</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">terminate</span> <span class="ow">and</span>
+                <span class="n">prev_status</span> <span class="o">==</span> <span class="n">global_user_state</span><span class="o">.</span><span class="n">ClusterStatus</span><span class="o">.</span><span class="n">STOPPED</span><span class="p">):</span>
             <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">):</span>
                 <span class="c1"># TODO (zhwu): Room for optimization. We can move these cloud</span>
                 <span class="c1"># specific handling to the cloud class.</span>
@@ -1823,16 +1822,25 @@
                     <span class="sa">f</span><span class="s1">&#39;aws ec2 terminate-instances --region </span><span class="si">{</span><span class="n">region</span><span class="si">}</span><span class="s1"> &#39;</span>
                     <span class="sa">f</span><span class="s1">&#39;--instance-ids $(</span><span class="si">{</span><span class="n">query_cmd</span><span class="si">}</span><span class="s1">)&#39;</span><span class="p">)</span>
                 <span class="n">backend_utils</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">terminate_cmd</span><span class="p">,</span> <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">GCP</span><span class="p">):</span>
+                <span class="n">zone</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;provider&#39;</span><span class="p">][</span><span class="s1">&#39;availability_zone&#39;</span><span class="p">]</span>
+                <span class="n">query_cmd</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="sa">f</span><span class="s1">&#39;gcloud compute instances list &#39;</span>
+                    <span class="sa">f</span><span class="s1">&#39;--filter=</span><span class="se">\\</span><span class="s1">(labels.ray-cluster-name=</span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="se">\\</span><span class="s1">) &#39;</span>
+                    <span class="sa">f</span><span class="s1">&#39;--zones=</span><span class="si">{</span><span class="n">zone</span><span class="si">}</span><span class="s1"> --format=value</span><span class="se">\\</span><span class="s1">(name</span><span class="se">\\</span><span class="s1">)&#39;</span><span class="p">)</span>
+                <span class="n">terminate_cmd</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="sa">f</span><span class="s1">&#39;gcloud compute instances delete --zone=</span><span class="si">{</span><span class="n">zone</span><span class="si">}</span><span class="s1"> --quiet &#39;</span>
+                    <span class="sa">f</span><span class="s1">&#39;$(</span><span class="si">{</span><span class="n">query_cmd</span><span class="si">}</span><span class="s1">)&#39;</span><span class="p">)</span>
+                <span class="n">backend_utils</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">terminate_cmd</span><span class="p">,</span> <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span><span class="p">):</span>
+                <span class="n">resource_group</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;provider&#39;</span><span class="p">][</span><span class="s1">&#39;resource_group&#39;</span><span class="p">]</span>
+                <span class="n">query_cmd</span> <span class="o">=</span> <span class="p">(</span><span class="sa">f</span><span class="s1">&#39;az vm list -g </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s1"> &#39;</span>
+                             <span class="s1">&#39;--query &quot;[].id&quot; -o tsv&#39;</span><span class="p">)</span>
+                <span class="n">terminate_cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;az vm delete --yes --ids $(</span><span class="si">{</span><span class="n">query_cmd</span><span class="si">}</span><span class="s1">)&#39;</span>
+                <span class="n">backend_utils</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">terminate_cmd</span><span class="p">,</span> <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
             <span class="k">else</span><span class="p">:</span>
-                <span class="c1"># TODO(suquark,zongheng): Support deleting stopped GCP clusters.</span>
-                <span class="c1"># Tracked in issue #318.</span>
-                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
-                    <span class="sa">f</span><span class="s1">&#39;Cannot terminate non-AWS cluster </span><span class="si">{</span><span class="n">cluster_name</span><span class="si">!r}</span><span class="s1"> &#39;</span>
-                    <span class="s1">&#39;because it is STOPPED. </span><span class="se">\n</span><span class="s1">To fix: manually terminate in &#39;</span>
-                    <span class="s1">&#39;the cloud</span><span class="se">\&#39;</span><span class="s1">s UI or &#39;</span>
-                    <span class="sa">f</span><span class="s1">&#39;`sky start </span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">; sky down </span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">` &#39;</span>
-                    <span class="s1">&#39;(This limitation will be addressed in the future.)&#39;</span><span class="p">)</span>
-                <span class="k">return</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Unsupported cloud </span><span class="si">{</span><span class="n">cloud</span><span class="si">}</span><span class="s1"> for stopped &#39;</span>
+                                 <span class="sa">f</span><span class="s1">&#39;cluster </span><span class="si">{</span><span class="n">cluster_name</span><span class="si">!r}</span><span class="s1">.&#39;</span><span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="n">config</span><span class="p">[</span><span class="s1">&#39;provider&#39;</span><span class="p">][</span><span class="s1">&#39;cache_stopped_nodes&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="ow">not</span> <span class="n">terminate</span>
             <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span><span class="s1">&#39;w&#39;</span><span class="p">,</span>

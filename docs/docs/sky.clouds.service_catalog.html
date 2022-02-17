@@ -33,6 +33,9 @@
     <script src="_static/jquery.js"></script>
     <script src="_static/underscore.js"></script>
     <script src="_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -130,7 +133,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -152,11 +167,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -528,33 +538,33 @@ type. E.g. <cite>p3.2xlarge</cite>.</p></li>
 <li><p>memory: Instance memory in GiB.</p></li>
 <li><p>price: Regular instance price per hour.</p></li>
 </ul>
-<dl class="py property">
+<dl class="py attribute">
 <dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_count">
-<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">accelerator_count</span></span><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_count" title="Permalink to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">accelerator_count</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.10)"><span class="pre">int</span></a></em><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_count" title="Permalink to this definition">¶</a></dt>
 <dd><p>Alias for field number 3</p>
 </dd></dl>
 
-<dl class="py property">
+<dl class="py attribute">
 <dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_name">
-<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">accelerator_name</span></span><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_name" title="Permalink to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">accelerator_name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a></em><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_name" title="Permalink to this definition">¶</a></dt>
 <dd><p>Alias for field number 2</p>
 </dd></dl>
 
-<dl class="py property">
+<dl class="py attribute">
 <dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo.cloud">
-<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">cloud</span></span><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.cloud" title="Permalink to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">cloud</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a></em><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.cloud" title="Permalink to this definition">¶</a></dt>
 <dd><p>Alias for field number 0</p>
 </dd></dl>
 
-<dl class="py property">
+<dl class="py attribute">
 <dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo.instance_type">
-<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">instance_type</span></span><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.instance_type" title="Permalink to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">instance_type</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><span class="pre">str</span></a></em><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.instance_type" title="Permalink to this definition">¶</a></dt>
 <dd><p>Alias for field number 1</p>
 </dd></dl>
 
-<dl class="py property">
+<dl class="py attribute">
 <dt class="sig sig-object py" id="sky.clouds.service_catalog.common.InstanceTypeInfo.memory">
-<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">memory</span></span><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.memory" title="Permalink to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">memory</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.10)"><span class="pre">float</span></a></em><a class="headerlink" href="#sky.clouds.service_catalog.common.InstanceTypeInfo.memory" title="Permalink to this definition">¶</a></dt>
 <dd><p>Alias for field number 4</p>
 </dd></dl>
 

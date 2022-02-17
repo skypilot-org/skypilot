@@ -33,6 +33,9 @@
     <script src="../../../_static/jquery.js"></script>
     <script src="../../../_static/underscore.js"></script>
     <script src="../../../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../../../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -130,7 +133,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -152,11 +167,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../../../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../../../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -456,6 +466,7 @@
 
 <div class="viewcode-block" id="tail_logs"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.log_lib.tail_logs">[docs]</a><span class="k">def</span> <span class="nf">tail_logs</span><span class="p">(</span><span class="n">job_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">log_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
               <span class="n">status</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">job_lib</span><span class="o">.</span><span class="n">JobStatus</span><span class="p">]):</span>
+    <span class="c1"># TODO (zhwu): Maybe switch to `ray job logs` according to the performance.</span>
     <span class="k">if</span> <span class="n">log_dir</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Job </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1"> not found (see `sky queue`).&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
         <span class="k">return</span>

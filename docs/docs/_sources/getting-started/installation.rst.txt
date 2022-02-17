@@ -19,10 +19,17 @@ Cloud account setup
 Sky currently supports three major cloud providers: AWS, GCP, and Azure.  To run
 tasks in the clouds, configure access to at least one cloud:
 
-**AWS**: Install boto with :code:`pip install boto3` and configure your AWS
-credentials using :code:`aws configure`.
+**AWS**:
 
-**GCP**: Run the following:
+.. code-block::
+
+   # Install boto
+   pip install boto3
+
+   # Configure your AWS credentials
+   aws configure
+
+**GCP**:
 
 .. code-block::
 
@@ -37,6 +44,34 @@ credentials using :code:`aws configure`.
    # This will generate ~/.config/gcloud/application_default_credentials.json.
    gcloud auth application-default login
 
-**Azure**: Install the Azure CLI with :code:`pip install azure-cli` and then
-login using :code:`az login --use-device-code`. Set the subscription to use from
-the command line (:code:`az account set -s <subscription_id>`).
+**Azure**:
+
+.. code-block::
+
+   # Install the Azure CLI
+   pip install azure-cli==2.30.0
+   # Login azure
+   az login
+   # Set the subscription to use
+   az account set -s <subscription_id>
+
+**Verifying cloud setup**
+
+Sky allows you to verify that cloud credentials are correctly configured using
+the CLI:
+
+.. code-block::
+
+   # Verify cloud account setup
+   sky check
+
+This will produce output verifying the correct setup of each supported cloud.
+
+.. code-block:: text
+
+   Checking credentials to enable clouds for Sky.
+      AWS: enabled
+      GCP: enabled
+      Azure: enabled
+
+   Sky will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.

@@ -64,6 +64,11 @@ Job Queue
 Miscellaneous
 -------------
 
+.. click:: sky.cli:check
+   :prog: sky check
+   :nested: full
+
+
 .. click:: sky.cli:show_gpus
    :prog: sky show-gpus
    :nested: full

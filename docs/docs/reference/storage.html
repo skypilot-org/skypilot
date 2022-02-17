@@ -33,6 +33,9 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -132,7 +135,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="current nav bd-sidenav">
@@ -154,11 +169,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -227,6 +237,24 @@
         <!-- Table of contents -->
         <div class="d-none d-md-block col-md-2 bd-toc show noprint">
             
+            <div class="tocsection onthispage pt-5 pb-3">
+                <i class="fas fa-list"></i> Contents
+            </div>
+            <nav id="bd-toc-nav" aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#using-sky-storage">
+   Using Sky Storage
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#alternate-usage-declarative-storage-api">
+   Alternate Usage - Declarative Storage API
+  </a>
+ </li>
+</ul>
+
+            </nav>
         </div>
     </div>
 </div>
@@ -239,6 +267,24 @@
                 <div id="print-main-content">
                     <div id="jb-print-toc">
                         
+                        <div>
+                            <h2> Contents </h2>
+                        </div>
+                        <nav aria-label="Page">
+                            <ul class="visible nav section-nav flex-column">
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#using-sky-storage">
+   Using Sky Storage
+  </a>
+ </li>
+ <li class="toc-h2 nav-item toc-entry">
+  <a class="reference internal nav-link" href="#alternate-usage-declarative-storage-api">
+   Alternate Usage - Declarative Storage API
+  </a>
+ </li>
+</ul>
+
+                        </nav>
                     </div>
                 </div>
             </div>
@@ -247,54 +293,142 @@
                 
   <div class="section" id="storage">
 <h1>Storage<a class="headerlink" href="#storage" title="Permalink to this headline">¶</a></h1>
-<p>A Sky Storage object represents an abstract data store containing large data files
-required by the task. Compared to file_mounts, storage is faster and
+<p>A Sky Storage object represents an abstract data store containing large data
+files required by the task. Compared to file_mounts, storage is faster and
 can persist across runs, requiring fewer uploads from your local machine.
-A storage object is used by “mounting” it to a task. On mounting, the data
+Behind the scenes, storage automatically uploads all data in the source
+to a backing object store in a particular cloud (S3/GCS/Azure Blob).</p>
+<p>A storage object is used by “mounting” it to a task. On mounting, the data
 specified in the source becomes available at the destination mount_path.
 Please note that sky.Storage does not guarantee preservation of file
-permissions - you may need to set file permissions during task execution. These are specified
-in Sky YAML configurations with <code class="code docutils literal notranslate"><span class="pre">storage</span></code>.</p>
-<p>Behind the scenes, storage automatically uploads all data in the source
-to a backing object store in a particular cloud (S3/GCS/Azure Blob).</p>
-<p>Storage mounts specify where the storage objects defined above should be
-mounted when the task is run. These are specified with <code class="code docutils literal notranslate"><span class="pre">storage_mounts</span></code>.</p>
-<p>In YAML form, this looks something like:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">storage</span><span class="p">:</span><span class="w"></span>
-<span class="w">   </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">imagenet-bucket</span><span class="w"></span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">source</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">s3://imagenet-bucket</span><span class="w"></span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">force_stores</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">s3</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># Could be [s3, gcs], [gcs] default: None</span><span class="w"></span>
-<span class="w">      </span><span class="nt">persistent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span><span class="w"></span>
+permissions - you may need to set file permissions during task execution.</p>
+<div class="section" id="using-sky-storage">
+<h2>Using Sky Storage<a class="headerlink" href="#using-sky-storage" title="Permalink to this headline">¶</a></h2>
+<p>Sky Storage can be used by specifying additional fields in the
+<code class="code docutils literal notranslate"><span class="pre">file_mounts</span></code>. By default, <code class="code docutils literal notranslate"><span class="pre">file_mounts</span></code> uses rsync to
+directly copy files from local to remote VM.
+However, you can have them backed by sky Storage, which uploads
+the files to a cloud store (e.g. S3, GCS) and have them persist there by
+specifying the <code class="code docutils literal notranslate"><span class="pre">name</span></code>, <code class="code docutils literal notranslate"><span class="pre">source</span></code> and <code class="code docutils literal notranslate"><span class="pre">persistent</span></code> fields. By
+enabling persistence, file_mount sync can be made significantly faster.</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">storage-demo</span><span class="w"></span>
 
-<span class="nt">storage_mounts</span><span class="p">:</span><span class="w"></span>
-<span class="w">   </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">storage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">imagenet-bucket</span><span class="w"></span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">mount_path</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/tmp/imagenet</span><span class="w"></span>
+<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
+<span class="w">  </span><span class="nt">cloud</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws</span><span class="w"></span>
+<span class="w">  </span><span class="nt">instance_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">m5.2xlarge</span><span class="w"></span>
 
-<span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
-<span class="w">   </span><span class="no">. $(conda info --base)/etc/profile.d/conda.sh</span><span class="w"></span>
-<span class="w">   </span><span class="no">pip install --upgrade pip</span><span class="w"></span>
-<span class="w">   </span><span class="no">conda activate resnet</span><span class="w"></span>
-<span class="w">   </span><span class="no">if [ $? -eq 0 ]; then</span><span class="w"></span>
-<span class="w">      </span><span class="no">echo &quot;conda env exists&quot;</span><span class="w"></span>
-<span class="w">   </span><span class="no">else</span><span class="w"></span>
-<span class="w">      </span><span class="no">conda create -n resnet python=3.7 -y</span><span class="w"></span>
-<span class="w">      </span><span class="no">conda activate resnet</span><span class="w"></span>
-<span class="w">      </span><span class="no">pip install tensorflow==2.4.0 pyyaml</span><span class="w"></span>
-<span class="w">      </span><span class="no">cd models</span><span class="w"></span>
-<span class="w">      </span><span class="no">pip install -e .</span><span class="w"></span>
-<span class="w">   </span><span class="no">fi</span><span class="w"></span>
+<span class="nt">file_mounts</span><span class="p">:</span><span class="w"></span>
+<span class="w">  </span><span class="c1"># This uses rsync to directly copy files from your machine to the remote</span><span class="w"></span>
+<span class="w">  </span><span class="c1"># VM at /datasets. Since this uses rsync, the ~/datasets folder is</span><span class="w"></span>
+<span class="w">  </span><span class="c1"># uploaded on each execution.</span><span class="w"></span>
+<span class="w">  </span><span class="nt">/datasets</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/datasets</span><span class="w"></span>
+
+<span class="w">  </span><span class="c1"># This uses sky Storage to first create a S3 bucket named sky-dataset,</span><span class="w"></span>
+<span class="w">  </span><span class="c1"># copies the contents of ~/datasets to the remote bucket and makes the</span><span class="w"></span>
+<span class="w">  </span><span class="c1"># bucket persistent (i.e., the bucket is not deleted after the completion of</span><span class="w"></span>
+<span class="w">  </span><span class="c1"># this sky task, and future invocations of this bucket will be much faster).</span><span class="w"></span>
+<span class="w">  </span><span class="c1"># The bucket is mounted at /datasets-storage.</span><span class="w"></span>
+<span class="w">  </span><span class="nt">/datasets-storage</span><span class="p">:</span><span class="w"></span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sky-dataset</span><span class="w"></span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/datasets</span><span class="w"></span>
+<span class="w">    </span><span class="nt">force_stores</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">s3</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># Could be [s3, gcs], [gcs] default: None</span><span class="w"></span>
+<span class="w">    </span><span class="nt">persistent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span><span class="w">  </span><span class="c1"># Defaults to True, can be set to false.</span><span class="w"></span>
 
 <span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
-<span class="w">   </span><span class="no">. $(conda info --base)/etc/profile.d/conda.sh</span><span class="w"></span>
-<span class="w">   </span><span class="no">conda activate resnet</span><span class="w"></span>
-<span class="w">   </span><span class="no">export XLA_FLAGS=&#39;--xla_gpu_cuda_data_dir=/usr/local/cuda/&#39;</span><span class="w"></span>
-<span class="w">   </span><span class="no">python -u models/official/resnet/resnet_main.py --use_tpu=False \</span><span class="w"></span>
-<span class="w">         </span><span class="no">--mode=train --train_batch_size=256 --train_steps=250 \</span><span class="w"></span>
-<span class="w">         </span><span class="no">--iterations_per_loop=125 \</span><span class="w"></span>
-<span class="w">         </span><span class="no">--data_dir=/tmp/imagenet \</span><span class="w"></span>
-<span class="w">         </span><span class="no">--model_dir=resnet-model-dir \</span><span class="w"></span>
-<span class="w">         </span><span class="no">--amp --xla --loss_scale=128</span><span class="w"></span>
+<span class="w">  </span><span class="no">pwd</span><span class="w"></span>
+<span class="w">  </span><span class="no">ls -la /</span><span class="w"></span>
 </pre></div>
+</div>
+<p>Finally, you can also directly mount s3/gcs buckets in your remote VM by
+providing the path to the s3/gcs bucket.</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">storage-demo</span><span class="w"></span>
+
+<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
+<span class="w">  </span><span class="nt">cloud</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws</span><span class="w"></span>
+<span class="w">  </span><span class="nt">instance_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">m5.2xlarge</span><span class="w"></span>
+
+<span class="nt">file_mounts</span><span class="p">:</span><span class="w"></span>
+<span class="w">  </span><span class="c1"># This re-uses a predefined bucket (sky-dataset, defined above) and</span><span class="w"></span>
+<span class="w">  </span><span class="c1"># mounts it directly at /datasets-s3.</span><span class="w"></span>
+<span class="w">  </span><span class="nt">/datasets-s3</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">s3://sky-dataset</span><span class="w"></span>
+
+<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">  </span><span class="no">pwd</span><span class="w"></span>
+<span class="w">  </span><span class="no">ls -la /</span><span class="w"></span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="alternate-usage-declarative-storage-api">
+<h2>Alternate Usage - Declarative Storage API<a class="headerlink" href="#alternate-usage-declarative-storage-api" title="Permalink to this headline">¶</a></h2>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The declarative storage YAML API has been deprecated. If you need to create Storage objects but not mount them, use the storage CLI once it is supported.</p>
+</div>
+<p>Some power users may want to only upload their files to an object store
+without mounting it, while others may want to re-use pre-existing storage
+objects. They can do so using the storage and storage_mount fields, which are
+at 1:1 parity with the sky.Storage python API.</p>
+<p>Here’s an example using the declarative API.</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">storage-demo</span><span class="w"></span>
+
+<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
+<span class="w">  </span><span class="nt">cloud</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws</span><span class="w"></span>
+<span class="w">  </span><span class="nt">instance_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">m5.2xlarge</span><span class="w"></span>
+
+<span class="nt">storage</span><span class="p">:</span><span class="w"></span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sky-dataset-decl</span><span class="w"></span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/datasets</span><span class="w"></span>
+<span class="w">    </span><span class="c1">#force_stores: [s3] # Could be [s3, gcs], [gcs] default: None</span><span class="w"></span>
+<span class="w">    </span><span class="nt">persistent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span><span class="w"></span>
+
+<span class="nt">storage_mounts</span><span class="p">:</span><span class="w"></span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">storage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sky-dataset-decl</span><span class="w"> </span><span class="c1"># Name of the storage defined above</span><span class="w"></span>
+<span class="w">    </span><span class="nt">mount_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/datasets-decl</span><span class="w"> </span><span class="c1"># Path to mount the storage at</span><span class="w"></span>
+
+<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">  </span><span class="no">pwd</span><span class="w"></span>
+<span class="w">  </span><span class="no">ls -la /</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Storage YAML field reference:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">storage</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">sky</span><span class="o">.</span><span class="n">Storage</span><span class="p">]</span>
+
+<span class="n">Fields</span><span class="p">:</span>
+  <span class="n">sky</span><span class="o">.</span><span class="n">Storage</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">Identifier</span> <span class="k">for</span> <span class="n">the</span> <span class="n">storage</span> <span class="nb">object</span><span class="p">,</span> <span class="n">used</span> <span class="k">as</span> <span class="n">reference</span> <span class="ow">in</span> <span class="n">storage_mount</span>
+
+  <span class="n">sky</span><span class="o">.</span><span class="n">Storage</span><span class="o">.</span><span class="n">source</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">The</span> <span class="n">source</span> <span class="n">attribute</span> <span class="n">specifies</span> <span class="n">the</span> <span class="n">local</span> <span class="n">path</span> <span class="n">that</span> <span class="n">must</span> <span class="n">be</span> <span class="n">made</span> <span class="n">available</span>
+    <span class="ow">in</span> <span class="n">the</span> <span class="n">storage</span> <span class="nb">object</span><span class="o">.</span> <span class="n">It</span> <span class="n">can</span> <span class="n">either</span> <span class="n">be</span> <span class="n">a</span> <span class="n">local</span> <span class="n">path</span><span class="p">,</span> <span class="ow">in</span> <span class="n">which</span> <span class="n">case</span> <span class="n">data</span>
+    <span class="ow">is</span> <span class="n">uploaded</span> <span class="n">to</span> <span class="n">the</span> <span class="n">cloud</span> <span class="n">to</span> <span class="n">an</span> <span class="n">appropriate</span> <span class="nb">object</span> <span class="n">store</span> <span class="p">(</span><span class="n">s3</span> <span class="ow">or</span> <span class="n">gcs</span><span class="p">),</span> <span class="ow">or</span> <span class="n">it</span>
+    <span class="n">can</span> <span class="n">be</span> <span class="n">a</span> <span class="n">remote</span> <span class="n">path</span> <span class="p">(</span><span class="n">s3</span><span class="p">:</span><span class="o">//</span><span class="p">,</span> <span class="n">gs</span><span class="p">:</span><span class="o">//</span><span class="p">),</span> <span class="ow">in</span> <span class="n">which</span> <span class="n">case</span> <span class="n">it</span> <span class="ow">is</span> <span class="n">mounted</span> <span class="n">directly</span><span class="o">.</span>
+
+  <span class="n">sky</span><span class="o">.</span><span class="n">Storage</span><span class="o">.</span><span class="n">force_stores</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+    <span class="n">If</span> <span class="n">you</span> <span class="n">wish</span> <span class="n">to</span> <span class="n">force</span> <span class="n">sky</span><span class="o">.</span><span class="n">Storage</span> <span class="n">to</span> <span class="n">be</span> <span class="n">backed</span> <span class="n">by</span> <span class="n">specific</span> <span class="n">cloud</span> <span class="nb">object</span>
+    <span class="n">stores</span><span class="p">,</span> <span class="n">you</span> <span class="n">can</span> <span class="n">specify</span> <span class="n">them</span> <span class="n">here</span><span class="o">.</span> <span class="n">If</span> <span class="n">the</span> <span class="n">Storage</span> <span class="nb">object</span> <span class="n">does</span> <span class="ow">not</span> <span class="n">already</span>
+    <span class="n">exist</span> <span class="n">there</span><span class="p">,</span> <span class="n">it</span> <span class="n">will</span> <span class="n">be</span> <span class="n">replicated</span> <span class="n">onto</span> <span class="n">those</span> <span class="n">clouds</span><span class="o">.</span>
+
+  <span class="n">sky</span><span class="o">.</span><span class="n">Storage</span><span class="o">.</span><span class="n">persistent</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">Whether</span> <span class="n">the</span> <span class="n">remote</span> <span class="n">backing</span> <span class="n">stores</span> <span class="ow">in</span> <span class="n">the</span> <span class="n">cloud</span> <span class="n">should</span> <span class="n">be</span> <span class="n">deleted</span> <span class="n">after</span>
+    <span class="n">execution</span> <span class="n">of</span> <span class="n">this</span> <span class="n">task</span> <span class="ow">or</span> <span class="ow">not</span><span class="o">.</span> <span class="n">Set</span> <span class="n">to</span> <span class="kc">True</span> <span class="n">to</span> <span class="n">avoid</span> <span class="n">uploading</span> <span class="n">files</span> <span class="n">again</span>
+    <span class="ow">in</span> <span class="n">subsequent</span> <span class="n">runs</span> <span class="p">(</span><span class="n">at</span> <span class="n">the</span> <span class="n">cost</span> <span class="n">of</span> <span class="n">storing</span> <span class="n">your</span> <span class="n">data</span> <span class="ow">in</span> <span class="n">the</span> <span class="n">cloud</span><span class="p">)</span><span class="o">.</span> <span class="n">If</span>
+    <span class="n">files</span> <span class="n">change</span> <span class="n">between</span> <span class="n">runs</span><span class="p">,</span> <span class="n">new</span> <span class="n">files</span> <span class="n">are</span> <span class="n">synced</span> <span class="n">to</span> <span class="n">the</span> <span class="n">bucket</span><span class="o">.</span>
+</pre></div>
+</div>
+<p>Storage Mounts YAML field reference:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">storage_mounts</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">sky</span><span class="o">.</span><span class="n">storage_mounts</span><span class="p">]</span>
+
+<span class="n">Storage</span> <span class="n">mounts</span> <span class="n">specify</span> <span class="n">where</span> <span class="n">the</span> <span class="n">storage</span> <span class="n">objects</span> <span class="n">defined</span> <span class="n">above</span> <span class="n">should</span> <span class="n">be</span>
+<span class="n">mounted</span> <span class="n">when</span> <span class="n">the</span> <span class="n">task</span> <span class="ow">is</span> <span class="n">run</span><span class="o">.</span>
+
+<span class="n">Fields</span><span class="p">:</span>
+  <span class="n">sky</span><span class="o">.</span><span class="n">StorageMount</span><span class="o">.</span><span class="n">storage</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">Name</span> <span class="n">reference</span> <span class="n">to</span> <span class="n">the</span> <span class="n">storage</span> <span class="nb">object</span> <span class="n">being</span> <span class="n">mounted</span>
+
+  <span class="n">sky</span><span class="o">.</span><span class="n">StorageMount</span><span class="o">.</span><span class="n">mount_path</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">Path</span> <span class="n">where</span> <span class="n">the</span> <span class="n">storage</span> <span class="nb">object</span> <span class="ow">is</span> <span class="n">to</span> <span class="n">be</span> <span class="n">mounted</span>
+</pre></div>
+</div>
 </div>
 </div>
 

@@ -33,6 +33,9 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -132,7 +135,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -154,11 +169,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -293,7 +303,8 @@ and run command:</p>
 <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">huggingface</span><span class="w"></span>
 
 <span class="nt">resources</span><span class="p">:</span><span class="w"></span>
-<span class="w">   </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V100</span><span class="w"></span>
+<span class="w">   </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"></span>
+<span class="w">      </span><span class="nt">V100</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span><span class="w"></span>
 
 <span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
 <span class="w">   </span><span class="no">git clone https://github.com/huggingface/transformers/</span><span class="w"></span>
@@ -320,7 +331,7 @@ and run command:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sky launch -c lm-cluster dnn.yaml
 </pre></div>
 </div>
-<p>This will kick off a single training run after provisioning a cluster.</p>
+<p>This will kick off a single training run after provisioning a cluster. You can safely Ctrl-C after the training job starts printing, and the job will continue to run remotely on the cluster. To stop the job, refer to <code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">cancel</span></code> below.</p>
 </div>
 <div class="section" id="scheduling-multiple-training-jobs">
 <h2>Scheduling Multiple Training Jobs<a class="headerlink" href="#scheduling-multiple-training-jobs" title="Permalink to this headline">¶</a></h2>
@@ -330,22 +341,39 @@ for hyperparameter tuning? This is where Sky’s job queue steps in.</p>
 automatically queue each job on the cluster based on their resource
 requirements. The <code class="code docutils literal notranslate"><span class="pre">-d</span></code> flag can be used to detach logging from the
 terminal, which is useful for launching long-running jobs concurrently.</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Launch 5 jobs, perhaps with different hyperparameters.</span>
-sky <span class="nb">exec</span> lm-cluster dnn.yaml -d
-sky <span class="nb">exec</span> lm-cluster dnn.yaml -d
-sky <span class="nb">exec</span> lm-cluster dnn.yaml -d
-sky <span class="nb">exec</span> lm-cluster dnn.yaml -d
-sky <span class="nb">exec</span> lm-cluster dnn.yaml -d
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Launch 4 jobs, perhaps with different hyperparameters.</span>
+<span class="c1"># We can override the task name with `-n` (optional) and resource requirement with `--gpus` (optional)</span>
+sky <span class="nb">exec</span> lm-cluster dnn.yaml -d -n job2 --gpus<span class="o">=</span>V100:1
+sky <span class="nb">exec</span> lm-cluster dnn.yaml -d -n job3 --gpus<span class="o">=</span>V100:1
+sky <span class="nb">exec</span> lm-cluster dnn.yaml -d -n job4 --gpus<span class="o">=</span>V100:3
+sky <span class="nb">exec</span> lm-cluster dnn.yaml -d -n job5 --gpus<span class="o">=</span>V100:2
 </pre></div>
 </div>
-<p>Because the cluster has 1 V100 GPU, and each job takes 1 V100 GPU, one job will
-start running while the other four will be pending.</p>
+<p>Because the cluster only has 4 V100 GPU, we will see the following behavior:</p>
+<ul class="simple">
+<li><p>The <code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">launch</span></code> job is running and occupies 4 GPU, all other jobs are pending for it.</p></li>
+<li><p>The first two <code class="code docutils literal notranslate"><span class="pre">sky</span> <span class="pre">exec</span></code> jobs (job2, job3) are running and occupy 1 GPU each</p></li>
+<li><p>The third job (job4) will be pending, since it requires 3 GPUs and there is only 2 free GPU.</p></li>
+<li><p>The last job (job5) will start running, since its requirement is fulfilled with 2 GPUs available.</p></li>
+<li><p>Once some of the jobs finished and there are 3 GPUs available, job4 will start running.</p></li>
+</ul>
 <p>If we wish to view the output for each run after it has completed we can use:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># View the jobs in the queue</span>
 sky queue lm-cluster
 
-<span class="c1"># Pick a JOB_ID to view</span>
-sky logs lm-cluster JOB_ID
+ID  NAME         USER  SUBMITTED    STARTED     STATUS
+<span class="m">5</span>   job5         user  <span class="m">10</span> mins ago  <span class="m">10</span> mins ago RUNNING
+<span class="m">4</span>   job4         user  <span class="m">10</span> mins ago  -           PENDING
+<span class="m">3</span>   job3         user  <span class="m">10</span> mins ago  <span class="m">9</span> mins ago  RUNNING
+<span class="m">2</span>   job2         user  <span class="m">10</span> mins ago  <span class="m">9</span> mins ago  RUNNING
+<span class="m">1</span>   huggingface  user  <span class="m">10</span> mins ago  <span class="m">1</span> min ago   SUCCEEDED
+
+
+<span class="c1"># Stream the logs of job5 (ID: 5) to the console</span>
+sky logs lm-cluster <span class="m">5</span>
+
+<span class="c1"># Cancel job job3 (ID: 3)</span>
+sky cancel lm-cluster <span class="m">3</span>
 </pre></div>
 </div>
 </div>

@@ -29,7 +29,14 @@ transparent manner.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Reference Documentation
+   :caption: Sky CLI
+
+   reference/cli
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Features
 
    .. reference/faq
 
@@ -44,7 +51,6 @@ transparent manner.
    .. reference/service-catalog
    reference/storage
    reference/job-queue
-   reference/cli
 
 
 .. .. toctree::

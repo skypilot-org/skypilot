@@ -33,6 +33,9 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -132,7 +135,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -154,11 +169,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -284,9 +294,15 @@
 <h2>Cloud account setup<a class="headerlink" href="#cloud-account-setup" title="Permalink to this headline">¶</a></h2>
 <p>Sky currently supports three major cloud providers: AWS, GCP, and Azure.  To run
 tasks in the clouds, configure access to at least one cloud:</p>
-<p><strong>AWS</strong>: Install boto with <code class="code docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">boto3</span></code> and configure your AWS
-credentials using <code class="code docutils literal notranslate"><span class="pre">aws</span> <span class="pre">configure</span></code>.</p>
-<p><strong>GCP</strong>: Run the following:</p>
+<p><strong>AWS</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Install boto</span>
+<span class="n">pip</span> <span class="n">install</span> <span class="n">boto3</span>
+
+<span class="c1"># Configure your AWS credentials</span>
+<span class="n">aws</span> <span class="n">configure</span>
+</pre></div>
+</div>
+<p><strong>GCP</strong>:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pip</span> <span class="n">install</span> <span class="n">google</span><span class="o">-</span><span class="n">api</span><span class="o">-</span><span class="n">python</span><span class="o">-</span><span class="n">client</span>
 <span class="c1"># Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart</span>
 <span class="n">conda</span> <span class="n">install</span> <span class="o">-</span><span class="n">c</span> <span class="n">conda</span><span class="o">-</span><span class="n">forge</span> <span class="n">google</span><span class="o">-</span><span class="n">cloud</span><span class="o">-</span><span class="n">sdk</span>
@@ -299,9 +315,31 @@ credentials using <code class="code docutils literal notranslate"><span class="p
 <span class="n">gcloud</span> <span class="n">auth</span> <span class="n">application</span><span class="o">-</span><span class="n">default</span> <span class="n">login</span>
 </pre></div>
 </div>
-<p><strong>Azure</strong>: Install the Azure CLI with <code class="code docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">azure-cli</span></code> and then
-login using <code class="code docutils literal notranslate"><span class="pre">az</span> <span class="pre">login</span> <span class="pre">--use-device-code</span></code>. Set the subscription to use from
-the command line (<code class="code docutils literal notranslate"><span class="pre">az</span> <span class="pre">account</span> <span class="pre">set</span> <span class="pre">-s</span> <span class="pre">&lt;subscription_id&gt;</span></code>).</p>
+<p><strong>Azure</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Install the Azure CLI</span>
+<span class="n">pip</span> <span class="n">install</span> <span class="n">azure</span><span class="o">-</span><span class="n">cli</span><span class="o">==</span><span class="mf">2.30.0</span>
+<span class="c1"># Login azure</span>
+<span class="n">az</span> <span class="n">login</span>
+<span class="c1"># Set the subscription to use</span>
+<span class="n">az</span> <span class="n">account</span> <span class="nb">set</span> <span class="o">-</span><span class="n">s</span> <span class="o">&lt;</span><span class="n">subscription_id</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p><strong>Verifying cloud setup</strong></p>
+<p>Sky allows you to verify that cloud credentials are correctly configured using
+the CLI:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Verify cloud account setup</span>
+<span class="n">sky</span> <span class="n">check</span>
+</pre></div>
+</div>
+<p>This will produce output verifying the correct setup of each supported cloud.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Checking credentials to enable clouds for Sky.
+   AWS: enabled
+   GCP: enabled
+   Azure: enabled
+
+Sky will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
+</pre></div>
+</div>
 </div>
 </div>
 
