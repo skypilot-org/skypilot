@@ -69,8 +69,11 @@ class Resources:
         self._use_spot_specified = use_spot is not None
         self.use_spot = use_spot if use_spot is not None else False
 
-        self.os_disk_size = (os_disk_size if os_disk_size is not None else
-                             DEFAULT_OS_DISK_SIZE)
+        if os_disk_size is not None:
+            assert os_disk_size >= 50, 'OS disk size must be larger than 50GB.'
+            self.os_disk_size = os_disk_size
+        else:
+            self.os_disk_size = DEFAULT_OS_DISK_SIZE
         self._try_validate_accelerators()
 
     def __repr__(self) -> str:
