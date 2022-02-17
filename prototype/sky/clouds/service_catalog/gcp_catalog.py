@@ -15,6 +15,25 @@ _df = common.read_catalog('gcp.csv')
 
 _DEFAULT_REGION = 'us-central1'
 
+# TODO(zongheng): fix A100 info directly in catalog.
+# https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
+# count -> vm type
+_A100_INSTANCE_TYPES = {
+    1: 'a2-highgpu-1g',
+    2: 'a2-highgpu-2g',
+    4: 'a2-highgpu-4g',
+    8: 'a2-highgpu-8g',
+    16: 'a2-megagpu-16g',
+}
+# count -> host memory
+_A100_HOST_MEMORY = {
+    1: 85,
+    2: 170,
+    4: 340,
+    8: 680,
+    16: 1360,
+}
+
 
 def _get_accelerator(
     df: pd.DataFrame,
@@ -54,7 +73,20 @@ def list_accelerators(
     name_filter: Optional[str] = None,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
-    return common.list_accelerators_impl('GCP', _df, gpus_only, name_filter)
+    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter)
+
+    # TODO(zongheng): fix A100 info directly in catalog.
+    a100_infos = results.get('A100', None)
+    if a100_infos is not None:
+        new_infos = []
+        for info in a100_infos:
+            assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
+            new_infos.append(
+                info._replace(
+                    instance_type=_A100_INSTANCE_TYPES[info.accelerator_count],
+                    memory=_A100_HOST_MEMORY[info.accelerator_count]))
+        results['A100'] = new_infos
+    return results
 
 
 def get_region_zones_for_accelerators(

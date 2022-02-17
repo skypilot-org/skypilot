@@ -1371,7 +1371,7 @@ it is formatted using formatException() and appended to the message.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="sky.task.Task.add_storage_mounts">
 <span class="sig-name descname"><span class="pre">add_storage_mounts</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/task.html#Task.add_storage_mounts"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.task.Task.add_storage_mounts" title="Permalink to this definition">¶</a></dt>
-<dd><p>Adds storage mounts to the Storage object</p>
+<dd><p>Adds storage mounts to the Task.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Return type</dt>
 <dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a></p>
@@ -1466,12 +1466,15 @@ paths on the remote VM(s) where this Task will run.</p>
 <p>})</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><p><strong>file_mounts</strong> – a dict of { remote_path: local_path/cloud URI }, where
-remote is the VM on which this Task will eventually run on, and
-local is the node from which the task is launched.</p>
+<dd class="field-odd"><p><strong>file_mounts</strong> – either None or a dict of { remote_path: local_path/cloud
+URI }, where remote is the VM on which this Task will eventually
+run on, and local is the node from which the task is launched.</p>
 </dd>
 <dt class="field-even">Parameters</dt>
-<dd class="field-even"><p><strong>file_mounts</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p>
+<dd class="field-even"><p><strong>file_mounts</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]]) – </p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a></p>
 </dd>
 </dl>
 </dd></dl>
@@ -2433,7 +2436,7 @@ add it to Storage.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="sky.Task.add_storage_mounts">
 <span class="sig-name descname"><span class="pre">add_storage_mounts</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/task.html#Task.add_storage_mounts"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.Task.add_storage_mounts" title="Permalink to this definition">¶</a></dt>
-<dd><p>Adds storage mounts to the Storage object</p>
+<dd><p>Adds storage mounts to the Task.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Return type</dt>
 <dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a></p>
@@ -2528,12 +2531,15 @@ paths on the remote VM(s) where this Task will run.</p>
 <p>})</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><p><strong>file_mounts</strong> – a dict of { remote_path: local_path/cloud URI }, where
-remote is the VM on which this Task will eventually run on, and
-local is the node from which the task is launched.</p>
+<dd class="field-odd"><p><strong>file_mounts</strong> – either None or a dict of { remote_path: local_path/cloud
+URI }, where remote is the VM on which this Task will eventually
+run on, and local is the node from which the task is launched.</p>
 </dd>
 <dt class="field-even">Parameters</dt>
-<dd class="field-even"><p><strong>file_mounts</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p>
+<dd class="field-even"><p><strong>file_mounts</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.10)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]]) – </p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.10)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></a></p>
 </dd>
 </dl>
 </dd></dl>

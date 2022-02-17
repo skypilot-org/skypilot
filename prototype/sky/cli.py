@@ -446,7 +446,7 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
            detach_run: bool, backend_name: str, workdir: Optional[str],
            cloud: Optional[str], gpus: Optional[str], use_spot: Optional[bool],
            name: Optional[str]):
-    """Launch a task from a YAML or command (rerun setup if cluster exists).
+    """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If entrypoint points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command to be
@@ -546,7 +546,7 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
     If entrypoint points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command to be
     executed on the head node of the cluster. The task will be submitted to
-    the job queue of the cluster, except if the bash command is used without
+    the job queue of the cluster, except if a bash command is used without
     providing --gpus.
 
     \b
@@ -655,7 +655,7 @@ def _readable_time_duration(start_time: int):
               required=False,
               help='Show all information in full.')
 def status(all: bool):  # pylint: disable=redefined-builtin
-    """Show launched clusters."""
+    """Show clusters."""
     show_all = all
     clusters_status = global_user_state.get_clusters()
     cluster_table = util_lib.create_table([
@@ -853,7 +853,7 @@ def stop(
     CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
     supplied, the latter takes precedence.
 
-    Limitation: this currently only works for AWS/GCP non-spot clusters.
+    Currently, spot-instance clusters cannot be stopped.
 
     Examples:
 
@@ -985,8 +985,6 @@ def down(
     are supplied, the latter takes precedence.
 
     Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
-
-    Limitation: this does not work for stopped clusters for now.
 
     Examples:
 
@@ -1277,11 +1275,11 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
 
 @cli.command()
 def init():
-    """Determines a set of clouds that Sky will use.
+    """Determine the set of clouds available to use.
 
-    It checks access credentials for AWS, Azure and GCP. Sky tasks will only
-    run in clouds that you have access to. After configuring access for a
-    cloud, rerun `sky init` to reflect the changes.
+    This checks access credentials for AWS, Azure and GCP; on failure, it shows
+    the reason and suggests correction steps. Sky tasks will only run on clouds
+    that you have access to.
     """
     sky_init.init()
 
@@ -1294,9 +1292,10 @@ def init():
               default=False,
               help='Show details of all GPU/TPU/accelerator offerings.')
 def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-builtin
-    """List GPU/TPU/accelerators supported by Sky.
+    """Show supported GPU/TPU/accelerators.
 
-    To show what cloud offers a GPU/TPU type, use `sky show-gpus <gpu>`.
+    To show the detailed information of a GPU/TPU type (which clouds offer it,
+    the quantity in each VM type, etc.), use `sky show-gpus <gpu>`.
 
     To show all GPUs, including less common ones and their detailed
     information, use `sky show-gpus --all`.
@@ -1353,8 +1352,8 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
             ])
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
-                    item.instance_type) else '(*)'
-                mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '(*)'
+                    item.instance_type) else '(attachable)'
+                mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '-'
                 accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
                     instance_type_str, mem_str
