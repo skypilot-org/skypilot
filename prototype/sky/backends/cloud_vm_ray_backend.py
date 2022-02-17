@@ -1555,7 +1555,7 @@ class CloudVmRayBackend(backends.Backend):
     def teardown_ephemeral_storage(self, task: Task) -> None:
         storage_mounts = task.storage_mounts
         if storage_mounts is not None:
-            for storage, _ in storage_mounts.items():
+            for _, storage in storage_mounts.items():
                 if not storage.persistent:
                     storage.delete()
 
