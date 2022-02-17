@@ -15,7 +15,6 @@ install_requires = [
     'pycryptodome==3.12.0',
     'pendulum',
     'PrettyTable',
-    'pytest',
     'ray[default]',
     'tabulate',
     'docker',
