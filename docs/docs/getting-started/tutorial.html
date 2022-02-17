@@ -135,7 +135,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -157,11 +169,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -291,33 +298,33 @@
 <h2>Defining our Training Task<a class="headerlink" href="#defining-our-training-task" title="Permalink to this headline">¶</a></h2>
 <p>We’ll start by specifying a Sky task YAML with our resource requirements, cluster setup script,
 and run command:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># dnn.yaml</span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># dnn.yaml</span><span class="w"></span>
 
-<span class="nt">name</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">huggingface</span>
+<span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">huggingface</span><span class="w"></span>
 
-<span class="nt">resources</span><span class="p">:</span>
-   <span class="nt">accelerators</span><span class="p">:</span>
-      <span class="nt">V100</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">4</span>
+<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
+<span class="w">   </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"></span>
+<span class="w">      </span><span class="nt">V100</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span><span class="w"></span>
 
-<span class="nt">setup</span><span class="p">:</span> <span class="p p-Indicator">|</span>
-   <span class="no">git clone https://github.com/huggingface/transformers/</span>
-   <span class="no">cd transformers</span>
-   <span class="no">pip3 install .</span>
-   <span class="no">cd examples/pytorch/text-classification</span>
-   <span class="no">pip3 install -r requirements.txt</span>
+<span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">   </span><span class="no">git clone https://github.com/huggingface/transformers/</span><span class="w"></span>
+<span class="w">   </span><span class="no">cd transformers</span><span class="w"></span>
+<span class="w">   </span><span class="no">pip3 install .</span><span class="w"></span>
+<span class="w">   </span><span class="no">cd examples/pytorch/text-classification</span><span class="w"></span>
+<span class="w">   </span><span class="no">pip3 install -r requirements.txt</span><span class="w"></span>
 
-<span class="nt">run</span><span class="p">:</span> <span class="p p-Indicator">|</span>
-   <span class="no">cd transformers/examples/pytorch/text-classification</span>
-   <span class="no">python3 run_glue.py \</span>
-      <span class="no">--model_name_or_path bert-base-cased \</span>
-      <span class="no">--dataset_name imdb  \</span>
-      <span class="no">--do_train \</span>
-      <span class="no">--max_seq_length 128 \</span>
-      <span class="no">--per_device_train_batch_size 32 \</span>
-      <span class="no">--learning_rate 2e-5 \</span>
-      <span class="no">--max_steps 50 \</span>
-      <span class="no">--output_dir /tmp/imdb/ --overwrite_output_dir \</span>
-      <span class="no">--fp16</span>
+<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">   </span><span class="no">cd transformers/examples/pytorch/text-classification</span><span class="w"></span>
+<span class="w">   </span><span class="no">python3 run_glue.py \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--model_name_or_path bert-base-cased \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--dataset_name imdb  \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--do_train \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--max_seq_length 128 \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--per_device_train_batch_size 32 \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--learning_rate 2e-5 \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--max_steps 50 \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--output_dir /tmp/imdb/ --overwrite_output_dir \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--fp16</span><span class="w"></span>
 </pre></div>
 </div>
 <p>We can launch training by running:</p>

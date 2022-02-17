@@ -135,7 +135,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -157,11 +169,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -314,25 +321,25 @@ Azure.</p>
 </ul>
 <p>Below is a task YAML that prints “hello sky!” and shows installed Conda environments,
 requiring an NVIDIA Tesla K80 GPU on AWS.</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># hello_sky.yaml</span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># hello_sky.yaml</span><span class="w"></span>
 
-<span class="nt">resources</span><span class="p">:</span>
-   <span class="c1"># Optional; if left out, pick from the available clouds.</span>
-   <span class="nt">cloud</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">aws</span>
+<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
+<span class="w">   </span><span class="c1"># Optional; if left out, pick from the available clouds.</span><span class="w"></span>
+<span class="w">   </span><span class="nt">cloud</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws</span><span class="w"></span>
 
-   <span class="c1"># Get more GPUs with</span>
-   <span class="c1">#   accelerators:</span>
-   <span class="c1">#     K80: 8</span>
-   <span class="nt">accelerators</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">K80</span>
+<span class="w">   </span><span class="c1"># Get more GPUs with</span><span class="w"></span>
+<span class="w">   </span><span class="c1">#   accelerators:</span><span class="w"></span>
+<span class="w">   </span><span class="c1">#     K80: 8</span><span class="w"></span>
+<span class="w">   </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">K80</span><span class="w"></span>
 
-<span class="nt">setup</span><span class="p">:</span> <span class="p p-Indicator">|</span>
-   <span class="no"># Typical use: pip install -r requirements.txt</span>
-   <span class="no">echo &quot;running setup&quot;</span>
+<span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">   </span><span class="no"># Typical use: pip install -r requirements.txt</span><span class="w"></span>
+<span class="w">   </span><span class="no">echo &quot;running setup&quot;</span><span class="w"></span>
 
-<span class="nt">run</span><span class="p">:</span> <span class="p p-Indicator">|</span>
-   <span class="no"># Typical use: make use of resources, such as running training.</span>
-   <span class="no">echo &quot;hello sky!&quot;</span>
-   <span class="no">conda env list</span>
+<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">   </span><span class="no"># Typical use: make use of resources, such as running training.</span><span class="w"></span>
+<span class="w">   </span><span class="no">echo &quot;hello sky!&quot;</span><span class="w"></span>
+<span class="w">   </span><span class="no">conda env list</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Sky handles selecting an appropriate VM based on user-specified resource

@@ -41,7 +41,7 @@
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Interactive Nodes" href="../reference/interactive-nodes.html" />
+    <link rel="next" title="CLI Reference" href="../reference/cli.html" />
     <link rel="prev" title="Grid Search" href="grid-search.html" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="docsearch:language" content="None">
@@ -135,7 +135,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -157,11 +169,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -253,26 +260,26 @@
 <p>Sky supports multi-node cluster
 provisioning and distributed execution on many VMs.</p>
 <p>For example, here is a simple PyTorch Distributed training example:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">resnet-distributed-app</span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resnet-distributed-app</span><span class="w"></span>
 
-<span class="nt">resources</span><span class="p">:</span>
-    <span class="nt">accelerators</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">V100</span>
+<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
+<span class="w">    </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">V100</span><span class="w"></span>
 
-<span class="nt">num_nodes</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="nt">num_nodes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span><span class="w"></span>
 
-<span class="nt">setup</span><span class="p">:</span> <span class="p p-Indicator">|</span>
-    <span class="no">pip3 install --upgrade pip</span>
-    <span class="no">git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet</span>
-    <span class="no">cd pytorch-distributed-resnet &amp;&amp; pip3 install -r requirements.txt</span>
-    <span class="no">mkdir -p data  &amp;&amp; mkdir -p saved_models &amp;&amp; cd data &amp;&amp; \</span>
-      <span class="no">wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz</span>
-    <span class="no">tar -xvzf cifar-10-python.tar.gz</span>
+<span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">    </span><span class="no">pip3 install --upgrade pip</span><span class="w"></span>
+<span class="w">    </span><span class="no">git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet</span><span class="w"></span>
+<span class="w">    </span><span class="no">cd pytorch-distributed-resnet &amp;&amp; pip3 install -r requirements.txt</span><span class="w"></span>
+<span class="w">    </span><span class="no">mkdir -p data  &amp;&amp; mkdir -p saved_models &amp;&amp; cd data &amp;&amp; \</span><span class="w"></span>
+<span class="w">      </span><span class="no">wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz</span><span class="w"></span>
+<span class="w">    </span><span class="no">tar -xvzf cifar-10-python.tar.gz</span><span class="w"></span>
 
-<span class="nt">run</span><span class="p">:</span> <span class="p p-Indicator">|</span>
-    <span class="no">cd pytorch-distributed-resnet</span>
-    <span class="no">python3 -m torch.distributed.launch --nproc_per_node=1 \</span>
-      <span class="no">--nnodes=${#SKY_NODE_IPS[@]} --node_rank=${SKY_NODE_RANK} --master_addr=${SKY_NODE_IPS[0]} \</span>
-    <span class="no">--master_port=8008 resnet_ddp.py --num_epochs 20</span>
+<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
+<span class="w">    </span><span class="no">cd pytorch-distributed-resnet</span><span class="w"></span>
+<span class="w">    </span><span class="no">python3 -m torch.distributed.launch --nproc_per_node=1 \</span><span class="w"></span>
+<span class="w">      </span><span class="no">--nnodes=${#SKY_NODE_IPS[@]} --node_rank=${SKY_NODE_RANK} --master_addr=${SKY_NODE_IPS[0]} \</span><span class="w"></span>
+<span class="w">    </span><span class="no">--master_port=8008 resnet_ddp.py --num_epochs 20</span><span class="w"></span>
 </pre></div>
 </div>
 <p>In the above, <code class="code docutils literal notranslate"><span class="pre">num_nodes:</span> <span class="pre">2</span></code> specifies that this task is to be run on 2
@@ -299,10 +306,10 @@ the task</p></li>
             <p class="prev-next-title">Grid Search</p>
         </div>
     </a>
-    <a class='right-next' id="next-link" href="../reference/interactive-nodes.html" title="next page">
+    <a class='right-next' id="next-link" href="../reference/cli.html" title="next page">
     <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Interactive Nodes</p>
+        <p class="prev-next-title">CLI Reference</p>
     </div>
     <i class="fas fa-angle-right"></i>
     </a>

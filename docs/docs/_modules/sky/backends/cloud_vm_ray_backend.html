@@ -133,7 +133,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -155,11 +167,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../../../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../../../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -1787,7 +1794,7 @@
 <div class="viewcode-block" id="CloudVmRayBackend.teardown_ephemeral_storage"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.cloud_vm_ray_backend.CloudVmRayBackend.teardown_ephemeral_storage">[docs]</a>    <span class="k">def</span> <span class="nf">teardown_ephemeral_storage</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task</span><span class="p">:</span> <span class="n">Task</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">storage_mounts</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">storage_mounts</span>
         <span class="k">if</span> <span class="n">storage_mounts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="k">for</span> <span class="n">storage</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">storage_mounts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">storage</span> <span class="ow">in</span> <span class="n">storage_mounts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
                 <span class="k">if</span> <span class="ow">not</span> <span class="n">storage</span><span class="o">.</span><span class="n">persistent</span><span class="p">:</span>
                     <span class="n">storage</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span></div>
 

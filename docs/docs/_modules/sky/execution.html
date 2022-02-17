@@ -133,7 +133,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -155,11 +167,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -251,7 +258,7 @@
 
 <span class="kn">import</span> <span class="nn">sky</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">backends</span>
-<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">init</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">check</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">global_user_state</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">sky_logging</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">optimizer</span>
@@ -326,7 +333,7 @@
                 <span class="c1"># TODO: adding this check because docker backend on a</span>
                 <span class="c1"># no-credential machine should not enter optimize(), which</span>
                 <span class="c1"># would directly error out (&#39;No cloud is enabled...&#39;).  Fix by</span>
-                <span class="c1"># moving sky init checks out of optimize()?</span>
+                <span class="c1"># moving `sky check` checks out of optimize()?</span>
                 <span class="n">dag</span> <span class="o">=</span> <span class="n">sky</span><span class="o">.</span><span class="n">optimize</span><span class="p">(</span><span class="n">dag</span><span class="p">,</span> <span class="n">minimize</span><span class="o">=</span><span class="n">optimize_target</span><span class="p">)</span>
             <span class="n">task</span> <span class="o">=</span> <span class="n">dag</span><span class="o">.</span><span class="n">tasks</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># Keep: dag may have been deep-copied.</span>
 
@@ -352,7 +359,8 @@
                 <span class="n">prev_file_mounts</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">file_mounts</span>
                 <span class="k">if</span> <span class="n">prev_file_mounts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
                     <span class="n">prev_file_mounts</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">file_mounts</span><span class="p">)</span>
-                <span class="n">task</span><span class="o">.</span><span class="n">update_file_mounts</span><span class="p">(</span><span class="n">init</span><span class="o">.</span><span class="n">get_cloud_credential_file_mounts</span><span class="p">())</span>
+                <span class="n">task</span><span class="o">.</span><span class="n">update_file_mounts</span><span class="p">(</span>
+                    <span class="n">check</span><span class="o">.</span><span class="n">get_cloud_credential_file_mounts</span><span class="p">())</span>
                 <span class="n">handle</span> <span class="o">=</span> <span class="n">backend</span><span class="o">.</span><span class="n">provision</span><span class="p">(</span><span class="n">task</span><span class="p">,</span>
                                            <span class="n">task</span><span class="o">.</span><span class="n">best_resources</span><span class="p">,</span>
                                            <span class="n">dryrun</span><span class="o">=</span><span class="n">dryrun</span><span class="p">,</span>
