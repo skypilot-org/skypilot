@@ -40,8 +40,8 @@ import pendulum
 
 import sky
 from sky import backends
+from sky import check as sky_check
 from sky import global_user_state
-from sky import init as sky_init
 from sky import sky_logging
 from sky import clouds
 from sky.backends import backend as backend_lib
@@ -279,7 +279,7 @@ def _create_and_ssh_into_node(
             run='',
         )
         task.set_resources(resources)
-        task.update_file_mounts(sky_init.get_cloud_credential_file_mounts())
+        task.update_file_mounts(sky_check.get_cloud_credential_file_mounts())
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -1274,14 +1274,14 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
 
 
 @cli.command()
-def init():
+def check():
     """Determine the set of clouds available to use.
 
     This checks access credentials for AWS, Azure and GCP; on failure, it shows
     the reason and suggests correction steps. Sky tasks will only run on clouds
     that you have access to.
     """
-    sky_init.init()
+    sky_check.check()
 
 
 @cli.command()
