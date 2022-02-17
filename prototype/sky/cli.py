@@ -1354,23 +1354,6 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(attachable)'
                 mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '-'
-                # TODO(zongheng): fix this in catalog.
-                # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
-                if item.accelerator_name == 'A100' and item.cloud == 'GCP':
-                    instance_type_str = {
-                        1: 'a2-highgpu-1g',
-                        2: 'a2-highgpu-2g',
-                        4: 'a2-highgpu-4g',
-                        8: 'a2-highgpu-8g',
-                        16: 'a2-megagpu-16g',
-                    }[item.accelerator_count]
-                    mem_str = {
-                        1: '85GB',
-                        2: '170GB',
-                        4: '340GB',
-                        8: '680GB',
-                        16: '1360GB',
-                    }[item.accelerator_count]
                 accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
                     instance_type_str, mem_str
