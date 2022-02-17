@@ -23,6 +23,7 @@ specifying the :code:`name`, :code:`source` and :code:`persistent` fields. By
 enabling persistence, file_mount sync can be made significantly faster.
 
 .. code-block:: yaml
+
     name: storage-demo
 
     resources:
@@ -54,6 +55,7 @@ Finally, you can also directly mount s3/gcs buckets in your remote VM by
 providing the path to the s3/gcs bucket.
 
 .. code-block:: yaml
+
     name: storage-demo
 
     resources:
@@ -71,16 +73,42 @@ providing the path to the s3/gcs bucket.
 
 Alternate Usage - Declarative Storage API
 ------------------------------------------
-.. warning:: The declarative storage YMAL API has been deprecated.
-If you need to create Storage objects but not mount them, use the storage CLI
-once it is supported.
+.. warning:: The declarative storage YAML API has been deprecated. If you need to create Storage objects but not mount them, use the storage CLI once it is supported.
 
 Some power users may want to only upload their files to an object store
 without mounting it, while others may want to re-use pre-existing storage
 objects. They can do so using the storage and storage_mount fields, which are
 at 1:1 parity with the sky.Storage python API.
 
+Here's an example using the declarative API.
+
+.. code-block:: yaml
+
+    name: storage-demo
+
+    resources:
+      cloud: aws
+      instance_type: m5.2xlarge
+
+    storage:
+      - name: sky-dataset-decl
+        source: ~/datasets
+        #force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
+        persistent: True
+
+    storage_mounts:
+      - storage: sky-dataset-decl # Name of the storage defined above
+        mount_path: /datasets-decl # Path to mount the storage at
+
+    run: |
+      pwd
+      ls -la /
+
+
+Storage YAML field reference:
+
 ::
+
     storage: List[sky.Storage]
 
     Fields:
@@ -104,7 +132,11 @@ at 1:1 parity with the sky.Storage python API.
         in subsequent runs (at the cost of storing your data in the cloud). If
         files change between runs, new files are synced to the bucket.
 
+
+Storage Mounts YAML field reference:
+
 ::
+
     storage_mounts: List[sky.storage_mounts]
 
     Storage mounts specify where the storage objects defined above should be
@@ -116,26 +148,3 @@ at 1:1 parity with the sky.Storage python API.
 
       sky.StorageMount.mount_path: str
         Path where the storage object is to be mounted
-
-Here's an example using the declarative API
-
-.. code-block:: yaml
-    name: storage-demo
-
-    resources:
-      cloud: aws
-      instance_type: m5.2xlarge
-
-    storage:
-      - name: sky-dataset-decl
-        source: ~/datasets
-        #force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
-        persistent: True
-
-    storage_mounts:
-      - storage: sky-dataset-decl # Name of the storage defined above
-        mount_path: /datasets-decl # Path to mount the storage at
-
-    run: |
-      pwd
-      ls -la /
