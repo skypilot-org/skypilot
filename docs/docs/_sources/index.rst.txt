@@ -17,13 +17,6 @@ transparent manner.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Command Line Interface
-
-   reference/cli
-
-
-.. toctree::
-   :maxdepth: 1
    :caption: Use Cases
 
    examples/auto-failover
@@ -32,6 +25,13 @@ transparent manner.
    examples/grid-search
    examples/distributed-jobs
 .. Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
+
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Sky CLI
+
+   reference/cli
 
 
 .. toctree::

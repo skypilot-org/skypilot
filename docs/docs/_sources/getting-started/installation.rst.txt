@@ -55,6 +55,7 @@ tasks in the clouds, configure access to at least one cloud:
    # Set the subscription to use
    az account set -s <subscription_id>
 
+**Verifying cloud setup**
 
 Sky allows you to verify that cloud credentials are correctly configured using
 the CLI:
