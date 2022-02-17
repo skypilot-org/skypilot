@@ -14,17 +14,15 @@ resources:
   instance_type: m5.2xlarge
 
 ###############################################
-#  Using sky storage #
+#  Sky storage #
 ###############################################
-# Sky storage can be used in two ways. First is the shorthand, which builds on
-# the file_mounts API (see using_file_mounts.yaml) and is easier to use. The
-# second is the the declarative API which allows more flexibility for users.
-# Both achieve the same goal, but are specified differently. It is recommended
-# for most users to use Method 1 since it is easier to use.
+# Storage represents an abstract data store containing large data files
+# required by the task. Compared to file_mounts, storage is faster and
+# can persist across runs, requiring fewer uploads from your local machine.
 
 
 ###############################################
-#  Method 1  - file_mounts shorthand #
+#  Using Sky Storage #
 ###############################################
 # By default, file_mounts use rsync to directly copy files from local to remote
 # VM. However, you can optionally have them backed by sky Storage, which uploads
@@ -55,8 +53,11 @@ file_mounts:
 
 
 ###############################################
-#  Method 2  - Declarative Sky API #
+#  Deprecated Usage - Declarative Sky API #
 ###############################################
+# WARNING - This method has been deprecated. If you need to create Storage
+# objects but not mount them, use the storage CLI.
+
 # Some power users may want to only upload their files to an object store
 # without mounting it, while others may want to re-use pre-existing storage
 # objects. They can do so using the storage and storage_mount fields, which are
