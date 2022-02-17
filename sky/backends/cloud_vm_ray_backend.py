@@ -665,93 +665,97 @@ class RetryingVmProvisioner(object):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
 
-            with console.status(f'[turqoise]Launching on {to_provision.cloud}'
-                                f'[bold green] {region.name}\n'):
+            zone_str = ','.join(
+                z.name for z in zones) if zones is not None else 'all zones'
+            logger.info(f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
+                        f'{region.name}{style.RESET_ALL} ({zone_str})')
+            # with console.status(f'[turqoise]Launching on {to_provision.cloud}'
+            #                     f'[bold green] {region.name}\n'):
 
-                config_dict = backend_utils.write_cluster_config(
-                    task,
-                    to_provision,
-                    num_nodes,
-                    _get_cluster_config_template(to_provision.cloud),
-                    region=region,
-                    zones=zones,
-                    dryrun=dryrun,
-                    cluster_name=cluster_name)
-                if dryrun:
-                    return
-                tpu_name = config_dict.get('tpu_name')
-                if tpu_name is not None:
-                    success = self._try_provision_tpu(to_provision, config_dict)
-                    if not success:
-                        continue
-                cluster_config_file = config_dict['ray']
+            config_dict = backend_utils.write_cluster_config(
+                task,
+                to_provision,
+                num_nodes,
+                _get_cluster_config_template(to_provision.cloud),
+                region=region,
+                zones=zones,
+                dryrun=dryrun,
+                cluster_name=cluster_name)
+            if dryrun:
+                return
+            tpu_name = config_dict.get('tpu_name')
+            if tpu_name is not None:
+                success = self._try_provision_tpu(to_provision, config_dict)
+                if not success:
+                    continue
+            cluster_config_file = config_dict['ray']
 
-                # Record early, so if anything goes wrong, 'sky status' will
-                # show the cluster name and users can appropriately 'sky down'.
-                # It also means a second 'sky launch -c <name>' will attempt to
-                # reuse.
-                handle = CloudVmRayBackend.ResourceHandle(
-                    cluster_name=cluster_name,
-                    cluster_yaml=cluster_config_file,
-                    launched_nodes=num_nodes,
-                    # OK for this to be shown in CLI as status == INIT.
-                    launched_resources=to_provision,
-                    tpu_create_script=config_dict.get('tpu-create-script'),
-                    tpu_delete_script=config_dict.get('tpu-delete-script'))
-                global_user_state.add_or_update_cluster(cluster_name,
-                                                        cluster_handle=handle,
-                                                        ready=False)
+            # Record early, so if anything goes wrong, 'sky status' will
+            # show the cluster name and users can appropriately 'sky down'.
+            # It also means a second 'sky launch -c <name>' will attempt to
+            # reuse.
+            handle = CloudVmRayBackend.ResourceHandle(
+                cluster_name=cluster_name,
+                cluster_yaml=cluster_config_file,
+                launched_nodes=num_nodes,
+                # OK for this to be shown in CLI as status == INIT.
+                launched_resources=to_provision,
+                tpu_create_script=config_dict.get('tpu-create-script'),
+                tpu_delete_script=config_dict.get('tpu-delete-script'))
+            global_user_state.add_or_update_cluster(cluster_name,
+                                                    cluster_handle=handle,
+                                                    ready=False)
 
-                gang_failed, proc, stdout, stderr = self._gang_schedule_ray_up(
-                    to_provision.cloud, num_nodes, cluster_config_file,
-                    log_abs_path, stream_logs, prev_cluster_config)
+            gang_failed, proc, stdout, stderr = self._gang_schedule_ray_up(
+                to_provision.cloud, num_nodes, cluster_config_file,
+                log_abs_path, stream_logs, prev_cluster_config)
 
-                if gang_failed or proc.returncode != 0:
-                    if gang_failed:
-                        # There exist partial nodes (e.g., head node) so we must
-                        # down before moving on to other regions.
-                        # FIXME(zongheng): terminating a potentially live
-                        # cluster is scary. Say: users have an existing cluster,
-                        # do sky launch, gang failed, then we are terminating it
-                        # here.
-                        logger.error('*** Failed provisioning the cluster. ***')
-                        logger.error('====== stdout ======')
-                        logger.error(stdout)
-                        logger.error('====== stderr ======')
-                        logger.error(stderr)
-                        logger.error('*** Tearing down the failed cluster. ***')
-                        CloudVmRayBackend().teardown(handle, terminate=True)
-                        self._update_blocklist_on_error(
-                            to_provision.cloud,
-                            region,
-                            # Ignored and block region:
-                            zones=None,
-                            stdout=None,
-                            stderr=None)
-                    else:
-                        self._update_blocklist_on_error(to_provision.cloud,
-                                                        region, zones, stdout,
-                                                        stderr)
+            if gang_failed or proc.returncode != 0:
+                if gang_failed:
+                    # There exist partial nodes (e.g., head node) so we must
+                    # down before moving on to other regions.
+                    # FIXME(zongheng): terminating a potentially live
+                    # cluster is scary. Say: users have an existing cluster,
+                    # do sky launch, gang failed, then we are terminating it
+                    # here.
+                    logger.error('*** Failed provisioning the cluster. ***')
+                    logger.error('====== stdout ======')
+                    logger.error(stdout)
+                    logger.error('====== stderr ======')
+                    logger.error(stderr)
+                    logger.error('*** Tearing down the failed cluster. ***')
+                    CloudVmRayBackend().teardown(handle, terminate=True)
+                    self._update_blocklist_on_error(
+                        to_provision.cloud,
+                        region,
+                        # Ignored and block region:
+                        zones=None,
+                        stdout=None,
+                        stderr=None)
                 else:
-                    # Success.
+                    self._update_blocklist_on_error(to_provision.cloud,
+                                                    region, zones, stdout,
+                                                    stderr)
+            else:
+                # Success.
 
-                    # However, ray processes may not be up due to 'ray up
-                    # --no-restart' flag.  Ensure so.
-                    self._ensure_cluster_ray_started(handle, log_abs_path)
+                # However, ray processes may not be up due to 'ray up
+                # --no-restart' flag.  Ensure so.
+                self._ensure_cluster_ray_started(handle, log_abs_path)
 
-                    cluster_name = config_dict['cluster_name']
-                    plural = '' if num_nodes == 1 else 's'
-                    logger.info(
-                        f'{style.BRIGHT}Successfully provisioned or found'
-                        f' existing VM{plural}. Setup completed.'
-                        f'{style.RESET_ALL}')
-                    return config_dict
-            message = (
-                'Failed to acquire resources in all regions/zones'
-                f' (requested {to_provision}).'
-                ' Try changing resource requirements or use another cloud.')
-            logger.error(message)
-            raise exceptions.ResourcesUnavailableError()
+                cluster_name = config_dict['cluster_name']
+                plural = '' if num_nodes == 1 else 's'
+                logger.info(
+                    f'{style.BRIGHT}Successfully provisioned or found'
+                    f' existing VM{plural}. Setup completed.'
+                    f'{style.RESET_ALL}')
+                return config_dict
+        message = (
+            'Failed to acquire resources in all regions/zones'
+            f' (requested {to_provision}).'
+            ' Try changing resource requirements or use another cloud.')
+        logger.error(message)
+        raise exceptions.ResourcesUnavailableError()
 
     def _gang_schedule_ray_up(self, to_provision_cloud: clouds.Cloud,
                               num_nodes: int, cluster_config_file: str,
@@ -776,28 +780,31 @@ class RetryingVmProvisioner(object):
         style = colorama.Style
 
         def ray_up(start_streaming_at):
-            # Redirect stdout/err to the file and streaming (if stream_logs).
-            # With stdout/err redirected, 'ray up' will have no color and
-            # different order from directly running in the console. The
-            # `--log-style` and `--log-color` flags do not work. To reproduce,
-            # `ray up --log-style pretty --log-color true | tee tmp.out`.
-            proc, stdout, stderr = log_lib.run_with_log(
-                # NOTE: --no-restart solves the following bug.  Without it, if
-                # 'ray up' (sky launch) twice on a cluster with >1 node, the
-                # worker node gets disconnected/killed by ray autoscaler; the
-                # whole task will just freeze.  (Doesn't affect 1-node
-                # clusters.)  With this flag, ray processes no longer restart
-                # and this bug doesn't show.  Downside is existing tasks on the
-                # cluster will keep running (which may be ok with the semantics
-                # of 'sky launch' twice).
-                # Tracked in https://github.com/ray-project/ray/issues/20402.
-                ['ray', 'up', '-y', '--no-restart', cluster_config_file],
-                log_abs_path,
-                stream_logs,
-                start_streaming_at=start_streaming_at,
-                # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
-                # time during 'ray up' if insufficient capacity occurs.
-                env=dict(os.environ, BOTO_MAX_RETRIES='5'))
+            with console.status('Spinning up...'):
+                # Redirect stdout/err to the file and streaming (if stream_logs).
+                # With stdout/err redirected, 'ray up' will have no color and
+                # different order from directly running in the console. The
+                # `--log-style` and `--log-color` flags do not work. To reproduce,
+                # `ray up --log-style pretty --log-color true | tee tmp.out`.
+                proc, stdout, stderr = log_lib.run_with_log(
+                    # NOTE: --no-restart solves the following bug.  Without it, if
+                    # 'ray up' (sky launch) twice on a cluster with >1 node, the
+                    # worker node gets disconnected/killed by ray autoscaler; the
+                    # whole task will just freeze.  (Doesn't affect 1-node
+                    # clusters.)  With this flag, ray processes no longer restart
+                    # and this bug doesn't show.  Downside is existing tasks on the
+                    # cluster will keep running (which may be ok with the semantics
+                    # of 'sky launch' twice).
+                    # Tracked in https://github.com/ray-project/ray/issues/20402.
+                    ['ray', 'up', '-y', '--no-restart', cluster_config_file],
+                    log_abs_path,
+                    False,
+                    start_streaming_at=start_streaming_at,
+                    # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
+                    # time during 'ray up' if insufficient capacity occurs.
+                    env=dict(os.environ, BOTO_MAX_RETRIES='5'))
+
+            import pdb; pdb.set_trace()
             return proc, stdout, stderr
 
         def is_cluster_yaml_identical():
