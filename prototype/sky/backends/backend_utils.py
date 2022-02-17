@@ -13,7 +13,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 import zlib
-import shutil
 
 import jinja2
 
@@ -24,6 +23,7 @@ from sky import clouds
 from sky import sky_logging
 from sky import resources
 from sky import task as task_lib
+from sky.backends import wheel_utils
 from sky.cloud_adaptors import azure
 from sky.skylet import log_lib
 
@@ -310,50 +310,6 @@ class SSHConfigHelper(object):
             f.write('\n')
 
 
-# TODO(suquark): once we have sky on PYPI, we should directly install sky
-# from PYPI
-def _build_sky_wheel() -> pathlib.Path:
-    """Build a wheel for sky. This works correctly only when sky is installed
-    with development/editable mode."""
-    # check if sky is installed under development mode.
-    package_root = pathlib.Path(sky.__file__).parent.parent
-    if package_root.name == 'site-packages':
-        raise EnvironmentError('We can only build wheels for Sky when Sky is '
-                               'installed under development/editable mode.')
-    # It is important to normalize the path, otherwise 'pip wheel' would treat
-    # the directory as a file and generate an empty wheel.
-    norm_path = str(package_root) + os.sep
-    username = getpass.getuser()
-    wheel_dir = pathlib.Path(tempfile.gettempdir()) / f'sky_wheels_{username}'
-    # remove old wheels
-    for f in wheel_dir.glob('sky-*.whl'):
-        f.unlink()
-    # remove pip wheels build directory, otherwise we may include outdated code
-    shutil.rmtree(str(package_root / 'build'), ignore_errors=True)
-    try:
-        # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
-        # the output.
-        subprocess.run([
-            'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
-            str(wheel_dir)
-        ],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.PIPE,
-                       check=True)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError('Fail to build pip wheel for Sky. '
-                           f'Error message: {e.stderr.decode()}') from e
-    try:
-        latest_wheel = max(wheel_dir.glob('sky-*.whl'), key=os.path.getctime)
-    except ValueError:
-        raise FileNotFoundError('Could not find built Sky wheels.') from None
-    # cleanup older wheels
-    for f in wheel_dir.iterdir():
-        if f != latest_wheel:
-            f.unlink()
-    return wheel_dir.absolute()
-
-
 # TODO: too many things happening here - leaky abstraction. Refactor.
 def write_cluster_config(task: task_lib.Task,
                          to_provision: Resources,
@@ -459,9 +415,9 @@ def write_cluster_config(task: task_lib.Task,
                 source=remote, target=wrapped_remote)
             initialization_commands.append(command)
 
-    # TODO(suquark): Cache built wheels to prevent rebuilding.
-    # This may not be necessary because it's fast to build the wheel.
-    local_wheel_path = _build_sky_wheel()
+    # TODO(suquark): once we have sky on PYPI, we should directly install sky
+    # from PYPI
+    local_wheel_path = wheel_utils.build_sky_wheel()
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
