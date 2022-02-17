@@ -7,11 +7,11 @@ from typing import Dict, List, Optional
 import numpy as np
 import tabulate
 
+from sky import check
 from sky import clouds
 from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
-from sky import init
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
@@ -376,11 +376,11 @@ def _filter_out_blocked_launchable_resources(
 def _fill_in_launchable_resources(
     task: Task,
     blocked_launchable_resources: Optional[List[Resources]],
-    try_fix_with_sky_init: bool = True,
+    try_fix_with_sky_check: bool = True,
 ) -> Dict[Resources, List[Resources]]:
     enabled_clouds = global_user_state.get_enabled_clouds()
-    if len(enabled_clouds) == 0 and try_fix_with_sky_init:
-        init.init(quiet=True)
+    if len(enabled_clouds) == 0 and try_fix_with_sky_check:
+        check.init(quiet=True)
         return _fill_in_launchable_resources(task, blocked_launchable_resources,
                                              False)
     launchable = collections.defaultdict(list)
@@ -389,13 +389,13 @@ def _fill_in_launchable_resources(
     for resources in task.get_resources():
         if resources.cloud is not None and not _cloud_in_list(
                 resources.cloud, enabled_clouds):
-            if try_fix_with_sky_init:
-                init.init(quiet=True)
+            if try_fix_with_sky_check:
+                check.init(quiet=True)
                 return _fill_in_launchable_resources(
                     task, blocked_launchable_resources, False)
             raise exceptions.ResourcesUnavailableError(
                 f'Task {task} requires {resources.cloud} which is not '
-                'enabled. Run `sky init` to enable access to it, '
+                'enabled. Run `sky check` to enable access to it, '
                 'or change the cloud requirement.')
         elif resources.is_launchable():
             launchable[resources] = [resources]

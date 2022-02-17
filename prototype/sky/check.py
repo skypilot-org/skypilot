@@ -1,4 +1,4 @@
-"""Sky Initialization: check cloud credentials and enable clouds."""
+"""Sky credential check: check cloud credentials and enable clouds."""
 from typing import Dict
 
 import click
