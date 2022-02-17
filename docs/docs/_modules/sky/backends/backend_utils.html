@@ -255,7 +255,6 @@
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">sky_logging</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">resources</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">task</span> <span class="k">as</span> <span class="n">task_lib</span>
-<span class="kn">from</span> <span class="nn">sky.cloud_adaptors</span> <span class="kn">import</span> <span class="n">azure</span>
 <span class="kn">from</span> <span class="nn">sky.skylet</span> <span class="kn">import</span> <span class="n">log_lib</span>
 
 <span class="n">logger</span> <span class="o">=</span> <span class="n">sky_logging</span><span class="o">.</span><span class="n">init_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
@@ -625,22 +624,6 @@
     <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">):</span>
         <span class="n">aws_default_ami</span> <span class="o">=</span> <span class="n">cloud</span><span class="o">.</span><span class="n">get_default_ami</span><span class="p">(</span><span class="n">region</span><span class="p">)</span>
 
-    <span class="n">azure_subscription_id</span> <span class="o">=</span> <span class="kc">None</span>
-    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span><span class="p">):</span>
-        <span class="k">if</span> <span class="n">dryrun</span><span class="p">:</span>
-            <span class="n">azure_subscription_id</span> <span class="o">=</span> <span class="s1">&#39;ffffffff-ffff-ffff-ffff-ffffffffffff&#39;</span>
-        <span class="k">else</span><span class="p">:</span>
-            <span class="k">try</span><span class="p">:</span>
-                <span class="n">azure_subscription_id</span> <span class="o">=</span> <span class="n">azure</span><span class="o">.</span><span class="n">get_subscription_id</span><span class="p">()</span>
-                <span class="k">if</span> <span class="ow">not</span> <span class="n">azure_subscription_id</span><span class="p">:</span>
-                    <span class="k">raise</span> <span class="ne">ValueError</span>  <span class="c1"># The error message will be replaced.</span>
-            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
-                    <span class="s1">&#39;Fail to get subscription id from azure cli. &#39;</span>
-                    <span class="s1">&#39;Make sure you have login in and fix it with this Azure &#39;</span>
-                    <span class="s1">&#39;cli command: &quot;az account set -s &lt;subscription_id&gt;&quot;.&#39;</span>
-                <span class="p">)</span> <span class="kn">from</span> <span class="bp">None</span>
-
     <span class="k">assert</span> <span class="n">cluster_name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
 
     <span class="n">setup_sh_path</span> <span class="o">=</span> <span class="kc">None</span>
@@ -706,9 +689,6 @@
                 <span class="s1">&#39;zones&#39;</span><span class="p">:</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">zones</span><span class="p">),</span>
                 <span class="c1"># AWS only.</span>
                 <span class="s1">&#39;aws_default_ami&#39;</span><span class="p">:</span> <span class="n">aws_default_ami</span><span class="p">,</span>
-                <span class="c1"># Azure only.</span>
-                <span class="s1">&#39;azure_subscription_id&#39;</span><span class="p">:</span> <span class="n">azure_subscription_id</span><span class="p">,</span>
-                <span class="s1">&#39;resource_group&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">-</span><span class="si">{</span><span class="n">region</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
                 <span class="c1"># Ray version.</span>
                 <span class="s1">&#39;ray_version&#39;</span><span class="p">:</span> <span class="n">SKY_REMOTE_RAY_VERSION</span><span class="p">,</span>
                 <span class="c1"># Sky remote utils.</span>
