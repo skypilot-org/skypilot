@@ -244,6 +244,25 @@
 
 <span class="n">_DEFAULT_REGION</span> <span class="o">=</span> <span class="s1">&#39;us-central1&#39;</span>
 
+<span class="c1"># TODO(zongheng): fix A100 info directly in catalog.</span>
+<span class="c1"># https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga</span>
+<span class="c1"># count -&gt; vm type</span>
+<span class="n">_A100_INSTANCE_TYPES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="mi">1</span><span class="p">:</span> <span class="s1">&#39;a2-highgpu-1g&#39;</span><span class="p">,</span>
+    <span class="mi">2</span><span class="p">:</span> <span class="s1">&#39;a2-highgpu-2g&#39;</span><span class="p">,</span>
+    <span class="mi">4</span><span class="p">:</span> <span class="s1">&#39;a2-highgpu-4g&#39;</span><span class="p">,</span>
+    <span class="mi">8</span><span class="p">:</span> <span class="s1">&#39;a2-highgpu-8g&#39;</span><span class="p">,</span>
+    <span class="mi">16</span><span class="p">:</span> <span class="s1">&#39;a2-megagpu-16g&#39;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="c1"># count -&gt; host memory</span>
+<span class="n">_A100_HOST_MEMORY</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="mi">1</span><span class="p">:</span> <span class="mi">85</span><span class="p">,</span>
+    <span class="mi">2</span><span class="p">:</span> <span class="mi">170</span><span class="p">,</span>
+    <span class="mi">4</span><span class="p">:</span> <span class="mi">340</span><span class="p">,</span>
+    <span class="mi">8</span><span class="p">:</span> <span class="mi">680</span><span class="p">,</span>
+    <span class="mi">16</span><span class="p">:</span> <span class="mi">1360</span><span class="p">,</span>
+<span class="p">}</span>
+
 
 <span class="k">def</span> <span class="nf">_get_accelerator</span><span class="p">(</span>
     <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
@@ -283,7 +302,20 @@
     <span class="n">name_filter</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="n">common</span><span class="o">.</span><span class="n">InstanceTypeInfo</span><span class="p">]]:</span>
     <span class="sd">&quot;&quot;&quot;Returns all instance types in GCP offering GPUs.&quot;&quot;&quot;</span>
-    <span class="k">return</span> <span class="n">common</span><span class="o">.</span><span class="n">list_accelerators_impl</span><span class="p">(</span><span class="s1">&#39;GCP&#39;</span><span class="p">,</span> <span class="n">_df</span><span class="p">,</span> <span class="n">gpus_only</span><span class="p">,</span> <span class="n">name_filter</span><span class="p">)</span></div>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">common</span><span class="o">.</span><span class="n">list_accelerators_impl</span><span class="p">(</span><span class="s1">&#39;GCP&#39;</span><span class="p">,</span> <span class="n">_df</span><span class="p">,</span> <span class="n">gpus_only</span><span class="p">,</span> <span class="n">name_filter</span><span class="p">)</span>
+
+    <span class="c1"># TODO(zongheng): fix A100 info directly in catalog.</span>
+    <span class="n">a100_infos</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;A100&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">a100_infos</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">new_infos</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">a100_infos</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">info</span><span class="o">.</span><span class="n">instance_type</span><span class="p">)</span> <span class="ow">and</span> <span class="n">info</span><span class="o">.</span><span class="n">memory</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="n">a100_infos</span>
+            <span class="n">new_infos</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                <span class="n">info</span><span class="o">.</span><span class="n">_replace</span><span class="p">(</span>
+                    <span class="n">instance_type</span><span class="o">=</span><span class="n">_A100_INSTANCE_TYPES</span><span class="p">[</span><span class="n">info</span><span class="o">.</span><span class="n">accelerator_count</span><span class="p">],</span>
+                    <span class="n">memory</span><span class="o">=</span><span class="n">_A100_HOST_MEMORY</span><span class="p">[</span><span class="n">info</span><span class="o">.</span><span class="n">accelerator_count</span><span class="p">]))</span>
+        <span class="n">results</span><span class="p">[</span><span class="s1">&#39;A100&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">new_infos</span>
+    <span class="k">return</span> <span class="n">results</span></div>
 
 
 <div class="viewcode-block" id="get_region_zones_for_accelerators"><a class="viewcode-back" href="../../../../sky.clouds.service_catalog.html#sky.clouds.service_catalog.gcp_catalog.get_region_zones_for_accelerators">[docs]</a><span class="k">def</span> <span class="nf">get_region_zones_for_accelerators</span><span class="p">(</span>

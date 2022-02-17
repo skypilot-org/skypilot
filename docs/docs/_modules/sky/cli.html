@@ -675,7 +675,7 @@
            <span class="n">detach_run</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">backend_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">workdir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
            <span class="n">cloud</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">gpus</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">use_spot</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span>
            <span class="n">name</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]):</span>
-    <span class="sd">&quot;&quot;&quot;Launch a task from a YAML or command (rerun setup if cluster exists).</span>
+    <span class="sd">&quot;&quot;&quot;Launch a task from a YAML or a command (rerun setup if cluster exists).</span>
 
 <span class="sd">    If entrypoint points to a valid YAML file, it is read in as the task</span>
 <span class="sd">    specification. Otherwise, it is interpreted as a bash command to be</span>
@@ -775,7 +775,7 @@
 <span class="sd">    If entrypoint points to a valid YAML file, it is read in as the task</span>
 <span class="sd">    specification. Otherwise, it is interpreted as a bash command to be</span>
 <span class="sd">    executed on the head node of the cluster. The task will be submitted to</span>
-<span class="sd">    the job queue of the cluster, except if the bash command is used without</span>
+<span class="sd">    the job queue of the cluster, except if a bash command is used without</span>
 <span class="sd">    providing --gpus.</span>
 
 <span class="sd">    \b</span>
@@ -884,7 +884,7 @@
               <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
               <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Show all information in full.&#39;</span><span class="p">)</span>
 <span class="k">def</span> <span class="nf">status</span><span class="p">(</span><span class="nb">all</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>  <span class="c1"># pylint: disable=redefined-builtin</span>
-    <span class="sd">&quot;&quot;&quot;Show launched clusters.&quot;&quot;&quot;</span>
+    <span class="sd">&quot;&quot;&quot;Show clusters.&quot;&quot;&quot;</span>
     <span class="n">show_all</span> <span class="o">=</span> <span class="nb">all</span>
     <span class="n">clusters_status</span> <span class="o">=</span> <span class="n">global_user_state</span><span class="o">.</span><span class="n">get_clusters</span><span class="p">()</span>
     <span class="n">cluster_table</span> <span class="o">=</span> <span class="n">util_lib</span><span class="o">.</span><span class="n">create_table</span><span class="p">([</span>
@@ -1082,7 +1082,7 @@
 <span class="sd">    CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are</span>
 <span class="sd">    supplied, the latter takes precedence.</span>
 
-<span class="sd">    Limitation: this currently only works for AWS/GCP non-spot clusters.</span>
+<span class="sd">    Currently, spot-instance clusters cannot be stopped.</span>
 
 <span class="sd">    Examples:</span>
 
@@ -1214,8 +1214,6 @@
 <span class="sd">    are supplied, the latter takes precedence.</span>
 
 <span class="sd">    Accelerators (e.g., TPU) that are part of the cluster will be deleted too.</span>
-
-<span class="sd">    Limitation: this does not work for stopped clusters for now.</span>
 
 <span class="sd">    Examples:</span>
 
@@ -1506,11 +1504,11 @@
 
 <span class="nd">@cli</span><span class="o">.</span><span class="n">command</span><span class="p">()</span>
 <span class="k">def</span> <span class="nf">init</span><span class="p">():</span>
-    <span class="sd">&quot;&quot;&quot;Determines a set of clouds that Sky will use.</span>
+    <span class="sd">&quot;&quot;&quot;Determine the set of clouds available to use.</span>
 
-<span class="sd">    It checks access credentials for AWS, Azure and GCP. Sky tasks will only</span>
-<span class="sd">    run in clouds that you have access to. After configuring access for a</span>
-<span class="sd">    cloud, rerun `sky init` to reflect the changes.</span>
+<span class="sd">    This checks access credentials for AWS, Azure and GCP; on failure, it shows</span>
+<span class="sd">    the reason and suggests correction steps. Sky tasks will only run on clouds</span>
+<span class="sd">    that you have access to.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="n">sky_init</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
 
@@ -1523,9 +1521,10 @@
               <span class="n">default</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
               <span class="n">help</span><span class="o">=</span><span class="s1">&#39;Show details of all GPU/TPU/accelerator offerings.&#39;</span><span class="p">)</span>
 <span class="k">def</span> <span class="nf">show_gpus</span><span class="p">(</span><span class="n">gpu_name</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">all</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>  <span class="c1"># pylint: disable=redefined-builtin</span>
-    <span class="sd">&quot;&quot;&quot;List GPU/TPU/accelerators supported by Sky.</span>
+    <span class="sd">&quot;&quot;&quot;Show supported GPU/TPU/accelerators.</span>
 
-<span class="sd">    To show what cloud offers a GPU/TPU type, use `sky show-gpus &lt;gpu&gt;`.</span>
+<span class="sd">    To show the detailed information of a GPU/TPU type (which clouds offer it,</span>
+<span class="sd">    the quantity in each VM type, etc.), use `sky show-gpus &lt;gpu&gt;`.</span>
 
 <span class="sd">    To show all GPUs, including less common ones and their detailed</span>
 <span class="sd">    information, use `sky show-gpus --all`.</span>
@@ -1582,8 +1581,8 @@
             <span class="p">])</span>
             <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">items</span><span class="p">:</span>
                 <span class="n">instance_type_str</span> <span class="o">=</span> <span class="n">item</span><span class="o">.</span><span class="n">instance_type</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span>
-                    <span class="n">item</span><span class="o">.</span><span class="n">instance_type</span><span class="p">)</span> <span class="k">else</span> <span class="s1">&#39;(*)&#39;</span>
-                <span class="n">mem_str</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">item</span><span class="o">.</span><span class="n">memory</span><span class="si">:</span><span class="s1">.0f</span><span class="si">}</span><span class="s1">GB&#39;</span> <span class="k">if</span> <span class="n">item</span><span class="o">.</span><span class="n">memory</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="s1">&#39;(*)&#39;</span>
+                    <span class="n">item</span><span class="o">.</span><span class="n">instance_type</span><span class="p">)</span> <span class="k">else</span> <span class="s1">&#39;(attachable)&#39;</span>
+                <span class="n">mem_str</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">item</span><span class="o">.</span><span class="n">memory</span><span class="si">:</span><span class="s1">.0f</span><span class="si">}</span><span class="s1">GB&#39;</span> <span class="k">if</span> <span class="n">item</span><span class="o">.</span><span class="n">memory</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="s1">&#39;-&#39;</span>
                 <span class="n">accelerator_table</span><span class="o">.</span><span class="n">add_row</span><span class="p">([</span>
                     <span class="n">item</span><span class="o">.</span><span class="n">accelerator_name</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">accelerator_count</span><span class="p">,</span> <span class="n">item</span><span class="o">.</span><span class="n">cloud</span><span class="p">,</span>
                     <span class="n">instance_type_str</span><span class="p">,</span> <span class="n">mem_str</span>

@@ -587,8 +587,7 @@
         <span class="k">return</span> <span class="bp">self</span></div>
 
 <div class="viewcode-block" id="Task.add_storage_mounts"><a class="viewcode-back" href="../../sky.html#sky.task.Task.add_storage_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">add_storage_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Adds storage mounts to the Storage object</span>
-<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="sd">&quot;&quot;&quot;Adds storage mounts to the Task.&quot;&quot;&quot;</span>
         <span class="c1"># Hack: Hardcode storage_plans to AWS for optimal plan</span>
         <span class="c1"># Optimizer is supposed to choose storage plan but we</span>
         <span class="c1"># move this here temporarily</span>
@@ -611,8 +610,6 @@
                 <span class="p">})</span>
             <span class="k">elif</span> <span class="n">storage_type</span> <span class="ow">is</span> <span class="n">storage_lib</span><span class="o">.</span><span class="n">StorageType</span><span class="o">.</span><span class="n">GCS</span><span class="p">:</span>
                 <span class="c1"># Remember to run `gcloud auth application-default login`</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">update_file_mounts</span><span class="p">(</span>
-                    <span class="p">{</span><span class="s1">&#39;~/.config/gcloud&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.config/gcloud&#39;</span><span class="p">})</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">setup</span> <span class="o">=</span> <span class="s1">&#39;[[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] &amp;&amp; &#39;</span> <span class="o">+</span> \
                 <span class="s1">&#39;echo GOOGLE_APPLICATION_CREDENTIALS=&#39;</span> <span class="o">+</span> \
                 <span class="s1">&#39;~/.config/gcloud/application_default_credentials.json &gt;&gt; &#39;</span> <span class="o">+</span> \
@@ -628,7 +625,7 @@
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Storage Type </span><span class="si">{</span><span class="n">storage_type</span><span class="si">}</span><span class="s1"> </span><span class="se">\</span>
 <span class="s1">                    does not exist!&#39;</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="Task.set_file_mounts"><a class="viewcode-back" href="../../sky.html#sky.task.Task.set_file_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">set_file_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">file_mounts</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]):</span>
+<div class="viewcode-block" id="Task.set_file_mounts"><a class="viewcode-back" href="../../sky.html#sky.task.Task.set_file_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">set_file_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">file_mounts</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="sd">&quot;&quot;&quot;Sets the file mounts for this Task.</span>
 
 <span class="sd">        File mounts are a dictionary of { remote_path: local_path/cloud URI }.</span>
@@ -648,10 +645,13 @@
 <span class="sd">            })</span>
 
 <span class="sd">        Args:</span>
-<span class="sd">          file_mounts: a dict of { remote_path: local_path/cloud URI }, where</span>
-<span class="sd">            remote is the VM on which this Task will eventually run on, and</span>
-<span class="sd">            local is the node from which the task is launched.</span>
+<span class="sd">          file_mounts: either None or a dict of { remote_path: local_path/cloud</span>
+<span class="sd">            URI }, where remote is the VM on which this Task will eventually</span>
+<span class="sd">            run on, and local is the node from which the task is launched.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">file_mounts</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file_mounts</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span> <span class="bp">self</span>
         <span class="k">for</span> <span class="n">target</span><span class="p">,</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">file_mounts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
             <span class="k">if</span> <span class="n">target</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">source</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">):</span>
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
