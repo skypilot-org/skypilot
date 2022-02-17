@@ -21,9 +21,16 @@ ls examples/
 Running these setup enables Sky to launch resources on different clouds.
 This should be run on your laptop/development machine where you will use Sky to launch jobs.
 
-**AWS**. Install boto (`pip install boto3`) and configure your AWS credentials using `aws configure`.
+**AWS**. 
+```
+# Install boto
+pip install boto3
 
-**GCP**. Run:
+# Configure your AWS credentials
+aws configure
+```
+
+**GCP**.
 ```
 pip install google-api-python-client
 # Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart
@@ -41,15 +48,24 @@ echo GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credent
 source ~/.bashrc
 ```
 
-**Azure**. Install the Azure CLI (`pip install azure-cli==2.30.0`) then login using `az login`. Set the subscription to use from the command line (`az account set -s <subscription_id>`).
+**Azure**. 
+```
+# Install the Azure CLI
+pip install azure-cli==2.30.0
+# Login azure
+az login
+# Set the subscription to use
+az account set -s <subscription_id>
+```
 
-## SSH Access
+<!-- TODO (gautam): Removed since we have reversed it -->
+<!-- ## SSH Access
 The system currently supports SSH access for launched VMs by modifying your local `~/.ssh/config`. For git credentials to forward seamlessly, users must start their SSH agent and add their GitHub SSH key to it:
 ```
 eval "$(ssh-agent -s)"
 ssh-add -K /path/to/key  # e.g. ~/.ssh/id_ed25519
 ```
-For more information on GitHub authentication and keys, see their [setup tutorial](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent).
+For more information on GitHub authentication and keys, see their [setup tutorial](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent). -->
 
 ## Some general engineering practice suggestions
 

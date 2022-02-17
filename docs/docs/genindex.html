@@ -33,6 +33,9 @@
     <script src="_static/jquery.js"></script>
     <script src="_static/underscore.js"></script>
     <script src="_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -535,9 +538,9 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="sky.data.html#sky.data.storage.AbstractStore">AbstractStore (class in sky.data.storage)</a>
 </li>
-      <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_count">accelerator_count (sky.clouds.service_catalog.common.InstanceTypeInfo property)</a>
+      <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_count">accelerator_count (sky.clouds.service_catalog.common.InstanceTypeInfo attribute)</a>
 </li>
-      <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_name">accelerator_name (sky.clouds.service_catalog.common.InstanceTypeInfo property)</a>
+      <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.accelerator_name">accelerator_name (sky.clouds.service_catalog.common.InstanceTypeInfo attribute)</a>
 </li>
       <li><a href="sky.html#sky.AWS.accelerators_to_hourly_cost">accelerators_to_hourly_cost() (sky.AWS method)</a>
 
@@ -713,13 +716,9 @@
       </ul></li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.check_local_gpus">check_local_gpus() (in module sky.backends.backend_utils)</a>
 </li>
-      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor.check_log_files_and_publish_updates">check_log_files_and_publish_updates() (sky.skylet.ray_patches.log_monitor.LogMonitor method)</a>
-</li>
       <li><a href="sky.cloud_adaptors.html#sky.cloud_adaptors.aws.client">client() (in module sky.cloud_adaptors.aws)</a>
 </li>
       <li><a href="sky.cloud_adaptors.html#sky.cloud_adaptors.aws.client_exception">client_exception() (in module sky.cloud_adaptors.aws)</a>
-</li>
-      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor.close_all_files">close_all_files() (sky.skylet.ray_patches.log_monitor.LogMonitor method)</a>
 </li>
       <li><a href="sky.clouds.html#sky.clouds.Cloud">Cloud (class in sky.clouds)</a>
 
@@ -727,10 +726,10 @@
         <li><a href="sky.clouds.html#sky.clouds.cloud.Cloud">(class in sky.clouds.cloud)</a>
 </li>
       </ul></li>
+      <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.cloud">cloud (sky.clouds.service_catalog.common.InstanceTypeInfo attribute)</a>
+</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.cloud">cloud (sky.clouds.service_catalog.common.InstanceTypeInfo property)</a>
-</li>
       <li><a href="sky.html#sky.cloud_stores.CloudStorage">CloudStorage (class in sky.cloud_stores)</a>
 </li>
       <li><a href="sky.backends.html#sky.backends.CloudVmRayBackend">CloudVmRayBackend (class in sky.backends)</a>
@@ -1287,7 +1286,7 @@
       </ul></li>
       <li><a href="sky.html#sky.sky_logging.init_logger">init_logger() (in module sky.sky_logging)</a>
 </li>
-      <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.instance_type">instance_type (sky.clouds.service_catalog.common.InstanceTypeInfo property)</a>
+      <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.instance_type">instance_type (sky.clouds.service_catalog.common.InstanceTypeInfo attribute)</a>
 </li>
       <li><a href="sky.html#sky.AWS.instance_type_to_hourly_cost">instance_type_to_hourly_cost() (sky.AWS method)</a>
 
@@ -1459,11 +1458,7 @@
       </ul></li>
       <li><a href="sky.skylet.html#sky.skylet.job_lib.log_dir">log_dir() (in module sky.skylet.job_lib)</a>
 </li>
-      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogFileInfo">LogFileInfo (class in sky.skylet.ray_patches.log_monitor)</a>
-</li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.SshMode.LOGIN">LOGIN (sky.backends.backend_utils.SshMode attribute)</a>
-</li>
-      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor">LogMonitor (class in sky.skylet.ray_patches.log_monitor)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -1519,7 +1514,7 @@
       </ul></li>
       <li><a href="sky.skylet.html#sky.skylet.log_lib.make_task_bash_script">make_task_bash_script() (in module sky.skylet.log_lib)</a>
 </li>
-      <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.memory">memory (sky.clouds.service_catalog.common.InstanceTypeInfo property)</a>
+      <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.memory">memory (sky.clouds.service_catalog.common.InstanceTypeInfo attribute)</a>
 </li>
       <li>
     module
@@ -1603,8 +1598,6 @@
 </li>
         <li><a href="sky.skylet.ray_patches.html#module-sky.skylet.ray_patches">sky.skylet.ray_patches</a>
 </li>
-        <li><a href="sky.skylet.ray_patches.html#module-sky.skylet.ray_patches.log_monitor">sky.skylet.ray_patches.log_monitor</a>
-</li>
         <li><a href="sky.skylet.html#module-sky.skylet.util_lib">sky.skylet.util_lib</a>
 </li>
         <li><a href="sky.html#module-sky.task">sky.task</a>
@@ -1644,8 +1637,6 @@
 <h2 id="O">O</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor.open_closed_files">open_closed_files() (sky.skylet.ray_patches.log_monitor.LogMonitor method)</a>
-</li>
       <li><a href="sky.html#sky.execution.Stage.OPTIMIZE">OPTIMIZE (sky.execution.Stage attribute)</a>
 </li>
       <li><a href="sky.html#sky.Optimizer.optimize">optimize() (sky.Optimizer static method)</a>
@@ -1855,11 +1846,7 @@
       <li><a href="sky.backends.html#sky.backends.cloud_vm_ray_backend.RetryingVmProvisioner">RetryingVmProvisioner (class in sky.backends.cloud_vm_ray_backend)</a>
 </li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.run">run() (in module sky.backends.backend_utils)</a>
-
-      <ul>
-        <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor.run">(sky.skylet.ray_patches.log_monitor.LogMonitor method)</a>
 </li>
-      </ul></li>
       <li><a href="sky.skylet.html#sky.skylet.log_lib.run_bash_command_with_log">run_bash_command_with_log() (in module sky.skylet.log_lib)</a>
 </li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.run_command_on_ip_via_ssh">run_command_on_ip_via_ssh() (in module sky.backends.backend_utils)</a>
@@ -2461,13 +2448,6 @@
 </li>
       </ul></li>
       <li>
-    sky.skylet.ray_patches.log_monitor
-
-      <ul>
-        <li><a href="sky.skylet.ray_patches.html#module-sky.skylet.ray_patches.log_monitor">module</a>
-</li>
-      </ul></li>
-      <li>
     sky.skylet.util_lib
 
       <ul>
@@ -2642,8 +2622,6 @@
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="sky.html#sky.global_user_state.update_last_use">update_last_use() (in module sky.global_user_state)</a>
-</li>
-      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.log_monitor.LogMonitor.update_log_filenames">update_log_filenames() (sky.skylet.ray_patches.log_monitor.LogMonitor method)</a>
 </li>
       <li><a href="sky.skylet.html#sky.skylet.job_lib.JobInfoLoc.USERNAME">USERNAME (sky.skylet.job_lib.JobInfoLoc attribute)</a>
 </li>

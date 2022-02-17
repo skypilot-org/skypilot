@@ -33,6 +33,9 @@
     <script src="../../../_static/jquery.js"></script>
     <script src="../../../_static/underscore.js"></script>
     <script src="../../../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../../../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -234,6 +237,7 @@
 <span class="kn">import</span> <span class="nn">enum</span>
 <span class="kn">import</span> <span class="nn">os</span>
 <span class="kn">import</span> <span class="nn">pathlib</span>
+<span class="kn">import</span> <span class="nn">re</span>
 <span class="kn">import</span> <span class="nn">sqlite3</span>
 <span class="kn">import</span> <span class="nn">subprocess</span>
 <span class="kn">import</span> <span class="nn">time</span>
@@ -259,10 +263,12 @@
 
 <span class="n">_RAY_TO_JOB_STATUS_MAP</span> <span class="o">=</span> <span class="p">{</span>
     <span class="s1">&#39;RUNNING&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">,</span>
-    <span class="s1">&#39;SUCCEEDED&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">SUCCEEDED</span><span class="p">,</span>
-    <span class="s1">&#39;FAILED&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">FAILED</span><span class="p">,</span>
-    <span class="s1">&#39;STOPPED&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">CANCELLED</span><span class="p">,</span>
+    <span class="s1">&#39;succeeded&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">SUCCEEDED</span><span class="p">,</span>
+    <span class="s1">&#39;failed&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">FAILED</span><span class="p">,</span>
+    <span class="s1">&#39;stopped&#39;</span><span class="p">:</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">CANCELLED</span><span class="p">,</span>
 <span class="p">}</span>
+
+<span class="n">ANSI_ESCAPE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]&#39;</span><span class="p">)</span>
 
 
 <div class="viewcode-block" id="JobInfoLoc"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.JobInfoLoc">[docs]</a><span class="k">class</span> <span class="nc">JobInfoLoc</span><span class="p">(</span><span class="n">enum</span><span class="o">.</span><span class="n">IntEnum</span><span class="p">):</span>
@@ -398,8 +404,16 @@
         <span class="k">return</span> <span class="p">[]</span>
 
     <span class="c1"># TODO: if too slow, directly query against redis.</span>
-    <span class="n">test_cmd</span> <span class="o">=</span> <span class="p">[(</span><span class="sa">f</span><span class="s1">&#39;(ray job status --address 127.0.0.1:8265 </span><span class="si">{</span><span class="n">job</span><span class="si">}</span><span class="s1"> 2&gt;&amp;1 | &#39;</span>
-                 <span class="s1">&#39;grep &quot;Job status&quot; || echo &quot;not found&quot;)&#39;</span><span class="p">)</span> <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">job_ids</span><span class="p">]</span>
+    <span class="n">test_cmd</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;(ray job status --address 127.0.0.1:8265 </span><span class="si">{</span><span class="n">job</span><span class="si">}</span><span class="s1"> 2&gt;&amp;1 | &#39;</span>
+            <span class="c1"># Not a typo, ray has inconsistent output for job status.</span>
+            <span class="c1"># succeeded: Job &#39;job_id&#39; succeeded</span>
+            <span class="c1"># running: job &#39;job_id&#39;: RUNNING</span>
+            <span class="c1"># stopped: Job &#39;job_id&#39; was stopped</span>
+            <span class="c1"># failed: Job &#39;job_id&#39; failed</span>
+            <span class="sa">f</span><span class="s1">&#39;grep &quot;ob </span><span class="se">\&#39;</span><span class="si">{</span><span class="n">job</span><span class="si">}</span><span class="se">\&#39;</span><span class="s1">&quot; || echo &quot;not found&quot;)&#39;</span><span class="p">)</span> <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">job_ids</span>
+    <span class="p">]</span>
     <span class="n">test_cmd</span> <span class="o">=</span> <span class="s1">&#39; &amp;&amp; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">test_cmd</span><span class="p">)</span>
     <span class="n">proc</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">test_cmd</span><span class="p">,</span>
                           <span class="n">shell</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
@@ -414,7 +428,9 @@
     <span class="c1"># Process the results</span>
     <span class="n">job_status_list</span> <span class="o">=</span> <span class="p">[]</span>
     <span class="k">for</span> <span class="n">job_id</span><span class="p">,</span> <span class="n">res</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">job_ids</span><span class="p">,</span> <span class="n">results</span><span class="p">):</span>
-        <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;not found&#39;</span><span class="p">:</span>
+        <span class="c1"># Replace the color codes in the output</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">ANSI_ESCAPE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">res</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">res</span> <span class="o">==</span> <span class="s1">&#39;not found&#39;</span><span class="p">:</span>
             <span class="c1"># The job may be stale, when the instance is restarted (the ray</span>
             <span class="c1"># redis is volatile). We need to reset the status of the task to</span>
             <span class="c1"># FAILED if its original status is RUNNING or PENDING.</span>
@@ -425,8 +441,7 @@
             <span class="k">if</span> <span class="n">status</span> <span class="ow">in</span> <span class="p">[</span><span class="n">JobStatus</span><span class="o">.</span><span class="n">RUNNING</span><span class="p">,</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">PENDING</span><span class="p">]:</span>
                 <span class="n">status</span> <span class="o">=</span> <span class="n">JobStatus</span><span class="o">.</span><span class="n">FAILED</span>
         <span class="k">else</span><span class="p">:</span>
-            <span class="n">ray_status</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)</span>
-            <span class="n">ray_status</span> <span class="o">=</span> <span class="n">ray_status</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">ray_status</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
             <span class="n">status</span> <span class="o">=</span> <span class="n">_RAY_TO_JOB_STATUS_MAP</span><span class="p">[</span><span class="n">ray_status</span><span class="p">]</span>
         <span class="n">job_status_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">status</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">job_status_list</span></div>
@@ -514,16 +529,16 @@
 <div class="viewcode-block" id="log_dir"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.job_lib.log_dir">[docs]</a><span class="k">def</span> <span class="nf">log_dir</span><span class="p">(</span><span class="n">job_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">Optional</span><span class="p">[</span><span class="n">JobStatus</span><span class="p">]]:</span>
     <span class="sd">&quot;&quot;&quot;Returns the relative path to the log file for a job and the status.&quot;&quot;&quot;</span>
     <span class="n">_update_status</span><span class="p">()</span>
-    <span class="n">rows</span> <span class="o">=</span> <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+    <span class="n">_CURSOR</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
         <span class="sd">&quot;&quot;&quot;\</span>
 <span class="sd">            SELECT * FROM jobs</span>
 <span class="sd">            WHERE job_id=(?)&quot;&quot;&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">job_id</span><span class="p">,))</span>
-    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
-        <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
-        <span class="n">status</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">STATUS</span><span class="o">.</span><span class="n">value</span><span class="p">]</span>
-        <span class="n">status</span> <span class="o">=</span> <span class="n">JobStatus</span><span class="p">[</span><span class="n">status</span><span class="p">]</span>
-        <span class="n">run_timestamp</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">RUN_TIMESTAMP</span><span class="o">.</span><span class="n">value</span><span class="p">]</span>
+    <span class="n">row</span> <span class="o">=</span> <span class="n">_CURSOR</span><span class="o">.</span><span class="n">fetchone</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">row</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+    <span class="n">status</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">STATUS</span><span class="o">.</span><span class="n">value</span><span class="p">]</span>
+    <span class="n">status</span> <span class="o">=</span> <span class="n">JobStatus</span><span class="p">[</span><span class="n">status</span><span class="p">]</span>
+    <span class="n">run_timestamp</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="n">JobInfoLoc</span><span class="o">.</span><span class="n">RUN_TIMESTAMP</span><span class="o">.</span><span class="n">value</span><span class="p">]</span>
     <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">SKY_LOGS_DIRECTORY</span><span class="p">,</span> <span class="n">run_timestamp</span><span class="p">),</span> <span class="n">status</span></div>
 </pre></div>
 
