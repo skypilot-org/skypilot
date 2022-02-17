@@ -30,14 +30,14 @@ def init(quiet: bool = False) -> None:
         click.echo(
             click.style(
                 'No cloud is enabled. Sky will not be able to run any task. '
-                'Run `sky init` for more info.',
+                'Run `sky check` for more info.',
                 fg='red',
                 bold=True))
         raise SystemExit()
     else:
         echo('\nSky will use only the enabled clouds to run tasks. '
              'To change this, configure cloud credentials, '
-             'and run ' + click.style('sky init', bold=True) + '.')
+             'and run ' + click.style('sky check', bold=True) + '.')
 
     global_user_state.set_enabled_clouds(enabled_clouds)
 
