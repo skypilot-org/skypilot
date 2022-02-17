@@ -55,8 +55,8 @@ file_mounts:
 ###############################################
 #  Deprecated Usage - Declarative Sky API #
 ###############################################
-# WARNING - This method has been deprecated. If you need to create Storage
-# objects but not mount them, use the storage CLI.
+# WARNING - This usage has been deprecated. If you need to create Storage
+# objects but not mount them, use the storage CLI once it is supported.
 
 # Some power users may want to only upload their files to an object store
 # without mounting it, while others may want to re-use pre-existing storage
@@ -105,6 +105,14 @@ storage:
 #
 # Storage mounts specify where the storage objects defined above should be
 # mounted when the task is run.
+#
+# Fields:
+#   sky.StorageMount.storage: str
+#     Name reference to the storage object being mounted
+#
+#   sky.StorageMount.mount_path: str
+#     Path where the storage object is to be mounted
+
 storage_mounts:
   - storage: sky-dataset-decl # Name of the storage defined above
     mount_path: /datasets-decl # Path to mount the storage at
