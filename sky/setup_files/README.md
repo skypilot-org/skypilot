@@ -8,7 +8,9 @@
 # Sky requires python version >= 3.6
 
 # You can just install the dependencies for
-# certain clouds, e.g., ".[aws,azure,gcp]"
+# certain clouds or containers, e.g., ".[aws,azure,gcp,docker]"
+
+# Use "all" to install all dependencies
 pip install -e ".[all]"
 
 python examples/resnet_app.py
