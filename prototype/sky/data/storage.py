@@ -142,6 +142,8 @@ class Storage(object):
         elif self.source.startswith('gs://'):
             self.get_or_copy_to_gcs()
         else:
+            # self.source is a local path
+            self.source = os.path.abspath(os.path.expanduser(self.source))
             scheme = urllib.parse.urlsplit(self.source).scheme
             if scheme != '':
                 raise ValueError(
@@ -216,7 +218,6 @@ class S3Store(AbstractStore):
             assert name == data_utils.split_s3_path(source)[0], (
                 'S3 Bucket is specified as path, the name should be the '
                 'same as S3 bucket.')
-
         elif self.source.startswith('gs://'):
             assert name == data_utils.split_gcs_path(source)[0], (
                 'GCS Bucket is specified as path, the name should be the '
@@ -255,7 +256,26 @@ class S3Store(AbstractStore):
         file (Default path: ~/.aws/config).
         """
         sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'
-        subprocess.run(sync_command, shell=True, check=True)
+        logger.info(f'Executing: {sync_command}')
+        with subprocess.Popen(sync_command.split(' '),
+                              stderr=subprocess.PIPE) as process:
+            while True:
+                line = process.stderr.readline()
+                if not line:
+                    break
+                str_line = line.decode('utf-8')
+                logger.info(str_line)
+                if 'Access Denied' in str_line:
+                    process.kill()
+                    logger.error('Sky Storage failed to upload files to '
+                                 'the S3 bucket. The bucket does not have '
+                                 'write permissions. It is possible that '
+                                 'the bucket is public.')
+                    e = PermissionError('Can\'t write to bucket!')
+                    logger.error(e)
+                    raise e
+            process.wait()
+            logger.info('Done Syncing Local to S3')
 
     def _transfer_to_s3(self) -> None:
         if self.source.startswith('gs://'):
@@ -271,9 +291,24 @@ class S3Store(AbstractStore):
         """
         s3 = aws.resource('s3')
         bucket = s3.Bucket(self.name)
-        if bucket in s3.buckets.all():
+        # Checks if bucket exists (both public and private buckets)
+        try:
+            s3.meta.client.head_bucket(Bucket=self.name)
             return bucket, False
+        except aws.client_exception() as e:
+            # If it was a 404 error, then the bucket does not exist.
+            error_code = e.response['Error']['Code']
+            if error_code == '404':
+                pass
+            else:
+                logger.error(
+                    'Failed to connect to an existing bucket. \n'
+                    'Check if the 1) the bucket name is taken and/or '
+                    '2) the bucket permissions are not setup correctly.')
+                logger.error(e)
+                raise e
         if self.source.startswith('s3://'):
+            # Create new bucket is the bucket does not exist
             raise ValueError(
                 f'Attempted to connect to a non-existent bucket: {self.source}')
         return self._create_s3_bucket(self.name), True
@@ -307,8 +342,8 @@ class S3Store(AbstractStore):
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
         except aws.client_exception() as e:
-            logger.info(e)
-            return None
+            logger.error(e)
+            raise e
         return aws.resource('s3').Bucket(bucket_name)
 
     def _delete_s3_bucket(self, bucket_name: str) -> None:
@@ -317,10 +352,15 @@ class S3Store(AbstractStore):
         Args:
           bucket_name: str; Name of bucket
         """
-        s3 = aws.resource('s3')
-        bucket = s3.Bucket(bucket_name)
-        bucket.objects.all().delete()
-        bucket.delete()
+        try:
+            s3 = aws.resource('s3')
+            bucket = s3.Bucket(bucket_name)
+            bucket.objects.all().delete()
+            bucket.delete()
+        except aws.client_exception() as e:
+            logger.error(f'Unable to delete S3 bucket {self.name}')
+            logger.error(e)
+            raise e
 
 
 class GcsStore(AbstractStore):
@@ -368,7 +408,26 @@ class GcsStore(AbstractStore):
     def sync_local_dir(self) -> None:
         """Syncs a local directory to a GCS bucket."""
         sync_command = f'gsutil -m rsync -d -r {self.source} gs://{self.name}/'
-        subprocess.run(sync_command, shell=True, check=True)
+        logger.info(f'Executing: {sync_command}')
+        with subprocess.Popen(sync_command.split(' '),
+                              stderr=subprocess.PIPE) as process:
+            while True:
+                line = process.stderr.readline()
+                if not line:
+                    break
+                str_line = line.decode('utf-8')
+                logger.info(str_line)
+                if 'AccessDeniedException' in str_line:
+                    process.kill()
+                    logger.error('Sky Storage failed to upload files to '
+                                 'GCS. The bucket does not have '
+                                 'write permissions. It is possible that '
+                                 'the bucket is public.')
+                    e = PermissionError('Can\'t write to bucket!')
+                    logger.error(e)
+                    raise e
+            process.wait()
+            logger.info('Done Syncing Local to GCS')
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
@@ -376,7 +435,6 @@ class GcsStore(AbstractStore):
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the GCS bucket.
-
         If the bucket exists, this method will connect to the bucket.
         If the bucket does not exist, there are two cases:
           1) Raise an error if the bucket source starts with gs://
@@ -385,13 +443,37 @@ class GcsStore(AbstractStore):
         try:
             bucket = self.client.get_bucket(self.name)
             return bucket, False
-        except gcp.not_found_exception() as e:
-            if self.source.startswith('gs://'):
-                raise ValueError(
-                    'Attempted to connect to a non-existent bucket: '
-                    f'{self.source}') from e
-            logger.info(e)
-            return self._create_gcs_bucket(self.name), True
+        except gcp.not_found_exception():
+            pass
+        except gcp.forbidden_exception():
+            # Try public bucket to see if bucket exists
+            logger.info(
+                'External Bucket detected; Connecting to external bucket...')
+            try:
+                a_client = gcp.anonymous_storage_client()
+                bucket = a_client.bucket(self.name)
+                # Check if bucket can be listed/read from
+                next(bucket.list_blobs())
+                return bucket, False
+            except gcp.not_found_exception() as e:
+                logger.error(
+                    'Failed to connect to external bucket. \n'
+                    'Check if the 1) the bucket name is taken and/or '
+                    '2) the bucket permissions are not setup correctly.')
+                logger.error(e)
+                raise e
+            except ValueError as e:
+                logger.error(
+                    'Attempted to access a private external bucket. \n'
+                    'Check if the 1) the bucket name is taken and/or '
+                    '2) the bucket permissions are not setup correctly.')
+                logger.error(e)
+                raise e
+
+        if self.source.startswith('gs://'):
+            raise ValueError('Attempted to connect to a non-existent bucket: '
+                             f'{self.source}') from e
+        return self._create_gcs_bucket(self.name), True
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -426,5 +508,12 @@ class GcsStore(AbstractStore):
         Args:
           bucket_name: str; Name of bucket
         """
-        bucket = self.client.get_bucket(bucket_name)
-        bucket.delete(force=True)
+        try:
+            bucket = self.client.get_bucket(bucket_name)
+            bucket.delete(force=True)
+        except gcp.forbidden_exception() as e:
+            # Try public bucket to see if bucket exists
+            logger.error('External Bucket detected; User not allowed to delete '
+                         'external bucket!')
+            logger.error(e)
+            raise e

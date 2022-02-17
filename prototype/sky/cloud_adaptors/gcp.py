@@ -22,7 +22,21 @@ def storage_client():
     return storage.Client()
 
 
+def anonymous_storage_client():
+    """Helper method that connects to GCS Storage Client for
+    Public GCS Buckets
+    """
+    from google.cloud import storage
+    return storage.Client.create_anonymous_client()
+
+
 def not_found_exception():
     """NotFound exception."""
     from google.api_core import exceptions as gcs_exceptions
     return gcs_exceptions.NotFound
+
+
+def forbidden_exception():
+    """Forbidden exception."""
+    from google.api_core import exceptions as gcs_exceptions
+    return gcs_exceptions.Forbidden
