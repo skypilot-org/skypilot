@@ -5,6 +5,7 @@ import setuptools
 ROOT_DIR = os.path.dirname(__file__)
 
 install_requires = [
+    'wheel',
     'Click',
     'absl-py',
     'colorama',
@@ -18,7 +19,6 @@ install_requires = [
     'ray[default]',
     'tabulate',
     'docker',
-    'wheel',
 ]
 
 extras_require = {
