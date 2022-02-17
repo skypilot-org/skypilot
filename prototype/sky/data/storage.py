@@ -128,7 +128,7 @@ class Storage(object):
           persistent: bool; Whether to persist across sky launches.
         """
         self.name = name
-        self.source = os.path.abspath(os.path.expanduser(source))
+        self.source = source
         self.persistent = persistent
 
         # Sky optimizer either adds a storage object instance or selects
@@ -146,6 +146,9 @@ class Storage(object):
             if scheme != '':
                 raise ValueError(
                     f'Supported paths: local, s3://, gs://. Got: {self.source}')
+
+            # It's not a cloud path - parse local path
+            self.source = os.path.abspath(os.path.expanduser(source))
             if not os.path.exists(self.source):
                 raise ValueError(
                     f'Local source path does not exist: {self.source}')

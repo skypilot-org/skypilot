@@ -1512,26 +1512,25 @@ a task.</p>
 <dt class="sig sig-object py" id="sky.task.Task.set_storage_mounts">
 <span class="sig-name descname"><span class="pre">set_storage_mounts</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">storage_mounts</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/task.html#Task.set_storage_mounts"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.task.Task.set_storage_mounts" title="Permalink to this definition">¶</a></dt>
 <dd><p>Sets the storage mounts for this Task</p>
-<p>Advanced method for users. Storage mounts map a Storage object
-(see sky/data/storage.py) to a mount path on the Cloud VM.
-The storage object can be from a local folder or from an existing
-cloud bucket.</p>
+<p>Advanced method for users. Storage mounts map a mount path on the Cloud
+VM to a Storage object (see sky/data/storage.py). The storage object
+can be from a local folder or from an existing cloud bucket.</p>
 <p class="rubric">Example</p>
 <dl class="simple">
-<dt>task.set_storage_mounts({</dt><dd><p>Storage(name=’imagenet’, source=’s3://imagenet-bucket’):                 ‘/tmp/imagenet/’,</p>
+<dt>task.set_storage_mounts({</dt><dd><p>‘/tmp/imagenet/’:                 Storage(name=’imagenet’, source=’s3://imagenet-bucket’):</p>
 </dd>
 </dl>
 <p>})</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>storage_mounts</strong> – a dict of {Storage : mount_path}, where mount_path</p></li>
+<li><p><strong>storage_mounts</strong> – a dict of {mount_path: Storage}, where mount_path</p></li>
 <li><p><strong>is the path on the Cloud VM where the Storage object will be</strong></p></li>
 <li><p><strong>mounted on</strong></p></li>
 </ul>
 </dd>
 <dt class="field-even">Parameters</dt>
-<dd class="field-even"><p><strong>storage_mounts</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference internal" href="sky.data.html#sky.data.storage.Storage" title="sky.data.storage.Storage"><code class="xref py py-class docutils literal notranslate"><span class="pre">Storage</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p>
+<dd class="field-even"><p><strong>storage_mounts</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference internal" href="sky.data.html#sky.data.storage.Storage" title="sky.data.storage.Storage"><code class="xref py py-class docutils literal notranslate"><span class="pre">Storage</span></code></a>]) – </p>
 </dd>
 </dl>
 </dd></dl>
@@ -2577,26 +2576,25 @@ a task.</p>
 <dt class="sig sig-object py" id="sky.Task.set_storage_mounts">
 <span class="sig-name descname"><span class="pre">set_storage_mounts</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">storage_mounts</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/task.html#Task.set_storage_mounts"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.Task.set_storage_mounts" title="Permalink to this definition">¶</a></dt>
 <dd><p>Sets the storage mounts for this Task</p>
-<p>Advanced method for users. Storage mounts map a Storage object
-(see sky/data/storage.py) to a mount path on the Cloud VM.
-The storage object can be from a local folder or from an existing
-cloud bucket.</p>
+<p>Advanced method for users. Storage mounts map a mount path on the Cloud
+VM to a Storage object (see sky/data/storage.py). The storage object
+can be from a local folder or from an existing cloud bucket.</p>
 <p class="rubric">Example</p>
 <dl class="simple">
-<dt>task.set_storage_mounts({</dt><dd><p>Storage(name=’imagenet’, source=’s3://imagenet-bucket’):                 ‘/tmp/imagenet/’,</p>
+<dt>task.set_storage_mounts({</dt><dd><p>‘/tmp/imagenet/’:                 Storage(name=’imagenet’, source=’s3://imagenet-bucket’):</p>
 </dd>
 </dl>
 <p>})</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>storage_mounts</strong> – a dict of {Storage : mount_path}, where mount_path</p></li>
+<li><p><strong>storage_mounts</strong> – a dict of {mount_path: Storage}, where mount_path</p></li>
 <li><p><strong>is the path on the Cloud VM where the Storage object will be</strong></p></li>
 <li><p><strong>mounted on</strong></p></li>
 </ul>
 </dd>
 <dt class="field-even">Parameters</dt>
-<dd class="field-even"><p><strong>storage_mounts</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference internal" href="sky.data.html#sky.data.storage.Storage" title="sky.data.storage.Storage"><code class="xref py py-class docutils literal notranslate"><span class="pre">Storage</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]) – </p>
+<dd class="field-even"><p><strong>storage_mounts</strong> (<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference internal" href="sky.data.html#sky.data.storage.Storage" title="sky.data.storage.Storage"><code class="xref py py-class docutils literal notranslate"><span class="pre">Storage</span></code></a>]) – </p>
 </dd>
 </dl>
 </dd></dl>

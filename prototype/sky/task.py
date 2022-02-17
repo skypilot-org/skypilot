@@ -187,52 +187,108 @@ class Task:
             num_nodes=config.get('num_nodes'),
         )
 
+        # Create lists to store storage objects inlined in file_mounts.
+        # These are retained in dicts in the YAML schema and later parsed to
+        # storage objects with the storage/storage_mount objects.
+        fm_storages = []
+        fm_storage_mounts = []
         file_mounts = config.get('file_mounts')
         if file_mounts is not None:
-            task.set_file_mounts(file_mounts)
+            rsync_mounts = dict()
+            for dst_path, src in file_mounts.items():
+                # Check if it is str path
+                if isinstance(src, str):
+                    # Check if it's a cloud store path (for cloud storage) ...
+                    if is_cloud_store_url(src):
+                        # Valid cloud path (s3:// or gcs://) - create storage
+                        storage_name = parse.urlsplit(src).netloc
+                        fm_storages.append({
+                            'name': storage_name,
+                            'source': src
+                        })
+                        fm_storage_mounts.append({
+                            'storage': storage_name,
+                            'mount_path': dst_path
+                        })
+                    # If not a cloud url, it's a local path (for rsync)
+                    else:
+                        rsync_mounts[dst_path] = src
+                # If the src is not a str path, it is likely a dict. Try to
+                # parse storage object.
+                elif isinstance(src, dict):
+                    name = src.get('name')
+                    source = src.get('source')
+                    if not name or not source:
+                        raise ValueError('Inline storage objects need both name'
+                                         ' and source path to be specified.')
+                    fm_storages.append(src)
+                    fm_storage_mounts.append({
+                        'storage': name,
+                        'mount_path': dst_path
+                    })
+                else:
+                    raise ValueError(f'Unable to parse file_mount '
+                                     f'{dst_path}:{src}')
+            task.set_file_mounts(rsync_mounts)
 
-        storages = config.get('storage')
+        # Process storage objects - both from file_mounts and from YAML
+        yaml_storages = config.get('storage')
+        if yaml_storages is not None:
+            if isinstance(yaml_storages, dict):
+                yaml_storages = [yaml_storages]
+            if not isinstance(yaml_storages, list):
+                raise ValueError(f'Invalid storage specification.'
+                                 f' Expected list, got {yaml_storages}')
+        else:
+            yaml_storages = []
+
         task_storages = {}
-        if storages is not None:
-            task_storages = {}
-            if isinstance(storages, dict):
-                storages = [storages]
-            for storage in storages:
-                name = storage.get('name')
-                source = storage.get('source')
-                force_stores = storage.get('force_stores')
-                assert name and source, \
-                       'Storage Object needs name and source path specified.'
-                persistent = True if storage.get(
-                    'persistent') is None else storage['persistent']
-                task_storages[name] = storage_lib.Storage(name=name,
-                                                          source=source,
-                                                          persistent=persistent)
-                if force_stores is not None:
-                    assert set(force_stores) <= {'s3', 'gcs', 'azure_blob'}
-                    for cloud_type in force_stores:
-                        if cloud_type == 's3':
-                            task_storages[name].get_or_copy_to_s3()
-                        elif cloud_type == 'gcs':
-                            task_storages[name].get_or_copy_to_gcs()
-                        elif cloud_type == 'azure_blob':
-                            task_storages[name].get_or_copy_to_azure_blob()
+        all_storages = yaml_storages + fm_storages
+        for storage in all_storages:
+            name = storage.get('name')
+            source = storage.get('source')
+            force_stores = storage.get('force_stores')
+            assert name and source, \
+                   'Storage Object needs name and source path specified.'
+            persistent = True if storage.get(
+                'persistent') is None else storage['persistent']
+            storage_obj = storage_lib.Storage(name=name,
+                                              source=source,
+                                              persistent=persistent)
+            if force_stores is not None:
+                assert set(force_stores) <= {'s3', 'gcs', 'azure_blob'}
+                for cloud_type in force_stores:
+                    if cloud_type == 's3':
+                        storage_obj.get_or_copy_to_s3()
+                    elif cloud_type == 'gcs':
+                        storage_obj.get_or_copy_to_gcs()
+                    elif cloud_type == 'azure_blob':
+                        storage_obj.get_or_copy_to_azure_blob()
+            task_storages[name] = storage_obj
 
-        storage_mounts = config.get('storage_mounts')
-        if storage_mounts is not None:
-            task_storage_mounts = {}
-            if isinstance(storage_mounts, dict):
-                storage_mounts = [storage_mounts]
-            for storage_mount in storage_mounts:
-                name = storage_mount.get('storage')
-                storage_mount_path = storage_mount.get('mount_path')
-                assert name, \
-                    'Storage mount must have name reference to Storage object.'
-                assert storage_mount_path, \
-                    'Storage mount path cannot be empty.'
-                storage = task_storages[name]
-                task_storage_mounts[storage] = storage_mount_path
-            task.set_storage_mounts(task_storage_mounts)
+        # Process storage mount objects - both from file_mounts and from YAML
+        yaml_storage_mounts = config.get('storage_mounts')
+        if yaml_storage_mounts is not None:
+            if isinstance(yaml_storage_mounts, dict):
+                yaml_storage_mounts = [yaml_storage_mounts]
+            if not isinstance(yaml_storage_mounts, list):
+                raise ValueError(f'Invalid storage mount specification.'
+                                 f' Expected list, got {yaml_storage_mounts}')
+        else:
+            yaml_storage_mounts = []
+
+        all_storage_mounts = yaml_storage_mounts + fm_storage_mounts
+        task_storage_mounts = {}
+        for storage_mount in all_storage_mounts:
+            name = storage_mount.get('storage')
+            storage_mount_path = storage_mount.get('mount_path')
+            assert name, \
+                'Storage mount must have name reference to Storage object.'
+            assert storage_mount_path, \
+                'Storage mount path cannot be empty.'
+            storage = task_storages[name]
+            task_storage_mounts[storage_mount_path] = storage
+        task.set_storage_mounts(task_storage_mounts)
 
         if config.get('inputs') is not None:
             inputs_dict = config['inputs']
@@ -334,23 +390,22 @@ class Task:
 
     def set_storage_mounts(
         self,
-        storage_mounts: Dict[storage_lib.Storage, str],
+        storage_mounts: Dict[str, storage_lib.Storage],
     ):
         """Sets the storage mounts for this Task
 
-        Advanced method for users. Storage mounts map a Storage object
-        (see sky/data/storage.py) to a mount path on the Cloud VM.
-        The storage object can be from a local folder or from an existing
-        cloud bucket.
+        Advanced method for users. Storage mounts map a mount path on the Cloud
+        VM to a Storage object (see sky/data/storage.py). The storage object
+        can be from a local folder or from an existing cloud bucket.
 
         Example:
             task.set_storage_mounts({
-                Storage(name='imagenet', source='s3://imagenet-bucket'): \
-                '/tmp/imagenet/',
+                '/tmp/imagenet/': \
+                Storage(name='imagenet', source='s3://imagenet-bucket'):
             })
 
         Args:
-            storage_mounts: a dict of {Storage : mount_path}, where mount_path
+            storage_mounts: a dict of {mount_path: Storage}, where mount_path
             is the path on the Cloud VM where the Storage object will be
             mounted on
         """
@@ -362,7 +417,7 @@ class Task:
         # Hack: Hardcode storage_plans to AWS for optimal plan
         # Optimizer is supposed to choose storage plan but we
         # move this here temporarily
-        for store in self.storage_mounts.keys():
+        for store in self.storage_mounts.values():
             if len(store.stores) == 0:
                 self.storage_plans[store] = storage_lib.StorageType.S3
                 store.get_or_copy_to_s3()
@@ -372,7 +427,7 @@ class Task:
 
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
-        for store, mnt_path in storage_mounts.items():
+        for mnt_path, store in storage_mounts.items():
             storage_type = storage_plans[store]
             if storage_type is storage_lib.StorageType.S3:
                 # TODO: allow for Storage mounting of different clouds
