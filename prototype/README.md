@@ -30,7 +30,7 @@ pip install boto3
 aws configure
 ```
 
-**GCP**. Run:
+**GCP**.
 ```
 pip install google-api-python-client
 # Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart
@@ -48,7 +48,15 @@ echo GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credent
 source ~/.bashrc
 ```
 
-**Azure**. Install the Azure CLI (`pip install azure-cli==2.30.0`) then login using `az login`. Set the subscription to use from the command line (`az account set -s <subscription_id>`).
+**Azure**. 
+```
+# Install the Azure CLI
+pip install azure-cli==2.30.0
+# Login azure
+az login
+# Set the subscription to use
+az account set -s <subscription_id>
+```
 
 <!-- TODO (gautam): Removed since we have reversed it -->
 <!-- ## SSH Access
