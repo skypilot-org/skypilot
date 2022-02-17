@@ -33,6 +33,9 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -311,25 +314,25 @@ Azure.</p>
 </ul>
 <p>Below is a task YAML that prints “hello sky!” and shows installed Conda environments,
 requiring an NVIDIA Tesla K80 GPU on AWS.</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># hello_sky.yaml</span><span class="w"></span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># hello_sky.yaml</span>
 
-<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
-<span class="w">   </span><span class="c1"># Optional; if left out, pick from the available clouds.</span><span class="w"></span>
-<span class="w">   </span><span class="nt">cloud</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws</span><span class="w"></span>
+<span class="nt">resources</span><span class="p">:</span>
+   <span class="c1"># Optional; if left out, pick from the available clouds.</span>
+   <span class="nt">cloud</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">aws</span>
 
-<span class="w">   </span><span class="c1"># Get more GPUs with</span><span class="w"></span>
-<span class="w">   </span><span class="c1">#   accelerators:</span><span class="w"></span>
-<span class="w">   </span><span class="c1">#     K80: 8</span><span class="w"></span>
-<span class="w">   </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">K80</span><span class="w"></span>
+   <span class="c1"># Get more GPUs with</span>
+   <span class="c1">#   accelerators:</span>
+   <span class="c1">#     K80: 8</span>
+   <span class="nt">accelerators</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">K80</span>
 
-<span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
-<span class="w">   </span><span class="no"># Typical use: pip install -r requirements.txt</span><span class="w"></span>
-<span class="w">   </span><span class="no">echo &quot;running setup&quot;</span><span class="w"></span>
+<span class="nt">setup</span><span class="p">:</span> <span class="p p-Indicator">|</span>
+   <span class="no"># Typical use: pip install -r requirements.txt</span>
+   <span class="no">echo &quot;running setup&quot;</span>
 
-<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
-<span class="w">   </span><span class="no"># Typical use: make use of resources, such as running training.</span><span class="w"></span>
-<span class="w">   </span><span class="no">echo &quot;hello sky!&quot;</span><span class="w"></span>
-<span class="w">   </span><span class="no">conda env list</span><span class="w"></span>
+<span class="nt">run</span><span class="p">:</span> <span class="p p-Indicator">|</span>
+   <span class="no"># Typical use: make use of resources, such as running training.</span>
+   <span class="no">echo &quot;hello sky!&quot;</span>
+   <span class="no">conda env list</span>
 </pre></div>
 </div>
 <p>Sky handles selecting an appropriate VM based on user-specified resource

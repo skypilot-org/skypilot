@@ -33,6 +33,9 @@
     <script src="../../_static/jquery.js"></script>
     <script src="../../_static/underscore.js"></script>
     <script src="../../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -329,9 +332,6 @@
 
     <span class="n">backend</span><span class="o">.</span><span class="n">register_info</span><span class="p">(</span><span class="n">dag</span><span class="o">=</span><span class="n">dag</span><span class="p">,</span> <span class="n">optimize_target</span><span class="o">=</span><span class="n">optimize_target</span><span class="p">)</span>
 
-    <span class="c1"># FIXME: test on some node where the mounts do not exist.</span>
-    <span class="n">task</span><span class="o">.</span><span class="n">update_file_mounts</span><span class="p">(</span><span class="n">init</span><span class="o">.</span><span class="n">get_cloud_credential_file_mounts</span><span class="p">())</span>
-
     <span class="k">if</span> <span class="n">task</span><span class="o">.</span><span class="n">storage_mounts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
         <span class="c1"># Optimizer should eventually choose where to store bucket</span>
         <span class="n">task</span><span class="o">.</span><span class="n">add_storage_mounts</span><span class="p">()</span>
@@ -349,11 +349,16 @@
                 <span class="c1"># sync all files.  They are mitigations because if one manually</span>
                 <span class="c1"># changes the cluster AND passing in a handle, the cluster still</span>
                 <span class="c1"># would not be updated correctly.</span>
+                <span class="n">prev_file_mounts</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">file_mounts</span>
+                <span class="k">if</span> <span class="n">prev_file_mounts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">prev_file_mounts</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">file_mounts</span><span class="p">)</span>
+                <span class="n">task</span><span class="o">.</span><span class="n">update_file_mounts</span><span class="p">(</span><span class="n">init</span><span class="o">.</span><span class="n">get_cloud_credential_file_mounts</span><span class="p">())</span>
                 <span class="n">handle</span> <span class="o">=</span> <span class="n">backend</span><span class="o">.</span><span class="n">provision</span><span class="p">(</span><span class="n">task</span><span class="p">,</span>
                                            <span class="n">task</span><span class="o">.</span><span class="n">best_resources</span><span class="p">,</span>
                                            <span class="n">dryrun</span><span class="o">=</span><span class="n">dryrun</span><span class="p">,</span>
                                            <span class="n">stream_logs</span><span class="o">=</span><span class="n">stream_logs</span><span class="p">,</span>
                                            <span class="n">cluster_name</span><span class="o">=</span><span class="n">cluster_name</span><span class="p">)</span>
+                <span class="n">task</span><span class="o">.</span><span class="n">set_file_mounts</span><span class="p">(</span><span class="n">prev_file_mounts</span><span class="p">)</span>
 
         <span class="k">if</span> <span class="n">dryrun</span><span class="p">:</span>
             <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Dry run finished.&#39;</span><span class="p">)</span>

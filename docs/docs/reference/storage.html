@@ -33,6 +33,9 @@
     <script src="../_static/jquery.js"></script>
     <script src="../_static/underscore.js"></script>
     <script src="../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -260,40 +263,40 @@ to a backing object store in a particular cloud (S3/GCS/Azure Blob).</p>
 <p>Storage mounts specify where the storage objects defined above should be
 mounted when the task is run. These are specified with <code class="code docutils literal notranslate"><span class="pre">storage_mounts</span></code>.</p>
 <p>In YAML form, this looks something like:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">storage</span><span class="p">:</span><span class="w"></span>
-<span class="w">   </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">imagenet-bucket</span><span class="w"></span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">source</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">s3://imagenet-bucket</span><span class="w"></span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">force_stores</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">s3</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># Could be [s3, gcs], [gcs] default: None</span><span class="w"></span>
-<span class="w">      </span><span class="nt">persistent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span><span class="w"></span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">storage</span><span class="p">:</span>
+   <span class="p p-Indicator">-</span> <span class="nt">name</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">imagenet-bucket</span>
+      <span class="l l-Scalar l-Scalar-Plain">source</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">s3://imagenet-bucket</span>
+      <span class="l l-Scalar l-Scalar-Plain">force_stores</span><span class="p p-Indicator">:</span> <span class="p p-Indicator">[</span><span class="nv">s3</span><span class="p p-Indicator">]</span> <span class="c1"># Could be [s3, gcs], [gcs] default: None</span>
+      <span class="nt">persistent</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">True</span>
 
-<span class="nt">storage_mounts</span><span class="p">:</span><span class="w"></span>
-<span class="w">   </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">storage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">imagenet-bucket</span><span class="w"></span>
-<span class="w">      </span><span class="l l-Scalar l-Scalar-Plain">mount_path</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/tmp/imagenet</span><span class="w"></span>
+<span class="nt">storage_mounts</span><span class="p">:</span>
+   <span class="p p-Indicator">-</span> <span class="nt">storage</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">imagenet-bucket</span>
+      <span class="l l-Scalar l-Scalar-Plain">mount_path</span><span class="p p-Indicator">:</span> <span class="l l-Scalar l-Scalar-Plain">/tmp/imagenet</span>
 
-<span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
-<span class="w">   </span><span class="no">. $(conda info --base)/etc/profile.d/conda.sh</span><span class="w"></span>
-<span class="w">   </span><span class="no">pip install --upgrade pip</span><span class="w"></span>
-<span class="w">   </span><span class="no">conda activate resnet</span><span class="w"></span>
-<span class="w">   </span><span class="no">if [ $? -eq 0 ]; then</span><span class="w"></span>
-<span class="w">      </span><span class="no">echo &quot;conda env exists&quot;</span><span class="w"></span>
-<span class="w">   </span><span class="no">else</span><span class="w"></span>
-<span class="w">      </span><span class="no">conda create -n resnet python=3.7 -y</span><span class="w"></span>
-<span class="w">      </span><span class="no">conda activate resnet</span><span class="w"></span>
-<span class="w">      </span><span class="no">pip install tensorflow==2.4.0 pyyaml</span><span class="w"></span>
-<span class="w">      </span><span class="no">cd models</span><span class="w"></span>
-<span class="w">      </span><span class="no">pip install -e .</span><span class="w"></span>
-<span class="w">   </span><span class="no">fi</span><span class="w"></span>
+<span class="nt">setup</span><span class="p">:</span> <span class="p p-Indicator">|</span>
+   <span class="no">. $(conda info --base)/etc/profile.d/conda.sh</span>
+   <span class="no">pip install --upgrade pip</span>
+   <span class="no">conda activate resnet</span>
+   <span class="no">if [ $? -eq 0 ]; then</span>
+      <span class="no">echo &quot;conda env exists&quot;</span>
+   <span class="no">else</span>
+      <span class="no">conda create -n resnet python=3.7 -y</span>
+      <span class="no">conda activate resnet</span>
+      <span class="no">pip install tensorflow==2.4.0 pyyaml</span>
+      <span class="no">cd models</span>
+      <span class="no">pip install -e .</span>
+   <span class="no">fi</span>
 
-<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
-<span class="w">   </span><span class="no">. $(conda info --base)/etc/profile.d/conda.sh</span><span class="w"></span>
-<span class="w">   </span><span class="no">conda activate resnet</span><span class="w"></span>
-<span class="w">   </span><span class="no">export XLA_FLAGS=&#39;--xla_gpu_cuda_data_dir=/usr/local/cuda/&#39;</span><span class="w"></span>
-<span class="w">   </span><span class="no">python -u models/official/resnet/resnet_main.py --use_tpu=False \</span><span class="w"></span>
-<span class="w">         </span><span class="no">--mode=train --train_batch_size=256 --train_steps=250 \</span><span class="w"></span>
-<span class="w">         </span><span class="no">--iterations_per_loop=125 \</span><span class="w"></span>
-<span class="w">         </span><span class="no">--data_dir=/tmp/imagenet \</span><span class="w"></span>
-<span class="w">         </span><span class="no">--model_dir=resnet-model-dir \</span><span class="w"></span>
-<span class="w">         </span><span class="no">--amp --xla --loss_scale=128</span><span class="w"></span>
+<span class="nt">run</span><span class="p">:</span> <span class="p p-Indicator">|</span>
+   <span class="no">. $(conda info --base)/etc/profile.d/conda.sh</span>
+   <span class="no">conda activate resnet</span>
+   <span class="no">export XLA_FLAGS=&#39;--xla_gpu_cuda_data_dir=/usr/local/cuda/&#39;</span>
+   <span class="no">python -u models/official/resnet/resnet_main.py --use_tpu=False \</span>
+         <span class="no">--mode=train --train_batch_size=256 --train_steps=250 \</span>
+         <span class="no">--iterations_per_loop=125 \</span>
+         <span class="no">--data_dir=/tmp/imagenet \</span>
+         <span class="no">--model_dir=resnet-model-dir \</span>
+         <span class="no">--amp --xla --loss_scale=128</span>
 </pre></div>
 </div>
 </div>

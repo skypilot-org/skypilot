@@ -33,6 +33,9 @@
     <script src="../../../_static/jquery.js"></script>
     <script src="../../../_static/underscore.js"></script>
     <script src="../../../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../../../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -247,25 +250,25 @@
     <span class="k">return</span> <span class="n">proc</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
 
 
-<div class="viewcode-block" id="Azure"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure">[docs]</a><span class="k">class</span> <span class="nc">Azure</span><span class="p">(</span><span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">):</span>
+<div class="viewcode-block" id="Azure"><a class="viewcode-back" href="../../../sky.html#sky.Azure">[docs]</a><span class="k">class</span> <span class="nc">Azure</span><span class="p">(</span><span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot;Azure.&quot;&quot;&quot;</span>
 
     <span class="n">_REPR</span> <span class="o">=</span> <span class="s1">&#39;Azure&#39;</span>
     <span class="n">_regions</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">clouds</span><span class="o">.</span><span class="n">Region</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
 
-<div class="viewcode-block" id="Azure.instance_type_to_hourly_cost"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.instance_type_to_hourly_cost">[docs]</a>    <span class="k">def</span> <span class="nf">instance_type_to_hourly_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">instance_type</span><span class="p">,</span> <span class="n">use_spot</span><span class="p">):</span>
+<div class="viewcode-block" id="Azure.instance_type_to_hourly_cost"><a class="viewcode-back" href="../../../sky.html#sky.Azure.instance_type_to_hourly_cost">[docs]</a>    <span class="k">def</span> <span class="nf">instance_type_to_hourly_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">instance_type</span><span class="p">,</span> <span class="n">use_spot</span><span class="p">):</span>
         <span class="k">return</span> <span class="n">service_catalog</span><span class="o">.</span><span class="n">get_hourly_cost</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span>
                                                <span class="n">region</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
                                                <span class="n">use_spot</span><span class="o">=</span><span class="n">use_spot</span><span class="p">,</span>
                                                <span class="n">clouds</span><span class="o">=</span><span class="s1">&#39;azure&#39;</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="Azure.accelerators_to_hourly_cost"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.accelerators_to_hourly_cost">[docs]</a>    <span class="k">def</span> <span class="nf">accelerators_to_hourly_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">accelerators</span><span class="p">):</span>
+<div class="viewcode-block" id="Azure.accelerators_to_hourly_cost"><a class="viewcode-back" href="../../../sky.html#sky.Azure.accelerators_to_hourly_cost">[docs]</a>    <span class="k">def</span> <span class="nf">accelerators_to_hourly_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">accelerators</span><span class="p">):</span>
         <span class="c1"># Azure includes accelerators as part of the instance type.</span>
         <span class="c1"># Implementing this is also necessary for e.g., the instance may have 4</span>
         <span class="c1"># GPUs, while the task specifies to use 1 GPU.</span>
         <span class="k">return</span> <span class="mi">0</span></div>
 
-<div class="viewcode-block" id="Azure.get_egress_cost"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.get_egress_cost">[docs]</a>    <span class="k">def</span> <span class="nf">get_egress_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">num_gigabytes</span><span class="p">):</span>
+<div class="viewcode-block" id="Azure.get_egress_cost"><a class="viewcode-back" href="../../../sky.html#sky.Azure.get_egress_cost">[docs]</a>    <span class="k">def</span> <span class="nf">get_egress_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">num_gigabytes</span><span class="p">):</span>
         <span class="c1"># In general, query this from the cloud:</span>
         <span class="c1">#   https://azure.microsoft.com/en-us/pricing/details/bandwidth/</span>
         <span class="c1"># NOTE: egress from US East.</span>
@@ -291,10 +294,10 @@
     <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="k">return</span> <span class="n">Azure</span><span class="o">.</span><span class="n">_REPR</span>
 
-<div class="viewcode-block" id="Azure.is_same_cloud"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.is_same_cloud">[docs]</a>    <span class="k">def</span> <span class="nf">is_same_cloud</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+<div class="viewcode-block" id="Azure.is_same_cloud"><a class="viewcode-back" href="../../../sky.html#sky.Azure.is_same_cloud">[docs]</a>    <span class="k">def</span> <span class="nf">is_same_cloud</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
         <span class="k">return</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">Azure</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="Azure.get_default_instance_type"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.get_default_instance_type">[docs]</a>    <span class="nd">@classmethod</span>
+<div class="viewcode-block" id="Azure.get_default_instance_type"><a class="viewcode-back" href="../../../sky.html#sky.Azure.get_default_instance_type">[docs]</a>    <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">get_default_instance_type</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
         <span class="c1"># 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.</span>
         <span class="k">return</span> <span class="s1">&#39;Standard_D8_v4&#39;</span></div>
@@ -319,7 +322,7 @@
             <span class="n">image_config</span><span class="p">[</span><span class="s1">&#39;image_sku&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;2004&#39;</span>
         <span class="k">return</span> <span class="n">image_config</span>
 
-<div class="viewcode-block" id="Azure.regions"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.regions">[docs]</a>    <span class="nd">@classmethod</span>
+<div class="viewcode-block" id="Azure.regions"><a class="viewcode-back" href="../../../sky.html#sky.Azure.regions">[docs]</a>    <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">regions</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">clouds</span><span class="o">.</span><span class="n">Region</span><span class="p">]:</span>
         <span class="c1"># NOTE on zones: Ray Autoscaler does not support specifying</span>
         <span class="c1"># availability zones, and Azure CLI will try launching VMs in all</span>
@@ -337,7 +340,7 @@
             <span class="p">]</span>
         <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_regions</span></div>
 
-<div class="viewcode-block" id="Azure.region_zones_provision_loop"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.region_zones_provision_loop">[docs]</a>    <span class="nd">@classmethod</span>
+<div class="viewcode-block" id="Azure.region_zones_provision_loop"><a class="viewcode-back" href="../../../sky.html#sky.Azure.region_zones_provision_loop">[docs]</a>    <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">region_zones_provision_loop</span><span class="p">(</span>
         <span class="bp">cls</span><span class="p">,</span>
         <span class="o">*</span><span class="p">,</span>
@@ -359,14 +362,14 @@
     <span class="c1"># TODO: factor the following three methods, as they are the same logic</span>
     <span class="c1"># between Azure and AWS.</span>
 
-<div class="viewcode-block" id="Azure.get_accelerators_from_instance_type"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.get_accelerators_from_instance_type">[docs]</a>    <span class="k">def</span> <span class="nf">get_accelerators_from_instance_type</span><span class="p">(</span>
+<div class="viewcode-block" id="Azure.get_accelerators_from_instance_type"><a class="viewcode-back" href="../../../sky.html#sky.Azure.get_accelerators_from_instance_type">[docs]</a>    <span class="k">def</span> <span class="nf">get_accelerators_from_instance_type</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">instance_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]:</span>
         <span class="k">return</span> <span class="n">service_catalog</span><span class="o">.</span><span class="n">get_accelerators_from_instance_type</span><span class="p">(</span>
             <span class="n">instance_type</span><span class="p">,</span> <span class="n">clouds</span><span class="o">=</span><span class="s1">&#39;azure&#39;</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="Azure.make_deploy_resources_variables"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.make_deploy_resources_variables">[docs]</a>    <span class="k">def</span> <span class="nf">make_deploy_resources_variables</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resources</span><span class="p">):</span>
+<div class="viewcode-block" id="Azure.make_deploy_resources_variables"><a class="viewcode-back" href="../../../sky.html#sky.Azure.make_deploy_resources_variables">[docs]</a>    <span class="k">def</span> <span class="nf">make_deploy_resources_variables</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resources</span><span class="p">):</span>
         <span class="n">r</span> <span class="o">=</span> <span class="n">resources</span>
         <span class="k">assert</span> <span class="ow">not</span> <span class="n">r</span><span class="o">.</span><span class="n">use_spot</span><span class="p">,</span> \
             <span class="s1">&#39;Our subscription offer ID does not support spot instances.&#39;</span>
@@ -387,7 +390,7 @@
             <span class="o">**</span><span class="n">image_config</span>
         <span class="p">}</span></div>
 
-<div class="viewcode-block" id="Azure.get_feasible_launchable_resources"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.get_feasible_launchable_resources">[docs]</a>    <span class="k">def</span> <span class="nf">get_feasible_launchable_resources</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resources</span><span class="p">):</span>
+<div class="viewcode-block" id="Azure.get_feasible_launchable_resources"><a class="viewcode-back" href="../../../sky.html#sky.Azure.get_feasible_launchable_resources">[docs]</a>    <span class="k">def</span> <span class="nf">get_feasible_launchable_resources</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resources</span><span class="p">):</span>
         <span class="k">if</span> <span class="n">resources</span><span class="o">.</span><span class="n">instance_type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="k">assert</span> <span class="n">resources</span><span class="o">.</span><span class="n">is_launchable</span><span class="p">(),</span> <span class="n">resources</span>
             <span class="c1"># Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).</span>
@@ -417,7 +420,7 @@
             <span class="k">return</span> <span class="p">[]</span>
         <span class="k">return</span> <span class="n">_make</span><span class="p">(</span><span class="n">instance_type</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="Azure.check_credentials"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.check_credentials">[docs]</a>    <span class="k">def</span> <span class="nf">check_credentials</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<div class="viewcode-block" id="Azure.check_credentials"><a class="viewcode-back" href="../../../sky.html#sky.Azure.check_credentials">[docs]</a>    <span class="k">def</span> <span class="nf">check_credentials</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
         <span class="sd">&quot;&quot;&quot;Checks if the user has access credentials to this cloud.&quot;&quot;&quot;</span>
         <span class="n">help_str</span> <span class="o">=</span> <span class="p">(</span>
             <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">    For more info: &#39;</span>
@@ -426,10 +429,11 @@
         <span class="c1"># This file is required because it will be synced to remote VMs for</span>
         <span class="c1"># `az` to access private storage buckets.</span>
         <span class="c1"># `az account show` does not guarantee this file exists.</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="s1">&#39;~/.azure/accessTokens.json&#39;</span><span class="p">)):</span>
+        <span class="n">azure_token_cache_file</span> <span class="o">=</span> <span class="s1">&#39;~/.azure/msal_token_cache.json&#39;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">azure_token_cache_file</span><span class="p">)):</span>
             <span class="k">return</span> <span class="p">(</span>
                 <span class="kc">False</span><span class="p">,</span>
-                <span class="s1">&#39;~/.azure/accessTokens.json does not exist. Run `az login`.&#39;</span> <span class="o">+</span>
+                <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">azure_token_cache_file</span><span class="si">}</span><span class="s1"> does not exist. Run `az login`.&#39;</span> <span class="o">+</span>
                 <span class="n">help_str</span><span class="p">)</span>
         <span class="k">try</span><span class="p">:</span>
             <span class="n">output</span> <span class="o">=</span> <span class="n">_run_output</span><span class="p">(</span><span class="s1">&#39;az account show --output=json&#39;</span><span class="p">)</span>
@@ -443,7 +447,7 @@
             <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="kc">None</span>
         <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;Azure credentials not set. Run `az login`.&#39;</span> <span class="o">+</span> <span class="n">help_str</span></div>
 
-<div class="viewcode-block" id="Azure.get_credential_file_mounts"><a class="viewcode-back" href="../../../sky.clouds.html#sky.Azure.get_credential_file_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">get_credential_file_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<div class="viewcode-block" id="Azure.get_credential_file_mounts"><a class="viewcode-back" href="../../../sky.html#sky.Azure.get_credential_file_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">get_credential_file_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
         <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;~/.azure&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.azure&#39;</span><span class="p">}</span></div></div>
 </pre></div>
 

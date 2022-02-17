@@ -33,6 +33,9 @@
     <script src="_static/jquery.js"></script>
     <script src="_static/underscore.js"></script>
     <script src="_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -236,7 +239,7 @@
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#module-sky.skylet.ray_patches.log_monitor">
+  <a class="reference internal nav-link" href="#sky-skylet-ray-patches-log-monitor-module">
    sky.skylet.ray_patches.log_monitor module
   </a>
  </li>
@@ -276,7 +279,7 @@
   </a>
  </li>
  <li class="toc-h2 nav-item toc-entry">
-  <a class="reference internal nav-link" href="#module-sky.skylet.ray_patches.log_monitor">
+  <a class="reference internal nav-link" href="#sky-skylet-ray-patches-log-monitor-module">
    sky.skylet.ray_patches.log_monitor module
   </a>
  </li>
@@ -304,94 +307,8 @@
 <div class="section" id="submodules">
 <h2>Submodules<a class="headerlink" href="#submodules" title="Permalink to this headline">¶</a></h2>
 </div>
-<div class="section" id="module-sky.skylet.ray_patches.log_monitor">
-<span id="sky-skylet-ray-patches-log-monitor-module"></span><h2>sky.skylet.ray_patches.log_monitor module<a class="headerlink" href="#module-sky.skylet.ray_patches.log_monitor" title="Permalink to this headline">¶</a></h2>
-<dl class="py class">
-<dt class="sig sig-object py" id="sky.skylet.ray_patches.log_monitor.LogFileInfo">
-<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">sky.skylet.ray_patches.log_monitor.</span></span><span class="sig-name descname"><span class="pre">LogFileInfo</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">size_when_last_opened</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">file_position</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">file_handle</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_err_file</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">job_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">worker_pid</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/skylet/ray_patches/log_monitor.html#LogFileInfo"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.skylet.ray_patches.log_monitor.LogFileInfo" title="Permalink to this definition">¶</a></dt>
-<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
-</dd></dl>
-
-<dl class="py class">
-<dt class="sig sig-object py" id="sky.skylet.ray_patches.log_monitor.LogMonitor">
-<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">sky.skylet.ray_patches.log_monitor.</span></span><span class="sig-name descname"><span class="pre">LogMonitor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">logs_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">redis_address</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">redis_password</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/skylet/ray_patches/log_monitor.html#LogMonitor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.skylet.ray_patches.log_monitor.LogMonitor" title="Permalink to this definition">¶</a></dt>
-<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.10)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
-<p>A monitor process for monitoring Ray log files.</p>
-<p>This class mantains a list of open files and a list of closed log files. We
-can’t simply leave all files open because we’ll run out of file
-descriptors.</p>
-<p>The “run” method of this class will cycle between doing several things:
-1. First, it will check if any new files have appeared in the log</p>
-<blockquote>
-<div><p>directory. If so, they will be added to the list of closed files.</p>
-</div></blockquote>
-<ol class="arabic simple" start="2">
-<li><p>Then, if we are unable to open any new files, we will close all of the
-files.</p></li>
-<li><p>Then, we will open as many closed files as we can that may have new
-lines (judged by an increase in file size since the last time the file
-was opened).</p></li>
-<li><p>Then we will loop through the open files and see if there are any new
-lines in the file. If so, we will publish them to Redis.</p></li>
-</ol>
-<dl class="field-list simple">
-<dt class="field-odd">Variables</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>host</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><em>str</em></a>) – The hostname of this machine. Used to improve the log
-messages published to Redis.</p></li>
-<li><p><strong>logs_dir</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.10)"><em>str</em></a>) – The directory that the log files are in.</p></li>
-<li><p><strong>redis_client</strong> – A client used to communicate with the Redis server.</p></li>
-<li><p><strong>log_filenames</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#set" title="(in Python v3.10)"><em>set</em></a>) – This is the set of filenames of all files in
-open_file_infos and closed_file_infos.</p></li>
-<li><p><strong>open_file_infos</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.10)"><em>list</em></a><em>[</em><a class="reference internal" href="#sky.skylet.ray_patches.log_monitor.LogFileInfo" title="sky.skylet.ray_patches.log_monitor.LogFileInfo"><em>LogFileInfo</em></a><em>]</em>) – Info for all of the open files.</p></li>
-<li><p><strong>closed_file_infos</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.10)"><em>list</em></a><em>[</em><a class="reference internal" href="#sky.skylet.ray_patches.log_monitor.LogFileInfo" title="sky.skylet.ray_patches.log_monitor.LogFileInfo"><em>LogFileInfo</em></a><em>]</em>) – Info for all of the closed
-files.</p></li>
-<li><p><strong>can_open_more_files</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.10)"><em>bool</em></a>) – True if we can still open more files and
-false otherwise.</p></li>
-</ul>
-</dd>
-</dl>
-<dl class="py method">
-<dt class="sig sig-object py" id="sky.skylet.ray_patches.log_monitor.LogMonitor.check_log_files_and_publish_updates">
-<span class="sig-name descname"><span class="pre">check_log_files_and_publish_updates</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/skylet/ray_patches/log_monitor.html#LogMonitor.check_log_files_and_publish_updates"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.skylet.ray_patches.log_monitor.LogMonitor.check_log_files_and_publish_updates" title="Permalink to this definition">¶</a></dt>
-<dd><p>Get any changes to the log files and push updates to Redis.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Returns</dt>
-<dd class="field-odd"><p>True if anything was published and false otherwise.</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="sky.skylet.ray_patches.log_monitor.LogMonitor.close_all_files">
-<span class="sig-name descname"><span class="pre">close_all_files</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/skylet/ray_patches/log_monitor.html#LogMonitor.close_all_files"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.skylet.ray_patches.log_monitor.LogMonitor.close_all_files" title="Permalink to this definition">¶</a></dt>
-<dd><p>Close all open files (so that we can open more).</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="sky.skylet.ray_patches.log_monitor.LogMonitor.open_closed_files">
-<span class="sig-name descname"><span class="pre">open_closed_files</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/skylet/ray_patches/log_monitor.html#LogMonitor.open_closed_files"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.skylet.ray_patches.log_monitor.LogMonitor.open_closed_files" title="Permalink to this definition">¶</a></dt>
-<dd><p>Open some closed files if they may have new lines.</p>
-<p>Opening more files may require us to close some of the already open
-files.</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="sky.skylet.ray_patches.log_monitor.LogMonitor.run">
-<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/skylet/ray_patches/log_monitor.html#LogMonitor.run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.skylet.ray_patches.log_monitor.LogMonitor.run" title="Permalink to this definition">¶</a></dt>
-<dd><p>Run the log monitor.</p>
-<p>This will query Redis once every second to check if there are new log
-files to monitor. It will also store those log files in Redis.</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="sky.skylet.ray_patches.log_monitor.LogMonitor.update_log_filenames">
-<span class="sig-name descname"><span class="pre">update_log_filenames</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sky/skylet/ray_patches/log_monitor.html#LogMonitor.update_log_filenames"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#sky.skylet.ray_patches.log_monitor.LogMonitor.update_log_filenames" title="Permalink to this definition">¶</a></dt>
-<dd><p>Update the list of log files to monitor.</p>
-</dd></dl>
-
-</dd></dl>
-
+<div class="section" id="sky-skylet-ray-patches-log-monitor-module">
+<h2>sky.skylet.ray_patches.log_monitor module<a class="headerlink" href="#sky-skylet-ray-patches-log-monitor-module" title="Permalink to this headline">¶</a></h2>
 </div>
 <div class="section" id="sky-skylet-ray-patches-worker-module">
 <h2>sky.skylet.ray_patches.worker module<a class="headerlink" href="#sky-skylet-ray-patches-worker-module" title="Permalink to this headline">¶</a></h2>

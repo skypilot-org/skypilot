@@ -33,6 +33,9 @@
     <script src="../../../_static/jquery.js"></script>
     <script src="../../../_static/underscore.js"></script>
     <script src="../../../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../../../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -251,7 +254,7 @@
     <span class="k">return</span> <span class="n">proc</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span>
 
 
-<div class="viewcode-block" id="AWS"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS">[docs]</a><span class="k">class</span> <span class="nc">AWS</span><span class="p">(</span><span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">):</span>
+<div class="viewcode-block" id="AWS"><a class="viewcode-back" href="../../../sky.html#sky.AWS">[docs]</a><span class="k">class</span> <span class="nc">AWS</span><span class="p">(</span><span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot;Amazon Web Services.&quot;&quot;&quot;</span>
 
     <span class="n">_REPR</span> <span class="o">=</span> <span class="s1">&#39;AWS&#39;</span>
@@ -259,7 +262,7 @@
 
     <span class="c1">#### Regions/Zones ####</span>
 
-<div class="viewcode-block" id="AWS.regions"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.regions">[docs]</a>    <span class="nd">@classmethod</span>
+<div class="viewcode-block" id="AWS.regions"><a class="viewcode-back" href="../../../sky.html#sky.AWS.regions">[docs]</a>    <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">regions</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_regions</span><span class="p">:</span>
             <span class="c1"># https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/</span>
@@ -291,7 +294,7 @@
             <span class="p">]</span>
         <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">_regions</span></div>
 
-<div class="viewcode-block" id="AWS.region_zones_provision_loop"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.region_zones_provision_loop">[docs]</a>    <span class="nd">@classmethod</span>
+<div class="viewcode-block" id="AWS.region_zones_provision_loop"><a class="viewcode-back" href="../../../sky.html#sky.AWS.region_zones_provision_loop">[docs]</a>    <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">region_zones_provision_loop</span><span class="p">(</span>
         <span class="bp">cls</span><span class="p">,</span>
         <span class="o">*</span><span class="p">,</span>
@@ -315,7 +318,7 @@
                 <span class="k">continue</span>
             <span class="k">yield</span> <span class="n">region</span><span class="p">,</span> <span class="n">region</span><span class="o">.</span><span class="n">zones</span></div>
 
-<div class="viewcode-block" id="AWS.get_default_ami"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_default_ami">[docs]</a>    <span class="nd">@classmethod</span>
+<div class="viewcode-block" id="AWS.get_default_ami"><a class="viewcode-back" href="../../../sky.html#sky.AWS.get_default_ami">[docs]</a>    <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">get_default_ami</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">region_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
         <span class="c1"># AWS Deep Learning AMI (Ubuntu 18.04), version 50.0</span>
         <span class="c1"># https://aws.amazon.com/marketplace/pp/prodview-x5nivojpquy6y</span>
@@ -330,19 +333,19 @@
 
     <span class="c1">#### Normal methods ####</span>
 
-<div class="viewcode-block" id="AWS.instance_type_to_hourly_cost"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.instance_type_to_hourly_cost">[docs]</a>    <span class="k">def</span> <span class="nf">instance_type_to_hourly_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">instance_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">use_spot</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>
+<div class="viewcode-block" id="AWS.instance_type_to_hourly_cost"><a class="viewcode-back" href="../../../sky.html#sky.AWS.instance_type_to_hourly_cost">[docs]</a>    <span class="k">def</span> <span class="nf">instance_type_to_hourly_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">instance_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">use_spot</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>
         <span class="k">return</span> <span class="n">service_catalog</span><span class="o">.</span><span class="n">get_hourly_cost</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span>
                                                <span class="n">region</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
                                                <span class="n">use_spot</span><span class="o">=</span><span class="n">use_spot</span><span class="p">,</span>
                                                <span class="n">clouds</span><span class="o">=</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="AWS.accelerators_to_hourly_cost"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.accelerators_to_hourly_cost">[docs]</a>    <span class="k">def</span> <span class="nf">accelerators_to_hourly_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">accelerators</span><span class="p">):</span>
+<div class="viewcode-block" id="AWS.accelerators_to_hourly_cost"><a class="viewcode-back" href="../../../sky.html#sky.AWS.accelerators_to_hourly_cost">[docs]</a>    <span class="k">def</span> <span class="nf">accelerators_to_hourly_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">accelerators</span><span class="p">):</span>
         <span class="c1"># AWS includes accelerators as part of the instance type.  Implementing</span>
         <span class="c1"># this is also necessary for e.g., the instance may have 4 GPUs, while</span>
         <span class="c1"># the task specifies to use 1 GPU.</span>
         <span class="k">return</span> <span class="mi">0</span></div>
 
-<div class="viewcode-block" id="AWS.get_egress_cost"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_egress_cost">[docs]</a>    <span class="k">def</span> <span class="nf">get_egress_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">num_gigabytes</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
+<div class="viewcode-block" id="AWS.get_egress_cost"><a class="viewcode-back" href="../../../sky.html#sky.AWS.get_egress_cost">[docs]</a>    <span class="k">def</span> <span class="nf">get_egress_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">num_gigabytes</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
         <span class="c1"># In general, query this from the cloud:</span>
         <span class="c1">#   https://aws.amazon.com/s3/pricing/</span>
         <span class="c1"># NOTE: egress from US East (Ohio).</span>
@@ -368,10 +371,10 @@
     <span class="k">def</span> <span class="fm">__repr__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="k">return</span> <span class="n">AWS</span><span class="o">.</span><span class="n">_REPR</span>
 
-<div class="viewcode-block" id="AWS.is_same_cloud"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.is_same_cloud">[docs]</a>    <span class="k">def</span> <span class="nf">is_same_cloud</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">):</span>
+<div class="viewcode-block" id="AWS.is_same_cloud"><a class="viewcode-back" href="../../../sky.html#sky.AWS.is_same_cloud">[docs]</a>    <span class="k">def</span> <span class="nf">is_same_cloud</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Cloud</span><span class="p">):</span>
         <span class="k">return</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">AWS</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="AWS.get_default_instance_type"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_default_instance_type">[docs]</a>    <span class="nd">@classmethod</span>
+<div class="viewcode-block" id="AWS.get_default_instance_type"><a class="viewcode-back" href="../../../sky.html#sky.AWS.get_default_instance_type">[docs]</a>    <span class="nd">@classmethod</span>
     <span class="k">def</span> <span class="nf">get_default_instance_type</span><span class="p">(</span><span class="bp">cls</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
         <span class="c1"># 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.</span>
         <span class="k">return</span> <span class="s1">&#39;m4.2xlarge&#39;</span></div>
@@ -379,14 +382,14 @@
     <span class="c1"># TODO: factor the following three methods, as they are the same logic</span>
     <span class="c1"># between Azure and AWS.</span>
 
-<div class="viewcode-block" id="AWS.get_accelerators_from_instance_type"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_accelerators_from_instance_type">[docs]</a>    <span class="k">def</span> <span class="nf">get_accelerators_from_instance_type</span><span class="p">(</span>
+<div class="viewcode-block" id="AWS.get_accelerators_from_instance_type"><a class="viewcode-back" href="../../../sky.html#sky.AWS.get_accelerators_from_instance_type">[docs]</a>    <span class="k">def</span> <span class="nf">get_accelerators_from_instance_type</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">instance_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]:</span>
         <span class="k">return</span> <span class="n">service_catalog</span><span class="o">.</span><span class="n">get_accelerators_from_instance_type</span><span class="p">(</span>
             <span class="n">instance_type</span><span class="p">,</span> <span class="n">clouds</span><span class="o">=</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="AWS.make_deploy_resources_variables"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.make_deploy_resources_variables">[docs]</a>    <span class="k">def</span> <span class="nf">make_deploy_resources_variables</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+<div class="viewcode-block" id="AWS.make_deploy_resources_variables"><a class="viewcode-back" href="../../../sky.html#sky.AWS.make_deploy_resources_variables">[docs]</a>    <span class="k">def</span> <span class="nf">make_deploy_resources_variables</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
                                         <span class="n">resources</span><span class="p">:</span> <span class="s1">&#39;resources_lib.Resources&#39;</span><span class="p">):</span>
         <span class="n">r</span> <span class="o">=</span> <span class="n">resources</span>
         <span class="c1"># r.accelerators is cleared but .instance_type encodes the info.</span>
@@ -401,7 +404,7 @@
             <span class="s1">&#39;use_spot&#39;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">use_spot</span><span class="p">,</span>
         <span class="p">}</span></div>
 
-<div class="viewcode-block" id="AWS.get_feasible_launchable_resources"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_feasible_launchable_resources">[docs]</a>    <span class="k">def</span> <span class="nf">get_feasible_launchable_resources</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+<div class="viewcode-block" id="AWS.get_feasible_launchable_resources"><a class="viewcode-back" href="../../../sky.html#sky.AWS.get_feasible_launchable_resources">[docs]</a>    <span class="k">def</span> <span class="nf">get_feasible_launchable_resources</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
                                           <span class="n">resources</span><span class="p">:</span> <span class="s1">&#39;resources_lib.Resources&#39;</span><span class="p">):</span>
         <span class="k">if</span> <span class="n">resources</span><span class="o">.</span><span class="n">instance_type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="k">assert</span> <span class="n">resources</span><span class="o">.</span><span class="n">is_launchable</span><span class="p">(),</span> <span class="n">resources</span>
@@ -432,7 +435,7 @@
             <span class="k">return</span> <span class="p">[]</span>
         <span class="k">return</span> <span class="n">_make</span><span class="p">(</span><span class="n">instance_type</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="AWS.check_credentials"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.check_credentials">[docs]</a>    <span class="k">def</span> <span class="nf">check_credentials</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<div class="viewcode-block" id="AWS.check_credentials"><a class="viewcode-back" href="../../../sky.html#sky.AWS.check_credentials">[docs]</a>    <span class="k">def</span> <span class="nf">check_credentials</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
         <span class="sd">&quot;&quot;&quot;Checks if the user has access credentials to this cloud.&quot;&quot;&quot;</span>
         <span class="n">help_str</span> <span class="o">=</span> <span class="p">(</span>
             <span class="s1">&#39;</span><span class="se">\n</span><span class="s1">    For more info: &#39;</span>
@@ -472,7 +475,7 @@
             <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="kc">None</span>
         <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;AWS credentials not set. Run `aws configure`.&#39;</span> <span class="o">+</span> <span class="n">help_str</span></div>
 
-<div class="viewcode-block" id="AWS.get_credential_file_mounts"><a class="viewcode-back" href="../../../sky.clouds.html#sky.AWS.get_credential_file_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">get_credential_file_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<div class="viewcode-block" id="AWS.get_credential_file_mounts"><a class="viewcode-back" href="../../../sky.html#sky.AWS.get_credential_file_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">get_credential_file_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
         <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;~/.aws&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.aws&#39;</span><span class="p">}</span></div></div>
 </pre></div>
 

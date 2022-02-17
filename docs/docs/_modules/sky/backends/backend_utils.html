@@ -33,6 +33,9 @@
     <script src="../../../_static/jquery.js"></script>
     <script src="../../../_static/underscore.js"></script>
     <script src="../../../_static/doctools.js"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
     <script src="../../../_static/togglebutton.js"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown, .tag_hide_input div.cell_input, .tag_hide-input div.cell_input, .tag_hide_output div.cell_output, .tag_hide-output div.cell_output, .tag_hide_cell.cell, .tag_hide-cell.cell';</script>
     <script src="../../../_static/sphinx-book-theme.9d8b4a8b9bb19db25eeaddc40d639ba2.js"></script>
@@ -253,6 +256,7 @@
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">sky_logging</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">resources</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">task</span> <span class="k">as</span> <span class="n">task_lib</span>
+<span class="kn">from</span> <span class="nn">sky.cloud_adaptors</span> <span class="kn">import</span> <span class="n">azure</span>
 <span class="kn">from</span> <span class="nn">sky.skylet</span> <span class="kn">import</span> <span class="n">log_lib</span>
 
 <span class="n">logger</span> <span class="o">=</span> <span class="n">sky_logging</span><span class="o">.</span><span class="n">init_logger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
@@ -263,7 +267,7 @@
 <span class="n">SKY_REMOTE_WORKDIR</span> <span class="o">=</span> <span class="n">log_lib</span><span class="o">.</span><span class="n">SKY_REMOTE_WORKDIR</span>
 <span class="n">SKY_REMOTE_APP_DIR</span> <span class="o">=</span> <span class="s1">&#39;~/.sky/sky_app&#39;</span>
 <span class="n">IP_ADDR_REGEX</span> <span class="o">=</span> <span class="sa">r</span><span class="s1">&#39;\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}&#39;</span>
-<span class="n">SKY_REMOTE_RAY_VERSION</span> <span class="o">=</span> <span class="s1">&#39;1.9.2&#39;</span>
+<span class="n">SKY_REMOTE_RAY_VERSION</span> <span class="o">=</span> <span class="s1">&#39;1.10.0&#39;</span>
 <span class="n">SKY_REMOTE_PATH</span> <span class="o">=</span> <span class="s1">&#39;~/.sky/sky_wheels&#39;</span>
 <span class="n">SKY_USER_FILE_PATH</span> <span class="o">=</span> <span class="s1">&#39;~/.sky/generated&#39;</span>
 
@@ -275,18 +279,14 @@
 <span class="c1"># Keep the following two fields in sync with the cluster template:</span>
 
 
-<span class="k">def</span> <span class="nf">_fill_template</span><span class="p">(</span><span class="n">template_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<span class="k">def</span> <span class="nf">_fill_template</span><span class="p">(</span><span class="n">template_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
                    <span class="n">variables</span><span class="p">:</span> <span class="n">Dict</span><span class="p">,</span>
                    <span class="n">output_path</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
     <span class="sd">&quot;&quot;&quot;Create a file from a Jinja template and return the filename.&quot;&quot;&quot;</span>
-    <span class="k">assert</span> <span class="n">template_path</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.j2&#39;</span><span class="p">),</span> <span class="n">template_path</span>
-
-    <span class="k">def</span> <span class="nf">to_absolute</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isabs</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
-            <span class="n">path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">sky</span><span class="o">.</span><span class="n">__root_dir__</span><span class="p">),</span> <span class="n">path</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">path</span>
-
-    <span class="n">template_path</span> <span class="o">=</span> <span class="n">to_absolute</span><span class="p">(</span><span class="n">template_path</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">template_name</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.j2&#39;</span><span class="p">),</span> <span class="n">template_name</span>
+    <span class="n">template_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sky</span><span class="o">.</span><span class="n">__root_dir__</span><span class="p">,</span> <span class="s1">&#39;templates&#39;</span><span class="p">,</span> <span class="n">template_name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">template_path</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Template &quot;</span><span class="si">{</span><span class="n">template_name</span><span class="si">}</span><span class="s1">&quot; does not exist.&#39;</span><span class="p">)</span>
     <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">template_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">fin</span><span class="p">:</span>
         <span class="n">template</span> <span class="o">=</span> <span class="n">fin</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
     <span class="n">template</span> <span class="o">=</span> <span class="n">jinja2</span><span class="o">.</span><span class="n">Template</span><span class="p">(</span><span class="n">template</span><span class="p">)</span>
@@ -298,7 +298,7 @@
             <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">SKY_USER_FILE_PATH</span><span class="p">))</span> <span class="o">/</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">.yml&#39;</span>
         <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">output_path</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
         <span class="n">output_path</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">output_path</span><span class="p">)</span>
-    <span class="n">output_path</span> <span class="o">=</span> <span class="n">to_absolute</span><span class="p">(</span><span class="n">output_path</span><span class="p">)</span>
+    <span class="n">output_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">output_path</span><span class="p">)</span>
     <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fout</span><span class="p">:</span>
         <span class="n">fout</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">content</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">output_path</span>
@@ -631,6 +631,22 @@
     <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">AWS</span><span class="p">):</span>
         <span class="n">aws_default_ami</span> <span class="o">=</span> <span class="n">cloud</span><span class="o">.</span><span class="n">get_default_ami</span><span class="p">(</span><span class="n">region</span><span class="p">)</span>
 
+    <span class="n">azure_subscription_id</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cloud</span><span class="p">,</span> <span class="n">clouds</span><span class="o">.</span><span class="n">Azure</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">dryrun</span><span class="p">:</span>
+            <span class="n">azure_subscription_id</span> <span class="o">=</span> <span class="s1">&#39;ffffffff-ffff-ffff-ffff-ffffffffffff&#39;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">azure_subscription_id</span> <span class="o">=</span> <span class="n">azure</span><span class="o">.</span><span class="n">get_subscription_id</span><span class="p">()</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">azure_subscription_id</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span>  <span class="c1"># The error message will be replaced.</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                    <span class="s1">&#39;Fail to get subscription id from azure cli. &#39;</span>
+                    <span class="s1">&#39;Make sure you have login in and fix it with this Azure &#39;</span>
+                    <span class="s1">&#39;cli command: &quot;az account set -s &lt;subscription_id&gt;&quot;.&#39;</span>
+                <span class="p">)</span> <span class="kn">from</span> <span class="bp">None</span>
+
     <span class="k">assert</span> <span class="n">cluster_name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
 
     <span class="n">setup_sh_path</span> <span class="o">=</span> <span class="kc">None</span>
@@ -696,6 +712,9 @@
                 <span class="s1">&#39;zones&#39;</span><span class="p">:</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">zones</span><span class="p">),</span>
                 <span class="c1"># AWS only.</span>
                 <span class="s1">&#39;aws_default_ami&#39;</span><span class="p">:</span> <span class="n">aws_default_ami</span><span class="p">,</span>
+                <span class="c1"># Azure only.</span>
+                <span class="s1">&#39;azure_subscription_id&#39;</span><span class="p">:</span> <span class="n">azure_subscription_id</span><span class="p">,</span>
+                <span class="s1">&#39;resource_group&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">-</span><span class="si">{</span><span class="n">region</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
                 <span class="c1"># Ray version.</span>
                 <span class="s1">&#39;ray_version&#39;</span><span class="p">:</span> <span class="n">SKY_REMOTE_RAY_VERSION</span><span class="p">,</span>
                 <span class="c1"># Sky remote utils.</span>
@@ -712,9 +731,10 @@
         <span class="k">if</span> <span class="n">tpu_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">tpu_name</span> <span class="o">=</span> <span class="n">cluster_name</span>
 
+        <span class="n">user_file_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">SKY_USER_FILE_PATH</span><span class="si">}</span><span class="s1">/&#39;</span><span class="p">)</span>
         <span class="n">scripts</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span>
             <span class="n">_fill_template</span><span class="p">(</span>
-                <span class="n">path</span><span class="p">,</span>
+                <span class="n">template_name</span><span class="p">,</span>
                 <span class="nb">dict</span><span class="p">(</span><span class="n">resources_vars</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span>
                     <span class="s1">&#39;zones&#39;</span><span class="p">:</span> <span class="s1">&#39;,&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">zones</span><span class="p">),</span>
                     <span class="s1">&#39;tpu_name&#39;</span><span class="p">:</span> <span class="n">tpu_name</span><span class="p">,</span>
@@ -722,11 +742,10 @@
                 <span class="c1"># Use new names for TPU scripts so that different runs can use</span>
                 <span class="c1"># different TPUs.  Put in ~/.sky/generated/ to be consistent</span>
                 <span class="c1"># with cluster yamls.</span>
-                <span class="n">output_path</span><span class="o">=</span><span class="n">path</span><span class="o">.</span>
-                <span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.sh.j2&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;.</span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">.sh&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span>
-                    <span class="s1">&#39;config/&#39;</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">SKY_USER_FILE_PATH</span><span class="si">}</span><span class="s1">/&#39;</span><span class="p">)),</span>
-            <span class="p">)</span> <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span>
-            <span class="p">[</span><span class="s1">&#39;config/gcp-tpu-create.sh.j2&#39;</span><span class="p">,</span> <span class="s1">&#39;config/gcp-tpu-delete.sh.j2&#39;</span><span class="p">])</span>
+                <span class="n">output_path</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">user_file_dir</span><span class="p">,</span> <span class="n">template_name</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span>
+                    <span class="s1">&#39;.sh.j2&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;.</span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s1">.sh&#39;</span><span class="p">),</span>
+            <span class="p">)</span> <span class="k">for</span> <span class="n">template_name</span> <span class="ow">in</span>
+            <span class="p">[</span><span class="s1">&#39;gcp-tpu-create.sh.j2&#39;</span><span class="p">,</span> <span class="s1">&#39;gcp-tpu-delete.sh.j2&#39;</span><span class="p">])</span>
         <span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;tpu-create-script&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">scripts</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
         <span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;tpu-delete-script&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">scripts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
         <span class="n">config_dict</span><span class="p">[</span><span class="s1">&#39;tpu_name&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">tpu_name</span>
