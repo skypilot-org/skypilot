@@ -8,6 +8,7 @@ logger = sky_logging.init_logger(__name__)
 
 DEFAULT_OS_DISK_SIZE = 256
 
+
 class Resources:
     """A cloud resource bundle.
 
