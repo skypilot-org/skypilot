@@ -24,7 +24,7 @@ available_node_types:
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
-            VolumeSize: {{os_disk_size}}
+            VolumeSize: {{disk_size}}
       {% if use_spot %}
       InstanceMarketOptions:
           MarketType: spot
@@ -43,7 +43,7 @@ available_node_types:
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
-            VolumeSize: {{os_disk_size}}
+            VolumeSize: {{disk_size}}
       {% if use_spot %}
       InstanceMarketOptions:
           MarketType: spot

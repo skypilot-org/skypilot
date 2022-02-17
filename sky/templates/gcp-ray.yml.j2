@@ -31,7 +31,7 @@ available_node_types:
           autoDelete: true
           type: PERSISTENT
           initializeParams:
-            diskSizeGb: {{os_disk_size}}
+            diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
 {%- if gpu is none %}
             sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu
@@ -62,7 +62,7 @@ available_node_types:
           autoDelete: true
           type: PERSISTENT
           initializeParams:
-            diskSizeGb: {{os_disk_size}}
+            diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
 {%- if gpu is none %}
             sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu

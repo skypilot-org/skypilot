@@ -9,8 +9,8 @@
 name: minimal
 
 resources:
-  cloud: aws
-  os_disk_size: 512
+  cloud: azure
+  disk_size: 512
 
 setup: |
   echo "running setup"
