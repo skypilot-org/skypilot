@@ -419,52 +419,108 @@
             <span class="n">num_nodes</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;num_nodes&#39;</span><span class="p">),</span>
         <span class="p">)</span>
 
+        <span class="c1"># Create lists to store storage objects inlined in file_mounts.</span>
+        <span class="c1"># These are retained in dicts in the YAML schema and later parsed to</span>
+        <span class="c1"># storage objects with the storage/storage_mount objects.</span>
+        <span class="n">fm_storages</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">fm_storage_mounts</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="n">file_mounts</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;file_mounts&#39;</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">file_mounts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="n">task</span><span class="o">.</span><span class="n">set_file_mounts</span><span class="p">(</span><span class="n">file_mounts</span><span class="p">)</span>
+            <span class="n">rsync_mounts</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">dst_path</span><span class="p">,</span> <span class="n">src</span> <span class="ow">in</span> <span class="n">file_mounts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="c1"># Check if it is str path</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+                    <span class="c1"># Check if it&#39;s a cloud store path (for cloud storage) ...</span>
+                    <span class="k">if</span> <span class="n">is_cloud_store_url</span><span class="p">(</span><span class="n">src</span><span class="p">):</span>
+                        <span class="c1"># Valid cloud path (s3:// or gcs://) - create storage</span>
+                        <span class="n">storage_name</span> <span class="o">=</span> <span class="n">parse</span><span class="o">.</span><span class="n">urlsplit</span><span class="p">(</span><span class="n">src</span><span class="p">)</span><span class="o">.</span><span class="n">netloc</span>
+                        <span class="n">fm_storages</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+                            <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="n">storage_name</span><span class="p">,</span>
+                            <span class="s1">&#39;source&#39;</span><span class="p">:</span> <span class="n">src</span>
+                        <span class="p">})</span>
+                        <span class="n">fm_storage_mounts</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+                            <span class="s1">&#39;storage&#39;</span><span class="p">:</span> <span class="n">storage_name</span><span class="p">,</span>
+                            <span class="s1">&#39;mount_path&#39;</span><span class="p">:</span> <span class="n">dst_path</span>
+                        <span class="p">})</span>
+                    <span class="c1"># If not a cloud url, it&#39;s a local path (for rsync)</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">rsync_mounts</span><span class="p">[</span><span class="n">dst_path</span><span class="p">]</span> <span class="o">=</span> <span class="n">src</span>
+                <span class="c1"># If the src is not a str path, it is likely a dict. Try to</span>
+                <span class="c1"># parse storage object.</span>
+                <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                    <span class="n">name</span> <span class="o">=</span> <span class="n">src</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;name&#39;</span><span class="p">)</span>
+                    <span class="n">source</span> <span class="o">=</span> <span class="n">src</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;source&#39;</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">name</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">source</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Inline storage objects need both name&#39;</span>
+                                         <span class="s1">&#39; and source path to be specified.&#39;</span><span class="p">)</span>
+                    <span class="n">fm_storages</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">src</span><span class="p">)</span>
+                    <span class="n">fm_storage_mounts</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+                        <span class="s1">&#39;storage&#39;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span>
+                        <span class="s1">&#39;mount_path&#39;</span><span class="p">:</span> <span class="n">dst_path</span>
+                    <span class="p">})</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Unable to parse file_mount &#39;</span>
+                                     <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">dst_path</span><span class="si">}</span><span class="s1">:</span><span class="si">{</span><span class="n">src</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="n">task</span><span class="o">.</span><span class="n">set_file_mounts</span><span class="p">(</span><span class="n">rsync_mounts</span><span class="p">)</span>
 
-        <span class="n">storages</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;storage&#39;</span><span class="p">)</span>
+        <span class="c1"># Process storage objects - both from file_mounts and from YAML</span>
+        <span class="n">yaml_storages</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;storage&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">yaml_storages</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">yaml_storages</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                <span class="n">yaml_storages</span> <span class="o">=</span> <span class="p">[</span><span class="n">yaml_storages</span><span class="p">]</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">yaml_storages</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Invalid storage specification.&#39;</span>
+                                 <span class="sa">f</span><span class="s1">&#39; Expected list, got </span><span class="si">{</span><span class="n">yaml_storages</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">yaml_storages</span> <span class="o">=</span> <span class="p">[]</span>
+
         <span class="n">task_storages</span> <span class="o">=</span> <span class="p">{}</span>
-        <span class="k">if</span> <span class="n">storages</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="n">task_storages</span> <span class="o">=</span> <span class="p">{}</span>
-            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">storages</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
-                <span class="n">storages</span> <span class="o">=</span> <span class="p">[</span><span class="n">storages</span><span class="p">]</span>
-            <span class="k">for</span> <span class="n">storage</span> <span class="ow">in</span> <span class="n">storages</span><span class="p">:</span>
-                <span class="n">name</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;name&#39;</span><span class="p">)</span>
-                <span class="n">source</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;source&#39;</span><span class="p">)</span>
-                <span class="n">force_stores</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;force_stores&#39;</span><span class="p">)</span>
-                <span class="k">assert</span> <span class="n">name</span> <span class="ow">and</span> <span class="n">source</span><span class="p">,</span> \
-                       <span class="s1">&#39;Storage Object needs name and source path specified.&#39;</span>
-                <span class="n">persistent</span> <span class="o">=</span> <span class="kc">True</span> <span class="k">if</span> <span class="n">storage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
-                    <span class="s1">&#39;persistent&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">storage</span><span class="p">[</span><span class="s1">&#39;persistent&#39;</span><span class="p">]</span>
-                <span class="n">task_storages</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">storage_lib</span><span class="o">.</span><span class="n">Storage</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span>
-                                                          <span class="n">source</span><span class="o">=</span><span class="n">source</span><span class="p">,</span>
-                                                          <span class="n">persistent</span><span class="o">=</span><span class="n">persistent</span><span class="p">)</span>
-                <span class="k">if</span> <span class="n">force_stores</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-                    <span class="k">assert</span> <span class="nb">set</span><span class="p">(</span><span class="n">force_stores</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="p">{</span><span class="s1">&#39;s3&#39;</span><span class="p">,</span> <span class="s1">&#39;gcs&#39;</span><span class="p">,</span> <span class="s1">&#39;azure_blob&#39;</span><span class="p">}</span>
-                    <span class="k">for</span> <span class="n">cloud_type</span> <span class="ow">in</span> <span class="n">force_stores</span><span class="p">:</span>
-                        <span class="k">if</span> <span class="n">cloud_type</span> <span class="o">==</span> <span class="s1">&#39;s3&#39;</span><span class="p">:</span>
-                            <span class="n">task_storages</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">get_or_copy_to_s3</span><span class="p">()</span>
-                        <span class="k">elif</span> <span class="n">cloud_type</span> <span class="o">==</span> <span class="s1">&#39;gcs&#39;</span><span class="p">:</span>
-                            <span class="n">task_storages</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">get_or_copy_to_gcs</span><span class="p">()</span>
-                        <span class="k">elif</span> <span class="n">cloud_type</span> <span class="o">==</span> <span class="s1">&#39;azure_blob&#39;</span><span class="p">:</span>
-                            <span class="n">task_storages</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">get_or_copy_to_azure_blob</span><span class="p">()</span>
+        <span class="n">all_storages</span> <span class="o">=</span> <span class="n">yaml_storages</span> <span class="o">+</span> <span class="n">fm_storages</span>
+        <span class="k">for</span> <span class="n">storage</span> <span class="ow">in</span> <span class="n">all_storages</span><span class="p">:</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;name&#39;</span><span class="p">)</span>
+            <span class="n">source</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;source&#39;</span><span class="p">)</span>
+            <span class="n">force_stores</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;force_stores&#39;</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="n">name</span> <span class="ow">and</span> <span class="n">source</span><span class="p">,</span> \
+                   <span class="s1">&#39;Storage Object needs name and source path specified.&#39;</span>
+            <span class="n">persistent</span> <span class="o">=</span> <span class="kc">True</span> <span class="k">if</span> <span class="n">storage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                <span class="s1">&#39;persistent&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">storage</span><span class="p">[</span><span class="s1">&#39;persistent&#39;</span><span class="p">]</span>
+            <span class="n">storage_obj</span> <span class="o">=</span> <span class="n">storage_lib</span><span class="o">.</span><span class="n">Storage</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span>
+                                              <span class="n">source</span><span class="o">=</span><span class="n">source</span><span class="p">,</span>
+                                              <span class="n">persistent</span><span class="o">=</span><span class="n">persistent</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">force_stores</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">assert</span> <span class="nb">set</span><span class="p">(</span><span class="n">force_stores</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="p">{</span><span class="s1">&#39;s3&#39;</span><span class="p">,</span> <span class="s1">&#39;gcs&#39;</span><span class="p">,</span> <span class="s1">&#39;azure_blob&#39;</span><span class="p">}</span>
+                <span class="k">for</span> <span class="n">cloud_type</span> <span class="ow">in</span> <span class="n">force_stores</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">cloud_type</span> <span class="o">==</span> <span class="s1">&#39;s3&#39;</span><span class="p">:</span>
+                        <span class="n">storage_obj</span><span class="o">.</span><span class="n">get_or_copy_to_s3</span><span class="p">()</span>
+                    <span class="k">elif</span> <span class="n">cloud_type</span> <span class="o">==</span> <span class="s1">&#39;gcs&#39;</span><span class="p">:</span>
+                        <span class="n">storage_obj</span><span class="o">.</span><span class="n">get_or_copy_to_gcs</span><span class="p">()</span>
+                    <span class="k">elif</span> <span class="n">cloud_type</span> <span class="o">==</span> <span class="s1">&#39;azure_blob&#39;</span><span class="p">:</span>
+                        <span class="n">storage_obj</span><span class="o">.</span><span class="n">get_or_copy_to_azure_blob</span><span class="p">()</span>
+            <span class="n">task_storages</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">storage_obj</span>
 
-        <span class="n">storage_mounts</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;storage_mounts&#39;</span><span class="p">)</span>
-        <span class="k">if</span> <span class="n">storage_mounts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="n">task_storage_mounts</span> <span class="o">=</span> <span class="p">{}</span>
-            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">storage_mounts</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
-                <span class="n">storage_mounts</span> <span class="o">=</span> <span class="p">[</span><span class="n">storage_mounts</span><span class="p">]</span>
-            <span class="k">for</span> <span class="n">storage_mount</span> <span class="ow">in</span> <span class="n">storage_mounts</span><span class="p">:</span>
-                <span class="n">name</span> <span class="o">=</span> <span class="n">storage_mount</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;storage&#39;</span><span class="p">)</span>
-                <span class="n">storage_mount_path</span> <span class="o">=</span> <span class="n">storage_mount</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;mount_path&#39;</span><span class="p">)</span>
-                <span class="k">assert</span> <span class="n">name</span><span class="p">,</span> \
-                    <span class="s1">&#39;Storage mount must have name reference to Storage object.&#39;</span>
-                <span class="k">assert</span> <span class="n">storage_mount_path</span><span class="p">,</span> \
-                    <span class="s1">&#39;Storage mount path cannot be empty.&#39;</span>
-                <span class="n">storage</span> <span class="o">=</span> <span class="n">task_storages</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
-                <span class="n">task_storage_mounts</span><span class="p">[</span><span class="n">storage</span><span class="p">]</span> <span class="o">=</span> <span class="n">storage_mount_path</span>
-            <span class="n">task</span><span class="o">.</span><span class="n">set_storage_mounts</span><span class="p">(</span><span class="n">task_storage_mounts</span><span class="p">)</span>
+        <span class="c1"># Process storage mount objects - both from file_mounts and from YAML</span>
+        <span class="n">yaml_storage_mounts</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;storage_mounts&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">yaml_storage_mounts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">yaml_storage_mounts</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+                <span class="n">yaml_storage_mounts</span> <span class="o">=</span> <span class="p">[</span><span class="n">yaml_storage_mounts</span><span class="p">]</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">yaml_storage_mounts</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Invalid storage mount specification.&#39;</span>
+                                 <span class="sa">f</span><span class="s1">&#39; Expected list, got </span><span class="si">{</span><span class="n">yaml_storage_mounts</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">yaml_storage_mounts</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="n">all_storage_mounts</span> <span class="o">=</span> <span class="n">yaml_storage_mounts</span> <span class="o">+</span> <span class="n">fm_storage_mounts</span>
+        <span class="n">task_storage_mounts</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">storage_mount</span> <span class="ow">in</span> <span class="n">all_storage_mounts</span><span class="p">:</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">storage_mount</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;storage&#39;</span><span class="p">)</span>
+            <span class="n">storage_mount_path</span> <span class="o">=</span> <span class="n">storage_mount</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;mount_path&#39;</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="n">name</span><span class="p">,</span> \
+                <span class="s1">&#39;Storage mount must have name reference to Storage object.&#39;</span>
+            <span class="k">assert</span> <span class="n">storage_mount_path</span><span class="p">,</span> \
+                <span class="s1">&#39;Storage mount path cannot be empty.&#39;</span>
+            <span class="n">storage</span> <span class="o">=</span> <span class="n">task_storages</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+            <span class="n">task_storage_mounts</span><span class="p">[</span><span class="n">storage_mount_path</span><span class="p">]</span> <span class="o">=</span> <span class="n">storage</span>
+        <span class="n">task</span><span class="o">.</span><span class="n">set_storage_mounts</span><span class="p">(</span><span class="n">task_storage_mounts</span><span class="p">)</span>
 
         <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;inputs&#39;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">inputs_dict</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;inputs&#39;</span><span class="p">]</span>
@@ -566,23 +622,22 @@
 
 <div class="viewcode-block" id="Task.set_storage_mounts"><a class="viewcode-back" href="../../sky.html#sky.task.Task.set_storage_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">set_storage_mounts</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">storage_mounts</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="n">storage_lib</span><span class="o">.</span><span class="n">Storage</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span>
+        <span class="n">storage_mounts</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">storage_lib</span><span class="o">.</span><span class="n">Storage</span><span class="p">],</span>
     <span class="p">):</span>
         <span class="sd">&quot;&quot;&quot;Sets the storage mounts for this Task</span>
 
-<span class="sd">        Advanced method for users. Storage mounts map a Storage object</span>
-<span class="sd">        (see sky/data/storage.py) to a mount path on the Cloud VM.</span>
-<span class="sd">        The storage object can be from a local folder or from an existing</span>
-<span class="sd">        cloud bucket.</span>
+<span class="sd">        Advanced method for users. Storage mounts map a mount path on the Cloud</span>
+<span class="sd">        VM to a Storage object (see sky/data/storage.py). The storage object</span>
+<span class="sd">        can be from a local folder or from an existing cloud bucket.</span>
 
 <span class="sd">        Example:</span>
 <span class="sd">            task.set_storage_mounts({</span>
-<span class="sd">                Storage(name=&#39;imagenet&#39;, source=&#39;s3://imagenet-bucket&#39;): \</span>
-<span class="sd">                &#39;/tmp/imagenet/&#39;,</span>
+<span class="sd">                &#39;/tmp/imagenet/&#39;: \</span>
+<span class="sd">                Storage(name=&#39;imagenet&#39;, source=&#39;s3://imagenet-bucket&#39;):</span>
 <span class="sd">            })</span>
 
 <span class="sd">        Args:</span>
-<span class="sd">            storage_mounts: a dict of {Storage : mount_path}, where mount_path</span>
+<span class="sd">            storage_mounts: a dict of {mount_path: Storage}, where mount_path</span>
 <span class="sd">            is the path on the Cloud VM where the Storage object will be</span>
 <span class="sd">            mounted on</span>
 <span class="sd">        &quot;&quot;&quot;</span>
@@ -590,12 +645,11 @@
         <span class="k">return</span> <span class="bp">self</span></div>
 
 <div class="viewcode-block" id="Task.add_storage_mounts"><a class="viewcode-back" href="../../sky.html#sky.task.Task.add_storage_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">add_storage_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="sd">&quot;&quot;&quot;Adds storage mounts to the Storage object</span>
-<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="sd">&quot;&quot;&quot;Adds storage mounts to the Task.&quot;&quot;&quot;</span>
         <span class="c1"># Hack: Hardcode storage_plans to AWS for optimal plan</span>
         <span class="c1"># Optimizer is supposed to choose storage plan but we</span>
         <span class="c1"># move this here temporarily</span>
-        <span class="k">for</span> <span class="n">store</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">storage_mounts</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">store</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">storage_mounts</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
             <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">store</span><span class="o">.</span><span class="n">stores</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">storage_plans</span><span class="p">[</span><span class="n">store</span><span class="p">]</span> <span class="o">=</span> <span class="n">storage_lib</span><span class="o">.</span><span class="n">StorageType</span><span class="o">.</span><span class="n">S3</span>
                 <span class="n">store</span><span class="o">.</span><span class="n">get_or_copy_to_s3</span><span class="p">()</span>
@@ -605,7 +659,7 @@
 
         <span class="n">storage_mounts</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">storage_mounts</span>
         <span class="n">storage_plans</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">storage_plans</span>
-        <span class="k">for</span> <span class="n">store</span><span class="p">,</span> <span class="n">mnt_path</span> <span class="ow">in</span> <span class="n">storage_mounts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">mnt_path</span><span class="p">,</span> <span class="n">store</span> <span class="ow">in</span> <span class="n">storage_mounts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
             <span class="n">storage_type</span> <span class="o">=</span> <span class="n">storage_plans</span><span class="p">[</span><span class="n">store</span><span class="p">]</span>
             <span class="k">if</span> <span class="n">storage_type</span> <span class="ow">is</span> <span class="n">storage_lib</span><span class="o">.</span><span class="n">StorageType</span><span class="o">.</span><span class="n">S3</span><span class="p">:</span>
                 <span class="c1"># TODO: allow for Storage mounting of different clouds</span>
@@ -614,8 +668,6 @@
                 <span class="p">})</span>
             <span class="k">elif</span> <span class="n">storage_type</span> <span class="ow">is</span> <span class="n">storage_lib</span><span class="o">.</span><span class="n">StorageType</span><span class="o">.</span><span class="n">GCS</span><span class="p">:</span>
                 <span class="c1"># Remember to run `gcloud auth application-default login`</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">update_file_mounts</span><span class="p">(</span>
-                    <span class="p">{</span><span class="s1">&#39;~/.config/gcloud&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.config/gcloud&#39;</span><span class="p">})</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">setup</span> <span class="o">=</span> <span class="s1">&#39;[[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] &amp;&amp; &#39;</span> <span class="o">+</span> \
                 <span class="s1">&#39;echo GOOGLE_APPLICATION_CREDENTIALS=&#39;</span> <span class="o">+</span> \
                 <span class="s1">&#39;~/.config/gcloud/application_default_credentials.json &gt;&gt; &#39;</span> <span class="o">+</span> \
@@ -631,7 +683,7 @@
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Storage Type </span><span class="si">{</span><span class="n">storage_type</span><span class="si">}</span><span class="s1"> </span><span class="se">\</span>
 <span class="s1">                    does not exist!&#39;</span><span class="p">)</span></div>
 
-<div class="viewcode-block" id="Task.set_file_mounts"><a class="viewcode-back" href="../../sky.html#sky.task.Task.set_file_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">set_file_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">file_mounts</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]):</span>
+<div class="viewcode-block" id="Task.set_file_mounts"><a class="viewcode-back" href="../../sky.html#sky.task.Task.set_file_mounts">[docs]</a>    <span class="k">def</span> <span class="nf">set_file_mounts</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">file_mounts</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="sd">&quot;&quot;&quot;Sets the file mounts for this Task.</span>
 
 <span class="sd">        File mounts are a dictionary of { remote_path: local_path/cloud URI }.</span>
@@ -651,10 +703,13 @@
 <span class="sd">            })</span>
 
 <span class="sd">        Args:</span>
-<span class="sd">          file_mounts: a dict of { remote_path: local_path/cloud URI }, where</span>
-<span class="sd">            remote is the VM on which this Task will eventually run on, and</span>
-<span class="sd">            local is the node from which the task is launched.</span>
+<span class="sd">          file_mounts: either None or a dict of { remote_path: local_path/cloud</span>
+<span class="sd">            URI }, where remote is the VM on which this Task will eventually</span>
+<span class="sd">            run on, and local is the node from which the task is launched.</span>
 <span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">file_mounts</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file_mounts</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">return</span> <span class="bp">self</span>
         <span class="k">for</span> <span class="n">target</span><span class="p">,</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">file_mounts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
             <span class="k">if</span> <span class="n">target</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">source</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">):</span>
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>

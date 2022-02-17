@@ -429,10 +429,11 @@
         <span class="c1"># This file is required because it will be synced to remote VMs for</span>
         <span class="c1"># `az` to access private storage buckets.</span>
         <span class="c1"># `az account show` does not guarantee this file exists.</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="s1">&#39;~/.azure/accessTokens.json&#39;</span><span class="p">)):</span>
+        <span class="n">azure_token_cache_file</span> <span class="o">=</span> <span class="s1">&#39;~/.azure/msal_token_cache.json&#39;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">azure_token_cache_file</span><span class="p">)):</span>
             <span class="k">return</span> <span class="p">(</span>
                 <span class="kc">False</span><span class="p">,</span>
-                <span class="s1">&#39;~/.azure/accessTokens.json does not exist. Run `az login`.&#39;</span> <span class="o">+</span>
+                <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">azure_token_cache_file</span><span class="si">}</span><span class="s1"> does not exist. Run `az login`.&#39;</span> <span class="o">+</span>
                 <span class="n">help_str</span><span class="p">)</span>
         <span class="k">try</span><span class="p">:</span>
             <span class="n">output</span> <span class="o">=</span> <span class="n">_run_output</span><span class="p">(</span><span class="s1">&#39;az account show --output=json&#39;</span><span class="p">)</span>

@@ -459,6 +459,7 @@
 
 <div class="viewcode-block" id="tail_logs"><a class="viewcode-back" href="../../../sky.skylet.html#sky.skylet.log_lib.tail_logs">[docs]</a><span class="k">def</span> <span class="nf">tail_logs</span><span class="p">(</span><span class="n">job_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">log_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
               <span class="n">status</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">job_lib</span><span class="o">.</span><span class="n">JobStatus</span><span class="p">]):</span>
+    <span class="c1"># TODO (zhwu): Maybe switch to `ray job logs` according to the performance.</span>
     <span class="k">if</span> <span class="n">log_dir</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Job </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s1"> not found (see `sky queue`).&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
         <span class="k">return</span>
