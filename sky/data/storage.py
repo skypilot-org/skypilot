@@ -94,7 +94,7 @@ class Storage(object):
     source, where the data originally comes from. Power users can specify their
     pre-initialized stores if their data is already on the cloud.
 
-      Typical Usage: (See prototype/examples/playground/storage_playground.py)
+      Typical Usage: (See examples/playground/storage_playground.py)
         storage = Storage(name='imagenet-bucket', source='~/Documents/imagenet')
 
         # Move data to S3
