@@ -133,7 +133,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -155,11 +167,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../../../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../../../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -374,6 +381,8 @@
         <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;gs://&#39;</span><span class="p">):</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">get_or_copy_to_gcs</span><span class="p">()</span>
         <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># self.source is a local path</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">source</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="p">))</span>
             <span class="n">scheme</span> <span class="o">=</span> <span class="n">urllib</span><span class="o">.</span><span class="n">parse</span><span class="o">.</span><span class="n">urlsplit</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="p">)</span><span class="o">.</span><span class="n">scheme</span>
             <span class="k">if</span> <span class="n">scheme</span> <span class="o">!=</span> <span class="s1">&#39;&#39;</span><span class="p">:</span>
                 <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
@@ -448,7 +457,6 @@
             <span class="k">assert</span> <span class="n">name</span> <span class="o">==</span> <span class="n">data_utils</span><span class="o">.</span><span class="n">split_s3_path</span><span class="p">(</span><span class="n">source</span><span class="p">)[</span><span class="mi">0</span><span class="p">],</span> <span class="p">(</span>
                 <span class="s1">&#39;S3 Bucket is specified as path, the name should be the &#39;</span>
                 <span class="s1">&#39;same as S3 bucket.&#39;</span><span class="p">)</span>
-
         <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;gs://&#39;</span><span class="p">):</span>
             <span class="k">assert</span> <span class="n">name</span> <span class="o">==</span> <span class="n">data_utils</span><span class="o">.</span><span class="n">split_gcs_path</span><span class="p">(</span><span class="n">source</span><span class="p">)[</span><span class="mi">0</span><span class="p">],</span> <span class="p">(</span>
                 <span class="s1">&#39;GCS Bucket is specified as path, the name should be the &#39;</span>
@@ -487,7 +495,26 @@
 <span class="sd">        file (Default path: ~/.aws/config).</span>
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">sync_command</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;aws s3 sync </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="si">}</span><span class="s1"> s3://</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s1">/ --delete&#39;</span>
-        <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">sync_command</span><span class="p">,</span> <span class="n">shell</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Executing: </span><span class="si">{</span><span class="n">sync_command</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span><span class="n">sync_command</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">),</span>
+                              <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">)</span> <span class="k">as</span> <span class="n">process</span><span class="p">:</span>
+            <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+                <span class="n">line</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">readline</span><span class="p">()</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">line</span><span class="p">:</span>
+                    <span class="k">break</span>
+                <span class="n">str_line</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">str_line</span><span class="p">)</span>
+                <span class="k">if</span> <span class="s1">&#39;Access Denied&#39;</span> <span class="ow">in</span> <span class="n">str_line</span><span class="p">:</span>
+                    <span class="n">process</span><span class="o">.</span><span class="n">kill</span><span class="p">()</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Sky Storage failed to upload files to &#39;</span>
+                                 <span class="s1">&#39;the S3 bucket. The bucket does not have &#39;</span>
+                                 <span class="s1">&#39;write permissions. It is possible that &#39;</span>
+                                 <span class="s1">&#39;the bucket is public.&#39;</span><span class="p">)</span>
+                    <span class="n">e</span> <span class="o">=</span> <span class="ne">PermissionError</span><span class="p">(</span><span class="s1">&#39;Can</span><span class="se">\&#39;</span><span class="s1">t write to bucket!&#39;</span><span class="p">)</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+                    <span class="k">raise</span> <span class="n">e</span>
+            <span class="n">process</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Done Syncing Local to S3&#39;</span><span class="p">)</span></div>
 
     <span class="k">def</span> <span class="nf">_transfer_to_s3</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;gs://&#39;</span><span class="p">):</span>
@@ -503,9 +530,24 @@
 <span class="sd">        &quot;&quot;&quot;</span>
         <span class="n">s3</span> <span class="o">=</span> <span class="n">aws</span><span class="o">.</span><span class="n">resource</span><span class="p">(</span><span class="s1">&#39;s3&#39;</span><span class="p">)</span>
         <span class="n">bucket</span> <span class="o">=</span> <span class="n">s3</span><span class="o">.</span><span class="n">Bucket</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
-        <span class="k">if</span> <span class="n">bucket</span> <span class="ow">in</span> <span class="n">s3</span><span class="o">.</span><span class="n">buckets</span><span class="o">.</span><span class="n">all</span><span class="p">():</span>
+        <span class="c1"># Checks if bucket exists (both public and private buckets)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">s3</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">head_bucket</span><span class="p">(</span><span class="n">Bucket</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
             <span class="k">return</span> <span class="n">bucket</span><span class="p">,</span> <span class="kc">False</span>
+        <span class="k">except</span> <span class="n">aws</span><span class="o">.</span><span class="n">client_exception</span><span class="p">()</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="c1"># If it was a 404 error, then the bucket does not exist.</span>
+            <span class="n">error_code</span> <span class="o">=</span> <span class="n">e</span><span class="o">.</span><span class="n">response</span><span class="p">[</span><span class="s1">&#39;Error&#39;</span><span class="p">][</span><span class="s1">&#39;Code&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">error_code</span> <span class="o">==</span> <span class="s1">&#39;404&#39;</span><span class="p">:</span>
+                <span class="k">pass</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+                    <span class="s1">&#39;Failed to connect to an existing bucket. </span><span class="se">\n</span><span class="s1">&#39;</span>
+                    <span class="s1">&#39;Check if the 1) the bucket name is taken and/or &#39;</span>
+                    <span class="s1">&#39;2) the bucket permissions are not setup correctly.&#39;</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">e</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;s3://&#39;</span><span class="p">):</span>
+            <span class="c1"># Create new bucket is the bucket does not exist</span>
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
                 <span class="sa">f</span><span class="s1">&#39;Attempted to connect to a non-existent bucket: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
         <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_create_s3_bucket</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">),</span> <span class="kc">True</span>
@@ -539,8 +581,8 @@
                                         <span class="n">CreateBucketConfiguration</span><span class="o">=</span><span class="n">location</span><span class="p">)</span>
                 <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Created S3 bucket </span><span class="si">{</span><span class="n">bucket_name</span><span class="si">}</span><span class="s1"> in </span><span class="si">{</span><span class="n">region</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
         <span class="k">except</span> <span class="n">aws</span><span class="o">.</span><span class="n">client_exception</span><span class="p">()</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
-            <span class="k">return</span> <span class="kc">None</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">e</span>
         <span class="k">return</span> <span class="n">aws</span><span class="o">.</span><span class="n">resource</span><span class="p">(</span><span class="s1">&#39;s3&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">Bucket</span><span class="p">(</span><span class="n">bucket_name</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">_delete_s3_bucket</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bucket_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
@@ -549,10 +591,15 @@
 <span class="sd">        Args:</span>
 <span class="sd">          bucket_name: str; Name of bucket</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="n">s3</span> <span class="o">=</span> <span class="n">aws</span><span class="o">.</span><span class="n">resource</span><span class="p">(</span><span class="s1">&#39;s3&#39;</span><span class="p">)</span>
-        <span class="n">bucket</span> <span class="o">=</span> <span class="n">s3</span><span class="o">.</span><span class="n">Bucket</span><span class="p">(</span><span class="n">bucket_name</span><span class="p">)</span>
-        <span class="n">bucket</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">all</span><span class="p">()</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span>
-        <span class="n">bucket</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span></div>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">s3</span> <span class="o">=</span> <span class="n">aws</span><span class="o">.</span><span class="n">resource</span><span class="p">(</span><span class="s1">&#39;s3&#39;</span><span class="p">)</span>
+            <span class="n">bucket</span> <span class="o">=</span> <span class="n">s3</span><span class="o">.</span><span class="n">Bucket</span><span class="p">(</span><span class="n">bucket_name</span><span class="p">)</span>
+            <span class="n">bucket</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">all</span><span class="p">()</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span>
+            <span class="n">bucket</span><span class="o">.</span><span class="n">delete</span><span class="p">()</span>
+        <span class="k">except</span> <span class="n">aws</span><span class="o">.</span><span class="n">client_exception</span><span class="p">()</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Unable to delete S3 bucket </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">e</span></div>
 
 
 <div class="viewcode-block" id="GcsStore"><a class="viewcode-back" href="../../../sky.data.html#sky.GcsStore">[docs]</a><span class="k">class</span> <span class="nc">GcsStore</span><span class="p">(</span><span class="n">AbstractStore</span><span class="p">):</span>
@@ -600,7 +647,26 @@
 <div class="viewcode-block" id="GcsStore.sync_local_dir"><a class="viewcode-back" href="../../../sky.data.html#sky.GcsStore.sync_local_dir">[docs]</a>    <span class="k">def</span> <span class="nf">sync_local_dir</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="sd">&quot;&quot;&quot;Syncs a local directory to a GCS bucket.&quot;&quot;&quot;</span>
         <span class="n">sync_command</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;gsutil -m rsync -d -r </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="si">}</span><span class="s1"> gs://</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s1">/&#39;</span>
-        <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">sync_command</span><span class="p">,</span> <span class="n">shell</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Executing: </span><span class="si">{</span><span class="n">sync_command</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span><span class="n">sync_command</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">),</span>
+                              <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">)</span> <span class="k">as</span> <span class="n">process</span><span class="p">:</span>
+            <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+                <span class="n">line</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">readline</span><span class="p">()</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">line</span><span class="p">:</span>
+                    <span class="k">break</span>
+                <span class="n">str_line</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">str_line</span><span class="p">)</span>
+                <span class="k">if</span> <span class="s1">&#39;AccessDeniedException&#39;</span> <span class="ow">in</span> <span class="n">str_line</span><span class="p">:</span>
+                    <span class="n">process</span><span class="o">.</span><span class="n">kill</span><span class="p">()</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Sky Storage failed to upload files to &#39;</span>
+                                 <span class="s1">&#39;GCS. The bucket does not have &#39;</span>
+                                 <span class="s1">&#39;write permissions. It is possible that &#39;</span>
+                                 <span class="s1">&#39;the bucket is public.&#39;</span><span class="p">)</span>
+                    <span class="n">e</span> <span class="o">=</span> <span class="ne">PermissionError</span><span class="p">(</span><span class="s1">&#39;Can</span><span class="se">\&#39;</span><span class="s1">t write to bucket!&#39;</span><span class="p">)</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+                    <span class="k">raise</span> <span class="n">e</span>
+            <span class="n">process</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Done Syncing Local to GCS&#39;</span><span class="p">)</span></div>
 
     <span class="k">def</span> <span class="nf">_transfer_to_gcs</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;s3://&#39;</span><span class="p">):</span>
@@ -608,7 +674,6 @@
 
     <span class="k">def</span> <span class="nf">_get_bucket</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">StorageHandle</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]:</span>
         <span class="sd">&quot;&quot;&quot;Obtains the GCS bucket.</span>
-
 <span class="sd">        If the bucket exists, this method will connect to the bucket.</span>
 <span class="sd">        If the bucket does not exist, there are two cases:</span>
 <span class="sd">          1) Raise an error if the bucket source starts with gs://</span>
@@ -617,13 +682,37 @@
         <span class="k">try</span><span class="p">:</span>
             <span class="n">bucket</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">get_bucket</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
             <span class="k">return</span> <span class="n">bucket</span><span class="p">,</span> <span class="kc">False</span>
-        <span class="k">except</span> <span class="n">gcp</span><span class="o">.</span><span class="n">not_found_exception</span><span class="p">()</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;gs://&#39;</span><span class="p">):</span>
-                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-                    <span class="s1">&#39;Attempted to connect to a non-existent bucket: &#39;</span>
-                    <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span> <span class="kn">from</span> <span class="nn">e</span>
-            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
-            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_create_gcs_bucket</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">),</span> <span class="kc">True</span>
+        <span class="k">except</span> <span class="n">gcp</span><span class="o">.</span><span class="n">not_found_exception</span><span class="p">():</span>
+            <span class="k">pass</span>
+        <span class="k">except</span> <span class="n">gcp</span><span class="o">.</span><span class="n">forbidden_exception</span><span class="p">():</span>
+            <span class="c1"># Try public bucket to see if bucket exists</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                <span class="s1">&#39;External Bucket detected; Connecting to external bucket...&#39;</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">a_client</span> <span class="o">=</span> <span class="n">gcp</span><span class="o">.</span><span class="n">anonymous_storage_client</span><span class="p">()</span>
+                <span class="n">bucket</span> <span class="o">=</span> <span class="n">a_client</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+                <span class="c1"># Check if bucket can be listed/read from</span>
+                <span class="nb">next</span><span class="p">(</span><span class="n">bucket</span><span class="o">.</span><span class="n">list_blobs</span><span class="p">())</span>
+                <span class="k">return</span> <span class="n">bucket</span><span class="p">,</span> <span class="kc">False</span>
+            <span class="k">except</span> <span class="n">gcp</span><span class="o">.</span><span class="n">not_found_exception</span><span class="p">()</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+                    <span class="s1">&#39;Failed to connect to external bucket. </span><span class="se">\n</span><span class="s1">&#39;</span>
+                    <span class="s1">&#39;Check if the 1) the bucket name is taken and/or &#39;</span>
+                    <span class="s1">&#39;2) the bucket permissions are not setup correctly.&#39;</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">e</span>
+            <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span>
+                    <span class="s1">&#39;Attempted to access a private external bucket. </span><span class="se">\n</span><span class="s1">&#39;</span>
+                    <span class="s1">&#39;Check if the 1) the bucket name is taken and/or &#39;</span>
+                    <span class="s1">&#39;2) the bucket permissions are not setup correctly.&#39;</span><span class="p">)</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="n">e</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;gs://&#39;</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Attempted to connect to a non-existent bucket: &#39;</span>
+                             <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span> <span class="kn">from</span> <span class="nn">e</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_create_gcs_bucket</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">),</span> <span class="kc">True</span>
 
     <span class="k">def</span> <span class="nf">_download_file</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">remote_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">local_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
         <span class="sd">&quot;&quot;&quot;Downloads file from remote to local on GS bucket</span>
@@ -658,8 +747,15 @@
 <span class="sd">        Args:</span>
 <span class="sd">          bucket_name: str; Name of bucket</span>
 <span class="sd">        &quot;&quot;&quot;</span>
-        <span class="n">bucket</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">get_bucket</span><span class="p">(</span><span class="n">bucket_name</span><span class="p">)</span>
-        <span class="n">bucket</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">bucket</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">get_bucket</span><span class="p">(</span><span class="n">bucket_name</span><span class="p">)</span>
+            <span class="n">bucket</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">gcp</span><span class="o">.</span><span class="n">forbidden_exception</span><span class="p">()</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="c1"># Try public bucket to see if bucket exists</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;External Bucket detected; User not allowed to delete &#39;</span>
+                         <span class="s1">&#39;external bucket!&#39;</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">e</span></div>
 </pre></div>
 
               </div>

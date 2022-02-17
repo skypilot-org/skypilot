@@ -133,7 +133,19 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Sky CLI
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -155,11 +167,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -272,8 +279,8 @@
 
 <span class="kn">import</span> <span class="nn">sky</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">backends</span>
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">check</span> <span class="k">as</span> <span class="n">sky_check</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">global_user_state</span>
-<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">init</span> <span class="k">as</span> <span class="n">sky_init</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">sky_logging</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">clouds</span>
 <span class="kn">from</span> <span class="nn">sky.backends</span> <span class="kn">import</span> <span class="n">backend</span> <span class="k">as</span> <span class="n">backend_lib</span>
@@ -511,7 +518,7 @@
             <span class="n">run</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="n">task</span><span class="o">.</span><span class="n">set_resources</span><span class="p">(</span><span class="n">resources</span><span class="p">)</span>
-        <span class="n">task</span><span class="o">.</span><span class="n">update_file_mounts</span><span class="p">(</span><span class="n">sky_init</span><span class="o">.</span><span class="n">get_cloud_credential_file_mounts</span><span class="p">())</span>
+        <span class="n">task</span><span class="o">.</span><span class="n">update_file_mounts</span><span class="p">(</span><span class="n">sky_check</span><span class="o">.</span><span class="n">get_cloud_credential_file_mounts</span><span class="p">())</span>
 
     <span class="n">backend</span> <span class="o">=</span> <span class="n">backend</span> <span class="k">if</span> <span class="n">backend</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">backends</span><span class="o">.</span><span class="n">CloudVmRayBackend</span><span class="p">()</span>
     <span class="n">handle</span> <span class="o">=</span> <span class="n">global_user_state</span><span class="o">.</span><span class="n">get_handle_from_cluster_name</span><span class="p">(</span><span class="n">cluster_name</span><span class="p">)</span>
@@ -1506,14 +1513,14 @@
 
 
 <span class="nd">@cli</span><span class="o">.</span><span class="n">command</span><span class="p">()</span>
-<span class="k">def</span> <span class="nf">init</span><span class="p">():</span>
+<span class="k">def</span> <span class="nf">check</span><span class="p">():</span>
     <span class="sd">&quot;&quot;&quot;Determine the set of clouds available to use.</span>
 
 <span class="sd">    This checks access credentials for AWS, Azure and GCP; on failure, it shows</span>
 <span class="sd">    the reason and suggests correction steps. Sky tasks will only run on clouds</span>
 <span class="sd">    that you have access to.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">sky_init</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
+    <span class="n">sky_check</span><span class="o">.</span><span class="n">check</span><span class="p">()</span>
 
 
 <span class="nd">@cli</span><span class="o">.</span><span class="n">command</span><span class="p">()</span>

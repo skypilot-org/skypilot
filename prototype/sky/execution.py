@@ -19,7 +19,7 @@ from typing import Any, List, Optional
 
 import sky
 from sky import backends
-from sky import init
+from sky import check
 from sky import global_user_state
 from sky import sky_logging
 from sky import optimizer
@@ -94,7 +94,7 @@ def _execute(dag: sky.Dag,
                 # TODO: adding this check because docker backend on a
                 # no-credential machine should not enter optimize(), which
                 # would directly error out ('No cloud is enabled...').  Fix by
-                # moving sky init checks out of optimize()?
+                # moving `sky check` checks out of optimize()?
                 dag = sky.optimize(dag, minimize=optimize_target)
             task = dag.tasks[0]  # Keep: dag may have been deep-copied.
 
@@ -120,7 +120,8 @@ def _execute(dag: sky.Dag,
                 prev_file_mounts = task.file_mounts
                 if prev_file_mounts is not None:
                     prev_file_mounts = dict(task.file_mounts)
-                task.update_file_mounts(init.get_cloud_credential_file_mounts())
+                task.update_file_mounts(
+                    check.get_cloud_credential_file_mounts())
                 handle = backend.provision(task,
                                            task.best_resources,
                                            dryrun=dryrun,
