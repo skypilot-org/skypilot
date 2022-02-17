@@ -44,7 +44,7 @@ We can launch training by running:
 
    $ sky launch -c lm-cluster dnn.yaml
 
-This will kick off a single training run after provisioning a cluster. You can safely Ctrl-C after the training job starts printing, the job will be run in the backgroun on the cluster (to stop the job, refer to the `sky cancel` below).
+This will kick off a single training run after provisioning a cluster. You can safely Ctrl-C after the training job starts printing, and the job will continue to run remotely on the cluster. To stop the job, refer to `sky cancel` below.
 
 Scheduling Multiple Training Jobs
 ---------------------------------
@@ -59,13 +59,19 @@ terminal, which is useful for launching long-running jobs concurrently.
 .. code-block:: bash
 
    # Launch 4 jobs, perhaps with different hyperparameters.
-   sky exec lm-cluster dnn.yaml -d
-   sky exec lm-cluster dnn.yaml -d
-   # Override task name with `-n` and resource requirement with `--gpus`
-   sky exec lm-cluster dnn.yaml -d -n task4 --gpus=V100:2
+   # We can override the task name with `-n` (optional) and resource requirement with `--gpus` (optional)
+   sky exec lm-cluster dnn.yaml -d -n task2 --gpus=V100:1
+   sky exec lm-cluster dnn.yaml -d -n task3 --gpus=V100:1
+   sky exec lm-cluster dnn.yaml -d -n task4 --gpus=V100:3
    sky exec lm-cluster dnn.yaml -d -n task5 --gpus=V100:2
 
-Because the cluster only has 4 V100 GPU, these jobs will be queued waiting for the first job launched by `sky launch`. The last two jobs will be automatically scheduled to run concurrently.
+Because the cluster only has 4 V100 GPU, we will see the following behavior:
+
+- The sky launch job is running and occupies 4 GPU, all other tasks are pending for it.
+- The first two `sky exec` jobs (task2, task3) are running and occupy 1 GPU each
+- The third `sky exec` job (task4) will be pending, since it requires 3 GPUs and there is only 2 free GPU.
+- The last `sky exec` job (task5) will start running, since its requirement is fulfilled with 2 GPUs available.
+- Once some of the tasks finished and there are 3 GPUs available, task4 will start running.
 
 If we wish to view the output for each run after it has completed we can use:
 
@@ -76,15 +82,15 @@ If we wish to view the output for each run after it has completed we can use:
 
    ID  NAME         USER  SUBMITTED    STARTED     STATUS   
    5   task5        user  10 mins ago  10 mins ago RUNNING
-   4   task4        user  10 mins ago  10 mins ago RUNNING
-   3   huggingface  user  10 mins ago  9 mins ago  SUCCEEDED
-   2   huggingface  user  10 mins ago  5 mins ago  SUCCEEDED
+   4   task4        user  10 mins ago  -           PENDING
+   3   task3        user  10 mins ago  9 mins ago  RUNNING
+   2   task2        user  10 mins ago  9 mins ago  RUNNING
    1   huggingface  user  10 mins ago  1 min ago   SUCCEEDED
 
 
-   # Pick a JOB_ID to view
-   sky logs lm-cluster JOB_ID
+   # Stream the logs of task5 (ID: 5) to the console
+   sky logs lm-cluster 5
 
-   # Cancel a job
-   sky cancel lm-cluster JOB_ID
+   # Cancel job task3 (ID: 3)
+   sky cancel lm-cluster 3
 

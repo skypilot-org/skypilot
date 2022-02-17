@@ -4,7 +4,7 @@ Sky sphinx docs based on RTD.
 ## Build
 ```bash
 pip install -r requirements-docs.txt
-make html
+./build.sh
 ```
 
 ## View
