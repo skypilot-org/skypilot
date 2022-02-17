@@ -7,7 +7,6 @@ ROOT_DIR = os.path.dirname(__file__)
 install_requires = [
     'wheel',
     'Click',
-    'absl-py',
     'colorama',
     'jinja2',
     'networkx',
