@@ -17,6 +17,13 @@ transparent manner.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Command Line Interface
+
+   reference/cli
+
+
+.. toctree::
+   :maxdepth: 1
    :caption: Use Cases
 
    examples/auto-failover
@@ -29,7 +36,7 @@ transparent manner.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Reference Documentation
+   :caption: Features
 
    .. reference/faq
 
@@ -44,7 +51,6 @@ transparent manner.
    .. reference/service-catalog
    reference/storage
    reference/job-queue
-   reference/cli
 
 
 .. .. toctree::

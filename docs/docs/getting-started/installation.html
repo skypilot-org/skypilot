@@ -103,6 +103,18 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
+  Command Line Interface
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
   Use Cases
  </span>
 </p>
@@ -135,7 +147,7 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -157,11 +169,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -315,6 +322,21 @@ tasks in the clouds, configure access to at least one cloud:</p>
 <span class="n">az</span> <span class="n">login</span>
 <span class="c1"># Set the subscription to use</span>
 <span class="n">az</span> <span class="n">account</span> <span class="nb">set</span> <span class="o">-</span><span class="n">s</span> <span class="o">&lt;</span><span class="n">subscription_id</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p>Sky allows you to verify that cloud credentials are correctly configured using
+the CLI:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Verify cloud account setup</span>
+<span class="n">sky</span> <span class="n">check</span>
+</pre></div>
+</div>
+<p>This will produce output verifying the correct setup of each supported cloud.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Checking credentials to enable clouds for Sky.
+   AWS: enabled
+   GCP: enabled
+   Azure: enabled
+
+Sky will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 </pre></div>
 </div>
 </div>

@@ -101,6 +101,18 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
+  Command Line Interface
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
   Use Cases
  </span>
 </p>
@@ -133,7 +145,7 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -155,11 +167,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -243,6 +250,7 @@
  | <a href="#G"><strong>G</strong></a>
  | <a href="#I"><strong>I</strong></a>
  | <a href="#J"><strong>J</strong></a>
+ | <a href="#K"><strong>K</strong></a>
  | <a href="#L"><strong>L</strong></a>
  | <a href="#M"><strong>M</strong></a>
  | <a href="#N"><strong>N</strong></a>
@@ -566,6 +574,8 @@
         <li><a href="sky.html#sky.GCP.accelerators_to_hourly_cost">(sky.GCP method)</a>
 </li>
       </ul></li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.actor_id">actor_id (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
       <li><a href="sky.html#sky.Dag.add">add() (sky.Dag method)</a>
 
       <ul>
@@ -582,10 +592,10 @@
       </ul></li>
       <li><a href="sky.backends.html#sky.backends.cloud_vm_ray_backend.RayCodeGen.add_epilogue">add_epilogue() (sky.backends.cloud_vm_ray_backend.RayCodeGen method)</a>
 </li>
-      <li><a href="sky.backends.html#sky.backends.cloud_vm_ray_backend.RayCodeGen.add_gang_scheduling_placement_group">add_gang_scheduling_placement_group() (sky.backends.cloud_vm_ray_backend.RayCodeGen method)</a>
-</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="sky.backends.html#sky.backends.cloud_vm_ray_backend.RayCodeGen.add_gang_scheduling_placement_group">add_gang_scheduling_placement_group() (sky.backends.cloud_vm_ray_backend.RayCodeGen method)</a>
+</li>
       <li><a href="sky.skylet.html#sky.skylet.job_lib.add_job">add_job() (in module sky.skylet.job_lib)</a>
 
       <ul>
@@ -682,6 +692,8 @@
 <h2 id="C">C</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.cancel">cancel() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.skylet.html#sky.skylet.job_lib.cancel_jobs">cancel_jobs() (in module sky.skylet.job_lib)</a>
 
       <ul>
@@ -689,6 +701,8 @@
 </li>
       </ul></li>
       <li><a href="sky.skylet.html#sky.skylet.job_lib.JobStatus.CANCELLED">CANCELLED (sky.skylet.job_lib.JobStatus attribute)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.check_connected">check_connected() (sky.skylet.ray_patches.worker.Worker method)</a>
 </li>
       <li><a href="sky.html#sky.AWS.check_credentials">check_credentials() (sky.AWS method)</a>
 
@@ -728,8 +742,6 @@
       </ul></li>
       <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.cloud">cloud (sky.clouds.service_catalog.common.InstanceTypeInfo property)</a>
 </li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="sky.html#sky.cloud_stores.CloudStorage">CloudStorage (class in sky.cloud_stores)</a>
 </li>
       <li><a href="sky.backends.html#sky.backends.CloudVmRayBackend">CloudVmRayBackend (class in sky.backends)</a>
@@ -738,6 +750,8 @@
         <li><a href="sky.backends.html#sky.backends.cloud_vm_ray_backend.CloudVmRayBackend">(class in sky.backends.cloud_vm_ray_backend)</a>
 </li>
       </ul></li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="sky.backends.html#sky.backends.CloudVmRayBackend.ResourceHandle">CloudVmRayBackend.ResourceHandle (class in sky.backends)</a>
 
       <ul>
@@ -770,6 +784,10 @@
       </ul></li>
       <li><a href="sky.html#sky.global_user_state.ClusterStatus">ClusterStatus (class in sky.global_user_state)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.connect">connect() (in module sky.skylet.ray_patches.worker)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.connected">connected (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
       <li><a href="sky.html#sky.optimizer.OptimizeTarget.COST">COST (sky.optimizer.OptimizeTarget attribute)</a>
 
       <ul>
@@ -781,6 +799,16 @@
       <li><a href="sky.data.html#sky.data.data_utils.create_s3_client">create_s3_client() (in module sky.data.data_utils)</a>
 </li>
       <li><a href="sky.skylet.html#sky.skylet.util_lib.create_table">create_table() (in module sky.skylet.util_lib)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.current_job_id">current_job_id (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.current_node_id">current_node_id (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.current_session_and_job">current_session_and_job (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.current_task_id">current_task_id (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.custom_excepthook">custom_excepthook() (in module sky.skylet.ray_patches.worker)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -816,6 +844,10 @@
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.deserialize_objects">deserialize_objects() (sky.skylet.ray_patches.worker.Worker method)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.disconnect">disconnect() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.data.html#sky.data.storage.AbstractStore.download_remote_dir">download_remote_dir() (sky.data.storage.AbstractStore method)</a>
 </li>
       <li><a href="sky.html#sky.optimizer.DummyCloud">DummyCloud (class in sky.optimizer)</a>
@@ -881,6 +913,8 @@
 </li>
       <li><a href="sky.html#sky.registry.fill_in_launchable_resources">fill_in_launchable_resources() (in module sky.registry)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.filter_autoscaler_events">filter_autoscaler_events() (in module sky.skylet.ray_patches.worker)</a>
+</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="sky.html#sky.sky_logging.NewLineFormatter.format">format() (sky.sky_logging.NewLineFormatter method)</a>
@@ -925,6 +959,8 @@
 </li>
       <li><a href="sky.html#sky.authentication.generate_rsa_key_pair">generate_rsa_key_pair() (in module sky.authentication)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.get">get() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.get_accelerator_hourly_cost">get_accelerator_hourly_cost() (in module sky.clouds.service_catalog)</a>
 
       <ul>
@@ -968,6 +1004,8 @@
 </li>
       </ul></li>
       <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.get_accelerators_from_instance_type_impl">get_accelerators_from_instance_type_impl() (in module sky.clouds.service_catalog.common)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.get_actor">get_actor() (in module sky.skylet.ray_patches.worker)</a>
 </li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.get_backend_from_handle">get_backend_from_handle() (in module sky.backends.backend_utils)</a>
 </li>
@@ -1035,6 +1073,8 @@
         <li><a href="sky.html#sky.DagContext.get_current_dag">(sky.DagContext class method)</a>
 </li>
       </ul></li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.get_dashboard_url">get_dashboard_url() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.get_data_path">get_data_path() (in module sky.clouds.service_catalog.common)</a>
 </li>
       <li><a href="sky.html#sky.AWS.get_default_ami">get_default_ami() (sky.AWS class method)</a>
@@ -1147,6 +1187,8 @@
       </ul></li>
       <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.azure_catalog.get_gen_version_from_instance_type">get_gen_version_from_instance_type() (in module sky.clouds.service_catalog.azure_catalog)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.get_gpu_ids">get_gpu_ids() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.html#sky.Dag.get_graph">get_graph() (sky.Dag method)</a>
 
       <ul>
@@ -1203,6 +1245,8 @@
       </ul></li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.JobLibCodeGen.get_log_path">get_log_path() (sky.backends.backend_utils.JobLibCodeGen method)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.get_objects">get_objects() (sky.skylet.ray_patches.worker.Worker method)</a>
+</li>
       <li><a href="sky.data.html#sky.data.Storage.get_or_copy_to_azure_blob">get_or_copy_to_azure_blob() (sky.data.Storage method)</a>
 
       <ul>
@@ -1251,6 +1295,8 @@
         <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.azure_catalog.get_region_zones_for_instance_type">(in module sky.clouds.service_catalog.azure_catalog)</a>
 </li>
       </ul></li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.get_resource_ids">get_resource_ids() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.html#sky.Task.get_resources">get_resources() (sky.Task method)</a>
 
       <ul>
@@ -1259,11 +1305,15 @@
       </ul></li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.get_run_timestamp">get_run_timestamp() (in module sky.backends.backend_utils)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.get_serialization_context">get_serialization_context() (sky.skylet.ray_patches.worker.Worker method)</a>
+</li>
       <li><a href="sky.html#sky.global_user_state.get_status_from_cluster_name">get_status_from_cluster_name() (in module sky.global_user_state)</a>
 </li>
       <li><a href="sky.html#sky.cloud_stores.get_storage_from_path">get_storage_from_path() (in module sky.cloud_stores)</a>
 </li>
       <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.get_tpus">get_tpus() (in module sky.clouds.service_catalog)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.global_worker">global_worker (in module sky.skylet.ray_patches.worker)</a>
 </li>
       <li>
     GPU_NAME
@@ -1284,6 +1334,8 @@
         <li><a href="sky.skylet.html#sky.skylet.job_lib.JobStatus.INIT">(sky.skylet.job_lib.JobStatus attribute)</a>
 </li>
       </ul></li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.init">init() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.html#sky.sky_logging.init_logger">init_logger() (in module sky.sky_logging)</a>
 </li>
       <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.InstanceTypeInfo.instance_type">instance_type (sky.clouds.service_catalog.common.InstanceTypeInfo property)</a>
@@ -1334,6 +1386,8 @@
         <li><a href="sky.html#sky.resources.Resources.is_empty">(sky.resources.Resources method)</a>
 </li>
       </ul></li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.is_initialized">is_initialized() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.html#sky.Resources.is_launchable">is_launchable() (sky.Resources method)</a>
 
       <ul>
@@ -1411,6 +1465,14 @@
   </ul></td>
 </tr></table>
 
+<h2 id="K">K</h2>
+<table style="width: 100%" class="indextable genindextable"><tr>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.kill">kill() (in module sky.skylet.ray_patches.worker)</a>
+</li>
+  </ul></td>
+</tr></table>
+
 <h2 id="L">L</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
@@ -1444,6 +1506,12 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.list_accelerators_impl">list_accelerators_impl() (in module sky.clouds.service_catalog.common)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.listen_error_messages_from_gcs">listen_error_messages_from_gcs() (in module sky.skylet.ray_patches.worker)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.listen_error_messages_raylet">listen_error_messages_raylet() (in module sky.skylet.ray_patches.worker)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.load_code_from_local">load_code_from_local (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
       <li><a href="sky.backends.html#sky.backends.LocalDockerBackend">LocalDockerBackend (class in sky.backends)</a>
 
       <ul>
@@ -1468,7 +1536,11 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="sky.html#sky.cli.main">main() (in module sky.cli)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.main_loop">main_loop() (sky.skylet.ray_patches.worker.Worker method)</a>
+</li>
       <li><a href="sky.backends.html#sky.backends.docker_utils.make_bash_from_multiline">make_bash_from_multiline() (in module sky.backends.docker_utils)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.make_decorator">make_decorator() (in module sky.skylet.ray_patches.worker)</a>
 </li>
       <li><a href="sky.html#sky.AWS.make_deploy_resources_variables">make_deploy_resources_variables() (sky.AWS method)</a>
 
@@ -1598,6 +1670,8 @@
 </li>
         <li><a href="sky.skylet.ray_patches.html#module-sky.skylet.ray_patches">sky.skylet.ray_patches</a>
 </li>
+        <li><a href="sky.skylet.ray_patches.html#module-sky.skylet.ray_patches.worker">sky.skylet.ray_patches.worker</a>
+</li>
         <li><a href="sky.skylet.html#module-sky.skylet.util_lib">sky.skylet.util_lib</a>
 </li>
         <li><a href="sky.html#module-sky.task">sky.task</a>
@@ -1625,7 +1699,11 @@
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.namespace">namespace (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
       <li><a href="sky.html#sky.sky_logging.NewLineFormatter">NewLineFormatter (class in sky.sky_logging)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.node_ip_address">node_ip_address (sky.skylet.ray_patches.worker.Worker property)</a>
 </li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.SshMode.NON_INTERACTIVE">NON_INTERACTIVE (sky.backends.backend_utils.SshMode attribute)</a>
 </li>
@@ -1669,6 +1747,8 @@
 </li>
       <li><a href="sky.skylet.html#sky.skylet.job_lib.JobStatus.PENDING">PENDING (sky.skylet.job_lib.JobStatus attribute)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.placement_group_id">placement_group_id (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
       <li><a href="sky.html#sky.dag.DagContext.pop_dag">pop_dag() (sky.dag.DagContext class method)</a>
 
       <ul>
@@ -1689,8 +1769,14 @@
         <li><a href="sky.backends.html#sky.backends.LocalDockerBackend.post_execute">(sky.backends.LocalDockerBackend method)</a>
 </li>
       </ul></li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.print_logs">print_logs() (sky.skylet.ray_patches.worker.Worker method)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.print_to_stdstream">print_to_stdstream() (in module sky.skylet.ray_patches.worker)</a>
+</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.print_worker_logs">print_worker_logs() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.html#sky.execution.Stage.PROVISION">PROVISION (sky.execution.Stage attribute)</a>
 </li>
       <li><a href="sky.backends.html#sky.backends.Backend.provision">provision() (sky.backends.Backend method)</a>
@@ -1717,6 +1803,10 @@
       </ul></li>
       <li><a href="sky.backends.html#sky.backends.docker_utils.push_dockerimage">push_dockerimage() (in module sky.backends.docker_utils)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.put">put() (in module sky.skylet.ray_patches.worker)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.put_object">put_object() (sky.skylet.ray_patches.worker.Worker method)</a>
+</li>
   </ul></td>
 </tr></table>
 
@@ -1731,6 +1821,8 @@
 <h2 id="R">R</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.raise_errors">raise_errors() (sky.skylet.ray_patches.worker.Worker method)</a>
+</li>
       <li><a href="sky.backends.html#sky.backends.cloud_vm_ray_backend.RayCodeGen">RayCodeGen (class in sky.backends.cloud_vm_ray_backend)</a>
 </li>
       <li><a href="sky.clouds.service_catalog.html#sky.clouds.service_catalog.common.read_catalog">read_catalog() (in module sky.clouds.service_catalog.common)</a>
@@ -1819,6 +1911,8 @@
       </ul></li>
       <li><a href="sky.backends.html#sky.backends.cloud_vm_ray_backend.RayCodeGen.register_run_fn">register_run_fn() (sky.backends.cloud_vm_ray_backend.RayCodeGen method)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.remote">remote() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.html#sky.Dag.remove">remove() (sky.Dag method)</a>
 
       <ul>
@@ -1851,6 +1945,8 @@
 </li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.run_command_on_ip_via_ssh">run_command_on_ip_via_ssh() (in module sky.backends.backend_utils)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.run_function_on_all_workers">run_function_on_all_workers() (sky.skylet.ray_patches.worker.Worker method)</a>
+</li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.run_no_outputs">run_no_outputs() (in module sky.backends.backend_utils)</a>
 </li>
       <li><a href="sky.backends.html#sky.backends.cloud_vm_ray_backend.CloudVmRayBackend.run_on_head">run_on_head() (sky.backends.cloud_vm_ray_backend.CloudVmRayBackend method)</a>
@@ -1864,6 +1960,8 @@
       <li><a href="sky.skylet.html#sky.skylet.log_lib.run_with_log">run_with_log() (in module sky.skylet.log_lib)</a>
 </li>
       <li><a href="sky.skylet.html#sky.skylet.job_lib.JobStatus.RUNNING">RUNNING (sky.skylet.job_lib.JobStatus attribute)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.runtime_env">runtime_env (sky.skylet.ray_patches.worker.Worker property)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -1907,6 +2005,10 @@
       </ul></li>
       <li><a href="sky.skylet.html#sky.skylet.job_lib.set_job_started">set_job_started() (in module sky.skylet.job_lib)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.set_load_code_from_local">set_load_code_from_local() (sky.skylet.ray_patches.worker.Worker method)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.set_mode">set_mode() (sky.skylet.ray_patches.worker.Worker method)</a>
+</li>
       <li><a href="sky.html#sky.Task.set_outputs">set_outputs() (sky.Task method)</a>
 
       <ul>
@@ -1945,12 +2047,20 @@
 </li>
       <li><a href="sky.html#sky.authentication.setup_gcp_authentication">setup_gcp_authentication() (in module sky.authentication)</a>
 </li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.should_capture_child_tasks_in_placement_group">should_capture_child_tasks_in_placement_group (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.show_in_dashboard">show_in_dashboard() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.skylet.html#sky.skylet.job_lib.show_jobs">show_jobs() (in module sky.skylet.job_lib)</a>
 
       <ul>
         <li><a href="sky.backends.html#sky.backends.backend_utils.JobLibCodeGen.show_jobs">(sky.backends.backend_utils.JobLibCodeGen method)</a>
 </li>
       </ul></li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.shutdown">shutdown() (in module sky.skylet.ray_patches.worker)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.sigterm_handler">sigterm_handler() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li>
     sky
 
@@ -2448,6 +2558,13 @@
 </li>
       </ul></li>
       <li>
+    sky.skylet.ray_patches.worker
+
+      <ul>
+        <li><a href="sky.skylet.ray_patches.html#module-sky.skylet.ray_patches.worker">module</a>
+</li>
+      </ul></li>
+      <li>
     sky.skylet.util_lib
 
       <ul>
@@ -2605,6 +2722,8 @@
         <li><a href="sky.html#sky.OptimizeTarget.TIME">(sky.OptimizeTarget attribute)</a>
 </li>
       </ul></li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.time_string">time_string() (in module sky.skylet.ray_patches.worker)</a>
+</li>
   </ul></td>
 </tr></table>
 
@@ -2649,10 +2768,16 @@
 <h2 id="W">W</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.wait">wait() (in module sky.skylet.ray_patches.worker)</a>
+</li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.wait_until_ray_cluster_ready">wait_until_ray_cluster_ready() (in module sky.backends.backend_utils)</a>
+</li>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker">Worker (class in sky.skylet.ray_patches.worker)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="sky.skylet.ray_patches.html#sky.skylet.ray_patches.worker.Worker.worker_id">worker_id (sky.skylet.ray_patches.worker.Worker property)</a>
+</li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.FileMountHelper.wrap_file_mount">wrap_file_mount() (sky.backends.backend_utils.FileMountHelper class method)</a>
 </li>
       <li><a href="sky.backends.html#sky.backends.backend_utils.write_cluster_config">write_cluster_config() (in module sky.backends.backend_utils)</a>

@@ -101,6 +101,18 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
+  Command Line Interface
+ </span>
+</p>
+<ul class="nav bd-sidenav">
+ <li class="toctree-l1">
+  <a class="reference internal" href="../../reference/cli.html">
+   CLI Reference
+  </a>
+ </li>
+</ul>
+<p aria-level="2" class="caption" role="heading">
+ <span class="caption-text">
   Use Cases
  </span>
 </p>
@@ -133,7 +145,7 @@
 </ul>
 <p aria-level="2" class="caption" role="heading">
  <span class="caption-text">
-  Reference Documentation
+  Features
  </span>
 </p>
 <ul class="nav bd-sidenav">
@@ -155,11 +167,6 @@
  <li class="toctree-l1">
   <a class="reference internal" href="../../reference/job-queue.html">
    Job Queue
-  </a>
- </li>
- <li class="toctree-l1">
-  <a class="reference internal" href="../../reference/cli.html">
-   CLI Reference
   </a>
  </li>
 </ul>
@@ -239,11 +246,11 @@
 <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 <span class="kn">import</span> <span class="nn">tabulate</span>
 
+<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">check</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">clouds</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">dag</span> <span class="k">as</span> <span class="n">dag_lib</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">exceptions</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">global_user_state</span>
-<span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">init</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">resources</span> <span class="k">as</span> <span class="n">resources_lib</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">sky_logging</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">task</span> <span class="k">as</span> <span class="n">task_lib</span>
@@ -608,11 +615,11 @@
 <span class="k">def</span> <span class="nf">_fill_in_launchable_resources</span><span class="p">(</span>
     <span class="n">task</span><span class="p">:</span> <span class="n">Task</span><span class="p">,</span>
     <span class="n">blocked_launchable_resources</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Resources</span><span class="p">]],</span>
-    <span class="n">try_fix_with_sky_init</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">try_fix_with_sky_check</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="n">Resources</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="n">Resources</span><span class="p">]]:</span>
     <span class="n">enabled_clouds</span> <span class="o">=</span> <span class="n">global_user_state</span><span class="o">.</span><span class="n">get_enabled_clouds</span><span class="p">()</span>
-    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">enabled_clouds</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">try_fix_with_sky_init</span><span class="p">:</span>
-        <span class="n">init</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">quiet</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">enabled_clouds</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">try_fix_with_sky_check</span><span class="p">:</span>
+        <span class="n">check</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">quiet</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">_fill_in_launchable_resources</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">blocked_launchable_resources</span><span class="p">,</span>
                                              <span class="kc">False</span><span class="p">)</span>
     <span class="n">launchable</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
@@ -621,13 +628,13 @@
     <span class="k">for</span> <span class="n">resources</span> <span class="ow">in</span> <span class="n">task</span><span class="o">.</span><span class="n">get_resources</span><span class="p">():</span>
         <span class="k">if</span> <span class="n">resources</span><span class="o">.</span><span class="n">cloud</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">_cloud_in_list</span><span class="p">(</span>
                 <span class="n">resources</span><span class="o">.</span><span class="n">cloud</span><span class="p">,</span> <span class="n">enabled_clouds</span><span class="p">):</span>
-            <span class="k">if</span> <span class="n">try_fix_with_sky_init</span><span class="p">:</span>
-                <span class="n">init</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">quiet</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">try_fix_with_sky_check</span><span class="p">:</span>
+                <span class="n">check</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">quiet</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
                 <span class="k">return</span> <span class="n">_fill_in_launchable_resources</span><span class="p">(</span>
                     <span class="n">task</span><span class="p">,</span> <span class="n">blocked_launchable_resources</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
             <span class="k">raise</span> <span class="n">exceptions</span><span class="o">.</span><span class="n">ResourcesUnavailableError</span><span class="p">(</span>
                 <span class="sa">f</span><span class="s1">&#39;Task </span><span class="si">{</span><span class="n">task</span><span class="si">}</span><span class="s1"> requires </span><span class="si">{</span><span class="n">resources</span><span class="o">.</span><span class="n">cloud</span><span class="si">}</span><span class="s1"> which is not &#39;</span>
-                <span class="s1">&#39;enabled. Run `sky init` to enable access to it, &#39;</span>
+                <span class="s1">&#39;enabled. Run `sky check` to enable access to it, &#39;</span>
                 <span class="s1">&#39;or change the cloud requirement.&#39;</span><span class="p">)</span>
         <span class="k">elif</span> <span class="n">resources</span><span class="o">.</span><span class="n">is_launchable</span><span class="p">():</span>
             <span class="n">launchable</span><span class="p">[</span><span class="n">resources</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">resources</span><span class="p">]</span>
