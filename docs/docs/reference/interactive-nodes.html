@@ -338,12 +338,12 @@ $ sky start my-cpu
 <h2>Advanced configuration<a class="headerlink" href="#advanced-configuration" title="Permalink to this headline">¶</a></h2>
 <p>By default, interactive clusters are a single node. If you require a cluster with multiple nodes
 (e.g. for distributed training, etc.), you can launch a cluster using YAML:</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># multi_node.yaml</span><span class="w"></span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="c1"># multi_node.yaml</span>
 
-<span class="nt">num_nodes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">16</span><span class="w"></span>
-<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
-<span class="w">  </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"></span>
-<span class="w">    </span><span class="nt">V100</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span><span class="w"></span>
+<span class="nt">num_nodes</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">16</span>
+<span class="nt">resources</span><span class="p">:</span>
+  <span class="nt">accelerators</span><span class="p">:</span>
+    <span class="nt">V100</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">8</span>
 </pre></div>
 </div>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>sky launch -c my-cluster multi_node.yaml
