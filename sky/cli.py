@@ -1150,7 +1150,8 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
 @_interactive_node_cli_command
 def cpunode(cluster: str, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool], disk_size: Optional[int]):
+            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int]):
     """Launch or attach to an interactive CPU node.
 
     Example:
@@ -1222,7 +1223,8 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
 @_interactive_node_cli_command
 def tpunode(cluster: str, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool], disk_size: Optional[int]):
+            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int]):
     """Launch or attach to an interactive TPU node.
 
     Example:
