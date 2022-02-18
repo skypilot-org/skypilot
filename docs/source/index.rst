@@ -40,6 +40,7 @@ transparent manner.
 
    .. reference/faq
 
+   reference/yaml-spec
    reference/interactive-nodes
    reference/iterative-development
    .. reference/production-workflow
