@@ -4,34 +4,55 @@
 
 Sky is a tool to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
-## Get Started
+## A Quick Example
+The following command can automatically spin up a cluster on the cheapest available cloud fulfilled the required resources, setup and run the commands in the `hello_sky.yaml`
+```bash
+sky launch -c mycluster hello_sky.yaml
+```
+
+```yaml
+# hello_sky.yaml
+resources:
+  accelerators:
+    K80:8
+
+setup: |
+  # Typical use: pip install -r requirements.txt
+  echo "running setup"
+
+run: |
+  # Typical use: make use of resources, such as running training.
+  echo "hello sky!"
+  conda env list
+```
+
+## Getting Started
 <!-- TODO: fill the document link -->
 Please refer to our [document]().
 - [Getting Started]()
 - [SKY CLI]()
 
-## Development
-### Setup
+### Installation
 
 ```bash
-# Sky requires python version >= 3.6
-
-# You can just install the dependencies for
-# certain clouds, e.g., ".[aws,azure,gcp]"
-pip install -e ".[all]"
-
-python examples/resnet_app.py
-
-# Or try other examples:
-ls examples/
+# Clone the sky codebase
+git clone ssh://git@github.com/concretevitamin/sky-experiments.git
+cd sky-experiments
+# Sky requires python >= 3.6.
+pip install ".[all]"
 ```
 
-### Cloud account setup
-Running these setup enables Sky to launch resources on different clouds.
-This should be run on your laptop/development machine where you will use Sky to launch jobs.
+If you only want the dependencies for certain clouds, you can also use
+`".[aws,azure,gcp]"`.
 
-**AWS**. 
-```
+### Cloud Account Setup
+
+Sky currently supports three major cloud providers: AWS, GCP, and Azure.  To run
+tasks in the clouds, configure access to at least one cloud:
+
+**AWS**:
+
+```bash
 # Install boto
 pip install boto3
 
@@ -39,8 +60,11 @@ pip install boto3
 aws configure
 ```
 
-**GCP**.
-```
+To get the **AWS Access Key** required by the :code:`aws configure`, please refer to the [AWS manual](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey). The **Default region name [None]:** and **Default output format [None]:** are optional.
+
+**GCP**:
+
+```bash
 pip install google-api-python-client
 # Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart
 conda install -c conda-forge google-cloud-sdk
@@ -51,20 +75,49 @@ gcloud init
 # Run this if you don't have a credentials file.
 # This will generate ~/.config/gcloud/application_default_credentials.json.
 gcloud auth application-default login
-
-# Export environment variable to .bashrc
-echo GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json >> ~/.bashrc
-source ~/.bashrc
 ```
 
-**Azure**. 
-```
+**Azure**:
+
+```bash
 # Install the Azure CLI
 pip install azure-cli==2.30.0
 # Login azure
 az login
 # Set the subscription to use
 az account set -s <subscription_id>
+```
+
+**Verifying cloud setup**
+
+Sky allows you to verify that cloud credentials are correctly configured using
+the CLI:
+
+```bash
+# Verify cloud account setup
+sky check
+```
+
+This will produce output verifying the correct setup of each supported cloud.
+
+```bash
+Checking credentials to enable clouds for Sky.
+  AWS: enabled
+  GCP: enabled
+  Azure: enabled
+
+Sky will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
+```
+
+## Development
+### Setup
+
+```bash
+# Sky requires python version >= 3.6
+
+# You can just install the dependencies for
+# certain clouds, e.g., ".[aws,azure,gcp]"
+pip install -e ".[all]"
 ```
 
 <!-- TODO (gautam): Removed since we have reversed it -->
