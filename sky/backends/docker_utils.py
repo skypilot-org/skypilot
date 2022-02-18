@@ -8,7 +8,7 @@ from typing import Optional
 
 import colorama
 
-from adaptors import docker
+from sky.adaptors import docker
 from sky import sky_logging
 from sky import task as task_mod
 

@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Optional, Union
 import colorama
 
 from sky import backends
-from adaptors import docker
+from sky.adaptors import docker
 from sky import global_user_state
 from sky import sky_logging
 from sky import resources
