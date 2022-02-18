@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Optional, Union
 import colorama
 
 from sky import backends
-from sky import docker_adaptor
+from adaptors import docker
 from sky import global_user_state
 from sky import sky_logging
 from sky import resources
@@ -110,7 +110,7 @@ class LocalDockerBackend(backends.Backend):
         self.volume_mounts = {}  # Stores the ResourceHandle->volume mounts map
         self.images = {}  # Stores the ResourceHandle->[image_tag, metadata] map
         self.containers = {}
-        self.client = docker_adaptor.from_env()
+        self.client = docker.from_env()
         self._update_state()
 
     def _update_state(self):
@@ -230,7 +230,7 @@ class LocalDockerBackend(backends.Backend):
             # Check if a container exists and remove it to create new one
             _ = self.client.containers.get(handle)  # Throws NotFound error
             self.teardown(handle, terminate=True)
-        except docker_adaptor.not_found_error():
+        except docker.not_found_error():
             # Container does not exist, we're good to go
             pass
         try:
@@ -244,7 +244,7 @@ class LocalDockerBackend(backends.Backend):
                 volumes=volumes,
                 runtime=runtime,
                 labels=labels)
-        except docker_adaptor.api_error() as e:
+        except docker.api_error() as e:
             if 'Unknown runtime specified nvidia' in e.explanation:
                 logger.error(
                     'Unable to run container - nvidia runtime for docker not '

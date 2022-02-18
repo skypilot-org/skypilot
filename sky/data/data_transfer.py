@@ -21,7 +21,7 @@ import os
 from typing import Any
 
 from sky import sky_logging
-from sky.cloud_adaptors import aws, gcp
+from sky.adaptors import aws, gcp
 
 logger = sky_logging.init_logger(__name__)
 
