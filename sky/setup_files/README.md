@@ -1,6 +1,6 @@
 # Sky
 
-![pytest](https://github.com/concretevitamin/sky-experiments/actions/workflows/pytest.yml/badge.svg)
+![pytest](https://github.com/sky-proj/sky/actions/workflows/pytest.yml/badge.svg)
 
 Sky is a tool to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
@@ -28,17 +28,16 @@ run: |
 ```
 
 ## Getting Started
-<!-- TODO: fill the document link -->
-Please refer to our [document]().
-- [Getting Started]()
-- [Sky CLI]()
+Please refer to our [documentation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/index.html).
+- [Quickstart](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/quickstart.html)
+- [Sky CLI](https://sky-proj-sky.readthedocs-hosted.com/en/latest/reference/cli.html)
 
 ### Installation
 
 ```bash
 # Clone the sky codebase
-git clone ssh://git@github.com/concretevitamin/sky-experiments.git
-cd sky-experiments
+git clone ssh://git@github.com:sky-proj/sky.git
+cd sky
 # Sky requires python >= 3.6.
 pip install ".[all]"
 ```
