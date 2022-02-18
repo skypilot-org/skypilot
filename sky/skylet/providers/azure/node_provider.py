@@ -58,7 +58,12 @@ class AzureNodeProvider(NodeProvider):
         NodeProvider.__init__(self, provider_config, cluster_name)
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
-        credential = DefaultAzureCredential(exclude_shared_token_cache_credential=True)
+        # AWS provides managed identity for Azure, but it is not setup properly by
+        # default. This interferes with azure-cli credentials and causes failures,
+        # when using sky to launch Azure on AWS ec2 instances. We disable it to give
+        # way to azure-cli credentials.
+        credential = DefaultAzureCredential(exclude_shared_token_cache_credential=True,
+                                            exclude_managed_identity_credential=True)
         self.compute_client = ComputeManagementClient(credential, subscription_id)
         self.network_client = NetworkManagementClient(credential, subscription_id)
         self.resource_client = ResourceManagementClient(credential, subscription_id)
