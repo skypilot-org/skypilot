@@ -8,6 +8,7 @@ google = None
 
 
 def import_package(func):
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         global googleapiclient, google
@@ -18,9 +19,8 @@ def import_package(func):
                 googleapiclient = _googleapiclient
                 google = _google
             except ImportError:
-                raise ImportError(
-                    'Fail to import dependencies for GCP.'
-                    'See README for how to install it.') from None
+                raise ImportError('Fail to import dependencies for GCP.'
+                                  'See README for how to install it.') from None
         return func(*args, **kwargs)
 
     return wrapper

@@ -9,6 +9,7 @@ botocore = None
 
 
 def import_package(func):
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         global boto3, botocore
@@ -19,9 +20,8 @@ def import_package(func):
                 boto3 = _boto3
                 botocore = _botocore
             except ImportError:
-                raise ImportError(
-                    'Fail to import dependencies for AWS.'
-                    'See README for how to install it.') from None
+                raise ImportError('Fail to import dependencies for AWS.'
+                                  'See README for how to install it.') from None
         return func(*args, **kwargs)
 
     return wrapper
