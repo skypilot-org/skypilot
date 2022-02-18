@@ -8,6 +8,7 @@ install_requires = [
     'wheel',
     'Click',
     'colorama',
+    'cryptography',
     'jinja2',
     'networkx',
     'oauth2client',
