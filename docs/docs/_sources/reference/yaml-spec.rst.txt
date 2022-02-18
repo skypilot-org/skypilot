@@ -68,11 +68,13 @@ describe all fields available.
     # Alternatively, a single setup command (optional) can be provided.
     setup: pip install -r requirements.txt
 
-    # A task script (optional, but recommended) is the main script to run on the
-    # cluster.
+    # A task script (required) is the main script to run on the cluster.
     run: |
       echo "Beginning task."
       python train.py
 
     # Alternatively, a single run command can be provided.
     run: python train.py
+
+
+
