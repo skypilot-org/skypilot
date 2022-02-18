@@ -5,8 +5,8 @@ import setuptools
 ROOT_DIR = os.path.dirname(__file__)
 
 install_requires = [
+    'wheel',
     'Click',
-    'absl-py',
     'colorama',
     'jinja2',
     'networkx',
@@ -15,17 +15,15 @@ install_requires = [
     'pycryptodome==3.12.0',
     'pendulum',
     'PrettyTable',
-    'pytest',
     'ray[default]',
     'tabulate',
-    'docker',
-    'wheel',
 ]
 
 extras_require = {
     'aws': ['awscli==1.22.17', 'boto3'],
     'azure': ['azure-cli==2.30.0'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
+    'docker': ['docker'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

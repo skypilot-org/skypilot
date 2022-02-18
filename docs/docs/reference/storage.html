@@ -311,50 +311,50 @@ However, you can have them backed by sky Storage, which uploads
 the files to a cloud store (e.g. S3, GCS) and have them persist there by
 specifying the <code class="code docutils literal notranslate"><span class="pre">name</span></code>, <code class="code docutils literal notranslate"><span class="pre">source</span></code> and <code class="code docutils literal notranslate"><span class="pre">persistent</span></code> fields. By
 enabling persistence, file_mount sync can be made significantly faster.</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">storage-demo</span><span class="w"></span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">storage-demo</span>
 
-<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
-<span class="w">  </span><span class="nt">cloud</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws</span><span class="w"></span>
-<span class="w">  </span><span class="nt">instance_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">m5.2xlarge</span><span class="w"></span>
+<span class="nt">resources</span><span class="p">:</span>
+  <span class="nt">cloud</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">aws</span>
+  <span class="nt">instance_type</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">m5.2xlarge</span>
 
-<span class="nt">file_mounts</span><span class="p">:</span><span class="w"></span>
-<span class="w">  </span><span class="c1"># This uses rsync to directly copy files from your machine to the remote</span><span class="w"></span>
-<span class="w">  </span><span class="c1"># VM at /datasets. Since this uses rsync, the ~/datasets folder is</span><span class="w"></span>
-<span class="w">  </span><span class="c1"># uploaded on each execution.</span><span class="w"></span>
-<span class="w">  </span><span class="nt">/datasets</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/datasets</span><span class="w"></span>
+<span class="nt">file_mounts</span><span class="p">:</span>
+  <span class="c1"># This uses rsync to directly copy files from your machine to the remote</span>
+  <span class="c1"># VM at /datasets. Since this uses rsync, the ~/datasets folder is</span>
+  <span class="c1"># uploaded on each execution.</span>
+  <span class="nt">/datasets</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">~/datasets</span>
 
-<span class="w">  </span><span class="c1"># This uses sky Storage to first create a S3 bucket named sky-dataset,</span><span class="w"></span>
-<span class="w">  </span><span class="c1"># copies the contents of ~/datasets to the remote bucket and makes the</span><span class="w"></span>
-<span class="w">  </span><span class="c1"># bucket persistent (i.e., the bucket is not deleted after the completion of</span><span class="w"></span>
-<span class="w">  </span><span class="c1"># this sky task, and future invocations of this bucket will be much faster).</span><span class="w"></span>
-<span class="w">  </span><span class="c1"># The bucket is mounted at /datasets-storage.</span><span class="w"></span>
-<span class="w">  </span><span class="nt">/datasets-storage</span><span class="p">:</span><span class="w"></span>
-<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sky-dataset</span><span class="w"></span>
-<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/datasets</span><span class="w"></span>
-<span class="w">    </span><span class="nt">force_stores</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">s3</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># Could be [s3, gcs], [gcs] default: None</span><span class="w"></span>
-<span class="w">    </span><span class="nt">persistent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span><span class="w">  </span><span class="c1"># Defaults to True, can be set to false.</span><span class="w"></span>
+  <span class="c1"># This uses sky Storage to first create a S3 bucket named sky-dataset,</span>
+  <span class="c1"># copies the contents of ~/datasets to the remote bucket and makes the</span>
+  <span class="c1"># bucket persistent (i.e., the bucket is not deleted after the completion of</span>
+  <span class="c1"># this sky task, and future invocations of this bucket will be much faster).</span>
+  <span class="c1"># The bucket is mounted at /datasets-storage.</span>
+  <span class="nt">/datasets-storage</span><span class="p">:</span>
+    <span class="nt">name</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">sky-dataset</span>
+    <span class="nt">source</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">~/datasets</span>
+    <span class="nt">force_stores</span><span class="p">:</span> <span class="p p-Indicator">[</span><span class="nv">s3</span><span class="p p-Indicator">]</span> <span class="c1"># Could be [s3, gcs], [gcs] default: None</span>
+    <span class="nt">persistent</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">True</span>  <span class="c1"># Defaults to True, can be set to false.</span>
 
-<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
-<span class="w">  </span><span class="no">pwd</span><span class="w"></span>
-<span class="w">  </span><span class="no">ls -la /</span><span class="w"></span>
+<span class="nt">run</span><span class="p">:</span> <span class="p p-Indicator">|</span>
+  <span class="no">pwd</span>
+  <span class="no">ls -la /</span>
 </pre></div>
 </div>
 <p>Finally, you can also directly mount s3/gcs buckets in your remote VM by
 providing the path to the s3/gcs bucket.</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">storage-demo</span><span class="w"></span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">storage-demo</span>
 
-<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
-<span class="w">  </span><span class="nt">cloud</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws</span><span class="w"></span>
-<span class="w">  </span><span class="nt">instance_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">m5.2xlarge</span><span class="w"></span>
+<span class="nt">resources</span><span class="p">:</span>
+  <span class="nt">cloud</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">aws</span>
+  <span class="nt">instance_type</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">m5.2xlarge</span>
 
-<span class="nt">file_mounts</span><span class="p">:</span><span class="w"></span>
-<span class="w">  </span><span class="c1"># This re-uses a predefined bucket (sky-dataset, defined above) and</span><span class="w"></span>
-<span class="w">  </span><span class="c1"># mounts it directly at /datasets-s3.</span><span class="w"></span>
-<span class="w">  </span><span class="nt">/datasets-s3</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">s3://sky-dataset</span><span class="w"></span>
+<span class="nt">file_mounts</span><span class="p">:</span>
+  <span class="c1"># This re-uses a predefined bucket (sky-dataset, defined above) and</span>
+  <span class="c1"># mounts it directly at /datasets-s3.</span>
+  <span class="nt">/datasets-s3</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">s3://sky-dataset</span>
 
-<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
-<span class="w">  </span><span class="no">pwd</span><span class="w"></span>
-<span class="w">  </span><span class="no">ls -la /</span><span class="w"></span>
+<span class="nt">run</span><span class="p">:</span> <span class="p p-Indicator">|</span>
+  <span class="no">pwd</span>
+  <span class="no">ls -la /</span>
 </pre></div>
 </div>
 </div>
@@ -369,25 +369,25 @@ without mounting it, while others may want to re-use pre-existing storage
 objects. They can do so using the storage and storage_mount fields, which are
 at 1:1 parity with the sky.Storage python API.</p>
 <p>Here’s an example using the declarative API.</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">storage-demo</span><span class="w"></span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">name</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">storage-demo</span>
 
-<span class="nt">resources</span><span class="p">:</span><span class="w"></span>
-<span class="w">  </span><span class="nt">cloud</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws</span><span class="w"></span>
-<span class="w">  </span><span class="nt">instance_type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">m5.2xlarge</span><span class="w"></span>
+<span class="nt">resources</span><span class="p">:</span>
+  <span class="nt">cloud</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">aws</span>
+  <span class="nt">instance_type</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">m5.2xlarge</span>
 
-<span class="nt">storage</span><span class="p">:</span><span class="w"></span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sky-dataset-decl</span><span class="w"></span>
-<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/datasets</span><span class="w"></span>
-<span class="w">    </span><span class="c1">#force_stores: [s3] # Could be [s3, gcs], [gcs] default: None</span><span class="w"></span>
-<span class="w">    </span><span class="nt">persistent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span><span class="w"></span>
+<span class="nt">storage</span><span class="p">:</span>
+  <span class="p p-Indicator">-</span> <span class="nt">name</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">sky-dataset-decl</span>
+    <span class="nt">source</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">~/datasets</span>
+    <span class="c1">#force_stores: [s3] # Could be [s3, gcs], [gcs] default: None</span>
+    <span class="nt">persistent</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">True</span>
 
-<span class="nt">storage_mounts</span><span class="p">:</span><span class="w"></span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">storage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sky-dataset-decl</span><span class="w"> </span><span class="c1"># Name of the storage defined above</span><span class="w"></span>
-<span class="w">    </span><span class="nt">mount_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/datasets-decl</span><span class="w"> </span><span class="c1"># Path to mount the storage at</span><span class="w"></span>
+<span class="nt">storage_mounts</span><span class="p">:</span>
+  <span class="p p-Indicator">-</span> <span class="nt">storage</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">sky-dataset-decl</span> <span class="c1"># Name of the storage defined above</span>
+    <span class="nt">mount_path</span><span class="p">:</span> <span class="l l-Scalar l-Scalar-Plain">/datasets-decl</span> <span class="c1"># Path to mount the storage at</span>
 
-<span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
-<span class="w">  </span><span class="no">pwd</span><span class="w"></span>
-<span class="w">  </span><span class="no">ls -la /</span><span class="w"></span>
+<span class="nt">run</span><span class="p">:</span> <span class="p p-Indicator">|</span>
+  <span class="no">pwd</span>
+  <span class="no">ls -la /</span>
 </pre></div>
 </div>
 <p>Storage YAML field reference:</p>

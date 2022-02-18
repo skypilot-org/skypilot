@@ -398,6 +398,12 @@
                                <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
                                <span class="n">help</span><span class="o">=</span><span class="s1">&#39;If true, use spot instances.&#39;</span><span class="p">)</span>
 
+    <span class="n">disk_size</span> <span class="o">=</span> <span class="n">click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s1">&#39;--disk-size&#39;</span><span class="p">,</span>
+                             <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                             <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+                             <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                             <span class="n">help</span><span class="o">=</span><span class="p">(</span><span class="s1">&#39;OS disk size in GBs.&#39;</span><span class="p">))</span>
+
     <span class="n">click_decorators</span> <span class="o">=</span> <span class="p">[</span>
         <span class="n">cli</span><span class="o">.</span><span class="n">command</span><span class="p">(),</span>
         <span class="n">cluster_option</span><span class="p">,</span>
@@ -413,6 +419,7 @@
         <span class="c1"># Attach options</span>
         <span class="n">screen_option</span><span class="p">,</span>
         <span class="n">tmux_option</span><span class="p">,</span>
+        <span class="n">disk_size</span><span class="p">,</span>
     <span class="p">]</span>
     <span class="n">decorator</span> <span class="o">=</span> <span class="n">functools</span><span class="o">.</span><span class="n">reduce</span><span class="p">(</span><span class="k">lambda</span> <span class="n">res</span><span class="p">,</span> <span class="n">f</span><span class="p">:</span> <span class="n">f</span><span class="p">(</span><span class="n">res</span><span class="p">),</span>
                                  <span class="nb">reversed</span><span class="p">(</span><span class="n">click_decorators</span><span class="p">),</span> <span class="n">cli_func</span><span class="p">)</span>
@@ -681,10 +688,15 @@
               <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
               <span class="n">help</span><span class="o">=</span><span class="p">(</span><span class="s1">&#39;Task name. Overrides the &quot;name&quot; &#39;</span>
                     <span class="s1">&#39;config in the YAML if both are supplied.&#39;</span><span class="p">))</span>
+<span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s1">&#39;--disk-size&#39;</span><span class="p">,</span>
+              <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+              <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+              <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+              <span class="n">help</span><span class="o">=</span><span class="p">(</span><span class="s1">&#39;OS disk size in GBs.&#39;</span><span class="p">))</span>
 <span class="k">def</span> <span class="nf">launch</span><span class="p">(</span><span class="n">entrypoint</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cluster</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">dryrun</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
            <span class="n">detach_run</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">backend_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">workdir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
            <span class="n">cloud</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">gpus</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">use_spot</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span>
-           <span class="n">name</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]):</span>
+           <span class="n">name</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">disk_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]):</span>
     <span class="sd">&quot;&quot;&quot;Launch a task from a YAML or a command (rerun setup if cluster exists).</span>
 
 <span class="sd">    If entrypoint points to a valid YAML file, it is read in as the task</span>
@@ -723,6 +735,8 @@
             <span class="n">new_resources</span><span class="o">.</span><span class="n">accelerators</span> <span class="o">=</span> <span class="n">_parse_accelerator_options</span><span class="p">(</span><span class="n">gpus</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">use_spot</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">new_resources</span><span class="o">.</span><span class="n">use_spot</span> <span class="o">=</span> <span class="n">use_spot</span>
+        <span class="k">if</span> <span class="n">disk_size</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">new_resources</span><span class="o">.</span><span class="n">disk_size</span> <span class="o">=</span> <span class="n">disk_size</span>
         <span class="n">task</span><span class="o">.</span><span class="n">set_resources</span><span class="p">({</span><span class="n">new_resources</span><span class="p">})</span>
         <span class="k">if</span> <span class="n">name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">task</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span>
@@ -1298,7 +1312,7 @@
 <span class="k">def</span> <span class="nf">gpunode</span><span class="p">(</span><span class="n">cluster</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">port_forward</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]],</span>
             <span class="n">cloud</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">instance_type</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
             <span class="n">gpus</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">spot</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span> <span class="n">screen</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span>
-            <span class="n">tmux</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">]):</span>
+            <span class="n">tmux</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span> <span class="n">disk_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]):</span>
     <span class="sd">&quot;&quot;&quot;Launch or attach to an interactive GPU node.</span>
 
 <span class="sd">    Example:</span>
@@ -1359,7 +1373,8 @@
     <span class="n">resources</span> <span class="o">=</span> <span class="n">sky</span><span class="o">.</span><span class="n">Resources</span><span class="p">(</span><span class="n">cloud</span><span class="o">=</span><span class="n">cloud_provider</span><span class="p">,</span>
                               <span class="n">instance_type</span><span class="o">=</span><span class="n">instance_type</span><span class="p">,</span>
                               <span class="n">accelerators</span><span class="o">=</span><span class="n">gpus</span><span class="p">,</span>
-                              <span class="n">use_spot</span><span class="o">=</span><span class="n">spot</span><span class="p">)</span>
+                              <span class="n">use_spot</span><span class="o">=</span><span class="n">spot</span><span class="p">,</span>
+                              <span class="n">disk_size</span><span class="o">=</span><span class="n">disk_size</span><span class="p">)</span>
 
     <span class="n">_create_and_ssh_into_node</span><span class="p">(</span>
         <span class="s1">&#39;gpunode&#39;</span><span class="p">,</span>
@@ -1374,7 +1389,8 @@
 <span class="nd">@_interactive_node_cli_command</span>
 <span class="k">def</span> <span class="nf">cpunode</span><span class="p">(</span><span class="n">cluster</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">port_forward</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]],</span>
             <span class="n">cloud</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">instance_type</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
-            <span class="n">spot</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span> <span class="n">screen</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span> <span class="n">tmux</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">]):</span>
+            <span class="n">spot</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span> <span class="n">screen</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span> <span class="n">tmux</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span>
+            <span class="n">disk_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]):</span>
     <span class="sd">&quot;&quot;&quot;Launch or attach to an interactive CPU node.</span>
 
 <span class="sd">    Example:</span>
@@ -1430,7 +1446,8 @@
         <span class="n">spot</span> <span class="o">=</span> <span class="n">default_resources</span><span class="o">.</span><span class="n">use_spot</span>
     <span class="n">resources</span> <span class="o">=</span> <span class="n">sky</span><span class="o">.</span><span class="n">Resources</span><span class="p">(</span><span class="n">cloud</span><span class="o">=</span><span class="n">cloud_provider</span><span class="p">,</span>
                               <span class="n">instance_type</span><span class="o">=</span><span class="n">instance_type</span><span class="p">,</span>
-                              <span class="n">use_spot</span><span class="o">=</span><span class="n">spot</span><span class="p">)</span>
+                              <span class="n">use_spot</span><span class="o">=</span><span class="n">spot</span><span class="p">,</span>
+                              <span class="n">disk_size</span><span class="o">=</span><span class="n">disk_size</span><span class="p">)</span>
 
     <span class="n">_create_and_ssh_into_node</span><span class="p">(</span>
         <span class="s1">&#39;cpunode&#39;</span><span class="p">,</span>
@@ -1445,7 +1462,8 @@
 <span class="nd">@_interactive_node_cli_command</span>
 <span class="k">def</span> <span class="nf">tpunode</span><span class="p">(</span><span class="n">cluster</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">port_forward</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]],</span>
             <span class="n">instance_type</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">tpus</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
-            <span class="n">spot</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span> <span class="n">screen</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span> <span class="n">tmux</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">]):</span>
+            <span class="n">spot</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span> <span class="n">screen</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span> <span class="n">tmux</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">],</span>
+            <span class="n">disk_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]):</span>
     <span class="sd">&quot;&quot;&quot;Launch or attach to an interactive TPU node.</span>
 
 <span class="sd">    Example:</span>
@@ -1500,7 +1518,8 @@
     <span class="n">resources</span> <span class="o">=</span> <span class="n">sky</span><span class="o">.</span><span class="n">Resources</span><span class="p">(</span><span class="n">cloud</span><span class="o">=</span><span class="n">sky</span><span class="o">.</span><span class="n">GCP</span><span class="p">(),</span>
                               <span class="n">instance_type</span><span class="o">=</span><span class="n">instance_type</span><span class="p">,</span>
                               <span class="n">accelerators</span><span class="o">=</span><span class="n">tpus</span><span class="p">,</span>
-                              <span class="n">use_spot</span><span class="o">=</span><span class="n">spot</span><span class="p">)</span>
+                              <span class="n">use_spot</span><span class="o">=</span><span class="n">spot</span><span class="p">,</span>
+                              <span class="n">disk_size</span><span class="o">=</span><span class="n">disk_size</span><span class="p">)</span>
 
     <span class="n">_create_and_ssh_into_node</span><span class="p">(</span>
         <span class="s1">&#39;tpunode&#39;</span><span class="p">,</span>
