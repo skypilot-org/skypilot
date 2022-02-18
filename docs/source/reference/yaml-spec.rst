@@ -19,7 +19,7 @@ describe all fields available.
     # across all nodes.
     num_nodes: 4
 
-    # Resource requirements (optional).
+    # Per-node resource requirements (optional).
     resources:
       cloud: aws # A cloud (optional) can be specified, if desired.
 
