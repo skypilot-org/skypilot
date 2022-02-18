@@ -2,4 +2,3 @@
 
 rm -rf build docs
 make html
-
