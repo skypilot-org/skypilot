@@ -1,6 +1,7 @@
 # Sky
 
 ![pytest](https://github.com/sky-proj/sky/actions/workflows/pytest.yml/badge.svg)
+[![Documentation Status](https://readthedocs.com/projects/sky-proj-sky/badge/?version=latest)](https://sky-proj-sky.readthedocs-hosted.com/en/latest/?badge=latest)
 
 Sky is a tool to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
