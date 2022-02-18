@@ -49,6 +49,9 @@ To get the **AWS Access Key** required by the :code:`aws configure`, please refe
    $ # This will generate ~/.config/gcloud/application_default_credentials.json.
    $ gcloud auth application-default login
 
+If you meet the following error (*RemoveError: 'requests' is a dependency of conda and cannot be removed from conda's operating environment*) while running :code:`conda install -c conda-forge google-cloud-sdk`, please try :code:`conda update --force conda` and run it again.
+
+
 **Azure**:
 
 .. code-block:: console

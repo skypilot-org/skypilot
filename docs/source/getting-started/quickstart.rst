@@ -30,7 +30,7 @@ We can specify the following task attributes with a YAML file:
 - :code:`run` (optional): specifies the commands that must be run as the actual ask
 
 Below is a task YAML that prints "hello sky!" and shows installed Conda environments,
-requiring an NVIDIA Tesla K80 GPU on AWS. (You could find more example yaml files in `examples <https://github.com/concretevitamin/sky-experiments/tree/master/examples>`_)
+requiring an NVIDIA Tesla K80 GPU on AWS. (More example yaml files can be found in `examples <https://github.com/concretevitamin/sky-experiments/tree/master/examples>`_)
 
 .. code-block:: yaml
 

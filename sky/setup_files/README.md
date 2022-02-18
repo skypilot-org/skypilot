@@ -4,6 +4,7 @@
 
 Sky is a tool to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
+<!-- TODO: We need a logo here -->
 ## A Quick Example
 The following command can automatically spin up a cluster on the cheapest available cloud fulfilled the required resources, setup and run the commands in the `hello_sky.yaml`
 ```bash
