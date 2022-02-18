@@ -5,7 +5,9 @@ from typing import Dict, List, NamedTuple, Optional
 import pandas as pd
 
 from sky.clouds import cloud as cloud_lib
+from sky import sky_logging
 
+logger = sky_logging.init_logger(__name__)
 
 class InstanceTypeInfo(NamedTuple):
     """Instance type information.
@@ -119,6 +121,8 @@ def get_instance_type_for_accelerator_impl(
                 assert t.startswith('g4dn') or t.endswith(
                     '_T4_v3'), instance_types
         result.sort_values('Price', ascending=True, inplace=True)
+        logger.info('Multiple instance types satisfy the requirements...')
+        logger.info(f'choosing the cheapest instance among {instance_types}')
     return result.iloc[0]['InstanceType']
 
 

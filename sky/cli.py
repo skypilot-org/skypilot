@@ -1343,7 +1343,11 @@ def check():
               is_flag=True,
               default=False,
               help='Show details of all GPU/TPU/accelerator offerings.')
-def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-builtin
+@click.option('--cloud',
+              default=None,
+              type=str,
+              help='Cloud provider to query.')
+def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pylint: disable=redefined-builtin
     """Show supported GPU/TPU/accelerators.
 
     To show the detailed information of a GPU/TPU type (which clouds offer it,
@@ -1368,7 +1372,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         if gpu_name is None:
-            result = service_catalog.list_accelerator_counts(gpus_only=True)
+            result = service_catalog.list_accelerator_counts(gpus_only=True, clouds=cloud)
 
             # NVIDIA GPUs
             for gpu in service_catalog.get_common_gpus():
@@ -1392,7 +1396,8 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
 
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=gpu_name)
+                                                   name_filter=gpu_name,
+                                                   clouds=cloud)
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = util_lib.create_table([

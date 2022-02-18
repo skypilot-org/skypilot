@@ -142,7 +142,7 @@ def get_region_zones_for_accelerators(
 
 def get_common_gpus() -> List[str]:
     """Returns a list of commonly used GPU names."""
-    return ['V100', 'V100-32GB', 'A100', 'P100', 'K80', 'T4', 'M60']
+    return ['V100', 'V100-32GB', 'A100', 'A100-80GB', 'P100', 'K80', 'T4', 'M60']
 
 
 def get_tpus() -> List[str]:
