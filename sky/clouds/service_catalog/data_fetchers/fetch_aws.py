@@ -5,14 +5,12 @@ This script takes about 1 minute to finish.
 import datetime
 from typing import Tuple
 
-from absl import app
-from absl import logging
 import numpy as np
 import pandas as pd
 import ray
 
 from sky.clouds.service_catalog import common
-from sky.cloud_adaptors import aws
+from sky.adaptors import aws
 
 REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -137,14 +135,8 @@ def get_all_regions_instance_types_df():
     return df
 
 
-def main(argv):
-    del argv  # Unused.
+if __name__ == '__main__':
     ray.init()
-    logging.set_verbosity(logging.DEBUG)
     df = get_all_regions_instance_types_df()
     df.to_csv(common.get_data_path('aws.csv'), index=False)
     print('AWS Service Catalog saved to aws.csv')
-
-
-if __name__ == '__main__':
-    app.run(main)

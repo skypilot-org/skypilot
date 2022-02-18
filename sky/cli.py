@@ -160,8 +160,14 @@ def _interactive_node_cli_command(cli_func):
                                is_flag=True,
                                help='If true, use spot instances.')
 
+    disk_size = click.option('--disk-size',
+                             default=None,
+                             type=int,
+                             required=False,
+                             help=('OS disk size in GBs.'))
+
     click_decorators = [
-        cli.command(),
+        cli.command(cls=_DocumentedCodeCommand),
         cluster_option,
         port_forward_option,
 
@@ -175,6 +181,7 @@ def _interactive_node_cli_command(cli_func):
         # Attach options
         screen_option,
         tmux_option,
+        disk_size,
     ]
     decorator = functools.reduce(lambda res, f: f(res),
                                  reversed(click_decorators), cli_func)
@@ -379,12 +386,23 @@ class _NaturalOrderGroup(click.Group):
         return self.commands.keys()
 
 
+class _DocumentedCodeCommand(click.Command):
+    """Corrects help strings for documented commands such that --help displays
+    properly and code blocks are rendered in the official web documentation.
+    """
+
+    def get_help(self, ctx):
+        help_str = ctx.command.help
+        ctx.command.help = help_str.replace('.. code-block:: bash\n', '\b')
+        return super().get_help(ctx)
+
+
 @click.group(cls=_NaturalOrderGroup)
 def cli():
     pass
 
 
-@cli.command()
+@cli.command(cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 @click.option('--cluster',
               '-c',
@@ -443,10 +461,15 @@ def cli():
               type=str,
               help=('Task name. Overrides the "name" '
                     'config in the YAML if both are supplied.'))
+@click.option('--disk-size',
+              default=None,
+              type=int,
+              required=False,
+              help=('OS disk size in GBs.'))
 def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
            detach_run: bool, backend_name: str, workdir: Optional[str],
            cloud: Optional[str], gpus: Optional[str], use_spot: Optional[bool],
-           name: Optional[str]):
+           name: Optional[str], disk_size: Optional[int]):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If entrypoint points to a valid YAML file, it is read in as the task
@@ -485,6 +508,8 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
             new_resources.accelerators = _parse_accelerator_options(gpus)
         if use_spot is not None:
             new_resources.use_spot = use_spot
+        if disk_size is not None:
+            new_resources.disk_size = disk_size
         task.set_resources({new_resources})
         if name is not None:
             task.name = name
@@ -507,7 +532,7 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
                backend=backend)
 
 
-@cli.command()
+@cli.command(cls=_DocumentedCodeCommand)
 @click.argument('cluster', required=True, type=str)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 @click.option('--detach-run',
@@ -567,26 +592,28 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
 
     Typical workflow:
 
-      # First command: set up the cluster once.
+    .. code-block:: bash
 
-      >> sky launch -c mycluster app.yaml
+        # First command: set up the cluster once.
+        sky launch -c mycluster app.yaml
 
-    \b
-      # Starting iterative development...
-      # For example, modify local workdir code.
-      # Future commands: simply execute the task on the launched cluster.
+    .. code-block:: bash
 
-      >> sky exec mycluster app.yaml
+        # For iterative development, simply execute the task on the launched
+        # cluster.
+        sky exec mycluster app.yaml
 
-      # Do "sky launch" again if anything other than Task.run is modified:
+    .. code-block:: bash
 
-      >> sky launch -c mycluster app.yaml
+        # Do "sky launch" again if anything other than Task.run is modified:
+        sky launch -c mycluster app.yaml
 
     Advanced use cases:
 
-      #  Pass in commands for execution
+    .. code-block:: bash
 
-      >> sky exec mycluster -- echo Hello World
+        #  Pass in commands for execution
+        sky exec mycluster -- echo Hello World
 
     """
     entrypoint = ' '.join(entrypoint)
@@ -838,7 +865,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     backend.run_on_head(handle, code, stream_logs=False, check=True)
 
 
-@cli.command()
+@cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clusters', nargs=-1, required=False)
 @click.option('--all',
               '-a',
@@ -858,22 +885,26 @@ def stop(
 
     Examples:
 
-      \b
-      # Stop a specific cluster.
-      sky stop cluster_name
+    .. code-block:: bash
 
-      \b
-      # Stop multiple clusters.
-      sky stop cluster1 cluster2
+        # Stop a specific cluster.
+        sky stop cluster_name
 
-      \b
-      # Stop all existing clusters.
-      sky stop -a
+    .. code-block:: bash
+
+        # Stop multiple clusters.
+        sky stop cluster1 cluster2
+
+    .. code-block:: bash
+
+        # Stop all existing clusters.
+        sky stop -a
+
     """
     _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=False)
 
 
-@cli.command()
+@cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clusters', nargs=-1, required=False)
 def start(clusters: Tuple[str]):
     """Restart cluster(s).
@@ -887,13 +918,16 @@ def start(clusters: Tuple[str]):
 
     Examples:
 
-      \b
+    .. code-block:: bash
+
       # Restart a specific cluster.
       sky start cluster_name
 
-      \b
+    .. code-block:: bash
+
       # Restart multiple clusters.
       sky start cluster1 cluster2
+
     """
     to_start = []
     if clusters:
@@ -969,7 +1003,7 @@ def start(clusters: Tuple[str]):
         click.secho(f'Cluster {name} started.', fg='green')
 
 
-@cli.command()
+@cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clusters', nargs=-1, required=False)
 @click.option('--all',
               '-a',
@@ -989,17 +1023,21 @@ def down(
 
     Examples:
 
-      \b
-      # Tear down a specific cluster.
-      sky down cluster_name
+    .. code-block:: bash
 
-      \b
-      # Tear down multiple clusters.
-      sky down cluster1 cluster2
+        # Tear down a specific cluster.
+        sky down cluster_name
 
-      \b
-      # Tear down all existing clusters.
-      sky down -a
+    .. code-block:: bash
+
+        # Tear down multiple clusters.
+        sky down cluster1 cluster2
+
+    .. code-block:: bash
+
+        # Tear down all existing clusters.
+        sky down -a
+
     """
     names = clusters
     if not all and not names:
@@ -1060,36 +1098,39 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
 def gpunode(cluster: str, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
             gpus: Optional[str], spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool]):
+            tmux: Optional[bool], disk_size: Optional[int]):
     """Launch or attach to an interactive GPU node.
 
     Example:
 
-      \b
-      # Launch a default gpunode.
-      $ sky gpunode
+    .. code-block:: bash
 
-      \b
-      # Do work, then log out.  The node is kept running.
+        # Launch a default gpunode.
+        sky gpunode
 
-      \b
-      # Attach back to the same node and do more work.
-      $ sky gpunode
+    .. code-block:: bash
 
-      \b
-      # Alternatively, create multiple interactive nodes by specifying names
-      # via --cluster (-c).
-      $ sky gpunode -c node0
-      $ sky gpunode -c node1
+        # Do work, then log out. The node is kept running. Attach back to the
+        # same node and do more work.
+        sky gpunode
 
-      \b
-      # Port forward.
-      sky gpunode --port-forward 8080 --port-forward 4650 -c cluster_name
-      sky gpunode -p 8080 -p 4650 -c cluster_name
+    .. code-block:: bash
 
-      \b
-      # Sync current working directory to ~/workdir on the node.
-      rsync -r . cluster_name:~/workdir
+        # Create many interactive nodes by assigning names via --cluster (-c).
+        sky gpunode -c node0
+        sky gpunode -c node1
+
+    .. code-block:: bash
+
+        # Port forward.
+        sky gpunode --port-forward 8080 --port-forward 4650 -c cluster_name
+        sky gpunode -p 8080 -p 4650 -c cluster_name
+
+    .. code-block:: bash
+
+        # Sync current working directory to ~/workdir on the node.
+        rsync -r . cluster_name:~/workdir
+
     """
     # TODO: Factor out the shared logic below for [gpu|cpu|tpu]node.
     if screen and tmux:
@@ -1121,7 +1162,8 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
                               accelerators=gpus,
-                              use_spot=spot)
+                              use_spot=spot,
+                              disk_size=disk_size)
 
     _create_and_ssh_into_node(
         'gpunode',
@@ -1136,36 +1178,40 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
 @_interactive_node_cli_command
 def cpunode(cluster: str, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
+            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int]):
     """Launch or attach to an interactive CPU node.
 
     Example:
 
-      \b
-      # Launch a default cpunode.
-      $ sky cpunode
+    .. code-block:: bash
 
-      \b
-      # Do work, then log out.  The node is kept running.
+        # Launch a default cpunode.
+        sky cpunode
 
-      \b
-      # Attach back to the same node and do more work.
-      $ sky cpunode
+    .. code-block:: bash
 
-      \b
-      # Alternatively, create multiple interactive nodes by specifying names
-      # via --cluster (-c).
-      $ sky cpunode -c node0
-      $ sky cpunode -c node1
+        # Do work, then log out. The node is kept running. Attach back to the
+        # same node and do more work.
+        sky cpunode
 
-      \b
-      # Port forward.
-      sky cpunode --port-forward 8080 --port-forward 4650 -c cluster_name
-      sky cpunode -p 8080 -p 4650 -c cluster_name
+    .. code-block:: bash
 
-      \b
-      # Sync current working directory to ~/workdir on the node.
-      rsync -r . cluster_name:~/workdir
+        # Create many interactive nodes by assigning names via --cluster (-c).
+        sky cpunode -c node0
+        sky cpunode -c node1
+
+    .. code-block:: bash
+
+        # Port forward.
+        sky cpunode --port-forward 8080 --port-forward 4650 -c cluster_name
+        sky cpunode -p 8080 -p 4650 -c cluster_name
+
+    .. code-block:: bash
+
+        # Sync current working directory to ~/workdir on the node.
+        rsync -r . cluster_name:~/workdir
+
     """
     if screen and tmux:
         raise click.UsageError('Cannot use both screen and tmux.')
@@ -1192,7 +1238,8 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
         spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
-                              use_spot=spot)
+                              use_spot=spot,
+                              disk_size=disk_size)
 
     _create_and_ssh_into_node(
         'cpunode',
@@ -1207,36 +1254,40 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
 @_interactive_node_cli_command
 def tpunode(cluster: str, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
+            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int]):
     """Launch or attach to an interactive TPU node.
 
     Example:
 
-      \b
-      # Launch a default tpunode.
-      $ sky tpunode
+    .. code-block:: bash
 
-      \b
-      # Do work, then log out.  The node is kept running.
+        # Launch a default tpunode.
+        sky tpunode
 
-      \b
-      # Attach back to the same node and do more work.
-      $ sky tpunode
+    .. code-block:: bash
 
-      \b
-      # Alternatively, create multiple interactive nodes by specifying names
-      # via --cluster (-c).
-      $ sky tpunode -c node0
-      $ sky tpunode -c node1
+        # Do work, then log out. The node is kept running. Attach back to the
+        # same node and do more work.
+        sky tpunode
 
-      \b
-      # Port forward.
-      sky tpunode --port-forward 8080 --port-forward 4650 -c cluster_name
-      sky tpunode -p 8080 -p 4650 -c cluster_name
+    .. code-block:: bash
 
-      \b
-      # Sync current working directory to ~/workdir on the node.
-      rsync -r . cluster_name:~/workdir
+        # Create many interactive nodes by assigning names via --cluster (-c).
+        sky tpunode -c node0
+        sky tpunode -c node1
+
+    .. code-block:: bash
+
+        # Port forward.
+        sky tpunode --port-forward 8080 --port-forward 4650 -c cluster_name
+        sky tpunode -p 8080 -p 4650 -c cluster_name
+
+    .. code-block:: bash
+
+        # Sync current working directory to ~/workdir on the node.
+        rsync -r . cluster_name:~/workdir
+
     """
     if screen and tmux:
         raise click.UsageError('Cannot use both screen and tmux.')
@@ -1262,7 +1313,8 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
     resources = sky.Resources(cloud=sky.GCP(),
                               instance_type=instance_type,
                               accelerators=tpus,
-                              use_spot=spot)
+                              use_spot=spot,
+                              disk_size=disk_size)
 
     _create_and_ssh_into_node(
         'tpunode',

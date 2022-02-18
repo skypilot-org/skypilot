@@ -5,9 +5,10 @@ import setuptools
 ROOT_DIR = os.path.dirname(__file__)
 
 install_requires = [
+    'wheel',
     'Click',
-    'absl-py',
     'colorama',
+    'cryptography',
     'jinja2',
     'networkx',
     'oauth2client',
@@ -15,17 +16,19 @@ install_requires = [
     'pycryptodome==3.12.0',
     'pendulum',
     'PrettyTable',
-    'pytest',
     'ray[default]',
     'tabulate',
-    'docker',
-    'wheel',
+    # This is used by ray. The latest 1.44.0 will generate an error
+    # `Fork support is only compatible with the epoll1 and poll
+    # polling strategies`
+    'grpcio<=1.43.0'
 ]
 
 extras_require = {
     'aws': ['awscli==1.22.17', 'boto3'],
     'azure': ['azure-cli==2.30.0'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
+    'docker': ['docker'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

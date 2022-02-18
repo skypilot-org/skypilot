@@ -5,8 +5,8 @@ from typing import Any, Dict, Optional, Set, Tuple
 import subprocess
 import urllib.parse
 
-from sky.cloud_adaptors import aws
-from sky.cloud_adaptors import gcp
+from sky.adaptors import aws
+from sky.adaptors import gcp
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky import global_user_state

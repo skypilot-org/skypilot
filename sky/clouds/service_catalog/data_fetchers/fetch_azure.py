@@ -7,8 +7,6 @@ import subprocess
 from typing import Optional, Tuple
 import urllib
 
-from absl import app
-from absl import logging
 import numpy as np
 import pandas as pd
 import ray
@@ -174,14 +172,8 @@ def get_all_regions_instance_types_df():
     return df_ret
 
 
-def main(argv):
-    del argv  # Unused.
+if __name__ == '__main__':
     ray.init()
-    logging.set_verbosity(logging.DEBUG)
     df = get_all_regions_instance_types_df()
     df.to_csv('../data/azure.csv', index=False)
     print('Azure Service Catalog saved to azure.csv')
-
-
-if __name__ == '__main__':
-    app.run(main)
