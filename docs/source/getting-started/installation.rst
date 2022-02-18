@@ -8,8 +8,8 @@ Install Sky using pip:
 .. code-block:: console
 
    $ # Clone the sky codebase
-   $ git clone ssh://git@github.com/concretevitamin/sky-experiments.git
-   $ cd sky-experiments
+   $ git clone ssh://git@github.com/sky-proj/sky.git
+   $ cd sky
    $ # Sky requires python >= 3.6.
    $ pip install ".[all]"
 
