@@ -12,7 +12,7 @@ import urllib.parse
 
 from sky.backends import backend_utils
 from sky.data import data_utils
-from sky.cloud_adaptors import aws
+from sky.adaptors import aws
 
 
 class CloudStorage:
