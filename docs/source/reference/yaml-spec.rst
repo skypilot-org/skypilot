@@ -59,20 +59,18 @@ describe all fields available.
       /datasets-s3: s3://sky-dataset
 
     # A setup script (optional) can be provided to run when a cluster is provisioned or a
-    # task is launched.
+    # task is launched. Alternatively, a single setup command can be provided by removing |
+    # and using the following syntax:
+    # setup: pip install -r requirements.txt
     setup: |
       echo "Begin setup."
       pip install -r requirements.txt
       echo "Setup complete."
 
-    # Alternatively, a single setup command (optional) can be provided.
-    setup: pip install -r requirements.txt
-
     # A task script (optional, but recommended) is the main script to run on the
-    # cluster.
+    # cluster. Alternatively, a single run command can be provided by removing |
+    # and using the following syntax:
+    # run: python train.py
     run: |
       echo "Beginning task."
       python train.py
-
-    # Alternatively, a single run command can be provided.
-    run: python train.py
