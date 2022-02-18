@@ -2,7 +2,7 @@
 """
 from typing import Any, Tuple
 
-from sky.cloud_adaptors import aws, gcp
+from sky.adaptors import aws, gcp
 
 Client = Any
 
