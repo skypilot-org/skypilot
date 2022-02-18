@@ -32,7 +32,7 @@ tasks in the clouds, configure access to at least one cloud:
    $ # Configure your AWS credentials
    $ aws configure
 
-To get the "AWS Access Key" required by the :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The "Default region name [None]: " and "Default output format [None]:" are optional.
+To get the "AWS Access Key" required by the :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The *Default region name [None]:* and *Default output format [None]:* are optional.
 
 **GCP**:
 
