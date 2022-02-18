@@ -2,7 +2,16 @@
 
 ![pytest](https://github.com/concretevitamin/sky-experiments/actions/workflows/pytest.yml/badge.svg)
 
-## Setup
+Sky is a tool to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
+
+## Get Started
+<!-- TODO: fill the document link -->
+Please refer to our [document]().
+- [Getting Started]()
+- [SKY CLI]()
+
+## Development
+### Setup
 
 ```bash
 # Sky requires python version >= 3.6
@@ -17,7 +26,7 @@ python examples/resnet_app.py
 ls examples/
 ```
 
-## Cloud account setup
+### Cloud account setup
 Running these setup enables Sky to launch resources on different clouds.
 This should be run on your laptop/development machine where you will use Sky to launch jobs.
 
@@ -67,7 +76,7 @@ ssh-add -K /path/to/key  # e.g. ~/.ssh/id_ed25519
 ```
 For more information on GitHub authentication and keys, see their [setup tutorial](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent). -->
 
-## Some general engineering practice suggestions
+### Some general engineering practice suggestions
 
 These are suggestions, not strict rules to follow. For general coding style, follow [google style guide](https://google.github.io/styleguide/pyguide.html).
 
