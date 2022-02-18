@@ -1,8 +1,5 @@
 sphinx==4.3.2
 sphinx-click==3.0.2
-furo==2022.1.2
-myst-nb
-jupyter-sphinx==0.3.2
 pydata-sphinx-theme==0.7.2
 sphinx-autodoc-typehints==1.17.0
 sphinx-book-theme==0.2.0
