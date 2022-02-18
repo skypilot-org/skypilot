@@ -179,7 +179,7 @@ class Task:
                              f'Is it correct? Path: {yaml_path}')
 
         if config is None:
-            raise ValueError('YAML is empty.')
+            config = {}
 
         # TODO: perform more checks on yaml and raise meaningful errors.
         task = Task(
