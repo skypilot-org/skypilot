@@ -1,4 +1,3 @@
-
 # Configuration file for the Sphinx documentation builder.
 
 import sys
@@ -56,5 +55,3 @@ html_theme_options = {
 
 # -- Options for EPUB output
 epub_show_urls = 'footnote'
-
-
