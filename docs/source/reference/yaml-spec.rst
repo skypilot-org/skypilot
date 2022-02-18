@@ -21,12 +21,12 @@ describe all fields available.
 
     # Per-node resource requirements (optional).
     resources:
-      cloud: aws # A cloud (optional) can be specified, if desired.
+      cloud: aws  # A cloud (optional) can be specified, if desired.
 
       # Accelerator requirements (optional) can be specified, use sky show-gpus
       # to view available accelerator configurations.
       accelerators:
-        V100: 4 # Specify the accelerator type and the count per node.
+        V100: 4  # Specify the accelerator type and the count per node.
 
       # Accelerator arguments (optional) provides additional metadata for some
       # accelerators, such as the TensorFlow version for TPUs.
@@ -51,7 +51,7 @@ describe all fields available.
       /datasets-storage:
         name: sky-dataset
         source: ~/datasets
-        force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
+        force_stores: [s3]  # Could be [s3, gcs], [gcs] default: None
         persistent: True  # Defaults to True, can be set to false.
 
       # This re-uses a predefined bucket (sky-dataset, defined above) and mounts it
