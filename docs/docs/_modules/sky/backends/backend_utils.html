@@ -252,7 +252,6 @@
 <span class="kn">import</span> <span class="nn">uuid</span>
 <span class="kn">import</span> <span class="nn">yaml</span>
 <span class="kn">import</span> <span class="nn">zlib</span>
-<span class="kn">import</span> <span class="nn">shutil</span>
 
 <span class="kn">import</span> <span class="nn">jinja2</span>
 
@@ -263,6 +262,7 @@
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">sky_logging</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">resources</span>
 <span class="kn">from</span> <span class="nn">sky</span> <span class="kn">import</span> <span class="n">task</span> <span class="k">as</span> <span class="n">task_lib</span>
+<span class="kn">from</span> <span class="nn">sky.backends</span> <span class="kn">import</span> <span class="n">wheel_utils</span>
 <span class="kn">from</span> <span class="nn">sky.cloud_adaptors</span> <span class="kn">import</span> <span class="n">azure</span>
 <span class="kn">from</span> <span class="nn">sky.skylet</span> <span class="kn">import</span> <span class="n">log_lib</span>
 
@@ -549,50 +549,6 @@
             <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span></div></div>
 
 
-<span class="c1"># TODO(suquark): once we have sky on PYPI, we should directly install sky</span>
-<span class="c1"># from PYPI</span>
-<span class="k">def</span> <span class="nf">_build_sky_wheel</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">:</span>
-    <span class="sd">&quot;&quot;&quot;Build a wheel for sky. This works correctly only when sky is installed</span>
-<span class="sd">    with development/editable mode.&quot;&quot;&quot;</span>
-    <span class="c1"># check if sky is installed under development mode.</span>
-    <span class="n">package_root</span> <span class="o">=</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span><span class="n">sky</span><span class="o">.</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span>
-    <span class="k">if</span> <span class="n">package_root</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s1">&#39;site-packages&#39;</span><span class="p">:</span>
-        <span class="k">raise</span> <span class="ne">EnvironmentError</span><span class="p">(</span><span class="s1">&#39;We can only build wheels for Sky when Sky is &#39;</span>
-                               <span class="s1">&#39;installed under development/editable mode.&#39;</span><span class="p">)</span>
-    <span class="c1"># It is important to normalize the path, otherwise &#39;pip wheel&#39; would treat</span>
-    <span class="c1"># the directory as a file and generate an empty wheel.</span>
-    <span class="n">norm_path</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">package_root</span><span class="p">)</span> <span class="o">+</span> <span class="n">os</span><span class="o">.</span><span class="n">sep</span>
-    <span class="n">username</span> <span class="o">=</span> <span class="n">getpass</span><span class="o">.</span><span class="n">getuser</span><span class="p">()</span>
-    <span class="n">wheel_dir</span> <span class="o">=</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span><span class="n">tempfile</span><span class="o">.</span><span class="n">gettempdir</span><span class="p">())</span> <span class="o">/</span> <span class="sa">f</span><span class="s1">&#39;sky_wheels_</span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s1">&#39;</span>
-    <span class="c1"># remove old wheels</span>
-    <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">wheel_dir</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s1">&#39;sky-*.whl&#39;</span><span class="p">):</span>
-        <span class="n">f</span><span class="o">.</span><span class="n">unlink</span><span class="p">()</span>
-    <span class="c1"># remove pip wheels build directory, otherwise we may include outdated code</span>
-    <span class="n">shutil</span><span class="o">.</span><span class="n">rmtree</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">package_root</span> <span class="o">/</span> <span class="s1">&#39;build&#39;</span><span class="p">),</span> <span class="n">ignore_errors</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="c1"># TODO(suquark): For python&gt;=3.7, &#39;subprocess.run&#39; supports capture of</span>
-        <span class="c1"># the output.</span>
-        <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">([</span>
-            <span class="s1">&#39;pip3&#39;</span><span class="p">,</span> <span class="s1">&#39;wheel&#39;</span><span class="p">,</span> <span class="s1">&#39;--no-deps&#39;</span><span class="p">,</span> <span class="n">norm_path</span><span class="p">,</span> <span class="s1">&#39;--wheel-dir&#39;</span><span class="p">,</span>
-            <span class="nb">str</span><span class="p">(</span><span class="n">wheel_dir</span><span class="p">)</span>
-        <span class="p">],</span>
-                       <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
-                       <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">PIPE</span><span class="p">,</span>
-                       <span class="n">check</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-    <span class="k">except</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">CalledProcessError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Fail to build pip wheel for Sky. &#39;</span>
-                           <span class="sa">f</span><span class="s1">&#39;Error message: </span><span class="si">{</span><span class="n">e</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span> <span class="kn">from</span> <span class="nn">e</span>
-    <span class="k">try</span><span class="p">:</span>
-        <span class="n">latest_wheel</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">wheel_dir</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s1">&#39;sky-*.whl&#39;</span><span class="p">),</span> <span class="n">key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getctime</span><span class="p">)</span>
-    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
-        <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="s1">&#39;Could not find built Sky wheels.&#39;</span><span class="p">)</span> <span class="kn">from</span> <span class="bp">None</span>
-    <span class="c1"># cleanup older wheels</span>
-    <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">wheel_dir</span><span class="o">.</span><span class="n">iterdir</span><span class="p">():</span>
-        <span class="k">if</span> <span class="n">f</span> <span class="o">!=</span> <span class="n">latest_wheel</span><span class="p">:</span>
-            <span class="n">f</span><span class="o">.</span><span class="n">unlink</span><span class="p">()</span>
-    <span class="k">return</span> <span class="n">wheel_dir</span><span class="o">.</span><span class="n">absolute</span><span class="p">()</span>
-
-
 <span class="c1"># TODO: too many things happening here - leaky abstraction. Refactor.</span>
 <div class="viewcode-block" id="write_cluster_config"><a class="viewcode-back" href="../../../sky.backends.html#sky.backends.backend_utils.write_cluster_config">[docs]</a><span class="k">def</span> <span class="nf">write_cluster_config</span><span class="p">(</span><span class="n">task</span><span class="p">:</span> <span class="n">task_lib</span><span class="o">.</span><span class="n">Task</span><span class="p">,</span>
                          <span class="n">to_provision</span><span class="p">:</span> <span class="n">Resources</span><span class="p">,</span>
@@ -698,9 +654,9 @@
                 <span class="n">source</span><span class="o">=</span><span class="n">remote</span><span class="p">,</span> <span class="n">target</span><span class="o">=</span><span class="n">wrapped_remote</span><span class="p">)</span>
             <span class="n">initialization_commands</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
 
-    <span class="c1"># TODO(suquark): Cache built wheels to prevent rebuilding.</span>
-    <span class="c1"># This may not be necessary because it&#39;s fast to build the wheel.</span>
-    <span class="n">local_wheel_path</span> <span class="o">=</span> <span class="n">_build_sky_wheel</span><span class="p">()</span>
+    <span class="c1"># TODO(suquark): once we have sky on PYPI, we should directly install sky</span>
+    <span class="c1"># from PYPI</span>
+    <span class="n">local_wheel_path</span> <span class="o">=</span> <span class="n">wheel_utils</span><span class="o">.</span><span class="n">build_sky_wheel</span><span class="p">()</span>
     <span class="n">yaml_path</span> <span class="o">=</span> <span class="n">_fill_template</span><span class="p">(</span>
         <span class="n">cluster_config_template</span><span class="p">,</span>
         <span class="nb">dict</span><span class="p">(</span>
@@ -711,6 +667,7 @@
                 <span class="s1">&#39;workdir&#39;</span><span class="p">:</span> <span class="n">task</span><span class="o">.</span><span class="n">workdir</span><span class="p">,</span>
                 <span class="s1">&#39;docker_image&#39;</span><span class="p">:</span> <span class="n">task</span><span class="o">.</span><span class="n">docker_image</span><span class="p">,</span>
                 <span class="s1">&#39;num_nodes&#39;</span><span class="p">:</span> <span class="n">num_nodes</span><span class="p">,</span>
+                <span class="s1">&#39;disk_size&#39;</span><span class="p">:</span> <span class="n">to_provision</span><span class="o">.</span><span class="n">disk_size</span><span class="p">,</span>
                 <span class="c1"># File mounts handling.</span>
                 <span class="s1">&#39;file_mounts&#39;</span><span class="p">:</span> <span class="n">wrapped_file_mounts</span><span class="p">,</span>
                 <span class="s1">&#39;initialization_commands&#39;</span><span class="p">:</span> <span class="n">initialization_commands</span> <span class="ow">or</span> <span class="kc">None</span><span class="p">,</span>
