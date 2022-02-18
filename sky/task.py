@@ -178,6 +178,9 @@ class Task:
             raise ValueError('YAML loaded as str, not as dict. '
                              f'Is it correct? Path: {yaml_path}')
 
+        if config is None:
+            config = {}
+
         # TODO: perform more checks on yaml and raise meaningful errors.
         task = Task(
             config.get('name'),
