@@ -28,7 +28,7 @@ run: |
 ```
 
 ## Getting Started
-Please refer to our [documentation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/index.html).
+Please refer to our [documentation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/).
 - [Quickstart](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/quickstart.html)
 - [Sky CLI](https://sky-proj-sky.readthedocs-hosted.com/en/latest/reference/cli.html)
 
