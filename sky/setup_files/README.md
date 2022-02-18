@@ -37,7 +37,7 @@ Please refer to our [documentation](https://sky-proj-sky.readthedocs-hosted.com/
 
 ```bash
 # Clone the sky codebase
-git clone ssh://git@github.com:sky-proj/sky.git
+git clone ssh://git@github.com/sky-proj/sky.git
 cd sky
 # Sky requires python >= 3.6.
 pip install ".[all]"
