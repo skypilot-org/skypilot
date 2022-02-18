@@ -31,7 +31,7 @@ run: |
 <!-- TODO: fill the document link -->
 Please refer to our [document]().
 - [Getting Started]()
-- [SKY CLI]()
+- [Sky CLI]()
 
 ### Installation
 
@@ -101,7 +101,7 @@ sky check
 
 This will produce output verifying the correct setup of each supported cloud.
 
-```bash
+```
 Checking credentials to enable clouds for Sky.
   AWS: enabled
   GCP: enabled
@@ -110,7 +110,7 @@ Checking credentials to enable clouds for Sky.
 Sky will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 ```
 
-## Development
+## Developer Guide
 ### Setup
 
 ```bash
