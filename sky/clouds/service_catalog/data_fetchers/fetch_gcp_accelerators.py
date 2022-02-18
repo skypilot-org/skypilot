@@ -7,8 +7,6 @@ TODO: Add support for regular VMs
 https://cloud.google.com/sdk/gcloud/reference/compute/machine-types/list
 """
 
-from absl import app
-from absl import logging
 import numpy as np
 import pandas as pd
 
@@ -94,13 +92,7 @@ def get_gpu_tpu_df():
     return df
 
 
-def main(argv):
-    del argv  # Unused.
-    logging.set_verbosity(logging.DEBUG)
+if __name__ == '__main__':
     df = get_gpu_tpu_df()
     df.to_csv('../data/gcp.csv', index=False)
     print('GCP Service Catalog saved to gcp.csv')
-
-
-if __name__ == '__main__':
-    app.run(main)
