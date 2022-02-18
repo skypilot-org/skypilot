@@ -95,11 +95,17 @@ def get_instance_type_for_accelerator_impl(
         # and count. Throw so we can manually investigate. The current
         # whitelist consists of:
         if len(instance_types) == 2:
+            # FIXME: refactor below implementation
             # - M60, offered by AWS g3s.xl and g3.4xl
             # - "Promo" instance types offered by Azure
+            # - A100 instances (80GB or 40GB A100)
+            # - V100 instances (w or w/o RDMA)
             its = sorted(instance_types)
-            assert its == ['g3.4xlarge', 'g3s.xlarge'
-                          ] or its[0] + '_Promo' == its[1], its
+            assert its == [
+                'g3.4xlarge', 'g3s.xlarge'
+            ] or its[0] + '_Promo' == its[1] or its == [
+                'Standard_ND96amsr_A100_v4', 'Standard_ND96asr_v4'
+            ] or its == ['Standard_NC24rs_v3', 'Standard_NC24s_v3'], its
         elif len(instance_types) == 4:
             its = sorted(instance_types)
             assert its == [
