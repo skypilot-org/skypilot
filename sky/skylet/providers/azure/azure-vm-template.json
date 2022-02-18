@@ -82,6 +82,12 @@
             "metadata": {
                 "description": "Specifies the maximum price to pay for Azure Spot VM."
             }
+        },
+        "osDiskSizeGB": {
+            "type": "int",
+            "metadata": {
+                "description": "OS disk size in GBs."
+            }
         }
     },
     "variables": {
@@ -196,7 +202,8 @@
                         "createOption": "fromImage",
                         "managedDisk": {
                             "storageAccountType": "[variables('osDiskType')]"
-                        }
+                        },
+                        "diskSizeGB": "[parameters('osDiskSizeGB')]"
                     },
                     "imageReference": {
                         "publisher": "[parameters('imagePublisher')]",

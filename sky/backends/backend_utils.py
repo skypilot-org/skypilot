@@ -428,6 +428,7 @@ def write_cluster_config(task: task_lib.Task,
                 'workdir': task.workdir,
                 'docker_image': task.docker_image,
                 'num_nodes': num_nodes,
+                'disk_size': to_provision.disk_size,
                 # File mounts handling.
                 'file_mounts': wrapped_file_mounts,
                 'initialization_commands': initialization_commands or None,
