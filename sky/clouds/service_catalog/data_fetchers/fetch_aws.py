@@ -10,7 +10,7 @@ import pandas as pd
 import ray
 
 from sky.clouds.service_catalog import common
-from sky.cloud_adaptors import aws
+from sky.adaptors import aws
 
 REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is

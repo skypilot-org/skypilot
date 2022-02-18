@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from Crypto.PublicKey import RSA
 
-from sky.cloud_adaptors import aws, gcp
+from sky.adaptors import aws, gcp
 
 # TODO: Should tolerate if gcloud is not installed. Also,
 # https://pypi.org/project/google-api-python-client/ recommends
