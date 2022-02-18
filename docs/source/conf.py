@@ -5,7 +5,6 @@ import os
 
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
-sys.path.insert(0, os.path.abspath('../prototype'))
 
 # -- Project information
 
@@ -28,7 +27,6 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx_click',
     'sphinx_autodoc_typehints',
-    'myst_nb',
 ]
 
 intersphinx_mapping = {
@@ -57,16 +55,3 @@ html_theme_options = {
 # -- Options for EPUB output
 epub_show_urls = 'footnote'
 
-# -- Options for myst
-jupyter_execute_notebooks = 'force'
-execution_allow_errors = False
-
-# Notebook cell execution timeout; defaults to 30.
-execution_timeout = 100
-
-always_document_param_types = True
-html_show_sourcelink = True
-
-napoleon_google_docstring = True
-napoleon_use_param = False
-napoleon_use_ivar = True
