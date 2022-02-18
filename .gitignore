@@ -1,20 +1,8 @@
 **/.DS_Store
-**/*.log
 **/*.pyc
+**/__pycache__/
+*.egg-info/
 
-docs/build
-
-plotting/*.pdf
-plotting/*.png
-
-prototype/**/*.yml
-prototype/config/**/*.sh
-prototype/docs/build
-prototype/**/*.egg-info/
-prototype/**/*.tmp
-prototype/build
-prototype/.eggs
-prototype/*.whl
-
-logs
-sky_logs
+docs/build/
+build/
+sky_logs/
