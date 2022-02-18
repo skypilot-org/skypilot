@@ -159,6 +159,12 @@ def _interactive_node_cli_command(cli_func):
                                is_flag=True,
                                help='If true, use spot instances.')
 
+    disk_size = click.option('--disk-size',
+                             default=None,
+                             type=int,
+                             required=False,
+                             help=('OS disk size in GBs.'))
+
     click_decorators = [
         cli.command(),
         cluster_option,
@@ -174,6 +180,7 @@ def _interactive_node_cli_command(cli_func):
         # Attach options
         screen_option,
         tmux_option,
+        disk_size,
     ]
     decorator = functools.reduce(lambda res, f: f(res),
                                  reversed(click_decorators), cli_func)
@@ -442,10 +449,15 @@ def cli():
               type=str,
               help=('Task name. Overrides the "name" '
                     'config in the YAML if both are supplied.'))
+@click.option('--disk-size',
+              default=None,
+              type=int,
+              required=False,
+              help=('OS disk size in GBs.'))
 def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
            detach_run: bool, backend_name: str, workdir: Optional[str],
            cloud: Optional[str], gpus: Optional[str], use_spot: Optional[bool],
-           name: Optional[str]):
+           name: Optional[str], disk_size: Optional[int]):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If entrypoint points to a valid YAML file, it is read in as the task
@@ -484,6 +496,8 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
             new_resources.accelerators = _parse_accelerator_options(gpus)
         if use_spot is not None:
             new_resources.use_spot = use_spot
+        if disk_size is not None:
+            new_resources.disk_size = disk_size
         task.set_resources({new_resources})
         if name is not None:
             task.name = name
@@ -1059,7 +1073,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
 def gpunode(cluster: str, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
             gpus: Optional[str], spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool]):
+            tmux: Optional[bool], disk_size: Optional[int]):
     """Launch or attach to an interactive GPU node.
 
     Example:
@@ -1120,7 +1134,8 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
                               accelerators=gpus,
-                              use_spot=spot)
+                              use_spot=spot,
+                              disk_size=disk_size)
 
     _create_and_ssh_into_node(
         'gpunode',
@@ -1135,7 +1150,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
 @_interactive_node_cli_command
 def cpunode(cluster: str, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
+            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool], disk_size: Optional[int]):
     """Launch or attach to an interactive CPU node.
 
     Example:
@@ -1191,7 +1206,8 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
         spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
-                              use_spot=spot)
+                              use_spot=spot,
+                              disk_size=disk_size)
 
     _create_and_ssh_into_node(
         'cpunode',
@@ -1206,7 +1222,7 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
 @_interactive_node_cli_command
 def tpunode(cluster: str, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool]):
+            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool], disk_size: Optional[int]):
     """Launch or attach to an interactive TPU node.
 
     Example:
@@ -1261,7 +1277,8 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
     resources = sky.Resources(cloud=sky.GCP(),
                               instance_type=instance_type,
                               accelerators=tpus,
-                              use_spot=spot)
+                              use_spot=spot,
+                              disk_size=disk_size)
 
     _create_and_ssh_into_node(
         'tpunode',
