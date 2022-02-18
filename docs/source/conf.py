@@ -5,6 +5,7 @@ import os
 
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
+sys.path.insert(0, os.path.abspath('../../'))
 
 # -- Project information
 
@@ -54,3 +55,6 @@ html_theme_options = {
 
 # -- Options for EPUB output
 epub_show_urls = 'footnote'
+
+# Options for click tracing
+autodoc_mock_imports = ['google', 'colorama']
