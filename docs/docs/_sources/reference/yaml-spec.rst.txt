@@ -24,7 +24,7 @@ describe all fields available.
       cloud: aws # A cloud (optional) can be specified, if desired.
 
       # Accelerator requirements (optional) can be specified, use sky show-gpus
-      to view available accelerator configurations.
+      # to view available accelerator configurations.
       accelerators:
         V100: 4 # Specify the accelerator type and the count per node.
 
@@ -68,13 +68,11 @@ describe all fields available.
     # Alternatively, a single setup command (optional) can be provided.
     setup: pip install -r requirements.txt
 
-    # A task script (required) is the main script to run on the cluster.
+    # A task script (optional, but recommended) is the main script to run on the
+    # cluster.
     run: |
       echo "Beginning task."
       python train.py
 
     # Alternatively, a single run command can be provided.
     run: python train.py
-
-
-

@@ -24,7 +24,7 @@ describe all fields available.
       cloud: aws # A cloud (optional) can be specified, if desired.
 
       # Accelerator requirements (optional) can be specified, use sky show-gpus
-      to view available accelerator configurations.
+      # to view available accelerator configurations.
       accelerators:
         V100: 4 # Specify the accelerator type and the count per node.
 

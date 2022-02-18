@@ -422,6 +422,9 @@
             <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;YAML loaded as str, not as dict. &#39;</span>
                              <span class="sa">f</span><span class="s1">&#39;Is it correct? Path: </span><span class="si">{</span><span class="n">yaml_path</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
 
+        <span class="k">if</span> <span class="n">config</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;YAML is empty.&#39;</span><span class="p">)</span>
+
         <span class="c1"># TODO: perform more checks on yaml and raise meaningful errors.</span>
         <span class="n">task</span> <span class="o">=</span> <span class="n">Task</span><span class="p">(</span>
             <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;name&#39;</span><span class="p">),</span>

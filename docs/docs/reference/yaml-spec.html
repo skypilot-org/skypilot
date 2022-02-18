@@ -282,7 +282,7 @@ describe all fields available.</p>
 <span class="w">  </span><span class="nt">cloud</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aws</span><span class="w"> </span><span class="c1"># A cloud (optional) can be specified, if desired.</span><span class="w"></span>
 
 <span class="w">  </span><span class="c1"># Accelerator requirements (optional) can be specified, use sky show-gpus</span><span class="w"></span>
-<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">to view available accelerator configurations.</span><span class="w"></span>
+<span class="w">  </span><span class="c1"># to view available accelerator configurations.</span><span class="w"></span>
 <span class="w">  </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"></span>
 <span class="w">    </span><span class="nt">V100</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span><span class="w"> </span><span class="c1"># Specify the accelerator type and the count per node.</span><span class="w"></span>
 
@@ -326,7 +326,8 @@ describe all fields available.</p>
 <span class="c1"># Alternatively, a single setup command (optional) can be provided.</span><span class="w"></span>
 <span class="nt">setup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pip install -r requirements.txt</span><span class="w"></span>
 
-<span class="c1"># A task script (required) is the main script to run on the cluster.</span><span class="w"></span>
+<span class="c1"># A task script (optional, but recommended) is the main script to run on the</span><span class="w"></span>
+<span class="c1"># cluster.</span><span class="w"></span>
 <span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w"></span>
 <span class="w">  </span><span class="no">echo &quot;Beginning task.&quot;</span><span class="w"></span>
 <span class="w">  </span><span class="no">python train.py</span><span class="w"></span>
