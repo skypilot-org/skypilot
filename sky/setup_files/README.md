@@ -29,6 +29,7 @@ run: |
 
 ## Getting Started
 Please refer to our [documentation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/).
+- [Installation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html)
 - [Quickstart](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/quickstart.html)
 - [Sky CLI](https://sky-proj-sky.readthedocs-hosted.com/en/latest/reference/cli.html)
 
