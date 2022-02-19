@@ -1,4 +1,9 @@
-"""Setup file for Sky."""
+"""Sky is a tool to run any workload seamlessly across different
+cloud providers through a unified interface. No knowledge of cloud
+offerings is required or expected – you simply define the workload
+and its resource requirements, and Sky will automatically execute it on AWS,
+Google Cloud Platform or Microsoft Azure."""
+
 import os
 import setuptools
 
@@ -51,7 +56,5 @@ setuptools.setup(
         'Programming Language :: Python :: 3.9',
     ],
     description='Sky Prototype',
-    long_description=open(os.path.join(ROOT_DIR, 'README.md'),
-                          'r',
-                          encoding='utf-8').read(),
+    long_description=__doc__.replace('\n', ' '),
 )
