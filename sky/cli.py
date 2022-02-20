@@ -385,12 +385,6 @@ class _NaturalOrderGroup(click.Group):
     def list_commands(self, ctx):
         return self.commands.keys()
 
-    # def parse_args(self, ctx, args):
-    #     if len(args) >= 1 and args[0] == 'storage':
-    #         args[0] = 'sky-storage'
-    #         args.insert(0, '')
-    #     super(_NaturalOrderGroup, self).parse_args(ctx, args)
-
 
 class _DocumentedCodeCommand(click.Command):
     """Corrects help strings for documented commands such that --help displays
