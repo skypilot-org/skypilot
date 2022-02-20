@@ -385,6 +385,12 @@ class _NaturalOrderGroup(click.Group):
     def list_commands(self, ctx):
         return self.commands.keys()
 
+    # def parse_args(self, ctx, args):
+    #     if len(args) >= 1 and args[0] == 'storage':
+    #         args[0] = 'sky-storage'
+    #         args.insert(0, '')
+    #     super(_NaturalOrderGroup, self).parse_args(ctx, args)
+
 
 class _DocumentedCodeCommand(click.Command):
     """Corrects help strings for documented commands such that --help displays
@@ -399,6 +405,11 @@ class _DocumentedCodeCommand(click.Command):
 
 @click.group(cls=_NaturalOrderGroup)
 def cli():
+    pass
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def storage():
     pass
 
 
@@ -1424,50 +1435,12 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         click.echo()
 
 
-@cli.command()
-@click.option('--delete',
-              '-d',
-              default=False,
-              is_flag=True,
-              required=False,
-              type=str,
-              help='Delete the storage object.')
-@click.option('--ls',
-              '-ls',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all storage objects.')
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Used with --delete; Delete all storages.')
-@click.option('--name',
-              '-n',
-              required=False,
-              type=str,
-              help=('Name of storage object.'))
-def storage(all: bool, delete: bool, ls: bool, name: str):  # pylint: disable=redefined-builtin
-    """Show launched clusters."""
-    if ls:
-        if delete:
-            raise click.ClickException(
-                'Must specifiy only one of \'--ls\' or \'-d/--delete\'')
-        storage_ls()
-    elif delete:
-        storage_delete(all, name)
-    else:
-        raise click.ClickException(
-            'Must specifiy one of \'--ls\' or \'-d/--delete\'')
-
-
-def storage_ls():
+@storage.command('status')
+def storage_status():  # pylint: disable=redefined-builtin
     """Lists Storages.
     """
     click.echo('Listing storage objects.')
-    storage_status = global_user_state.get_storage()
+    storage_stat = global_user_state.get_storage()
     storage_table = util_lib.create_table([
         'NAME',
         'CREATED',
@@ -1476,7 +1449,7 @@ def storage_ls():
         'STATUS',
     ])
 
-    for row in storage_status:
+    for row in storage_stat:
         launched_at = row['launched_at']
         storage_table.add_row([
             # NAME
@@ -1490,16 +1463,28 @@ def storage_ls():
             # STATUS
             row['status'].value,
         ])
-    if storage_status:
+    if storage_stat:
         click.echo(storage_table)
     else:
         click.echo('No existing storage.')
 
 
-def storage_delete(all_delete: bool, name: str):
-    """Deletes Storages.
+@storage.command('down')
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Used with --delete; Delete all storages.')
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help=('Name of storage object.'))
+def storage_down(all: bool, name: str):  # pylint: disable=redefined-builtin
+    """Deletes/Tears Down Storages.
     """
-    if all_delete:
+    if all:
         click.echo('Deleting all storage objects')
         storages = global_user_state.get_storage()
         for row in storages:
