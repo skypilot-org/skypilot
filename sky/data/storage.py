@@ -161,6 +161,19 @@ class Storage(object):
         self.source = source
         self.persistent = persistent
 
+        scheme = urllib.parse.urlsplit(self.source).scheme
+        if scheme == '':
+            self.source = os.path.abspath(os.path.expanduser(source))
+            # Check if local path exists
+            if not os.path.exists(self.source):
+                raise ValueError(
+                    f'Local source path does not exist: {self.source}')
+        elif scheme in ['s3', 'gs']:
+            pass
+        else:
+            raise ValueError(
+                f'Supported paths: local, s3://, gs://. Got: {self.source}')
+
         # Sky optimizer either adds a storage object instance or selects
         # from existing ones
         self.stores = {} if stores is None else stores
@@ -194,12 +207,12 @@ class Storage(object):
                         self.get_or_copy_to_s3()
                     elif s_type == StorageType.GCS.value:
                         self.get_or_copy_to_gcs()
-        else:
-            self.handle = self.StorageMetaData(storage_name=self.name,
-                                               source=self.source,
-                                               clouds=list(self.stores.keys()))
-            global_user_state.add_or_update_storage(self.name, self.handle,
-                                                    'INIT')
+            return
+
+        self.handle = self.StorageMetaData(storage_name=self.name,
+                                           source=self.source,
+                                           clouds=list(self.stores.keys()))
+        global_user_state.add_or_update_storage(self.name, self.handle, 'INIT')
 
         # If source is a pre-existing bucket, connect to the bucket
         # If the bucket does not exist, this will error out
@@ -207,19 +220,6 @@ class Storage(object):
             self.get_or_copy_to_s3()
         elif self.source.startswith('gs://'):
             self.get_or_copy_to_gcs()
-        else:
-            # self.source is a local path
-            self.source = os.path.abspath(os.path.expanduser(self.source))
-            scheme = urllib.parse.urlsplit(self.source).scheme
-            if scheme != '':
-                raise ValueError(
-                    f'Supported paths: local, s3://, gs://. Got: {self.source}')
-
-            # It's not a cloud path - parse local path
-            self.source = os.path.abspath(os.path.expanduser(source))
-            if not os.path.exists(self.source):
-                raise ValueError(
-                    f'Local source path does not exist: {self.source}')
 
     def get_or_copy_to_s3(self):
         """Adds AWS S3 Store to Storage
