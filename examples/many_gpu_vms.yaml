@@ -2,8 +2,7 @@ name: many_gpu_vms
 
 resources:
   cloud: aws
-  accelerators:
-    V100: 8
+  accelerators: V100:8
   # use_spot: true
 
 num_nodes: 16

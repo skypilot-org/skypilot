@@ -1,8 +1,19 @@
 import pytest
+import tempfile
+import textwrap
 
 import sky
 from sky import clouds
 from sky import exceptions
+
+
+def _test_parse_accelerators(spec, expected_accelerators):
+    with tempfile.NamedTemporaryFile('w') as f:
+        f.write(spec)
+        f.flush()
+        with sky.Dag():
+            task = sky.Task.from_yaml(f.name)
+            assert list(task.resources)[0].accelerators == expected_accelerators
 
 
 # Monkey-patching is required because in the test environment, no cloud is
@@ -133,3 +144,33 @@ def test_instance_type_matches_accelerators(monkeypatch):
         sky.Resources(sky.AWS(),
                       instance_type='p3.16xlarge',
                       accelerators={'V100': 1}))
+
+
+def test_parse_accelerators_from_yaml():
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators: V100""")
+    _test_parse_accelerators(spec, {'V100': 1})
+
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators: V100:4""")
+    _test_parse_accelerators(spec, {'V100': 4})
+
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators: V100:0.5""")
+    _test_parse_accelerators(spec, {'V100': 0.5})
+
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators: \"V100: 0.5\"""")
+    _test_parse_accelerators(spec, {'V100': 0.5})
+
+    # Invalid.
+    spec = textwrap.dedent("""\
+      resources:
+        accelerators: \"V100: expected_a_float_here\"""")
+    with pytest.raises(ValueError) as e:
+        _test_parse_accelerators(spec, None)
+        assert 'The "accelerators" field as a str ' in str(e.value)

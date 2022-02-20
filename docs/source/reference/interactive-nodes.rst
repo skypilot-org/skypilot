@@ -69,8 +69,7 @@ By default, interactive clusters are a single node. If you require a cluster wit
 
     num_nodes: 16
     resources:
-      accelerators:
-        V100: 8
+      accelerators: V100:8
 
 .. code-block:: console
 
@@ -81,4 +80,3 @@ To log in to the head node:
 .. code-block:: console
 
     $ ssh my-cluster
-

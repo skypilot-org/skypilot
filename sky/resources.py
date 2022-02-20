@@ -21,13 +21,15 @@ class Resources:
     Examples:
 
         # Fully specified cloud and instance type (is_launchable() is True).
-        sky.Resources(clouds.AWS(), 'p3.2xlarge'),
-        sky.Resources(clouds.GCP(), 'n1-standard-16'),
+        sky.Resources(clouds.AWS(), 'p3.2xlarge')
+        sky.Resources(clouds.GCP(), 'n1-standard-16')
         sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
 
         # Specifying required resources; Sky decides the cloud/instance type.
-        sky.Resources(accelerators='V100'),
-        sky.Resources(clouds.GCP(), accelerators={'V100': 1}),
+        # The below are equivalent:
+        sky.Resources(accelerators='V100')
+        sky.Resources(accelerators='V100:1')
+        sky.Resources(accelerators={'V100': 1})
 
         # TODO:
         sky.Resources(requests={'mem': '16g', 'cpu': 8})
@@ -48,7 +50,22 @@ class Resources:
             'If instance_type is specified, must specify the cloud'
         if accelerators is not None:
             if isinstance(accelerators, str):  # Convert to Dict[str, int].
-                accelerators = {accelerators: 1}
+                if ':' not in accelerators:
+                    accelerators = {accelerators: 1}
+                else:
+                    splits = accelerators.split(':')
+                    parse_error = ('The "accelerators" field as a str '
+                                   'should be <name> or <name>:<cnt>. '
+                                   f'Found: {accelerators!r}')
+                    if len(splits) != 2:
+                        raise ValueError(parse_error)
+                    try:
+                        accelerators = {splits[0]: int(splits[1])}
+                    except ValueError:
+                        try:
+                            accelerators = {splits[0]: float(splits[1])}
+                        except ValueError:
+                            raise ValueError(parse_error) from None
             assert len(accelerators) == 1, accelerators
 
             acc, _ = list(accelerators.items())[0]
