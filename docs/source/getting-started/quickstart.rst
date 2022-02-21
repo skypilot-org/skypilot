@@ -26,6 +26,7 @@ We'll start by launching our first cluster on Sky by defining a task.
 We can specify the following task attributes with a YAML file:
 
 - :code:`resources` (optional): what cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
+- :code:`workdir` (optional): specifies work directory folder path that is synced with the provisioned instance(s)
 - :code:`setup` (optional): commands that must be run before the task is executed
 - :code:`run` (optional): specifies the commands that must be run as the actual ask
 
@@ -42,6 +43,8 @@ requiring an NVIDIA Tesla K80 GPU on AWS. (More example yaml files can be found 
 
      # Get 1 K80 GPU.  Use <name>:<n> to get more (e.g., "K80:8").
      accelerators: K80
+
+   workdir: .
 
    setup: |
      # Typical use: pip install -r requirements.txt
