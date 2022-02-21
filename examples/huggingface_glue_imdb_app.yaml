@@ -3,8 +3,7 @@ name: huggingface
 resources:
   accelerators: V100
   # The above is a shorthand for <name>: <count=1>.  Same as:
-  # accelerators:
-  #   V100: 1
+  # accelerators: V100:1
 
 # The setup command.  Will be run under the working directory.
 setup: |

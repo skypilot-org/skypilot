@@ -904,7 +904,7 @@ def stop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters', nargs=-1, required=False)
+@click.argument('clusters', nargs=-1, required=True)
 def start(clusters: Tuple[str]):
     """Restart cluster(s).
 
@@ -1038,10 +1038,7 @@ def down(
         sky down -a
 
     """
-    names = clusters
-    if not all and not names:
-        return
-    _terminate_or_stop_clusters(names, apply_to_all=all, terminate=True)
+    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
 
 
 def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],

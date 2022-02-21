@@ -1,7 +1,6 @@
 resources:
     cloud: aws
-    accelerators:
-        V100: 1
+    accelerators: V100
 
 num_nodes: 2
 
