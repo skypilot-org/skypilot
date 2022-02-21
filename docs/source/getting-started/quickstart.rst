@@ -26,12 +26,12 @@ We'll start by launching our first cluster on Sky by defining a task.
 We can specify the following task attributes with a YAML file:
 
 - :code:`resources` (optional): what cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
-- :code:`workdir` (optional): specifies work directory folder path that is synced with the provisioned instance(s)
+- :code:`workdir` (optional): specifies work directory that is synced with the provisioned instance(s)
 - :code:`setup` (optional): commands that must be run before the task is executed
 - :code:`run` (optional): specifies the commands that must be run as the actual ask
 
-Below is a task YAML that prints "hello sky!" and shows installed Conda environments,
-requiring an NVIDIA Tesla K80 GPU on AWS. (More example yaml files can be found in `examples <https://github.com/concretevitamin/sky-experiments/tree/master/examples>`_)
+Below is a minimal task YAML that prints "hello sky!" and shows installed Conda environments,
+requiring an NVIDIA Tesla K80 GPU on AWS. (See more example yaml files in the `repo <https://github.com/concretevitamin/sky-experiments/tree/master/examples>`_, with a fully-complete example documented :ref:`here <yaml-spec>`)
 
 .. code-block:: yaml
 
