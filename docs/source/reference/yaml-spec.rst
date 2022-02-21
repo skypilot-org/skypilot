@@ -1,3 +1,4 @@
+.. _yaml-spec:
 YAML Configuration
 ==================
 
