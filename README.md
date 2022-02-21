@@ -14,8 +14,7 @@ sky launch -c mycluster hello_sky.yaml
 ```yaml
 # hello_sky.yaml
 resources:
-  accelerators:
-    K80:4
+  accelerators: K80:4
 
 setup: |
   # Typical use: pip install -r requirements.txt

@@ -14,28 +14,27 @@ and run command:
    name: huggingface
 
    resources:
-      accelerators:
-         V100: 4
+     accelerators: V100:4
 
    setup: |
-      git clone https://github.com/huggingface/transformers/
-      cd transformers
-      pip3 install .
-      cd examples/pytorch/text-classification
-      pip3 install -r requirements.txt
+     git clone https://github.com/huggingface/transformers/
+     cd transformers
+     pip3 install .
+     cd examples/pytorch/text-classification
+     pip3 install -r requirements.txt
 
    run: |
-      cd transformers/examples/pytorch/text-classification
-      python3 run_glue.py \
-         --model_name_or_path bert-base-cased \
-         --dataset_name imdb  \
-         --do_train \
-         --max_seq_length 128 \
-         --per_device_train_batch_size 32 \
-         --learning_rate 2e-5 \
-         --max_steps 50 \
-         --output_dir /tmp/imdb/ --overwrite_output_dir \
-         --fp16
+     cd transformers/examples/pytorch/text-classification
+     python3 run_glue.py \
+       --model_name_or_path bert-base-cased \
+       --dataset_name imdb  \
+       --do_train \
+       --max_seq_length 128 \
+       --per_device_train_batch_size 32 \
+       --learning_rate 2e-5 \
+       --max_steps 50 \
+       --output_dir /tmp/imdb/ --overwrite_output_dir \
+       --fp16
 
 
 We can launch training by running:
@@ -93,4 +92,3 @@ If we wish to view the output for each run after it has completed we can use:
 
    $ # Cancel job job3 (ID: 3)
    $ sky cancel lm-cluster 3
-

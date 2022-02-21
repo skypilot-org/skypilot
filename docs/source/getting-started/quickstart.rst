@@ -37,22 +37,20 @@ requiring an NVIDIA Tesla K80 GPU on AWS. (More example yaml files can be found 
    # hello_sky.yaml
 
    resources:
-      # Optional; if left out, pick from the available clouds.
-      cloud: aws
+     # Optional; if left out, pick from the available clouds.
+     cloud: aws
 
-      # Get more GPUs with
-      #   accelerators:
-      #     K80: 8
-      accelerators: K80
+     # Get 1 K80 GPU.  Use <name>:<n> to get more (e.g., "K80:8").
+     accelerators: K80
 
    setup: |
-      # Typical use: pip install -r requirements.txt
-      echo "running setup"
+     # Typical use: pip install -r requirements.txt
+     echo "running setup"
 
    run: |
-      # Typical use: make use of resources, such as running training.
-      echo "hello sky!"
-      conda env list
+     # Typical use: make use of resources, such as running training.
+     echo "hello sky!"
+     conda env list
 
 Sky handles selecting an appropriate VM based on user-specified resource
 constraints, launching the cluster on an appropriate cloud provider, and
