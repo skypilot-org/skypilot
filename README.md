@@ -16,6 +16,8 @@ sky launch -c mycluster hello_sky.yaml
 resources:
   accelerators: V100:1  # 1x NVIDIA V100 GPU
 
+workdir: .  # Sync code dir to cloud
+
 setup: |
   # Typical use: pip install -r requirements.txt
   echo "running setup"
