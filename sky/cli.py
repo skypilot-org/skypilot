@@ -1429,7 +1429,7 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
-def storage_ls():  # pylint: disable=redefined-builtin
+def storage_ls():
     """Lists storage objects created.
     """
     storage_stat = global_user_state.get_storage()
