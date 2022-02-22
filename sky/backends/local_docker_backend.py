@@ -206,7 +206,7 @@ class LocalDockerBackend(backends.Backend):
         """
         Launches a container and runs a sleep command on it.
 
-        Post setup in LocalDockerBackend runs the container with a sleep job
+        setup() in LocalDockerBackend runs the container with a sleep job
         so that the container is kept alive and we can issue docker exec cmds
         to it to handle sky exec commands.
         """

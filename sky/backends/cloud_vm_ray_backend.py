@@ -748,12 +748,6 @@ class RetryingVmProvisioner(object):
                               log_abs_path: str, stream_logs: bool):
         """Provisions a cluster via 'ray up' with gang scheduling.
 
-        Steps for provisioning > 1 node:
-          1) ray up an empty config (no filemounts, no setup commands)
-          2) ray up a full config (with filemounts and setup commands)
-
-        For provisioning 1 node, only step 2 is run.
-
         Benefits:
           - Ensures all nodes are allocated first before potentially expensive
             file_mounts/setup.  (If not all nodes aren't allocated, step 1
@@ -762,6 +756,9 @@ class RetryingVmProvisioner(object):
         Returns:
           (did gang scheduling failed; proc; stdout; stderr).
         """
+        # FIXME(zhwu,zongheng): ray up on multiple nodes ups the head node then
+        # waits for all workers; turn it into real gang scheduling.
+
         style = colorama.Style
 
         def ray_up(start_streaming_at):
@@ -782,7 +779,7 @@ class RetryingVmProvisioner(object):
                 # Tracked in https://github.com/ray-project/ray/issues/20402.
                 ['ray', 'up', '-y', '--no-restart', cluster_config_file],
                 log_abs_path,
-                # TODO (zhwu): Suppress output of `ray up`
+                # TODO(zhwu): Suppress output of `ray up`
                 stream_logs=stream_logs,
                 start_streaming_at=start_streaming_at,
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
@@ -1152,8 +1149,8 @@ class CloudVmRayBackend(backends.Backend):
                         check=True,
                         ssh_control_name=self._ssh_control_name(handle))
                 else:
-                    # TODO (zhwu): Logging to 'file_mounts.log'
-                    # TODO (zhwu): Optimize for large amount of files.
+                    # TODO(zhwu): Logging to 'file_mounts.log'
+                    # TODO(zhwu): Optimize for large amount of files.
                     # zip / transfer/ unzip
                     self._rsync_up(handle,
                                    ip=ip,
@@ -1171,6 +1168,8 @@ class CloudVmRayBackend(backends.Backend):
             # Sync 'src' to 'wrapped_dst', a safe-to-write "wrapped" path.
             wrapped_dst = dst
             if not dst.startswith('~/') and not dst.startswith('/tmp/'):
+                # Handles the remote paths possibly without write access.
+                # (1) add <prefix> to these target paths.
                 wrapped_dst = backend_utils.FileMountHelper.wrap_file_mount(dst)
                 cmd = backend_utils.FileMountHelper.make_safe_symlink_command(
                     source=dst, target=wrapped_dst)
@@ -1218,10 +1217,9 @@ class CloudVmRayBackend(backends.Backend):
             return
         codegen = textwrap.dedent(f"""\
             #!/bin/bash
-            # TODO (zhwu): Move this to bashrc
+            # TODO(zhwu): Move this to bashrc
             . $(conda info --base)/etc/profile.d/conda.sh
-            {task.setup}
-            """)
+            {task.setup}""")
         with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
             f.write(codegen)
             f.flush()
@@ -1235,9 +1233,11 @@ class CloudVmRayBackend(backends.Backend):
                 handle.cluster_yaml)
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
-                node_name = f'worker{i}' if i > 0 else 'head'
+                node_name = f' worker{i}' if i > 0 else ' head'
+                if handle.launched_nodes == 1:
+                    node_name = ''
                 logger.info(
-                    f'{fore.CYAN}Setting up {node_name}...{style.RESET_ALL}')
+                    f'{fore.CYAN}Running setup{node_name}...{style.RESET_ALL}')
                 self._rsync_up(handle,
                                ip=ip,
                                source=setup_sh_path,
@@ -1245,7 +1245,7 @@ class CloudVmRayBackend(backends.Backend):
                                with_outputs=False)
                 backend_utils.run_command_on_ip_via_ssh(
                     ip,
-                    f'/bin/bash -i /tmp/{setup_file}',
+                    f'/bin/bash /tmp/{setup_file}',
                     ssh_user=ssh_user,
                     ssh_private_key=ssh_private_key,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
@@ -1463,7 +1463,7 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
-        # TODO (zhwu): The resources limitation for multi-node ray.tune and
+        # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
         for i in range(task.num_nodes):
             command_for_node = task.run if isinstance(task.run, str) else None
@@ -1535,7 +1535,7 @@ class CloudVmRayBackend(backends.Backend):
         if (terminate and
                 prev_status == global_user_state.ClusterStatus.STOPPED):
             if isinstance(cloud, clouds.AWS):
-                # TODO (zhwu): Room for optimization. We can move these cloud
+                # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
                 # The stopped instance on AWS will not be correctly terminated
                 # due to ray's bug.
@@ -1644,8 +1644,11 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
         # Build command.
-        # rsync options: progress bar; human readable; compress
-        rsync_command = ['rsync', '-ahz']
+        # --info=progress2 is used to get a total progress bar instead of a per-file one
+        # (with -P), but it requires rsync>=3.1.0.
+        # TOOD(zhwu): Mac OS has a rsync==2.6.9 (16 years old), maybe we should hint the
+        # user to upgrade to rsync>=3.1.0 using `brew install rsync`.
+        rsync_command = ['rsync', '-az', '--info=progress2']
         filter_path = os.path.join(source, '.gitignore')
         if os.path.exists(filter_path):
             rsync_command.append(f'--filter=\':- {filter_path}\'')
@@ -1659,7 +1662,7 @@ class CloudVmRayBackend(backends.Backend):
         ])
         command = ' '.join(rsync_command)
         if with_outputs:
-            # TODO (zhwu): Test this if the command will be still running in the
+            # TODO(zhwu): Test this if the command will be still running in the
             # background, after the current program is killed.
             backend_utils.run(command)
         else:

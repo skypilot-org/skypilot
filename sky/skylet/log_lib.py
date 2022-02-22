@@ -207,7 +207,7 @@ def _follow_job_logs(file,
                 if start_streaming_at in line:
                     start_streaming = True
                 if start_streaming:
-                    # TODO (zhwu): Consider using '\33[2K' to clear the
+                    # TODO(zhwu): Consider using '\33[2K' to clear the
                     # line when line endswith '\r' (to avoid previous line
                     # to long problem). `colorama.ansi.clear_line`
                     yield line
@@ -230,7 +230,7 @@ def _follow_job_logs(file,
 
 def tail_logs(job_id: int, log_dir: Optional[str],
               status: Optional[job_lib.JobStatus]):
-    # TODO (zhwu): Maybe switch to `ray job logs` according to the performance.
+    # TODO(zhwu): Maybe switch to `ray job logs` according to the performance.
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
