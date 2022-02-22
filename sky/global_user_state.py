@@ -14,10 +14,13 @@ import pickle
 import sqlite3
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from sky import backends
 from sky import clouds
+
+if TYPE_CHECKING:
+    from sky import backends
+    from sky.data import Storage
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
@@ -27,6 +30,7 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
 
+# Table for Clusters
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS clusters (
     name TEXT PRIMARY KEY,
@@ -34,9 +38,18 @@ _CURSOR.execute("""\
     handle BLOB,
     last_use TEXT,
     status TEXT)""")
+# Table for Sky Config (e.g. enabled clouds)
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY, value TEXT)""")
+# Table for Storage
+_CURSOR.execute("""\
+    CREATE TABLE IF NOT EXISTS storage (
+    name TEXT PRIMARY KEY,
+    lauched_at INTEGER,
+    handle BLOB, 
+    last_use TEXT,
+    status TEXT)""")
 
 _CONN.commit()
 
@@ -60,6 +73,28 @@ class ClusterStatus(enum.Enum):
     STOPPED = 'STOPPED'
 
 
+class StorageStatus(enum.Enum):
+    """Storage status as recorded in table 'storage'."""
+
+    # Initializing Storage Class
+    INIT = 'INIT'
+
+    # Uploading to AWS
+    UPLOAD_AWS = 'UPLOAD_AWS'
+
+    # Uploading to GCP
+    UPLOAD_GCP = 'UPLOAD_GCP'
+
+    # Uploading to AWS
+    UPLOAD_AZURE = 'UPLOAD_AZURE'
+
+    # Failed to Upload to Cloud
+    UPLOAD_FAIL = 'UPLOAD_FAIL'
+
+    # Finished uploading, in terminal state
+    DONE = 'DONE'
+
+
 def _get_pretty_entry_point() -> str:
     """Returns the prettified entry point of this process (sys.argv).
 
@@ -79,7 +114,7 @@ def _get_pretty_entry_point() -> str:
 
 
 def add_or_update_cluster(cluster_name: str,
-                          cluster_handle: backends.Backend.ResourceHandle,
+                          cluster_handle: 'backends.Backend.ResourceHandle',
                           ready: bool):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     # FIXME: launched_at will be changed when `sky launch -c` is called.
@@ -121,7 +156,7 @@ def remove_cluster(cluster_name: str, terminate: bool):
 
 
 def get_handle_from_cluster_name(
-        cluster_name: str) -> Optional[backends.Backend.ResourceHandle]:
+        cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _CURSOR.execute('SELECT handle FROM clusters WHERE name=(?)',
                            (cluster_name,))
@@ -130,7 +165,7 @@ def get_handle_from_cluster_name(
 
 
 def get_cluster_name_from_handle(
-        cluster_handle: backends.Backend.ResourceHandle) -> Optional[str]:
+        cluster_handle: 'backends.Backend.ResourceHandle') -> Optional[str]:
     handle = pickle.dumps(cluster_handle)
     rows = _CURSOR.execute('SELECT name FROM clusters WHERE handle=(?)',
                            (handle,))
@@ -186,3 +221,83 @@ def set_enabled_clouds(enabled_clouds: List[str]) -> None:
     _CURSOR.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
                     (_ENABLED_CLOUDS_KEY, json.dumps(enabled_clouds)))
     _CONN.commit()
+
+
+def add_or_update_storage(storage_name: str,
+                          storage_handle: 'Storage.StorageMetadata',
+                          storage_status: StorageStatus):
+    storage_launched_at = int(time.time())
+    handle = pickle.dumps(storage_handle)
+    last_use = _get_pretty_entry_point()
+
+    def status_check(status):
+        return status in StorageStatus
+
+    if not status_check(storage_status):
+        raise ValueError(f'Error in updating global state. Storage Status '
+                         f'{storage_status} is passed in incorrectly')
+    _CURSOR.execute('INSERT OR REPLACE INTO storage VALUES (?, ?, ?, ?, ?)',
+                    (storage_name, storage_launched_at, handle, last_use,
+                     storage_status.value))
+    _CONN.commit()
+
+
+def remove_storage(storage_name: str):
+    """Removes Storage from Database"""
+    _CURSOR.execute('DELETE FROM storage WHERE name=(?)', (storage_name,))
+    _CONN.commit()
+
+
+def set_storage_status(storage_name: str, status: StorageStatus) -> None:
+    _CURSOR.execute('UPDATE storage SET status=(?) WHERE name=(?)', (
+        status.value,
+        storage_name,
+    ))
+    count = _CURSOR.rowcount
+    _CONN.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Storage{storage_name} not found.')
+
+
+def get_storage_status(storage_name: str) -> None:
+    assert storage_name is not None, 'storage_name cannot be None'
+    rows = _CURSOR.execute('SELECT status FROM storage WHERE name=(?)',
+                           (storage_name,))
+    for (status,) in rows:
+        return status
+
+
+def set_storage_handle(storage_name: str, handle: 'Storage.StorageMetadata'):
+    _CURSOR.execute('UPDATE storage SET handle=(?) WHERE name=(?)', (
+        pickle.dumps(handle),
+        storage_name,
+    ))
+    count = _CURSOR.rowcount
+    _CONN.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Storage{storage_name} not found.')
+
+
+def get_handle_from_storage_name(storage_name: str):
+    assert storage_name is not None, 'storage_name cannot be None'
+    rows = _CURSOR.execute('SELECT handle FROM storage WHERE name=(?)',
+                           (storage_name,))
+    for (handle,) in rows:
+        return pickle.loads(handle)
+
+
+def get_storage() -> List[Dict[str, Any]]:
+    rows = _CURSOR.execute('select * from storage')
+    records = []
+    for name, launched_at, handle, last_use, status in rows:
+        # TODO: use namedtuple instead of dict
+        records.append({
+            'name': name,
+            'launched_at': launched_at,
+            'handle': pickle.loads(handle),
+            'last_use': last_use,
+            'status': StorageStatus[status],
+        })
+    return records

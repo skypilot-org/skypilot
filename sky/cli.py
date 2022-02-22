@@ -48,6 +48,7 @@ from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
+from sky.data import Storage
 from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -1418,6 +1419,92 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         for out in _output():
             click.echo(out, nl=False)
         click.echo()
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def storage():
+    """Handle to run Sky Storage CLI commands.
+    """
+    pass
+
+
+@storage.command('ls', cls=_DocumentedCodeCommand)
+def storage_ls():
+    """Lists storage objects created.
+    """
+    storage_stat = global_user_state.get_storage()
+    storage_table = util_lib.create_table([
+        'NAME',
+        'CREATED',
+        'STORES',
+        'COMMAND',
+        'STATUS',
+    ])
+
+    for row in storage_stat:
+        launched_at = row['launched_at']
+        storage_table.add_row([
+            # NAME
+            row['name'],
+            # LAUNCHED
+            _readable_time_duration(launched_at),
+            # CLOUDS
+            ', '.join(row['handle'].clouds),
+            # COMMAND
+            row['last_use'],
+            # STATUS
+            row['status'].value,
+        ])
+    if storage_stat:
+        click.echo(storage_table)
+    else:
+        click.echo('No existing storage.')
+
+
+@storage.command('delete', cls=_DocumentedCodeCommand)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Used with delete; Delete all storages.')
+@click.argument('name', required=False, type=str, nargs=-1)
+def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
+    """Deletes storage objects.
+
+    Example:
+
+    .. code-block:: bash
+
+        # Delete two storage objects
+        sky storage delete imagenet cifar10
+
+    .. code-block:: bash
+
+        # Delete all storage objects
+        sky storage delete -a
+    """
+    if all:
+        click.echo('Deleting all storage objects')
+        storages = global_user_state.get_storage()
+        for row in storages:
+            store_object = Storage(name=row['name'],
+                                   source=row['handle'].source)
+            store_object.delete()
+    elif name:
+        for n in name:
+            handle = global_user_state.get_handle_from_storage_name(n)
+            if handle is None:
+                click.echo(f'Storage Name {n} not found!')
+            else:
+                click.echo(f'Deleting storage object {n}')
+                store_object = Storage(name=handle.storage_name,
+                                       source=handle.source)
+                store_object.delete()
+    else:
+        raise click.ClickException(
+            'Must pass in \'-a/--all\' or storage names to \'sky '
+            'storage delete\'')
 
 
 def main():

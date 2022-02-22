@@ -61,6 +61,18 @@ Job Queue
    :nested: full
 
 
+Storage
+---------
+
+.. click:: sky.cli:storage_ls
+   :prog: sky storage ls
+   :nested: full
+
+.. click:: sky.cli:storage_delete
+   :prog: sky storage delete
+   :nested: full
+
+
 Miscellaneous
 -------------
 
