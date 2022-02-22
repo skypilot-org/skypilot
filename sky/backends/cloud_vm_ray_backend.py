@@ -435,9 +435,8 @@ class RetryingVmProvisioner(object):
                 logger.info('====== stderr ======')
                 for s in splits:
                     print(s)
-                raise RuntimeError(
-                    'Errors occurred during provision; '
-                    'check logs above.')
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
 
     def _update_blocklist_on_aws_error(self, region, zones, stdout, stderr):
         del zones  # Unused.
@@ -1644,11 +1643,11 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
         # Build command.
-        # --info=progress2 is used to get a total progress bar instead of a per-
-        # file one (with -P), but it requires rsync>=3.1.0.
-        # TOOD(zhwu): Mac OS has a rsync==2.6.9 (16 years old), maybe we should
-        # hint the user to upgrade to rsync>=3.1.0 using `brew install rsync`.
-        rsync_command = ['rsync', '-az', '--info=progress2']
+        # TODO(zhwu): This will print a per-file progress bar (with -P),
+        # shooting a lot of messages to the output. --info=progress2 is used
+        # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
+        # OS has a default rsync==2.6.9 (16 years old).
+        rsync_command = ['rsync', '-Pavz']
         filter_path = os.path.join(source, '.gitignore')
         if os.path.exists(filter_path):
             rsync_command.append(f'--filter=\':- {filter_path}\'')
