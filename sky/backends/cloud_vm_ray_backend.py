@@ -1240,7 +1240,7 @@ class CloudVmRayBackend(backends.Backend):
                                ip=ip,
                                source=setup_sh_path,
                                target=f'/tmp/{setup_file}',
-                               with_outputs=True)
+                               with_outputs=False)
                 backend_utils.run_command_on_ip_via_ssh(
                     ip,
                     f'/bin/bash -i /tmp/{setup_file}',

@@ -56,19 +56,15 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
 
-try:
-    _CURSOR.execute('select * from jobs limit 0')
-except sqlite3.OperationalError:
-    # Tables do not exist, create them.
-    _CURSOR.execute("""\
-      CREATE TABLE jobs (
-        job_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        job_name TEXT,
-        username TEXT,
-        submitted_at INTEGER,
-        status TEXT,
-        run_timestamp TEXT CANDIDATE KEY,
-        start_at INTEGER)""")
+_CURSOR.execute("""\
+    CREATE TABLE IF NOT EXISTS jobs (
+    job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_name TEXT,
+    username TEXT,
+    submitted_at INTEGER,
+    status TEXT,
+    run_timestamp TEXT CANDIDATE KEY,
+    start_at INTEGER)""")
 
 _CONN.commit()
 
