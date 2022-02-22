@@ -105,9 +105,6 @@ rsync_filter:
 setup_commands:
   - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
-{%- if setup_sh_path is not none %}
-  - cd ~/sky_workdir && bash /tmp/setup.sh  # FIXME: /tmp is volatile.
-{%- endif %}
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
