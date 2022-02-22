@@ -58,23 +58,7 @@ head_node_type: ray.head.default
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
   "{{sky_remote_path}}": "{{sky_local_path}}",
-{%- if workdir is not none %}
-  "~/sky_workdir": "{{workdir}}",
-{%- endif %}
-{%- if setup_sh_path is not none %}
-  "/tmp/setup.sh": "{{setup_sh_path}}",
-{%- endif %}
-{%- for remote_path, local_path in file_mounts.items() %}
-  "{{remote_path}}": "{{local_path}}",
-{%- endfor %}
 }
-
-{%- if initialization_commands is not none %}
-initialization_commands:
-{%- for cmd in initialization_commands %}
-  - {{cmd}}
-{%- endfor %}
-{%- endif %}
 
 # Patterns for files to exclude when running rsync up or rsync down
 # rsync_exclude:
@@ -90,9 +74,6 @@ setup_commands:
   # _gang_schedule_ray_up() requires first two lines; do not modify.
   - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
-{%- if setup_sh_path is not none %}
-  - cd ~/sky_workdir && bash /tmp/setup.sh  # FIXME: /tmp is volatile.
-{%- endif %}
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:

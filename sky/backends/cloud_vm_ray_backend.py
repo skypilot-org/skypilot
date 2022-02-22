@@ -793,69 +793,18 @@ class RetryingVmProvisioner(object):
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'))
             return proc, stdout, stderr
 
-        def is_cluster_yaml_identical():
-            if prev_cluster_config is None:
-                return False
-            curr_config = backend_utils.read_yaml(cluster_config_file)
-            curr = json.dumps(curr_config, sort_keys=True)
-            prev = json.dumps(prev_cluster_config, sort_keys=True)
-            return curr == prev
+        config = backend_utils.read_yaml(cluster_config_file)
+        file_mounts = config['file_mounts']
+        if 'ssh_public_key' in config['auth']:
+            # For Azure, we need to add ssh public key to VM by filemounts.
+            public_key_path = config['auth']['ssh_public_key']
+            file_mounts[public_key_path] = public_key_path
+        # ray up.
+        proc, stdout, stderr = ray_up(
+            start_streaming_at='Shared connection to')
 
-        ray_up_on_full_confg_only = False
-        # Fast paths for "no need to gang schedule":
-        #  (1) num_nodes == 1, no need to pre-provision.
-        #  (2) otherwise, if cluster configs have not changed, no need either.
-        #    TODO: can relax further: if (num_nodes x requested_resources) now
-        #    == existing, then skip Step 1.  Requested resources =
-        #    cloud(instance_type, acc, acc_args).  If requested clouds are
-        #    different, we still need to gang schedule on the new cloud.
-        if num_nodes == 1:
-            # ray up the full yaml.
-            proc, stdout, stderr = ray_up(
-                start_streaming_at='Shared connection to')
-            return False, proc, stdout, stderr
-        elif is_cluster_yaml_identical():
-            ray_up_on_full_confg_only = True
-            # NOTE: consider the exceptional case where cluster yamls are
-            # identical, but existing cluster has a few nodes killed (e.g.,
-            # spot).  For that case, we ray up once on the full config, instead
-            # of doing gang schedule first.  This seems an ok tradeoff because
-            # (1) checking how many nodes remain maybe slow, a price the common
-            # cases should not pay; (2) setup on the (presumably live) head
-            # node is likely no-op.  We can revisit.
-
-        # Step 1: ray up the emptied config.
-        if not ray_up_on_full_confg_only:
-            config = backend_utils.read_yaml(cluster_config_file)
-            pinned_ray_install = ('pip3 install -U '
-                                  f'ray[default]=={SKY_REMOTE_RAY_VERSION}')
-
-            file_mounts = {}
-            if 'ssh_public_key' in config['auth']:
-                # For Azure, we need to add ssh public key to VM by filemounts.
-                public_key_path = config['auth']['ssh_public_key']
-                file_mounts[public_key_path] = public_key_path
-
-            if SKYLET_REMOTE_PATH in config['file_mounts']:
-                file_mounts[SKYLET_REMOTE_PATH] = config['file_mounts'][
-                    SKYLET_REMOTE_PATH]
-
-            fields_to_empty = {
-                'file_mounts': file_mounts,
-                # Need ray for 'ray status' in wait_until_ray_cluster_ready().
-                # Need sky for external node provider.
-                'setup_commands': config['setup_commands'][:2],
-            }
-            existing_fields = {k: config[k] for k in fields_to_empty}
-            # Keep both in sync.
-            assert pinned_ray_install in existing_fields['setup_commands'][
-                0], existing_fields['setup_commands']
-            config.update(fields_to_empty)
-            backend_utils.dump_yaml(cluster_config_file, config)
-
-        proc, stdout, stderr = ray_up(start_streaming_at='Shared connection to')
-        if proc.returncode != 0:
-            # Head node provisioning failure.
+        # Only 1 node or head node provisioning failure.
+        if num_nodes == 1 or proc.returncode != 0:
             return False, proc, stdout, stderr
 
         logger.info(f'{style.BRIGHT}Successfully provisioned or found'
@@ -869,22 +818,9 @@ class RetryingVmProvisioner(object):
         cluster_ready = backend_utils.wait_until_ray_cluster_ready(
             to_provision_cloud, cluster_config_file, num_nodes)
         gang_failed = not cluster_ready
-        if gang_failed or ray_up_on_full_confg_only:
+        if gang_failed:
             # Head OK; gang scheduling failure.
             return gang_failed, proc, stdout, stderr
-
-        # Step 2: ray up the full config (file mounts, setup).
-        config.update(existing_fields)
-        backend_utils.dump_yaml(cluster_config_file, config)
-        logger.info(
-            f'{style.BRIGHT}Starting to set up the cluster.{style.RESET_ALL}')
-        proc, stdout, stderr = ray_up(
-            # FIXME: Not ideal. The setup log (pip install) will be streamed
-            # first, before the ray autoscaler's step-by-step output (<1/1>
-            # Setting up head node). Probably some buffering or
-            # stdout-vs-stderr bug?  We want the latter to show first, not
-            # printed in the end.
-            start_streaming_at='Shared connection to')
 
         return False, proc, stdout, stderr
 
@@ -1195,19 +1131,18 @@ class CloudVmRayBackend(backends.Backend):
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
-        # Note that 2nd+ provision()/'ray up' will not update (refresh) the
-        # file_mounts for workers.  1st launch does indeed sync file_mounts to
-        # all nodes.  Thus, we here rsync the file mounts.
+        # File mounts handling for remote paths possibly without write access:
+        #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
+        #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
+
         del cloud_to_remote_file_mounts  # Unused.
         mounts = all_file_mounts
+        symlink_commands = []
         if mounts is None or not mounts:
             return
         fore = colorama.Fore
         style = colorama.Style
-        cyan = fore.CYAN
-        reset = style.RESET_ALL
-        bright = style.BRIGHT
-        logger.info(f'{cyan}Processing file mounts.{reset}')
+        logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
 
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         ssh_user, ssh_private_key = self._get_ssh_credential(
@@ -1219,8 +1154,8 @@ class CloudVmRayBackend(backends.Backend):
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
-                logger.info(f'{cyan} Syncing (on {node_name}): '
-                            f'{bright}{src} -> {dst}{reset}')
+                logger.info(f'{fore.CYAN} Syncing (on {node_name}): '
+                            f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
                 if command is not None:
                     backend_utils.run_command_on_ip_via_ssh(
                         ip,
@@ -1244,46 +1179,89 @@ class CloudVmRayBackend(backends.Backend):
             # data-transfer container etc.
             if not os.path.isabs(dst) and not dst.startswith('~/'):
                 dst = f'~/{dst}'
-            use_symlink_trick = True
             # Sync 'src' to 'wrapped_dst', a safe-to-write "wrapped" path.
             if dst.startswith('~/') or dst.startswith('/tmp/'):
                 # Skip as these should be writable locations.
                 wrapped_dst = dst
-                use_symlink_trick = False
             else:
                 wrapped_dst = backend_utils.FileMountHelper.wrap_file_mount(dst)
+                command = backend_utils.FileMountHelper.make_safe_symlink_command(source=dst, target=wrapped_dst)
+                symlink_commands.append(command)
+
             if not task_lib.is_cloud_store_url(src):
                 sync_to_all_nodes(src, wrapped_dst)
                 continue
             storage = cloud_stores.get_storage_from_path(src)
+            sync = storage.make_sync_dir_command(source=src,
+                                                    destination=wrapped_dst)
             if storage.is_directory(src):
-                sync = storage.make_sync_dir_command(source=src,
-                                                     destination=wrapped_dst)
                 # It is a directory so make sure it exists.
                 mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
             else:
-                sync = storage.make_sync_file_command(source=src,
-                                                      destination=wrapped_dst)
                 # It is a file so make sure *its parent dir* exists.
-                mkdir_for_wrapped_dst = \
-                    f'mkdir -p {os.path.dirname(wrapped_dst)}'
+                mkdir_for_wrapped_dst = f'mkdir -p {os.path.dirname(wrapped_dst)}'
             download_target_commands = [
                 # Ensure sync can write to wrapped_dst (e.g., '/data/').
                 mkdir_for_wrapped_dst,
                 # Both the wrapped and the symlink dir exist; sync.
                 sync,
             ]
-            if not use_symlink_trick:
-                command = ' && '.join(download_target_commands)
-            else:
-                # Goal: point dst --> wrapped_dst.
-                command = (
-                    backend_utils.FileMountHelper.make_safe_symlink_command(
-                        source=dst,
-                        target=wrapped_dst,
-                        download_target_commands=download_target_commands))
-
+            command = ' && '.join(download_target_commands)
+            # dst is only used for message printing.
             sync_to_all_nodes(src, dst, command)
+
+        # (2) Run the commands to create symlinks on all the nodes.
+        symlink_command = ' && '.join(symlink_commands)
+        for ip in ip_list:
+            backend_utils.run_command_on_ip_via_ssh(
+                ip,
+                symlink_command,
+                ssh_user=ssh_user,
+                ssh_private_key=ssh_private_key,
+                log_path=os.path.join(self.log_dir, 'file_mounts.log'),
+                check=True,
+                ssh_control_name=self._ssh_control_name(handle))
+
+
+    def setup(self, handle: ResourceHandle, task: Task) -> None:
+        style = colorama.Style
+        fore = colorama.Fore
+
+        if task.setup is None:
+            return
+        codegen = textwrap.dedent(f"""\
+            #!/bin/bash
+            # TODO (zhwu): Move this to bashrc
+            . $(conda info --base)/etc/profile.d/conda.sh
+            {task.setup}
+            """)
+        with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
+            f.write(codegen)
+            f.flush()
+            setup_sh_path = f.name
+
+            # Sync the setup script up and run it.
+            ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+            ssh_user, ssh_private_key = self._get_ssh_credential(
+                handle.cluster_yaml)
+            # TODO(zhwu): make this in parallel
+            for i, ip in enumerate(ip_list):
+                node_name = f'worker{i}' if i > 0 else 'head'
+                logger.info(f'{fore.CYAN} Setting up {node_name}...{style.RESET_ALL}')
+                self._rsync_up(handle,
+                            ip=ip,
+                            source=setup_sh_path,
+                            target='/tmp/sky_setup.sh',
+                            with_outputs=True)
+                backend_utils.run_command_on_ip_via_ssh(
+                    ip,
+                    '/bin/bash -i /tmp/sky_setup.sh',
+                    ssh_user=ssh_user,
+                    ssh_private_key=ssh_private_key,
+                    log_path=os.path.join(self.log_dir, 'setup.log'),
+                    check=True,
+                    ssh_control_name=self._ssh_control_name(handle))
+
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()

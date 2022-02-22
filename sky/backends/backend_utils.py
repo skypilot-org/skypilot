@@ -373,48 +373,6 @@ def write_cluster_config(task: task_lib.Task,
 
     assert cluster_name is not None
 
-    setup_sh_path = None
-    if task.setup is not None:
-        codegen = textwrap.dedent(f"""#!/bin/bash
-            . $(conda info --base)/etc/profile.d/conda.sh
-            {task.setup}
-        """)
-        # Use a stable path, /<tempdir>/sky_setup_<checksum>.sh, because
-        # rerunning the same task without any changes to the content of the
-        # setup command should skip the setup step.  Using NamedTemporaryFile()
-        # would generate a random path every time, hence re-triggering setup.
-        checksum = zlib.crc32(codegen.encode())
-        tempdir = tempfile.gettempdir()
-        # TODO: file lock on this path, in case tasks have the same setup cmd.
-        with open(os.path.join(tempdir, f'sky_setup_{checksum}.sh'), 'w') as f:
-            f.write(codegen)
-        setup_sh_path = f.name
-
-    # File mounts handling for remote paths possibly without write access:
-    #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
-    #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
-    # We need to do these since as of Ray 1.8, this is not supported natively
-    # (Docker works though, of course):
-    #  https://github.com/ray-project/ray/pull/9332
-    #  https://github.com/ray-project/ray/issues/9326
-    mounts = task.get_local_to_remote_file_mounts()
-    wrapped_file_mounts = {}
-    initialization_commands = []
-    if mounts is not None:
-        for remote, local in mounts.items():
-            if not os.path.isabs(remote) and not remote.startswith('~/'):
-                remote = f'~/{remote}'
-            if remote.startswith('~/') or remote.startswith('/tmp/'):
-                # Skip as these should be writable locations.
-                wrapped_file_mounts[remote] = local
-                continue
-            assert os.path.isabs(remote), (remote, local)
-            wrapped_remote = FileMountHelper.wrap_file_mount(remote)
-            wrapped_file_mounts[wrapped_remote] = local
-            command = FileMountHelper.make_safe_symlink_command(
-                source=remote, target=wrapped_remote)
-            initialization_commands.append(command)
-
     # TODO(suquark): once we have sky on PYPI, we should directly install sky
     # from PYPI
     local_wheel_path = wheel_utils.build_sky_wheel()
@@ -424,14 +382,8 @@ def write_cluster_config(task: task_lib.Task,
             resources_vars,
             **{
                 'cluster_name': cluster_name,
-                'setup_sh_path': setup_sh_path,
-                'workdir': task.workdir,
-                'docker_image': task.docker_image,
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,
-                # File mounts handling.
-                'file_mounts': wrapped_file_mounts,
-                'initialization_commands': initialization_commands or None,
                 # Region/zones.
                 'region': region,
                 'zones': ','.join(zones),

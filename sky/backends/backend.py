@@ -41,6 +41,9 @@ class Backend:
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         raise NotImplementedError
+    
+    def setup(self, handle: ResourceHandle, task: Task) -> None:
+        raise NotImplementedError
 
     def add_storage_objects(self, task: Task) -> None:
         raise NotImplementedError
