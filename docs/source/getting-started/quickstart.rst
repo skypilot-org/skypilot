@@ -19,19 +19,46 @@ Key Features
 - **No cloud lock-in** - transparently run your code across AWS, Google Cloud, and Azure
 
 
+Provisioning your first cluster
+--------------------------------
+We'll start by launching our first cluster on Sky using an interactive node.
+Interactive nodes are standalone machines that can be used like any other VM instance,
+but are easy to configure without any additional setup. Sky also handles provisioning
+these nodes with your specified resources as cheaply and quickly as possible using an
+:ref:`auto-failover provisioner <auto-failover>`.
+
+Let's provision an instance with a single K80 GPU.
+
+.. code-block:: bash
+
+    # Provisions/reuses an interactive node with a single K80 GPU.
+    sky gpunode -c mygpu --gpus K80
+
+    # View the machine in the cluster table.
+    sky status
+
+    NAME   LAUNCHED        RESOURCES                     COMMAND                          STATUS
+    mygpu  a few secs ago  1x Azure(Standard_NC6_Promo)  sky gpunode -c mygpu --gpus K80  UP
+
+Sky can also provision interactive CPU and TPU nodes with :code:`cpunode` and :code:`tpunode`.
+Please see our :ref:`CLI reference <cli>` for all configuration options. For more information on
+using and managing interactive nodes, check out our :ref:`reference documentation <interactive-nodes>`.
+
+
 Hello, Sky!
 -----------
-We'll start by launching our first cluster on Sky by defining a task.
+You can also define tasks to be executed by Sky. We'll define our very first task
+to be a simple hello world program.
 
 We can specify the following task attributes with a YAML file:
 
 - :code:`resources` (optional): what cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
-- :code:`workdir` (optional): specifies work directory that is synced with the provisioned instance(s)
+- :code:`workdir` (optional): specifies working directory containing project code that is synced with the provisioned instance(s)
 - :code:`setup` (optional): commands that must be run before the task is executed
 - :code:`run` (optional): specifies the commands that must be run as the actual ask
 
 Below is a minimal task YAML that prints "hello sky!" and shows installed Conda environments,
-requiring an NVIDIA Tesla K80 GPU on AWS. (See more example yaml files in the `repo <https://github.com/sky-proj/sky/tree/master/examples>`_, with a fully-complete example documented :ref:`here <yaml-spec>`.)
+requiring an NVIDIA Tesla K80 GPU on AWS. See more example yaml files in the `repo <https://github.com/sky-proj/sky/tree/master/examples>`_, with a fully-complete example documented :ref:`here <yaml-spec>`.
 
 .. code-block:: yaml
 
@@ -44,14 +71,16 @@ requiring an NVIDIA Tesla K80 GPU on AWS. (See more example yaml files in the `r
      # Get 1 K80 GPU.  Use <name>:<n> to get more (e.g., "K80:8").
      accelerators: K80
 
+   # Working directory (optional) containing the project codebase.
+   # This directory will be synced with the provisioned cluster.
    workdir: .
 
+   # Typical use: pip install -r requirements.txt
    setup: |
-     # Typical use: pip install -r requirements.txt
      echo "running setup"
 
+   # Typical use: make use of resources, such as running training.
    run: |
-     # Typical use: make use of resources, such as running training.
      echo "hello sky!"
      conda env list
 

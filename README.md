@@ -40,7 +40,7 @@ Please refer to our [documentation](https://sky-proj-sky.readthedocs-hosted.com/
 # Clone the sky codebase
 git clone ssh://git@github.com/sky-proj/sky.git
 cd sky
-# Sky requires python >= 3.6.
+# Sky requires python >= 3.6. 3.10+ is currently NOT supported.
 pip install ".[all]"
 ```
 
@@ -54,6 +54,8 @@ tasks in the clouds, configure access to at least one cloud:
 
 **AWS**:
 
+To get the **AWS Access Key** required by the `aws configure`, please refer to the [AWS manual](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey). The **Default region name [None]:** and **Default output format [None]:** are optional.
+
 ```bash
 # Install boto
 pip install boto3
@@ -61,8 +63,6 @@ pip install boto3
 # Configure your AWS credentials
 aws configure
 ```
-
-To get the **AWS Access Key** required by the `aws configure`, please refer to the [AWS manual](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey). The **Default region name [None]:** and **Default output format [None]:** are optional.
 
 **GCP**:
 

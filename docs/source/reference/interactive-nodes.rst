@@ -1,3 +1,4 @@
+.. _interactive-nodes:
 Interactive Nodes
 =================
 
