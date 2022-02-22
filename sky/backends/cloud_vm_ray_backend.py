@@ -770,7 +770,6 @@ class RetryingVmProvisioner(object):
             # different order from directly running in the console. The
             # `--log-style` and `--log-color` flags do not work. To reproduce,
             # `ray up --log-style pretty --log-color true | tee tmp.out`.
-            # TODO(zhwu): Compress the ray up output
             proc, stdout, stderr = log_lib.run_with_log(
                 # NOTE: --no-restart solves the following bug.  Without it, if
                 # 'ray up' (sky launch) twice on a cluster with >1 node, the
@@ -783,7 +782,8 @@ class RetryingVmProvisioner(object):
                 # Tracked in https://github.com/ray-project/ray/issues/20402.
                 ['ray', 'up', '-y', '--no-restart', cluster_config_file],
                 log_abs_path,
-                stream_logs,
+                # TODO (zhwu): Suppress output of `ray up`
+                stream_logs=stream_logs,
                 start_streaming_at=start_streaming_at,
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
@@ -1152,7 +1152,9 @@ class CloudVmRayBackend(backends.Backend):
                         check=True,
                         ssh_control_name=self._ssh_control_name(handle))
                 else:
-                    # TODO(zhwu): Logging to 'file_mounts.log'
+                    # TODO (zhwu): Logging to 'file_mounts.log'
+                    # TODO (zhwu): Optimize for large amount of files.
+                    # zip / transfer/ unzip
                     self._rsync_up(handle,
                                    ip=ip,
                                    source=src,
@@ -1642,8 +1644,8 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
         # Build command.
-        # rsync options: progress bar; verbose; compress
-        rsync_command = ['rsync', '-Pavz']
+        # rsync options: progress bar; human readable; compress
+        rsync_command = ['rsync', '-ahz']
         filter_path = os.path.join(source, '.gitignore')
         if os.path.exists(filter_path):
             rsync_command.append(f'--filter=\':- {filter_path}\'')

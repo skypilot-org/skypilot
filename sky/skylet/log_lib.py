@@ -207,6 +207,9 @@ def _follow_job_logs(file,
                 if start_streaming_at in line:
                     start_streaming = True
                 if start_streaming:
+                    # TODO (zhwu): Consider using '\33[2K' to clear the
+                    # line when line endswith '\r' (to avoid previous line
+                    # to long problem). `colorama.ansi.clear_line`
                     yield line
                 line = ''
         else:
