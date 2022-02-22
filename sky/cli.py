@@ -1428,7 +1428,7 @@ def storage():
     pass
 
 
-@storage.command('ls')
+@storage.command('ls', cls=_DocumentedCodeCommand)
 def storage_ls():  # pylint: disable=redefined-builtin
     """Lists storage objects created.
     """
@@ -1461,7 +1461,7 @@ def storage_ls():  # pylint: disable=redefined-builtin
         click.echo('No existing storage.')
 
 
-@storage.command('delete')
+@storage.command('delete', cls=_DocumentedCodeCommand)
 @click.option('--all',
               '-a',
               default=False,
@@ -1471,6 +1471,18 @@ def storage_ls():  # pylint: disable=redefined-builtin
 @click.argument('name', required=False, type=str, nargs=-1)
 def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
     """Deletes storage objects.
+
+    Example:
+
+    .. code-block:: bash
+
+        # Delete two storage objects
+        sky storage delete imagenet cifar10
+
+    .. code-block:: bash
+
+        # Delete all storage objects
+        sky storage delete -a
     """
     if all:
         click.echo('Deleting all storage objects')
