@@ -207,7 +207,7 @@ class Storage(object):
 
             if self.handle.clouds:
                 for i, s_type in enumerate(self.handle.clouds):
-                    if status == StorageStatus.UPLOAD_FAIL and i == len(
+                    if status == StorageStatus.UPLOAD_FAIL.value and i == len(
                             self.handle.clouds) - 1:
                         logger.info(
                             f'Retrying upload on most recent cloud: {s_type}.')
