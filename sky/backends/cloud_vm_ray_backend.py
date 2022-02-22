@@ -436,7 +436,7 @@ class RetryingVmProvisioner(object):
                 for s in splits:
                     print(s)
                 raise RuntimeError(
-                    'Errors occurred during provision/file_mounts/setup; '
+                    'Errors occurred during provision; '
                     'check logs above.')
 
     def _update_blocklist_on_aws_error(self, region, zones, stdout, stderr):
@@ -1245,7 +1245,7 @@ class CloudVmRayBackend(backends.Backend):
                                with_outputs=False)
                 backend_utils.run_command_on_ip_via_ssh(
                     ip,
-                    f'/bin/bash /tmp/{setup_file}',
+                    f'cd {SKY_REMOTE_WORKDIR}; /bin/bash /tmp/{setup_file}',
                     ssh_user=ssh_user,
                     ssh_private_key=ssh_private_key,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
