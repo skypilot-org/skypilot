@@ -1401,6 +1401,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                 'CLOUD',
                 'INSTANCE_TYPE',
                 'HOST_MEMORY',
+                'PRICE',
             ])
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
@@ -1408,7 +1409,7 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                 mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '-'
                 accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
-                    instance_type_str, mem_str
+                    instance_type_str, mem_str, item.price
                 ])
 
             if i != 0 or gpu_name is None:

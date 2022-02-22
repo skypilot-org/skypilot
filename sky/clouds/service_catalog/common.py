@@ -17,12 +17,14 @@ class InstanceTypeInfo(NamedTuple):
     - accelerator_count: Number of accelerators offered by this instance type.
     - memory: Instance memory in GiB.
     - price: Regular instance price per hour.
+    - spot_price: Spot instance price per hour.
     """
     cloud: str
     instance_type: str
     accelerator_name: str
     accelerator_count: int
     memory: float
+    price: float
 
 
 def get_data_path(filename: str) -> str:
@@ -133,7 +135,8 @@ def list_accelerators_impl(
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
     df = df[[
-        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB'
+        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB',
+        'Price'
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter, regex=True)]
@@ -148,6 +151,7 @@ def list_accelerators_impl(
                 row['AcceleratorName'],
                 row['AcceleratorCount'],
                 row['MemoryGiB'],
+                row['Price'],
             ),
             axis='columns',
         ).tolist()
