@@ -737,15 +737,24 @@ def check_local_gpus() -> bool:
     Checks if GPUs are available locally.
 
     Returns whether GPUs are available on the local machine by checking
-    if nvidia-smi is installed.
+    if nvidia-smi is installed and returns zero return code.
 
-    Returns True if nvidia-smi is installed, false if not.
+    Returns True if nvidia-smi is installed and returns zero return code,
+    False if not.
     """
-    p = subprocess.run(['which', 'nvidia-smi'],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       check=False)
-    return p.returncode == 0
+    is_functional = False
+    installation_check = subprocess.run(['which', 'nvidia-smi'],
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL,
+                                        check=False)
+    is_installed = installation_check.returncode == 0
+    if is_installed == 0:
+        execution_check = subprocess.run(['nvidia-smi'],
+                                         stdout=subprocess.DEVNULL,
+                                         stderr=subprocess.DEVNULL,
+                                         check=False)
+        is_functional = execution_check.returncode == 0
+    return is_functional
 
 
 def generate_cluster_name():
