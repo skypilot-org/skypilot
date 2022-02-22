@@ -432,6 +432,7 @@ class Task:
 
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
+        prepend_setup = None
         for mnt_path, store in storage_mounts.items():
             storage_type = storage_plans[store]
             if storage_type is storage_lib.StorageType.S3:
@@ -441,11 +442,12 @@ class Task:
                 })
             elif storage_type is storage_lib.StorageType.GCS:
                 # Remember to run `gcloud auth application-default login`
-                self.setup = '[[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && ' + \
-                'echo GOOGLE_APPLICATION_CREDENTIALS=' + \
-                '~/.config/gcloud/application_default_credentials.json >> ' + \
-                '~/.bashrc' + ' || echo "GOOGLE_APPLICATION_CREDENTIALS ' + \
-                'already set" && ' + self.setup
+                prepend_setup = (
+                    '[[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && '
+                    'echo GOOGLE_APPLICATION_CREDENTIALS='
+                    '~/.config/gcloud/application_default_credentials.json >> '
+                    '~/.bashrc' + ' || echo "GOOGLE_APPLICATION_CREDENTIALS '
+                    'already set" && ')
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
@@ -455,6 +457,9 @@ class Task:
             else:
                 raise ValueError(f'Storage Type {storage_type} \
                     does not exist!')
+        if prepend_setup is not None:
+            self.setup = prepend_setup + (self.setup or 'true')
+            print(self.setup)
 
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> None:
         """Sets the file mounts for this Task.
