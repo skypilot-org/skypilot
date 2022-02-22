@@ -1644,10 +1644,10 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
         # Build command.
-        # --info=progress2 is used to get a total progress bar instead of a per-file one
-        # (with -P), but it requires rsync>=3.1.0.
-        # TOOD(zhwu): Mac OS has a rsync==2.6.9 (16 years old), maybe we should hint the
-        # user to upgrade to rsync>=3.1.0 using `brew install rsync`.
+        # --info=progress2 is used to get a total progress bar instead of a per-
+        # file one (with -P), but it requires rsync>=3.1.0.
+        # TOOD(zhwu): Mac OS has a rsync==2.6.9 (16 years old), maybe we should
+        # hint the user to upgrade to rsync>=3.1.0 using `brew install rsync`.
         rsync_command = ['rsync', '-az', '--info=progress2']
         filter_path = os.path.join(source, '.gitignore')
         if os.path.exists(filter_path):

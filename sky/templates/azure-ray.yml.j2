@@ -83,7 +83,6 @@ rsync_filter:
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.
-  # _gang_schedule_ray_up() requires first two lines; do not modify.
   - (which pip3 > /dev/null 2>&1 || (sudo apt-get update && sudo apt install -y python3-pip)) && pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful
   # We have to install azure-cli because the Azure cluster does not pre-install it.
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && pip3 install azure-cli==2.30.0 && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
