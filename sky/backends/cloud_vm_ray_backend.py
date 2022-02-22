@@ -644,10 +644,8 @@ class RetryingVmProvisioner(object):
             logger.error(stderr)
             raise e
 
-    def _retry_region_zones(self, task: Task, to_provision: Resources,
-                            num_nodes: int, dryrun: bool, stream_logs: bool,
-                            cluster_name: str,
-                            prev_cluster_config: Optional[Dict[str, Any]]):
+    def _retry_region_zones(self, to_provision: Resources, num_nodes: int,
+                            dryrun: bool, stream_logs: bool, cluster_name: str):
         """The provision retry loop."""
         style = colorama.Style
         # Get log_path name
@@ -667,7 +665,6 @@ class RetryingVmProvisioner(object):
             logger.info(f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
                         f'{region.name}{style.RESET_ALL} ({zone_str})')
             config_dict = backend_utils.write_cluster_config(
-                task,
                 to_provision,
                 num_nodes,
                 _get_cluster_config_template(to_provision.cloud),
@@ -701,7 +698,7 @@ class RetryingVmProvisioner(object):
 
             gang_failed, proc, stdout, stderr = self._gang_schedule_ray_up(
                 to_provision.cloud, num_nodes, cluster_config_file,
-                log_abs_path, stream_logs, prev_cluster_config)
+                log_abs_path, stream_logs)
 
             if gang_failed or proc.returncode != 0:
                 if gang_failed:
@@ -748,8 +745,7 @@ class RetryingVmProvisioner(object):
 
     def _gang_schedule_ray_up(self, to_provision_cloud: clouds.Cloud,
                               num_nodes: int, cluster_config_file: str,
-                              log_abs_path: str, stream_logs: bool,
-                              prev_cluster_config: Optional[Dict[str, Any]]):
+                              log_abs_path: str, stream_logs: bool):
         """Provisions a cluster via 'ray up' with gang scheduling.
 
         Steps for provisioning > 1 node:
@@ -774,6 +770,7 @@ class RetryingVmProvisioner(object):
             # different order from directly running in the console. The
             # `--log-style` and `--log-color` flags do not work. To reproduce,
             # `ray up --log-style pretty --log-color true | tee tmp.out`.
+            # TODO(zhwu): Compress the ray up output
             proc, stdout, stderr = log_lib.run_with_log(
                 # NOTE: --no-restart solves the following bug.  Without it, if
                 # 'ray up' (sky launch) twice on a cluster with >1 node, the
@@ -800,8 +797,7 @@ class RetryingVmProvisioner(object):
             public_key_path = config['auth']['ssh_public_key']
             file_mounts[public_key_path] = public_key_path
         # ray up.
-        proc, stdout, stderr = ray_up(
-            start_streaming_at='Shared connection to')
+        proc, stdout, stderr = ray_up(start_streaming_at='Shared connection to')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 or proc.returncode != 0:
@@ -860,16 +856,7 @@ class RetryingVmProvisioner(object):
         assert cluster_name is not None, 'cluster_name must be specified.'
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
-        prev_handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
-        if prev_handle is None:
-            prev_cluster_config = None
-        else:
-            try:
-                prev_cluster_config = backend_utils.read_yaml(
-                    prev_handle.cluster_yaml)
-            except FileNotFoundError:
-                prev_cluster_config = None
+
         style = colorama.Style
         # Retrying launchable resources.
         provision_failed = True
@@ -877,13 +864,11 @@ class RetryingVmProvisioner(object):
             provision_failed = False
             try:
                 config_dict = self._retry_region_zones(
-                    task,
                     to_provision,
                     num_nodes,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
-                    cluster_name=cluster_name,
-                    prev_cluster_config=prev_cluster_config)
+                    cluster_name=cluster_name)
                 if dryrun:
                     return
                 config_dict['launched_resources'] = to_provision
@@ -1167,6 +1152,7 @@ class CloudVmRayBackend(backends.Backend):
                         check=True,
                         ssh_control_name=self._ssh_control_name(handle))
                 else:
+                    # TODO(zhwu): Logging to 'file_mounts.log'
                     self._rsync_up(handle,
                                    ip=ip,
                                    source=src,
@@ -1181,26 +1167,25 @@ class CloudVmRayBackend(backends.Backend):
             if not os.path.isabs(dst) and not dst.startswith('~/'):
                 dst = f'~/{dst}'
             # Sync 'src' to 'wrapped_dst', a safe-to-write "wrapped" path.
-            if dst.startswith('~/') or dst.startswith('/tmp/'):
-                # Skip as these should be writable locations.
-                wrapped_dst = dst
-            else:
+            wrapped_dst = dst
+            if not dst.startswith('~/') and not dst.startswith('/tmp/'):
                 wrapped_dst = backend_utils.FileMountHelper.wrap_file_mount(dst)
-                command = backend_utils.FileMountHelper.make_safe_symlink_command(source=dst, target=wrapped_dst)
-                symlink_commands.append(command)
+                cmd = backend_utils.FileMountHelper.make_safe_symlink_command(
+                    source=dst, target=wrapped_dst)
+                symlink_commands.append(cmd)
 
             if not task_lib.is_cloud_store_url(src):
                 sync_to_all_nodes(src, wrapped_dst)
                 continue
             storage = cloud_stores.get_storage_from_path(src)
             sync = storage.make_sync_dir_command(source=src,
-                                                    destination=wrapped_dst)
-            if storage.is_directory(src):
-                # It is a directory so make sure it exists.
-                mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
-            else:
-                # It is a file so make sure *its parent dir* exists.
-                mkdir_for_wrapped_dst = f'mkdir -p {os.path.dirname(wrapped_dst)}'
+                                                 destination=wrapped_dst)
+            dir_name = wrapped_dst
+            if not storage.is_directory(src):
+                dir_name = os.path.dirname(wrapped_dst)
+            # Make sure dir exists.
+            mkdir_for_wrapped_dst = f'mkdir -p {dir_name}'
+
             download_target_commands = [
                 # Ensure sync can write to wrapped_dst (e.g., '/data/').
                 mkdir_for_wrapped_dst,
@@ -1223,7 +1208,6 @@ class CloudVmRayBackend(backends.Backend):
                 check=True,
                 ssh_control_name=self._ssh_control_name(handle))
 
-
     def setup(self, handle: ResourceHandle, task: Task) -> None:
         style = colorama.Style
         fore = colorama.Fore
@@ -1243,18 +1227,20 @@ class CloudVmRayBackend(backends.Backend):
             setup_file = os.path.basename(setup_sh_path)
 
             # Sync the setup script up and run it.
-            ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+            ip_list = self._get_node_ips(handle.cluster_yaml,
+                                         handle.launched_nodes)
             ssh_user, ssh_private_key = self._get_ssh_credential(
                 handle.cluster_yaml)
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
-                logger.info(f'{fore.CYAN}Setting up {node_name}...{style.RESET_ALL}')
+                logger.info(
+                    f'{fore.CYAN}Setting up {node_name}...{style.RESET_ALL}')
                 self._rsync_up(handle,
-                            ip=ip,
-                            source=setup_sh_path,
-                            target=f'/tmp/{setup_file}',
-                            with_outputs=True)
+                               ip=ip,
+                               source=setup_sh_path,
+                               target=f'/tmp/{setup_file}',
+                               with_outputs=True)
                 backend_utils.run_command_on_ip_via_ssh(
                     ip,
                     f'/bin/bash -i /tmp/{setup_file}',
@@ -1263,7 +1249,6 @@ class CloudVmRayBackend(backends.Backend):
                     log_path=os.path.join(self.log_dir, 'setup.log'),
                     check=True,
                     ssh_control_name=self._ssh_control_name(handle))
-
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()

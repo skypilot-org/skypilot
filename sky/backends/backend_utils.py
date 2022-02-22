@@ -6,13 +6,11 @@ import os
 import pathlib
 import shlex
 import subprocess
-import tempfile
 import textwrap
 import time
 from typing import Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
-import zlib
 
 import jinja2
 
@@ -22,7 +20,6 @@ from sky import backends
 from sky import clouds
 from sky import sky_logging
 from sky import resources
-from sky import task as task_lib
 from sky.backends import wheel_utils
 from sky.adaptors import azure
 from sky.skylet import log_lib
@@ -311,8 +308,7 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
-def write_cluster_config(task: task_lib.Task,
-                         to_provision: Resources,
+def write_cluster_config(to_provision: Resources,
                          num_nodes: int,
                          cluster_config_template: str,
                          cluster_name: str,
