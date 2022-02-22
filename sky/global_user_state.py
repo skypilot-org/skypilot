@@ -14,11 +14,13 @@ import pickle
 import sqlite3
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from sky import clouds
 
-ResourceHandle = Any
+if TYPE_CHECKING:
+    from sky import backends
+    from sky.data import Storage
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
@@ -111,7 +113,8 @@ def _get_pretty_entry_point() -> str:
     return ' '.join(argv)
 
 
-def add_or_update_cluster(cluster_name: str, cluster_handle: ResourceHandle,
+def add_or_update_cluster(cluster_name: str,
+                          cluster_handle: 'backends.Backend.ResourceHandle',
                           ready: bool):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     # FIXME: launched_at will be changed when `sky launch -c` is called.
@@ -152,7 +155,8 @@ def remove_cluster(cluster_name: str, terminate: bool):
     _CONN.commit()
 
 
-def get_handle_from_cluster_name(cluster_name: str) -> Optional[ResourceHandle]:
+def get_handle_from_cluster_name(
+        cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _CURSOR.execute('SELECT handle FROM clusters WHERE name=(?)',
                            (cluster_name,))
@@ -161,7 +165,7 @@ def get_handle_from_cluster_name(cluster_name: str) -> Optional[ResourceHandle]:
 
 
 def get_cluster_name_from_handle(
-        cluster_handle: ResourceHandle) -> Optional[str]:
+        cluster_handle: 'backends.Backend.ResourceHandle') -> Optional[str]:
     handle = pickle.dumps(cluster_handle)
     rows = _CURSOR.execute('SELECT name FROM clusters WHERE handle=(?)',
                            (handle,))
@@ -219,24 +223,22 @@ def set_enabled_clouds(enabled_clouds: List[str]) -> None:
     _CONN.commit()
 
 
-def add_or_update_storage(storage_name: str, storage_handle, storage_status):
+def add_or_update_storage(storage_name: str,
+                          storage_handle: 'Storage.StorageMetadata',
+                          storage_status: StorageStatus):
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
     last_use = _get_pretty_entry_point()
 
     def status_check(status):
-        try:
-            StorageStatus(status)
-        except ValueError:
-            return False
-        return True
+        return status in StorageStatus
 
     if not status_check(storage_status):
         raise ValueError(f'Error in updating global state. Storage Status '
                          f'{storage_status} is passed in incorrectly')
-    _CURSOR.execute(
-        'INSERT OR REPLACE INTO storage VALUES (?, ?, ?, ?, ?)',
-        (storage_name, storage_launched_at, handle, last_use, storage_status))
+    _CURSOR.execute('INSERT OR REPLACE INTO storage VALUES (?, ?, ?, ?, ?)',
+                    (storage_name, storage_launched_at, handle, last_use,
+                     storage_status.value))
     _CONN.commit()
 
 
@@ -248,7 +250,7 @@ def remove_storage(storage_name: str):
 
 def set_storage_status(storage_name: str, status: StorageStatus) -> None:
     _CURSOR.execute('UPDATE storage SET status=(?) WHERE name=(?)', (
-        status,
+        status.value,
         storage_name,
     ))
     count = _CURSOR.rowcount
@@ -266,7 +268,7 @@ def get_storage_status(storage_name: str) -> None:
         return status
 
 
-def set_storage_handle(storage_name: str, handle):
+def set_storage_handle(storage_name: str, handle: 'Storage.StorageMetadata'):
     _CURSOR.execute('UPDATE storage SET handle=(?) WHERE name=(?)', (
         pickle.dumps(handle),
         storage_name,

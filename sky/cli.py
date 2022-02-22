@@ -402,11 +402,6 @@ def cli():
     pass
 
 
-@cli.group(cls=_NaturalOrderGroup)
-def storage():
-    pass
-
-
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 @click.option('--cluster',
@@ -1426,11 +1421,17 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
         click.echo()
 
 
+@cli.group(cls=_NaturalOrderGroup)
+def storage():
+    """Handle to run Sky Storage CLI commands.
+    """
+    pass
+
+
 @storage.command('status')
 def storage_status():  # pylint: disable=redefined-builtin
-    """Lists Storages.
+    """Lists storage objects created.
     """
-    click.echo('Listing storage objects.')
     storage_stat = global_user_state.get_storage()
     storage_table = util_lib.create_table([
         'NAME',
@@ -1460,20 +1461,16 @@ def storage_status():  # pylint: disable=redefined-builtin
         click.echo('No existing storage.')
 
 
-@storage.command('down')
+@storage.command('delete')
 @click.option('--all',
               '-a',
               default=False,
               is_flag=True,
               required=False,
               help='Used with --delete; Delete all storages.')
-@click.option('--name',
-              '-n',
-              required=False,
-              type=str,
-              help=('Name of storage object.'))
-def storage_down(all: bool, name: str):  # pylint: disable=redefined-builtin
-    """Deletes/Tears Down Storages.
+@click.argument('name', required=False, type=str, nargs=-1)
+def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
+    """Deletes/Tears down storage objects.
     """
     if all:
         click.echo('Deleting all storage objects')
@@ -1483,12 +1480,15 @@ def storage_down(all: bool, name: str):  # pylint: disable=redefined-builtin
                                    source=row['handle'].source)
             store_object.delete()
     elif name:
-        handle = global_user_state.get_handle_from_storage_name(name)
-        if handle is None:
-            raise click.ClickException(f'Storage Name {name} not found!')
-        click.echo(f'Deleting storage object {name}')
-        store_object = Storage(name=handle.storage_name, source=handle.source)
-        store_object.delete()
+        for n in name:
+            handle = global_user_state.get_handle_from_storage_name(n)
+            if handle is None:
+                click.echo(f'Storage Name {n} not found!')
+            else:
+                click.echo(f'Deleting storage object {n}')
+                store_object = Storage(name=handle.storage_name,
+                                       source=handle.source)
+                store_object.delete()
     else:
         raise click.ClickException(
             'Must pass in \'-a/--all\' or \'-n/--name\' to \'sky '

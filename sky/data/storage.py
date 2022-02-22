@@ -1,8 +1,8 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
-from typing import Any, Dict, Optional, Set, Tuple
 import subprocess
+from typing import Any, Dict, Optional, Set, Tuple
 import urllib.parse
 
 from sky.adaptors import aws
@@ -16,6 +16,7 @@ logger = sky_logging.init_logger(__name__)
 
 Path = str
 StorageHandle = Any
+StorageStatus = global_user_state.StorageStatus
 
 
 class StorageType(enum.Enum):
@@ -108,10 +109,12 @@ class Storage(object):
         storage.delete()
     """
 
-    class StorageMetaData(object):
+    class StorageMetadata(object):
         """A pickle-able tuple of:
 
-        - (required) Storage  name.
+        - (required) Storage name.
+        - (required) Source
+        - (optional) Set of Clouds added to the Storage object
         """
 
         def __init__(self, *, storage_name: str, source: str,
@@ -121,7 +124,7 @@ class Storage(object):
             self.clouds = {} if clouds is None else clouds
 
         def __repr__(self):
-            return (f'StorageMetaData('
+            return (f'StorageMetadata('
                     f'\n\tstorage_name={self.storage_name},'
                     f'\n\tsource={self.source},'
                     f'\n\tclouds={self.clouds})')
@@ -178,7 +181,7 @@ class Storage(object):
         # from existing ones
         self.stores = {} if stores is None else stores
 
-        # Logic to rebuild Storage is it is in global user state
+        # Logic to rebuild Storage if it is in global user state
         self.handle = global_user_state.get_handle_from_storage_name(self.name)
         if self.handle:
             logger.info('Detected existing storage object, '
@@ -192,8 +195,11 @@ class Storage(object):
                 self.source = self.handle.source
             elif self.source != self.handle.source:
                 raise ValueError(
-                    'Declared Source is not equal to the original Storage '
-                    'source!')
+                    'Storage {self.name} was found in database, but the '
+                    'declared source {self.source} does not match the '
+                    'source in the database {self.handle.source}. Either '
+                    ' specify the same source in your Storage '
+                    'declaration or use a new storage name.')
 
             if self.handle.clouds:
                 for i, s_type in enumerate(self.handle.clouds):
@@ -209,10 +215,11 @@ class Storage(object):
                         self.get_or_copy_to_gcs()
             return
 
-        self.handle = self.StorageMetaData(storage_name=self.name,
+        self.handle = self.StorageMetadata(storage_name=self.name,
                                            source=self.source,
                                            clouds=list(self.stores.keys()))
-        global_user_state.add_or_update_storage(self.name, self.handle, 'INIT')
+        global_user_state.add_or_update_storage(self.name, self.handle,
+                                                StorageStatus.INIT)
 
         # If source is a pre-existing bucket, connect to the bucket
         # If the bucket does not exist, this will error out
@@ -225,27 +232,31 @@ class Storage(object):
         """Adds AWS S3 Store to Storage
         """
         try:
-            global_user_state.set_storage_status(self.name, 'UPLOAD_AWS')
+            global_user_state.set_storage_status(self.name,
+                                                 StorageStatus.UPLOAD_AWS)
             s3_store = self.add_store(StorageType.S3)
-            global_user_state.set_storage_status(self.name, 'DONE')
+            global_user_state.set_storage_status(self.name, StorageStatus.DONE)
             return 's3://' + s3_store.name
         except Exception as e:
             logger.error('Sky could not upload to S3 Bucket')
-            global_user_state.set_storage_status(self.name, 'UPLOAD_FAIL')
-            raise e
+            global_user_state.set_storage_status(self.name,
+                                                 StorageStatus.UPLOAD_FAIL)
+            raise e from e
 
     def get_or_copy_to_gcs(self):
         """Adds GCS Store to Storage
         """
         try:
-            global_user_state.set_storage_status(self.name, 'UPLOAD_GCP')
+            global_user_state.set_storage_status(self.name,
+                                                 StorageStatus.UPLOAD_GCP)
             gs_store = self.add_store(StorageType.GCS)
-            global_user_state.set_storage_status(self.name, 'DONE')
+            global_user_state.set_storage_status(self.name, StorageStatus.DONE)
             return 'gs://' + gs_store.name
         except Exception as e:
             logger.error('Sky could not upload to GCS Bucket')
-            global_user_state.set_storage_status(self.name, 'UPLOAD_FAIL')
-            raise e
+            global_user_state.set_storage_status(self.name,
+                                                 StorageStatus.UPLOAD_FAIL)
+            raise e from e
 
     def get_or_copy_to_azure_blob(self):
         """Adds Azure Blob Store to Storage
