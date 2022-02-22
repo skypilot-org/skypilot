@@ -44,11 +44,11 @@ from sky import check as sky_check
 from sky import global_user_state
 from sky import sky_logging
 from sky import clouds
+from sky import data
 from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
-from sky.data import Storage
 from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -1488,8 +1488,8 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         click.echo('Deleting all storage objects')
         storages = global_user_state.get_storage()
         for row in storages:
-            store_object = Storage(name=row['name'],
-                                   source=row['handle'].source)
+            store_object = data.Storage(name=row['name'],
+                                        source=row['handle'].source)
             store_object.delete()
     elif name:
         for n in name:
@@ -1498,8 +1498,8 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
                 click.echo(f'Storage Name {n} not found!')
             else:
                 click.echo(f'Deleting storage object {n}')
-                store_object = Storage(name=handle.storage_name,
-                                       source=handle.source)
+                store_object = data.Storage(name=handle.storage_name,
+                                            source=handle.source)
                 store_object.delete()
     else:
         raise click.ClickException(
