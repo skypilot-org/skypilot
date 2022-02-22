@@ -117,8 +117,12 @@ class Storage(object):
         - (optional) Set of Clouds added to the Storage object
         """
 
-        def __init__(self, *, storage_name: str, source: str,
-                     clouds: Set[StorageType]):
+        def __init__(self,
+                     *,
+                     storage_name: str,
+                     source: str,
+                     clouds: Set[StorageType] = None):
+            assert storage_name is not None and source is not None
             self.storage_name = storage_name
             self.source = source
             self.clouds = {} if clouds is None else clouds

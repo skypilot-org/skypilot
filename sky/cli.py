@@ -1428,15 +1428,15 @@ def storage():
     pass
 
 
-@storage.command('status')
-def storage_status():  # pylint: disable=redefined-builtin
+@storage.command('ls')
+def storage_ls():  # pylint: disable=redefined-builtin
     """Lists storage objects created.
     """
     storage_stat = global_user_state.get_storage()
     storage_table = util_lib.create_table([
         'NAME',
         'CREATED',
-        'CLOUDS',
+        'STORES',
         'COMMAND',
         'STATUS',
     ])
@@ -1449,7 +1449,7 @@ def storage_status():  # pylint: disable=redefined-builtin
             # LAUNCHED
             _readable_time_duration(launched_at),
             # CLOUDS
-            str(row['handle'].clouds),
+            ', '.join(row['handle'].clouds),
             # COMMAND
             row['last_use'],
             # STATUS
@@ -1467,10 +1467,10 @@ def storage_status():  # pylint: disable=redefined-builtin
               default=False,
               is_flag=True,
               required=False,
-              help='Used with --delete; Delete all storages.')
+              help='Used with delete; Delete all storages.')
 @click.argument('name', required=False, type=str, nargs=-1)
 def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
-    """Deletes/Tears down storage objects.
+    """Deletes storage objects.
     """
     if all:
         click.echo('Deleting all storage objects')
@@ -1491,8 +1491,8 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
                 store_object.delete()
     else:
         raise click.ClickException(
-            'Must pass in \'-a/--all\' or \'-n/--name\' to \'sky '
-            'storage -d/--delete\'')
+            'Must pass in \'-a/--all\' or storage names to \'sky '
+            'storage delete\'')
 
 
 def main():
