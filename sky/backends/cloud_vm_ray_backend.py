@@ -1131,6 +1131,7 @@ class CloudVmRayBackend(backends.Backend):
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
+        """Mounts all user files to the remote nodes."""
         # File mounts handling for remote paths possibly without write access:
         #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
         #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
@@ -1154,7 +1155,7 @@ class CloudVmRayBackend(backends.Backend):
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
-                logger.info(f'{fore.CYAN} Syncing (on {node_name}): '
+                logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
                             f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
                 if command is not None:
                     backend_utils.run_command_on_ip_via_ssh(
@@ -1239,6 +1240,7 @@ class CloudVmRayBackend(backends.Backend):
             f.write(codegen)
             f.flush()
             setup_sh_path = f.name
+            setup_file = os.path.basename(setup_sh_path)
 
             # Sync the setup script up and run it.
             ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
@@ -1247,15 +1249,15 @@ class CloudVmRayBackend(backends.Backend):
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
-                logger.info(f'{fore.CYAN} Setting up {node_name}...{style.RESET_ALL}')
+                logger.info(f'{fore.CYAN}Setting up {node_name}...{style.RESET_ALL}')
                 self._rsync_up(handle,
                             ip=ip,
                             source=setup_sh_path,
-                            target='/tmp/sky_setup.sh',
+                            target=f'/tmp/{setup_file}',
                             with_outputs=True)
                 backend_utils.run_command_on_ip_via_ssh(
                     ip,
-                    '/bin/bash -i /tmp/sky_setup.sh',
+                    f'/bin/bash -i /tmp/{setup_file}',
                     ssh_user=ssh_user,
                     ssh_private_key=ssh_private_key,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
