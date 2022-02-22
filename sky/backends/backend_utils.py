@@ -751,7 +751,8 @@ def check_local_gpus() -> bool:
                                          stdout=subprocess.DEVNULL,
                                          stderr=subprocess.DEVNULL,
                                          check=False)
-    return installation_check.returncode == 0 and execution_check.returncode == 0
+    return (installation_check.returncode == 0 and
+            execution_check.returncode == 0)
 
 
 def generate_cluster_name():
