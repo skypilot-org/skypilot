@@ -1,3 +1,4 @@
+.. _yaml-spec:
 YAML Configuration
 ==================
 
@@ -23,10 +24,11 @@ describe all fields available.
     resources:
       cloud: aws  # A cloud (optional) can be specified, if desired.
 
-      # Accelerator requirements (optional) can be specified, use sky show-gpus
+      # Accelerator requirements (optional) can be specified, use `sky show-gpus`
       # to view available accelerator configurations.
-      accelerators:
-        V100: 4  # Specify the accelerator type and the count per node.
+      # This specifies the accelerator type and the count per node. Format:
+      # <name>:<cnt> or <name> (short for a count of 1).
+      accelerators: V100:4
 
       # Accelerator arguments (optional) provides additional metadata for some
       # accelerators, such as the TensorFlow version for TPUs.
