@@ -1,4 +1,4 @@
-# TODO (zhwu): Fix this for #272.
+# TODO(zhwu): Fix this for #272.
 import json
 from typing import Dict, List
 
