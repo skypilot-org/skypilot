@@ -59,9 +59,8 @@ requiring an NVIDIA Tesla K80 GPU on AWS. (See more example yaml files in the `r
 
     echo "hello sky!"
     conda env list
-    # If using a `my_run.sh` script that requires conda and (or)
-    # sky environment variables, e.g. $SKY_NODE_RANK and $SKY_NODE_IPS,
-    # invoke it as below to ensure both works:
+    # If using a `my_run.sh` script that requires conda,
+    # invoke it as below to ensure `conda activate` works:
     # `bash -i my_run.sh`
 
 Sky handles selecting an appropriate VM based on user-specified resource
