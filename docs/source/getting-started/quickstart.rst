@@ -40,6 +40,9 @@ Let's provision an instance with a single K80 GPU.
     NAME   LAUNCHED        RESOURCES                     COMMAND                          STATUS
     mygpu  a few secs ago  1x Azure(Standard_NC6_Promo)  sky gpunode -c mygpu --gpus K80  UP
 
+After you are done, run :code:`sky down mygpu` to terminate the cluster. Find more details
+on managing the lifecycle of your cluster :ref:`here <interactive-nodes>`.
+
 Sky can also provision interactive CPU and TPU nodes with :code:`cpunode` and :code:`tpunode`.
 Please see our :ref:`CLI reference <cli>` for all configuration options. For more information on
 using and managing interactive nodes, check out our :ref:`reference documentation <interactive-nodes>`.
