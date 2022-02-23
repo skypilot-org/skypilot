@@ -801,6 +801,10 @@ class RetryingVmProvisioner(object):
             proc, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
 
+        if stream_logs:
+            logger.info(stdout)
+            logger.info(stderr)
+
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 or proc.returncode != 0:
             return False, proc, stdout, stderr
