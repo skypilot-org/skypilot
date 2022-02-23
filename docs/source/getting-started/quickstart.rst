@@ -79,7 +79,7 @@ requiring an NVIDIA Tesla K80 GPU on AWS. See more example yaml files in the `re
      accelerators: K80
 
    # Working directory (optional) containing the project codebase.
-   # This directory will be synced with the provisioned cluster.
+   # This directory will be synced to ~/sky_workdir on the provisioned cluster.
    workdir: .
 
    # Typical use: pip install -r requirements.txt
