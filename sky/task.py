@@ -197,25 +197,11 @@ class Task:
         fm_storage_mounts = []
         file_mounts = config.get('file_mounts')
         if file_mounts is not None:
-            rsync_mounts = dict()
+            copy_mounts = dict()
             for dst_path, src in file_mounts.items():
                 # Check if it is str path
                 if isinstance(src, str):
-                    # Check if it's a cloud store path (for cloud storage) ...
-                    if is_cloud_store_url(src):
-                        # Valid cloud path (s3:// or gcs://) - create storage
-                        storage_name = parse.urlsplit(src).netloc
-                        fm_storages.append({
-                            'name': storage_name,
-                            'source': src
-                        })
-                        fm_storage_mounts.append({
-                            'storage': storage_name,
-                            'mount_path': dst_path
-                        })
-                    # If not a cloud url, it's a local path (for rsync)
-                    else:
-                        rsync_mounts[dst_path] = src
+                    copy_mounts[dst_path] = src
                 # If the src is not a str path, it is likely a dict. Try to
                 # parse storage object.
                 elif isinstance(src, dict):
@@ -232,7 +218,7 @@ class Task:
                 else:
                     raise ValueError(f'Unable to parse file_mount '
                                      f'{dst_path}:{src}')
-            task.set_file_mounts(rsync_mounts)
+            task.set_file_mounts(copy_mounts)
 
         # Process storage objects - both from file_mounts and from YAML
         yaml_storages = config.get('storage')
@@ -441,11 +427,11 @@ class Task:
                 })
             elif storage_type is storage_lib.StorageType.GCS:
                 # Remember to run `gcloud auth application-default login`
-                self.setup = '[[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && ' + \
-                'echo GOOGLE_APPLICATION_CREDENTIALS=' + \
-                '~/.config/gcloud/application_default_credentials.json >> ' + \
-                '~/.bashrc' + ' || echo "GOOGLE_APPLICATION_CREDENTIALS ' + \
-                'already set" && ' + self.setup
+                self.setup = (
+                    '([[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && '
+                    'echo GOOGLE_APPLICATION_CREDENTIALS='
+                    '~/.config/gcloud/application_default_credentials.json >> '
+                    f'~/.bashrc || true); {self.setup or "true"}')
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
