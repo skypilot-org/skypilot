@@ -761,6 +761,8 @@ class RetryingVmProvisioner(object):
         """
         # FIXME(zhwu,zongheng): ray up on multiple nodes ups the head node then
         # waits for all workers; turn it into real gang scheduling.
+        # FIXME: refactor code path to remove use of stream_logs
+        del stream_logs
 
         style = colorama.Style
 
@@ -800,9 +802,6 @@ class RetryingVmProvisioner(object):
             # ray up.
             proc, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
-
-        if stream_logs:
-            logger.info(f'Provisioning logs will be written to {log_abs_path}')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 or proc.returncode != 0:
