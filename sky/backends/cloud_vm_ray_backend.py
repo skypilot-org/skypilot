@@ -15,6 +15,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import colorama
+from rich import console as rich_console
 
 import sky
 from sky import backends
@@ -45,6 +46,7 @@ SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
 SKYLET_REMOTE_PATH = backend_utils.SKY_REMOTE_PATH
 
 logger = sky_logging.init_logger(__name__)
+console = rich_console.Console()
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -165,7 +167,7 @@ class RayCodeGen:
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             ray.init('auto', namespace='__sky__{job_id}__', log_to_driver=True)
-            
+
             run_fn = None
             futures = []"""),
             # FIXME: This is a hack to make sure that the functions can be found
@@ -319,7 +321,7 @@ class RayCodeGen:
             script = run_fn({gang_scheduling_id}, ip_list)
 
         if script is not None:
-            node_export_sky_env_vars = (export_sky_env_vars + 
+            node_export_sky_env_vars = (export_sky_env_vars +
                                         'export SKY_NODE_RANK={gang_scheduling_id}\\n')
             futures.append(run_bash_command_with_log \\
                     .options({name_str}{resources_str}{num_gpus_str}) \\
@@ -602,10 +604,12 @@ class RetryingVmProvisioner(object):
         assert 'tpu-create-script' in config_dict, \
             'Expect TPU provisioning with gcloud.'
         try:
-            backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
-            return True
+            with console.status('[bold cyan]Provisioning TPU '
+                                f'[green]{tpu_name}'):
+                backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
+                return True
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
             if 'ALREADY_EXISTS' in stderr:
@@ -757,6 +761,8 @@ class RetryingVmProvisioner(object):
         """
         # FIXME(zhwu,zongheng): ray up on multiple nodes ups the head node then
         # waits for all workers; turn it into real gang scheduling.
+        # FIXME: refactor code path to remove use of stream_logs
+        del stream_logs
 
         style = colorama.Style
 
@@ -778,8 +784,7 @@ class RetryingVmProvisioner(object):
                 # Tracked in https://github.com/ray-project/ray/issues/20402.
                 ['ray', 'up', '-y', '--no-restart', cluster_config_file],
                 log_abs_path,
-                # TODO(zhwu): Suppress output of `ray up`
-                stream_logs=stream_logs,
+                stream_logs=False,
                 start_streaming_at=start_streaming_at,
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
@@ -792,8 +797,11 @@ class RetryingVmProvisioner(object):
             # For Azure, we need to add ssh public key to VM by filemounts.
             public_key_path = config['auth']['ssh_public_key']
             file_mounts[public_key_path] = public_key_path
-        # ray up.
-        proc, stdout, stderr = ray_up(start_streaming_at='Shared connection to')
+
+        with console.status('[bold cyan]Starting cluster...'):
+            # ray up.
+            proc, stdout, stderr = ray_up(
+                start_streaming_at='Shared connection to')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 or proc.returncode != 0:
@@ -1531,6 +1539,8 @@ class CloudVmRayBackend(backends.Backend):
                     storage.delete()
 
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+        log_path = os.path.join(self.log_dir, 'teardown.log')
+        log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
         prev_status = global_user_state.get_status_from_cluster_name(
@@ -1553,7 +1563,13 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = (
                     f'aws ec2 terminate-instances --region {region} '
                     f'--instance-ids $({query_cmd})')
-                backend_utils.run(terminate_cmd, check=True)
+                with console.status(f'[bold cyan]Terminating '
+                                    f'[green]{cluster_name}'):
+                    proc, stdout, stderr = log_lib.run_with_log(
+                        terminate_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False)
             elif isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
                 query_cmd = (
@@ -1563,13 +1579,25 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = (
                     f'gcloud compute instances delete --zone={zone} --quiet '
                     f'$({query_cmd})')
-                backend_utils.run(terminate_cmd, check=True)
+                with console.status(f'[bold cyan]Terminating '
+                                    f'[green]{cluster_name}'):
+                    proc, stdout, stderr = log_lib.run_with_log(
+                        terminate_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False)
             elif isinstance(cloud, clouds.Azure):
                 resource_group = config['provider']['resource_group']
                 query_cmd = (f'az vm list -g {resource_group} '
                              '--query "[].id" -o tsv')
                 terminate_cmd = f'az vm delete --yes --ids $({query_cmd})'
-                backend_utils.run(terminate_cmd, check=True)
+                with console.status(f'[bold cyan]Terminating '
+                                    f'[green]{cluster_name}'):
+                    proc, stdout, stderr = log_lib.run_with_log(
+                        terminate_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False)
             else:
                 raise ValueError(f'Unsupported cloud {cloud} for stopped '
                                  f'cluster {cluster_name!r}.')
@@ -1581,9 +1609,36 @@ class CloudVmRayBackend(backends.Backend):
                                              suffix='.yml') as f:
                 backend_utils.dump_yaml(f.name, config)
                 f.flush()
-                backend_utils.run(f'ray down -y {f.name}')
+
+                teardown_verb = 'Terminating' if terminate else 'Stopping'
+                with console.status(f'[bold cyan]{teardown_verb} '
+                                    f'[green]{cluster_name}'):
+                    proc, stdout, stderr = log_lib.run_with_log(
+                        ['ray', 'down', '-y', f.name],
+                        log_abs_path,
+                        stream_logs=False)
+
             if handle.tpu_delete_script is not None:
-                backend_utils.run(f'bash {handle.tpu_delete_script}')
+                with console.status('[bold cyan]Terminating TPU...'):
+                    tpu_proc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
+                        ['bash', handle.tpu_delete_script],
+                        log_abs_path,
+                        stream_logs=False)
+                if tpu_proc.returncode != 0:
+                    logger.error(f'{colorama.Fore.RED}Failed to delete TPU.\n'
+                                 f'**** STDOUT ****\n'
+                                 f'{tpu_stdout}\n'
+                                 f'**** STDERR ****\n'
+                                 f'{tpu_stderr}{colorama.Style.RESET_ALL}')
+
+        if proc.returncode != 0:
+            logger.error(
+                f'{colorama.Fore.RED}Failed to terminate {cluster_name}.\n'
+                f'**** STDOUT ****\n'
+                f'{stdout}\n'
+                f'**** STDERR ****\n'
+                f'{stderr}{colorama.Style.RESET_ALL}')
+
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)

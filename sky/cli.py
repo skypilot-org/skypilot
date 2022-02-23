@@ -36,7 +36,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
+import colorama
 import pendulum
+from rich import console as rich_console
 
 import sky
 from sky import backends
@@ -52,6 +54,7 @@ from sky.clouds import service_catalog
 from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
+console = rich_console.Console()
 
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -994,7 +997,10 @@ def start(clusters: Tuple[str]):
         with sky.Dag():
             dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
-        click.secho(f'Starting cluster {name}...', bold=True)
+        click.secho(
+            f'{colorama.Fore.CYAN}Starting cluster '
+            f'{colorama.Fore.GREEN}{name}...',
+            bold=True)
         backend.provision(dummy_task,
                           to_provision=handle.launched_resources,
                           dryrun=False,
