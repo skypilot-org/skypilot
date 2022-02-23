@@ -81,12 +81,13 @@ def redirect_process_output(proc,
 
 
 def run_with_log(
-    cmd: List[str],
+    cmd: Union[List[str], str],
     log_path: str,
     stream_logs: bool = False,
     start_streaming_at: str = '',
     return_none: bool = False,
     check: bool = False,
+    shell: bool = False,
     with_ray: bool = False,
     **kwargs,
 ) -> Union[None, Tuple[subprocess.Popen, str, str]]:
@@ -102,6 +103,7 @@ def run_with_log(
                           stdout=subprocess.PIPE,
                           stderr=stderr,
                           start_new_session=True,
+                          shell=shell,
                           **kwargs) as proc:
         # The proc can be defunct if the python program is killed. Here we
         # open a new subprocess to gracefully kill the proc, SIGTERM
