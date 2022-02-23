@@ -1246,7 +1246,8 @@ class CloudVmRayBackend(backends.Backend):
                                with_outputs=False)
                 backend_utils.run_command_on_ip_via_ssh(
                     ip,
-                    f'cd {SKY_REMOTE_WORKDIR}; /bin/bash /tmp/{setup_file}',
+                    # -i will make sure `conda activate` works
+                    f'/bin/bash -i /tmp/{setup_file}',
                     ssh_user=ssh_user,
                     ssh_private_key=ssh_private_key,
                     log_path=os.path.join(self.log_dir, 'setup.log'),

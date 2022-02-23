@@ -154,7 +154,6 @@ def make_task_bash_script(codegen: str) -> str:
     script = [
         textwrap.dedent(f"""\
                 #!/bin/bash
-                source ~/.bashrc
                 cd {SKY_REMOTE_WORKDIR}"""),
         codegen,
     ]

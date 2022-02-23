@@ -17,6 +17,10 @@ and run command:
      accelerators: V100:4
 
    setup: |
+     # If using a my_setup.sh script to setup, please use
+     # `bash -i my_setup.sh` to capture the environment
+     # variable and make sure `conda activate` works
+
      git clone https://github.com/huggingface/transformers/
      cd transformers
      pip3 install .
@@ -24,6 +28,10 @@ and run command:
      pip3 install -r requirements.txt
 
    run: |
+     # If using a my_run.sh script to run commands, please use
+     # `bash -i my_run.sh` to capture the environment variable
+     # and make sure `conda activate` works
+     
      cd transformers/examples/pytorch/text-classification
      python3 run_glue.py \
        --model_name_or_path bert-base-cased \
