@@ -689,7 +689,7 @@ def check_local_gpus() -> bool:
                                         stderr=subprocess.DEVNULL,
                                         check=False)
     is_installed = installation_check.returncode == 0
-    if is_installed == 0:
+    if is_installed:
         execution_check = subprocess.run(['nvidia-smi'],
                                          stdout=subprocess.DEVNULL,
                                          stderr=subprocess.DEVNULL,
