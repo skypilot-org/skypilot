@@ -1,0 +1,33 @@
+name: symlink-playground
+
+resources:
+  cloud: aws
+  instance_type: m5.2xlarge
+
+# ln -s [data_path] ~/Downloads/temp1
+# ~/Downloads/temp1 is a symlink
+workdir: ~/Downloads/temp1
+
+file_mounts:
+  # This uses rsync to directly copy files from your machine to the remote VM at
+  # /datasets.
+  /datasets: ~/Downloads/temp1
+
+  # This uses sky Storage to first create a S3 bucket named sky-dataset,
+  # copies the contents of ~/datasets to the remote bucket and makes the
+  # bucket persistent (i.e., the bucket is not deleted after the completion of
+  # this sky task, and future invocations of this bucket will be much faster).
+  # The bucket is mounted at /datasets-storage.
+  /datasets-storage:
+    name: mluo-data
+    source: ~/Downloads/temp1
+    force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
+    persistent: True  # Defaults to True, can be set to false.
+
+  # This re-uses a predefined bucket (sky-dataset, defined above) and mounts it
+  # directly at datasets-s3.
+  /datasets-s3: s3://mluo-data
+
+run: |
+  pwd
+  ls -la /

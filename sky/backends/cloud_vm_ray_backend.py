@@ -165,7 +165,7 @@ class RayCodeGen:
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             ray.init('auto', namespace='__sky__{job_id}__', log_to_driver=True)
-            
+
             run_fn = None
             futures = []"""),
             # FIXME: This is a hack to make sure that the functions can be found
@@ -1175,6 +1175,20 @@ class CloudVmRayBackend(backends.Backend):
                 symlink_commands.append(cmd)
 
             if not task_lib.is_cloud_store_url(src):
+                full_src = os.path.abspath(os.path.expanduser(src))
+                if os.path.islink(full_src):
+                    logger.warning(
+                        f'File-mount source path {src} is a symlink. '
+                        'The directory contents will be synced to cloud.')
+
+                if os.path.isfile(full_src):
+                    mkdir_for_wrapped_dst = \
+                        f'mkdir -p {os.path.dirname(wrapped_dst)}'
+                else:
+                    mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+
+                # TODO: Fix method so that mkdir and rsync run together
+                sync_to_all_nodes(src, dst, mkdir_for_wrapped_dst)
                 sync_to_all_nodes(src, wrapped_dst)
                 continue
 
@@ -1652,7 +1666,7 @@ class CloudVmRayBackend(backends.Backend):
         # shooting a lot of messages to the output. --info=progress2 is used
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', '-Pavz']
+        rsync_command = ['rsync', '-Pavz', '-k']
         filter_path = os.path.join(source, '.gitignore')
         if os.path.exists(filter_path):
             rsync_command.append(f'--filter=\':- {filter_path}\'')
