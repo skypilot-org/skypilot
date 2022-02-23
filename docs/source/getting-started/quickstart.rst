@@ -19,19 +19,62 @@ Key Features
 - **No cloud lock-in** - transparently run your code across AWS, Google Cloud, and Azure
 
 
+Provisioning your first cluster
+--------------------------------
+We'll start by launching our first cluster on Sky using an interactive node.
+Interactive nodes are standalone machines that can be used like any other VM instance,
+but are easy to configure without any additional setup. Sky also handles provisioning
+these nodes with your specified resources as cheaply and quickly as possible using an
+:ref:`auto-failover provisioner <auto-failover>`.
+
+Let's provision an instance with a single K80 GPU.
+
+.. code-block:: bash
+
+    # Provisions/reuses an interactive node with a single K80 GPU.
+    # Any of the interactive node commands (gpunode, tpunode, cpunode)
+    # will automatically log in to the cluster.
+    sky gpunode -c mygpu --gpus K80
+
+    Last login: Wed Feb 23 22:35:47 2022 from 136.152.143.101
+    ubuntu@ip-172-31-86-108:~$ gpustat
+    ip-172-31-86-108     Wed Feb 23 22:42:43 2022  450.142.00
+    [0] Tesla K80        | 31°C,   0 % |     0 / 11441 MB |
+    ubuntu@ip-172-31-86-108:~$
+    ^D
+
+    # View the machine in the cluster table.
+    sky status
+
+    NAME   LAUNCHED        RESOURCES                     COMMAND                          STATUS
+    mygpu  a few secs ago  1x Azure(Standard_NC6_Promo)  sky gpunode -c mygpu --gpus K80  UP
+
+After you are done, run :code:`sky down mygpu` to terminate the cluster. Find more details
+on managing the lifecycle of your cluster :ref:`here <interactive-nodes>`.
+
+Sky can also provision interactive CPU and TPU nodes with :code:`cpunode` and :code:`tpunode`.
+Please see our :ref:`CLI reference <cli>` for all configuration options. For more information on
+using and managing interactive nodes, check out our :ref:`reference documentation <interactive-nodes>`.
+
+
 Hello, Sky!
 -----------
-We'll start by launching our first cluster on Sky by defining a task.
+You can also define tasks to be executed by Sky. We'll define our very first task
+to be a simple hello world program.
 
 We can specify the following task attributes with a YAML file:
 
 - :code:`resources` (optional): what cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
-- :code:`workdir` (optional): specifies work directory that is synced with the provisioned instance(s)
+- :code:`workdir` (optional): specifies working directory containing project code that is synced with the provisioned instance(s).
 - :code:`setup` (optional): commands that must be run before the task is executed
 - :code:`run` (optional): specifies the commands that must be run as the actual ask
 
+.. note::
+
+    Sky does not currently support large, multi-gigabyte workdirs (e.g. do not store your large datasets in your working directory) as the files are synced to the remote VM with :code:`rsync`. Please consider using :ref:`Sky Storage <sky-storage>` to transfer large datasets and files.
+
 Below is a minimal task YAML that prints "hello sky!" and shows installed Conda environments,
-requiring an NVIDIA Tesla K80 GPU on AWS. (See more example yaml files in the `repo <https://github.com/sky-proj/sky/tree/master/examples>`_, with a fully-complete example documented :ref:`here <yaml-spec>`.)
+requiring an NVIDIA Tesla K80 GPU on AWS. See more example yaml files in the `repo <https://github.com/sky-proj/sky/tree/master/examples>`_, with a fully-complete example documented :ref:`here <yaml-spec>`.
 
 .. code-block:: yaml
 
@@ -44,14 +87,16 @@ requiring an NVIDIA Tesla K80 GPU on AWS. (See more example yaml files in the `r
      # Get 1 K80 GPU.  Use <name>:<n> to get more (e.g., "K80:8").
      accelerators: K80
 
+   # Working directory (optional) containing the project codebase.
+   # This directory will be synced to ~/sky_workdir on the provisioned cluster.
    workdir: .
 
+   # Typical use: pip install -r requirements.txt
    setup: |
-     # Typical use: pip install -r requirements.txt
      echo "running setup"
 
+   # Typical use: make use of resources, such as running training.
    run: |
-     # Typical use: make use of resources, such as running training.
      echo "hello sky!"
      conda env list
 
@@ -91,7 +136,17 @@ If you would like to log into the a cluster, Sky provides convenient SSH access 
 
    $ ssh mycluster
 
+If you would like to transfer files to and from the cluster, *rsync* or *scp* can be used:
+
+.. code-block:: console
+
+    $ rsync -Pavz /local/path/source mycluster:/remote/dest  # copy files to remote VM
+    $ rsync -Pavz mycluster:/remote/source /local/dest       # copy files from remote VM
+
+After you are done, run :code:`sky down mycluster` to terminate the cluster. Find more details
+on managing the lifecycle of your cluster :ref:`here <interactive-nodes>`.
+
 Sky is more than a tool for easily provisioning and managing multiple clusters
-on different clouds.  It also comes with features for storing and moving data,
-queueing multiple jobs, iterative development, and interactive nodes for
+on different clouds.  It also comes with features for :ref:`storing and moving data <sky-storage>`,
+:ref:`queueing multiple jobs <job-queue>`, :ref:`iterative development <iter-dev>`, and :ref:`interactive nodes <interactive-nodes>` for
 debugging.
