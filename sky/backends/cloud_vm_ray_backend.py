@@ -244,8 +244,8 @@ class RayCodeGen:
                     for i in range(pg.bundle_count)
                 ])
                 print('SKY INFO: Placement group IPs:', ip_list)
-                ip_list_str = ' '.join([repr(ip) for ip in ip_list])
-                export_sky_env_vars = 'export SKY_NODE_IPS=(' + ip_list_str + ')\\n'
+                ip_list_str = '\\n'.join(ip_list)
+                export_sky_env_vars = 'export SKY_NODE_IPS="' + ip_list_str + '"\\n'
                 """),
         ]
 

@@ -9,8 +9,8 @@ else
     echo "conda env does not exist"
     conda create -n resnet python=3.6 -y
     conda activate resnet
-    pip3 install -r requirements.txt
 fi
+pip install -r requirements.txt
 
 mkdir -p data
 mkdir -p saved_models
