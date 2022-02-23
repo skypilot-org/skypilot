@@ -1,3 +1,4 @@
+.. _iter-dev:
 Iteratively Developing a Project
 ====================================
 
@@ -47,8 +48,8 @@ Use the familiar scp/rsync to transfer files between your local machine and remo
 
 .. code-block::
 
-    $ scp -r my_code/ dev:/path/to/destination  # copy files to remote VM
-    $ scp -r dev:/path/to/source my_code/       # copy files from remote VM
+    $ rsync -Pavz my_code/ dev:/path/to/destination  # copy files to remote VM
+    $ rsync -Pavz dev:/path/to/source my_code/       # copy files from remote VM
 
 Sky **simplifies code syncing** by the automatic transfer of a working directory
 to the cluster.  The working directory can be configured with the

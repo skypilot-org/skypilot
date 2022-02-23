@@ -1,3 +1,4 @@
+.. _auto-failover:
 Auto-provisioning GPUs
 ==========================
 
