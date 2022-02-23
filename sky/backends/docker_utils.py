@@ -167,7 +167,7 @@ def build_dockerimage(task, tag):
     if copy_path:
         copy_dir_name = os.path.basename(os.path.dirname(copy_path))
         dst = os.path.join(temp_dir, copy_dir_name)
-        shutil.copytree(os.path.expanduser(copy_path), dst)
+        shutil.copytree(os.path.expanduser(copy_path), dst, dirs_exist_ok=True)
     logger.info(f'Using tempdir {temp_dir} for docker build.')
 
     # Run docker image build
