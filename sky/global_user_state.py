@@ -265,7 +265,7 @@ def get_storage_status(storage_name: str) -> None:
     rows = _CURSOR.execute('SELECT status FROM storage WHERE name=(?)',
                            (storage_name,))
     for (status,) in rows:
-        return status
+        return StorageStatus[status]
 
 
 def set_storage_handle(storage_name: str, handle: 'Storage.StorageMetadata'):
