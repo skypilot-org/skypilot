@@ -12,6 +12,10 @@ specified in the source becomes available at the destination mount_path.
 Please note that sky.Storage does not guarantee preservation of file
 permissions - you may need to set file permissions during task execution.
 
+.. note::
+    Sky file mounting currently does not support syncing writes.
+    Any writes made at a mounted folder will not reflect at the mounting source.
+
 Using Sky Storage
 -----------------
 Sky Storage can be used by specifying additional fields in the
@@ -41,6 +45,7 @@ enabling persistence, file_mount sync can be made significantly faster.
       # bucket persistent (i.e., the bucket is not deleted after the completion of
       # this sky task, and future invocations of this bucket will be much faster).
       # The bucket is mounted at /datasets-storage.
+      # If the bucket already exists, it is fetched and re-used.
       /datasets-storage:
         name: sky-dataset
         source: ~/datasets
@@ -51,8 +56,9 @@ enabling persistence, file_mount sync can be made significantly faster.
       pwd
       ls -la /
 
-Finally, you can also directly mount s3/gcs buckets in your remote VM by
-providing the path to the s3/gcs bucket.
+If you have files that already exist on remote cloud stores, you can also
+directly mount s3/gcs buckets and objects in your remote VM by providing the
+path to the s3/gcs bucket or object.
 
 .. code-block:: yaml
 
@@ -67,13 +73,20 @@ providing the path to the s3/gcs bucket.
       # mounts it directly at /datasets-s3.
       /datasets-s3: s3://sky-dataset
 
+      # This copies a single object (train-00001-of-01024) from a remote cloud
+      # storage to local disk.
+      /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
+
     run: |
       pwd
       ls -la /
 
 Alternate Usage - Declarative Storage API
 ------------------------------------------
-.. warning:: The declarative storage YAML API has been deprecated. If you need to create Storage objects but not mount them, use the storage CLI once it is supported.
+.. warning::
+    The declarative storage YAML API has been deprecated.
+    If you need to create Storage objects but not mount them, use the storage
+    CLI once it is supported.
 
 Some power users may want to only upload their files to an object store
 without mounting it, while others may want to re-use pre-existing storage
