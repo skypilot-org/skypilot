@@ -53,7 +53,7 @@ to be a simple hello world program.
 We can specify the following task attributes with a YAML file:
 
 - :code:`resources` (optional): what cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
-- :code:`workdir` (optional): specifies working directory containing project code that is synced with the provisioned instance(s)
+- :code:`workdir` (optional): specifies working directory containing project code that is synced with the provisioned instance(s). **NOTE**: Sky does not currently support large, multi-gigabyte workdirs (e.g. do not store your large datasets in your working directory) as the files are synced to the remote VM with :code:`rsync`. Please consider using :ref:`Sky Storage <sky-storage>` to transfer large datasets and files.
 - :code:`setup` (optional): commands that must be run before the task is executed
 - :code:`run` (optional): specifies the commands that must be run as the actual ask
 
@@ -120,7 +120,14 @@ If you would like to log into the a cluster, Sky provides convenient SSH access 
 
    $ ssh mycluster
 
+If you would like to transfer files to and from the cluster, *rsync* or *scp* can be used:
+
+.. code-block:: console
+
+    $ scp -r /local/path/source mycluster:/remote/dest  # copy files to remote VM
+    $ scp -r mycluster:/remote/source /local/dest       # copy files from remote VM
+
 Sky is more than a tool for easily provisioning and managing multiple clusters
-on different clouds.  It also comes with features for storing and moving data,
-queueing multiple jobs, iterative development, and interactive nodes for
+on different clouds.  It also comes with features for :ref:`storing and moving data <sky-storage>`,
+:ref:`queueing multiple jobs <job-queue>`, :ref:`iterative development <iter-dev>`, and :ref:`interactive nodes <interactive-nodes>` for
 debugging.

@@ -13,6 +13,9 @@ describe all fields available.
 
     # Working directory (optional), synced each time launch or exec is run
     # with the yaml file.
+    # NOTE: Sky does not currently support large, multi-gigabyte workdirs as the
+    # files are synced to the remote VM with `rsync`. Please consider using Sky
+    # Storage to transfer large datasets and files.
     workdir: ~/my-task-code
 
     # Number of nodes (optional) to launch including the head node. If not
