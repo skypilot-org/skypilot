@@ -100,5 +100,5 @@ To transfer a checkpoint or artifact from the remote VM to the local VM, you can
 
 .. code-block:: console
 
-    $ scp -r local_artifacts/ lm-cluster:/path/to/destination  # copy files to remote VM
-    $ scp -r lm-cluster:/path/to/checkpoints local_artifacts/  # copy files from remote VM
+    $ rsync -Pavz local_artifacts/ lm-cluster:/path/to/destination  # copy files to remote VM
+    $ rsync -Pavz lm-cluster:/path/to/checkpoints local_artifacts/  # copy files from remote VM

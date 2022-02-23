@@ -131,8 +131,8 @@ If you would like to transfer files to and from the cluster, *rsync* or *scp* ca
 
 .. code-block:: console
 
-    $ scp -r /local/path/source mycluster:/remote/dest  # copy files to remote VM
-    $ scp -r mycluster:/remote/source /local/dest       # copy files from remote VM
+    $ rsync -Pavz /local/path/source mycluster:/remote/dest  # copy files to remote VM
+    $ rsync -Pavz mycluster:/remote/source /local/dest       # copy files from remote VM
 
 After you are done, run :code:`sky down mycluster` to terminate the cluster. Find more details
 on managing the lifecycle of your cluster :ref:`here <interactive-nodes>`.
