@@ -802,8 +802,7 @@ class RetryingVmProvisioner(object):
                 start_streaming_at='Shared connection to')
 
         if stream_logs:
-            logger.info(stdout)
-            logger.info(stderr)
+            logger.info(f'Provisioning logs will be written to {log_abs_path}')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 or proc.returncode != 0:
