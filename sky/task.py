@@ -445,7 +445,6 @@ class Task:
                     does not exist!')
         if prepend_setup is not None:
             self.setup = prepend_setup + (self.setup or 'true')
-            print(self.setup)
 
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> None:
         """Sets the file mounts for this Task.
