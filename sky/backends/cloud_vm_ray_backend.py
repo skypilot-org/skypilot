@@ -1255,9 +1255,8 @@ class CloudVmRayBackend(backends.Backend):
                         check=True,
                         ssh_control_name=self._ssh_control_name(handle))
                 except subprocess.CalledProcessError as e:
-                    logger.error(
-                        f'{fore.RED}Setup failed with return code'
-                        f' {e.returncode}.{style.RESET_ALL}')
+                    logger.error(f'{fore.RED}Setup failed with return code'
+                                 f' {e.returncode}.{style.RESET_ALL}')
                     # Suppress the error traceback. Fail as soon as
                     # possible (head node).
                     sys.exit(e.returncode)

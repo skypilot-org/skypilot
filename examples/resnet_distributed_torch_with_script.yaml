@@ -1,0 +1,13 @@
+name: resnet-distributed-app
+
+
+resources:
+    accelerators: V100
+
+num_nodes: 2
+
+setup: |
+    bash -i resnet_distributed_torch_scripts/setup.sh
+
+run: |
+    bash -i resnet_distributed_torch_scripts/run.sh
