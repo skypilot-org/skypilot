@@ -35,34 +35,34 @@ requiring an NVIDIA Tesla K80 GPU on AWS. (See more example yaml files in the `r
 
 .. code-block:: yaml
 
-   # hello_sky.yaml
+  # hello_sky.yaml
 
-   resources:
-     # Optional; if left out, pick from the available clouds.
-     cloud: aws
+  resources:
+    # Optional; if left out, pick from the available clouds.
+    cloud: aws
 
-     # Get 1 K80 GPU.  Use <name>:<n> to get more (e.g., "K80:8").
-     accelerators: K80
+    # Get 1 K80 GPU.  Use <name>:<n> to get more (e.g., "K80:8").
+    accelerators: K80
 
-   workdir: .
+  workdir: .
 
-   setup: |
-     # Typical use: pip install -r requirements.txt
+  setup: |
+    # Typical use: pip install -r requirements.txt
 
-     # If using a `my_setup.sh` script that requires conda,
-     # invoke it as below to ensure `conda activate` works:
-     # bash -i my_setup.sh
-     echo "running setup"
+    echo "running setup"
+    # If using a `my_setup.sh` script that requires conda,
+    # invoke it as below to ensure `conda activate` works:
+    # bash -i my_setup.sh
 
-   run: |
-     # Typical use: make use of resources, such as running training.
+  run: |
+    # Typical use: make use of resources, such as running training.
 
-     # If using a `my_run.sh` script that requires conda and (or)
-     # sky environment variables, e.g. $SKY_NODE_RANK and $SKY_NODE_IPS,
-     # invoke it as below to ensure both works:
-     # `bash -i my_run.sh`
-     echo "hello sky!"
-     conda env list
+    echo "hello sky!"
+    conda env list
+    # If using a `my_run.sh` script that requires conda and (or)
+    # sky environment variables, e.g. $SKY_NODE_RANK and $SKY_NODE_IPS,
+    # invoke it as below to ensure both works:
+    # `bash -i my_run.sh`
 
 Sky handles selecting an appropriate VM based on user-specified resource
 constraints, launching the cluster on an appropriate cloud provider, and
@@ -72,7 +72,7 @@ To launch a task based on our above YAML spec, we can use :code:`sky launch`.
 
 .. code-block:: console
 
-   $ sky launch -c mycluster hello_sky.yaml
+  $ sky launch -c mycluster hello_sky.yaml
 
 The :code:`-c` option allows us to specify a cluster name. If a cluster with the
 same name already exists, Sky will reuse that cluster. If no such cluster
@@ -84,7 +84,7 @@ We can view our existing clusters by running :code:`sky status`:
 
 .. code-block:: console
 
-   $ sky status
+  $ sky status
 
 This may show multiple clusters, if you have created several:
 
@@ -98,7 +98,7 @@ If you would like to log into the a cluster, Sky provides convenient SSH access 
 
 .. code-block:: console
 
-   $ ssh mycluster
+  $ ssh mycluster
 
 Sky is more than a tool for easily provisioning and managing multiple clusters
 on different clouds.  It also comes with features for storing and moving data,

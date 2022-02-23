@@ -20,7 +20,11 @@ workdir: .  # Sync code dir to cloud
 
 setup: |
   # Typical use: pip install -r requirements.txt
+
   echo "running setup"
+  # If using a `my_setup.sh` script that requires conda,
+  # invoke it as below to ensure `conda activate` works:
+  # bash -i my_setup.sh
 
 run: |
   # Typical use: make use of resources, such as running training.
