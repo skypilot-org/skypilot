@@ -56,9 +56,13 @@ to be a simple hello world program.
 We can specify the following task attributes with a YAML file:
 
 - :code:`resources` (optional): what cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
-- :code:`workdir` (optional): specifies working directory containing project code that is synced with the provisioned instance(s). **NOTE**: Sky does not currently support large, multi-gigabyte workdirs (e.g. do not store your large datasets in your working directory) as the files are synced to the remote VM with :code:`rsync`. Please consider using :ref:`Sky Storage <sky-storage>` to transfer large datasets and files.
+- :code:`workdir` (optional): specifies working directory containing project code that is synced with the provisioned instance(s).
 - :code:`setup` (optional): commands that must be run before the task is executed
 - :code:`run` (optional): specifies the commands that must be run as the actual ask
+
+.. note::
+
+    Sky does not currently support large, multi-gigabyte workdirs (e.g. do not store your large datasets in your working directory) as the files are synced to the remote VM with :code:`rsync`. Please consider using :ref:`Sky Storage <sky-storage>` to transfer large datasets and files.
 
 Below is a minimal task YAML that prints "hello sky!" and shows installed Conda environments,
 requiring an NVIDIA Tesla K80 GPU on AWS. See more example yaml files in the `repo <https://github.com/sky-proj/sky/tree/master/examples>`_, with a fully-complete example documented :ref:`here <yaml-spec>`.
@@ -129,6 +133,9 @@ If you would like to transfer files to and from the cluster, *rsync* or *scp* ca
 
     $ scp -r /local/path/source mycluster:/remote/dest  # copy files to remote VM
     $ scp -r mycluster:/remote/source /local/dest       # copy files from remote VM
+
+After you are done, run :code:`sky down mycluster` to terminate the cluster. Find more details
+on managing the lifecycle of your cluster :ref:`here <interactive-nodes>`.
 
 Sky is more than a tool for easily provisioning and managing multiple clusters
 on different clouds.  It also comes with features for :ref:`storing and moving data <sky-storage>`,
