@@ -1372,17 +1372,19 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         if gpu_name is None:
-            result = service_catalog.list_accelerator_counts(gpus_only=True, clouds=cloud)
-
+            result = service_catalog.list_accelerator_counts(gpus_only=True,
+                                                             clouds=cloud)
             # NVIDIA GPUs
             for gpu in service_catalog.get_common_gpus():
-                gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+                if gpu in result:
+                    gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             yield from gpu_table.get_string()
             yield '\n\n'
 
             # Google TPUs
             for tpu in service_catalog.get_tpus():
-                tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+                if tpu in result:
+                    tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
             yield from tpu_table.get_string()
 
             # Other GPUs

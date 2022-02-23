@@ -9,6 +9,7 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
+
 class InstanceTypeInfo(NamedTuple):
     """Instance type information.
 
@@ -90,6 +91,16 @@ def get_instance_type_for_accelerator_impl(
     result = df[(df['AcceleratorName'] == acc_name) &
                 (df['AcceleratorCount'] == acc_count)]
     if len(result) == 0:
+        fuzzy_result = df[(df['AcceleratorName'].str.contains(acc_name)) &
+                          (df['AcceleratorCount'] >= acc_count)]
+        x = fuzzy_result[['AcceleratorName',
+                          'AcceleratorCount']].drop_duplicates()
+        logger.info(
+            f'No resource satisfying {acc_name}:{acc_count}. Did you mean:'
+        )
+        for _, row in x.iterrows():
+            logger.info(
+                f'--gpus {row["AcceleratorName"]}:{row["AcceleratorCount"]}')
         return None
     instance_types = set(result['InstanceType'])
     if len(instance_types) > 1:
