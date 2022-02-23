@@ -87,11 +87,7 @@ class FileMountHelper(object):
         return os.path.join(_SKY_REMOTE_FILE_MOUNTS_DIR, path.lstrip('/'))
 
     @classmethod
-    def make_safe_symlink_command(
-            cls,
-            *,
-            source: str,
-            target: str) -> str:
+    def make_safe_symlink_command(cls, *, source: str, target: str) -> str:
         """Returns a command that safely symlinks 'source' to 'target'.
 
         All intermediate directories of 'source' will be owned by $USER,

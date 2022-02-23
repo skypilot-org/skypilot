@@ -1177,14 +1177,19 @@ class CloudVmRayBackend(backends.Backend):
             if not task_lib.is_cloud_store_url(src):
                 sync_to_all_nodes(src, wrapped_dst)
                 continue
+
             storage = cloud_stores.get_storage_from_path(src)
-            sync = storage.make_sync_dir_command(source=src,
-                                                 destination=wrapped_dst)
-            dir_name = wrapped_dst
-            if not storage.is_directory(src):
-                dir_name = os.path.dirname(wrapped_dst)
-            # Make sure dir exists.
-            mkdir_for_wrapped_dst = f'mkdir -p {dir_name}'
+            if storage.is_directory(src):
+                sync = storage.make_sync_dir_command(source=src,
+                                                     destination=wrapped_dst)
+                # It is a directory so make sure it exists.
+                mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+            else:
+                sync = storage.make_sync_file_command(source=src,
+                                                      destination=wrapped_dst)
+                # It is a file so make sure *its parent dir* exists.
+                mkdir_for_wrapped_dst = \
+                    f'mkdir -p {os.path.dirname(wrapped_dst)}'
 
             download_target_commands = [
                 # Ensure sync can write to wrapped_dst (e.g., '/data/').
