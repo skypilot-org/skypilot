@@ -36,8 +36,9 @@ class Stage(enum.Enum):
     PROVISION = 1
     SYNC_WORKDIR = 2
     SYNC_FILE_MOUNTS = 3
-    EXEC = 4
-    TEARDOWN = 5
+    SETUP = 4
+    EXEC = 5
+    TEARDOWN = 6
 
 
 def _execute(dag: sky.Dag,
@@ -69,8 +70,8 @@ def _execute(dag: sky.Dag,
       optimize_target: OptimizeTarget; the dag optimization metric, e.g.
         OptimizeTarget.COST.
       stages: List of stages to run.  If None, run the whole life cycle of
-        execution; otherwise, just the specified stages.  Used for skipping
-        setup.
+        execution; otherwise, just the specified stages.  Used for `sky exec`
+        skipping all setup steps.
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
       detach_run: bool; whether to detach the process after the job submitted.
@@ -108,15 +109,6 @@ def _execute(dag: sky.Dag,
     try:
         if stages is None or Stage.PROVISION in stages:
             if handle is None:
-                # **Dangerous**.  If passing a handle, changes to (1) setup
-                # commands (2) file_mounts list/content (3) other state about
-                # the cluster are IGNORED.  Careful.
-                #
-                # Mitigations: introduce backend.run_setup_commands() as a
-                # standalone stage; fix CloudVmRayBackend.sync_file_mounts() to
-                # sync all files.  They are mitigations because if one manually
-                # changes the cluster AND passing in a handle, the cluster still
-                # would not be updated correctly.
                 prev_file_mounts = task.file_mounts
                 if prev_file_mounts is not None:
                     prev_file_mounts = dict(task.file_mounts)
@@ -140,6 +132,9 @@ def _execute(dag: sky.Dag,
         if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.get_cloud_to_remote_file_mounts())
+
+        if stages is None or Stage.SETUP in stages:
+            backend.setup(handle, task)
 
         if stages is None or Stage.EXEC in stages:
             try:

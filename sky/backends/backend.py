@@ -42,6 +42,9 @@ class Backend:
     ) -> None:
         raise NotImplementedError
 
+    def setup(self, handle: ResourceHandle, task: Task) -> None:
+        raise NotImplementedError
+
     def add_storage_objects(self, task: Task) -> None:
         raise NotImplementedError
 
