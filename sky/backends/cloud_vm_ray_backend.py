@@ -734,7 +734,7 @@ class RetryingVmProvisioner(object):
                 plural = '' if num_nodes == 1 else 's'
                 logger.info(
                     f'{style.BRIGHT}Successfully provisioned or found'
-                    f' existing VM{plural}. Setup completed.{style.RESET_ALL}')
+                    f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -1219,13 +1219,10 @@ class CloudVmRayBackend(backends.Backend):
 
         if task.setup is None:
             return
-        codegen = textwrap.dedent(f"""\
-            #!/bin/bash
-            # TODO(zhwu): Move this to bashrc
-            . $(conda info --base)/etc/profile.d/conda.sh
-            {task.setup}""")
+
+        setup_script = log_lib.make_task_bash_script(task.setup)
         with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
-            f.write(codegen)
+            f.write(setup_script)
             f.flush()
             setup_sh_path = f.name
             setup_file = os.path.basename(setup_sh_path)
