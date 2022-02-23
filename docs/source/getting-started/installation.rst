@@ -10,7 +10,7 @@ Install Sky using pip:
   $ # Clone the sky codebase
   $ git clone ssh://git@github.com/sky-proj/sky.git
   $ cd sky
-  $ # Sky requires python >= 3.6.
+  $ # Sky requires python >= 3.6. 3.10+ is currently NOT supported.
   $ pip install ".[all]"
 
 If you only want the dependencies for certain clouds, you can also use
@@ -24,6 +24,8 @@ tasks in the clouds, configure access to at least one cloud:
 
 **AWS**:
 
+To get the **AWS Access Key** required by the :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** are optional.
+
 .. code-block:: console
 
   $ # Install boto
@@ -32,7 +34,6 @@ tasks in the clouds, configure access to at least one cloud:
   $ # Configure your AWS credentials
   $ aws configure
 
-To get the **AWS Access Key** required by the :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** are optional.
 
 **GCP**:
 

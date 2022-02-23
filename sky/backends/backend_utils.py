@@ -107,10 +107,10 @@ class FileMountHelper(object):
             /existing_file: ~/local/file
               - error out saying this cannot be done as LHS already exists
             /existing_symlink: ~/local/file
-              - overwrite the existing symlink; this is important because sky
-                run can be run multiple times
+              - overwrite the existing symlink; this is important because `sky
+                launch` can be run multiple times
             Paths that start with ~/ and /tmp/ do not have the above
-            restrictions; just delegate to rsync behaviors.
+            restrictions; they are delegated to rsync behaviors.
         """
         assert os.path.isabs(source), source
         assert not source.endswith('/') and not target.endswith('/'), (source,
@@ -689,7 +689,7 @@ def check_local_gpus() -> bool:
                                         stderr=subprocess.DEVNULL,
                                         check=False)
     is_installed = installation_check.returncode == 0
-    if is_installed == 0:
+    if is_installed:
         execution_check = subprocess.run(['nvidia-smi'],
                                          stdout=subprocess.DEVNULL,
                                          stderr=subprocess.DEVNULL,

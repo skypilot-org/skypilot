@@ -79,12 +79,12 @@ If we wish to view the output for each run after it has completed we can use:
   $ # View the jobs in the queue
   $ sky queue lm-cluster
 
-  ID  NAME         USER  SUBMITTED    STARTED     STATUS   
-  5   job5         user  10 mins ago  10 mins ago RUNNING
-  4   job4         user  10 mins ago  -           PENDING
-  3   job3         user  10 mins ago  9 mins ago  RUNNING
-  2   job2         user  10 mins ago  9 mins ago  RUNNING
-  1   huggingface  user  10 mins ago  1 min ago   SUCCEEDED
+   ID  NAME         USER  SUBMITTED    STARTED     STATUS
+   5   job5         user  10 mins ago  10 mins ago RUNNING
+   4   job4         user  10 mins ago  -           PENDING
+   3   job3         user  10 mins ago  9 mins ago  RUNNING
+   2   job2         user  10 mins ago  9 mins ago  RUNNING
+   1   huggingface  user  10 mins ago  1 min ago   SUCCEEDED
 
 
   $ # Stream the logs of job5 (ID: 5) to the console
@@ -92,3 +92,13 @@ If we wish to view the output for each run after it has completed we can use:
 
   $ # Cancel job job3 (ID: 3)
   $ sky cancel lm-cluster 3
+
+
+Transferring Checkpoints and Artifacts
+--------------------------------------
+To transfer a checkpoint or artifact from the remote VM to the local VM, you can use `scp` or `rsync`:
+
+.. code-block:: console
+
+    $ rsync -Pavz local_artifacts/ lm-cluster:/path/to/destination  # copy files to remote VM
+    $ rsync -Pavz lm-cluster:/path/to/checkpoints local_artifacts/  # copy files from remote VM
