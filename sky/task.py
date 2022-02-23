@@ -418,7 +418,6 @@ class Task:
 
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
-        prepend_setup = None
         for mnt_path, store in storage_mounts.items():
             storage_type = storage_plans[store]
             if storage_type is storage_lib.StorageType.S3:
@@ -432,7 +431,7 @@ class Task:
                     '([[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && '
                     'echo GOOGLE_APPLICATION_CREDENTIALS='
                     '~/.config/gcloud/application_default_credentials.json >> '
-                    f"~/.bashrc || true); {self.setup or 'true'}")
+                    f'~/.bashrc || true); {self.setup or "true"}')
                 self.update_file_mounts({
                     mnt_path: 'gs://' + store.name,
                 })
