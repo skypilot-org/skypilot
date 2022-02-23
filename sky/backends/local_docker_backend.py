@@ -349,7 +349,8 @@ class LocalDockerBackend(backends.Backend):
             logger.warning(
                 'LocalDockerBackend.teardown() will terminate '
                 'containers for now, despite receiving terminate=False.')
-        container = self.containers[handle]
-        container.remove(force=True)
+        if handle in self.containers:
+            container = self.containers[handle]
+            container.remove(force=True)
         cluster_name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(cluster_name, terminate=True)
