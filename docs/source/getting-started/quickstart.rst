@@ -32,7 +32,16 @@ Let's provision an instance with a single K80 GPU.
 .. code-block:: bash
 
     # Provisions/reuses an interactive node with a single K80 GPU.
+    # Any of the interactive node commands (gpunode, tpunode, cpunode)
+    # will automatically log in to the cluster.
     sky gpunode -c mygpu --gpus K80
+
+    Last login: Wed Feb 23 22:35:47 2022 from 136.152.143.101
+    ubuntu@ip-172-31-86-108:~$ gpustat
+    ip-172-31-86-108     Wed Feb 23 22:42:43 2022  450.142.00
+    [0] Tesla K80        | 31°C,   0 % |     0 / 11441 MB |
+    ubuntu@ip-172-31-86-108:~$
+    ^D
 
     # View the machine in the cluster table.
     sky status
