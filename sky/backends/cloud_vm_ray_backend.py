@@ -732,9 +732,8 @@ class RetryingVmProvisioner(object):
 
                 cluster_name = config_dict['cluster_name']
                 plural = '' if num_nodes == 1 else 's'
-                logger.info(
-                    f'{style.BRIGHT}Successfully provisioned or found'
-                    f' existing VM{plural}.{style.RESET_ALL}')
+                logger.info(f'{style.BRIGHT}Successfully provisioned or found'
+                            f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
