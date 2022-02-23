@@ -91,8 +91,7 @@ class FileMountHelper(object):
             cls,
             *,
             source: str,
-            target: str,
-            download_target_commands: Optional[List[str]] = None) -> str:
+            target: str) -> str:
         """Returns a command that safely symlinks 'source' to 'target'.
 
         All intermediate directories of 'source' will be owned by $USER,
@@ -144,8 +143,6 @@ class FileMountHelper(object):
             f'(echo "!!! Failed mounting because path exists ({source})"; '
             'exit 1)))',
         ]
-        if download_target_commands is not None:
-            commands += download_target_commands
         commands += [
             # Link.
             f'sudo ln -s {target} {source}',
