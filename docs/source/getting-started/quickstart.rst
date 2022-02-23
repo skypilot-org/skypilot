@@ -49,17 +49,18 @@ requiring an NVIDIA Tesla K80 GPU on AWS. (See more example yaml files in the `r
    setup: |
      # Typical use: pip install -r requirements.txt
 
-     # If using a `my_setup.sh` script to setup, please use
-     # `bash -i my_setup.sh` to capture the environment
-     # variable and make sure `conda activate` works
+     # If using a `my_setup.sh` script that requires conda,
+     # invoke it as below to ensure `conda activate` works:
+     # bash -i my_setup.sh
      echo "running setup"
 
    run: |
      # Typical use: make use of resources, such as running training.
 
-     # If using a my_run.sh script to run commands, please use
-     # `bash -i my_run.sh` to capture the environment variable
-     # and make sure `conda activate` works
+     # If using a `my_run.sh` script that requires conda and (or)
+     # sky environment variables, e.g. $SKY_NODE_RANK and $SKY_NODE_IPS,
+     # invoke it as below to ensure both works:
+     # `bash -i my_run.sh`
      echo "hello sky!"
      conda env list
 
