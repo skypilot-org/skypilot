@@ -1123,6 +1123,8 @@ class CloudVmRayBackend(backends.Backend):
             logger.warning(
                 f'{fore.YELLOW}Workdir {workdir} is a symlink. '
                 f'Symlink contents are not uploaded.{style.RESET_ALL}')
+        else:
+            workdir = f'{workdir}/'
 
         # TODO(zhwu): make this in parallel
         for i, ip in enumerate(ip_list):
@@ -1132,7 +1134,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'{node_name}{style.RESET_ALL}.')
             self._rsync_up(handle,
                            ip=ip,
-                           source=f'{workdir}',
+                           source=workdir,
                            target=SKY_REMOTE_WORKDIR,
                            with_outputs=True)
 
@@ -1164,12 +1166,14 @@ class CloudVmRayBackend(backends.Backend):
                               dst: str,
                               command: Optional[str] = None,
                               run_rsync: Optional[bool] = False):
+            full_src = os.path.abspath(os.path.expanduser(src))
+            if not os.path.islink(full_src) and not os.path.isfile(full_src):
+                src = f'{src}/'
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
                 logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
                             f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
-
                 if command is not None:
                     backend_utils.run_command_on_ip_via_ssh(
                         ip,
@@ -1260,6 +1264,8 @@ class CloudVmRayBackend(backends.Backend):
 
         # (2) Run the commands to create symlinks on all the nodes.
         symlink_command = ' && '.join(symlink_commands)
+        if not symlink_command:
+            return
         for ip in ip_list:
             backend_utils.run_command_on_ip_via_ssh(
                 ip,
