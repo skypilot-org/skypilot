@@ -103,6 +103,12 @@ def _remove_cluster_from_ssh_config(cluster_ip: str,
     backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
 
 
+def _path_size(path: str) -> int:
+    return int(
+        subprocess.check_output(['du', '-sh', '-m',
+                                 path]).split()[0].decode('utf-8'))
+
+
 class RayCodeGen:
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -1105,19 +1111,18 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
-        def workdir_size(path):
-            return int(
-                subprocess.check_output(['du', '-sh', '-m',
-                                         path]).split()[0].decode('utf-8'))
-
         # If work directory exceeds 100 MB, raise warning
-        dir_size = workdir_size(full_workdir)
+        dir_size = _path_size(full_workdir)
         if dir_size >= 100:
             logger.warning(
-                f'{fore.RED}The size of workdir {workdir}'
+                f'{fore.YELLOW}The size of workdir {workdir}'
                 f'is {dir_size} MB, exceeding 100 MB. '
-                f'Try to keep workdir small, as large sizes will cause '
-                f'rsync to run for a long time.{style.RESET_ALL}')
+                f'Try to keep workdir small, as large sizes will slow '
+                f'down rsync.{style.RESET_ALL}')
+        if os.path.islink(full_workdir):
+            logger.warning(
+                f'{fore.YELLOW}Workdir {workdir} is a symlink. '
+                f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
         # TODO(zhwu): make this in parallel
         for i, ip in enumerate(ip_list):
@@ -1125,10 +1130,6 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(
                 f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
                 f'{node_name}{style.RESET_ALL}.')
-            if os.path.islink(full_workdir):
-                logger.warning(
-                    f'{fore.RED}Workdir {workdir} is a symlink. '
-                    f'Symlink contents are not uploaded.{style.RESET_ALL}')
             self._rsync_up(handle,
                            ip=ip,
                            source=f'{workdir}',
@@ -1168,12 +1169,6 @@ class CloudVmRayBackend(backends.Backend):
                 node_name = f'worker{i}' if i > 0 else 'head'
                 logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
                             f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
-
-                full_src = os.path.abspath(os.path.expanduser(src))
-                if os.path.islink(full_src):
-                    logger.warning(
-                        f'{fore.RED}Source path {src} is a symlink. '
-                        f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
                 if command is not None:
                     backend_utils.run_command_on_ip_via_ssh(
@@ -1219,6 +1214,19 @@ class CloudVmRayBackend(backends.Backend):
                         f'mkdir -p {os.path.dirname(wrapped_dst)}'
                 else:
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+
+                src_size = _path_size(full_src)
+                print(src_size)
+                if src_size >= 100:
+                    logger.warning(
+                        f'{fore.YELLOW}The size of file mount src {src}'
+                        f'is {src_size} MB, exceeding 100 MB. '
+                        f'Try to keep src small, as large sizes will slow '
+                        f'down rsync.{style.RESET_ALL}')
+                if os.path.islink(full_src):
+                    logger.warning(
+                        f'{fore.YELLOW}Source path {src} is a symlink. '
+                        f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
                 # TODO(mluo): Fix method so that mkdir and rsync run together
                 sync_to_all_nodes(src=src,
