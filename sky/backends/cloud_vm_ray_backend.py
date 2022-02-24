@@ -1461,10 +1461,8 @@ class CloudVmRayBackend(backends.Backend):
         # retry for this, after we figure out the reason.
         if returncode != 0:
             logger.error(stderr)
-            logger.error(
-                f'{colorama.Fore.RED}Failed to fetch job id.'
-                f'{colorama.Style.RESET_ALL}'
-            )
+            logger.error(f'{colorama.Fore.RED}Failed to fetch job id.'
+                         f'{colorama.Style.RESET_ALL}')
             sys.exit(returncode)
         try:
             job_id = int(job_id_str)
