@@ -1123,7 +1123,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'Symlink contents are not uploaded.{style.RESET_ALL}')
             self._rsync_up(handle,
                            ip=ip,
-                           source=f'{workdir}',
+                           source=f'{workdir}/',
                            target=SKY_REMOTE_WORKDIR,
                            with_outputs=True)
 
