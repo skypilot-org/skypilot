@@ -109,33 +109,6 @@ def get_instance_type_for_accelerator_impl(
         return None
     instance_types = set(result['InstanceType'])
     if len(instance_types) > 1:
-        # Assert that only one instance type exists for a given accelerator
-        # and count. Throw so we can manually investigate. The current
-        # whitelist consists of:
-        if len(instance_types) == 2:
-            # FIXME: refactor below implementation
-            # - M60, offered by AWS g3s.xl and g3.4xl
-            # - "Promo" instance types offered by Azure
-            # - A100 instances (80GB or 40GB A100)
-            # - V100 instances (w or w/o RDMA)
-            its = sorted(instance_types)
-            assert its == [
-                'g3.4xlarge', 'g3s.xlarge'
-            ] or its[0] + '_Promo' == its[1] or its == [
-                'Standard_ND96amsr_A100_v4', 'Standard_ND96asr_v4'
-            ] or its == ['Standard_NC24rs_v3', 'Standard_NC24s_v3'], its
-        elif len(instance_types) == 4:
-            its = sorted(instance_types)
-            assert its == [
-                'Standard_NV12s_v3', 'Standard_NV6', 'Standard_NV6_Promo',
-                'Standard_NV6s_v2'
-            ], its
-        else:
-            # - T4, offered by AWS g4dn.{1,2,4,8,16}xl
-            # - T4, offered by Azure Standard_NC{4,8,16}as_T4_v3
-            for t in instance_types:
-                assert t.startswith('g4dn') or t.endswith(
-                    '_T4_v3'), instance_types
         result.sort_values('Price', ascending=True, inplace=True)
         logger.info('Multiple instance types satisfy the requirements...')
         logger.info(f'choosing the cheapest instance among {instance_types}')

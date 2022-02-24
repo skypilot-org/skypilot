@@ -24,6 +24,7 @@ REGIONS = [
     # 'WestUS3',   # WestUS3 pricing table is broken as of 2021/11.
 ]
 REGION_SET = set(REGIONS)
+DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 
 def get_pricing_url(region: Optional[str] = None) -> str:
@@ -169,6 +170,8 @@ def get_all_regions_instance_types_df():
         [df_sku, df_sku.apply(get_additional_columns, axis='columns')],
         axis='columns',
     ).rename(columns={'name': 'InstanceType'})
+    # Filter out deprecated families
+    df_ret = df_ret.loc[~df_ret['family'].isin(DEPRECATED_FAMILIES)]
     return df_ret
 
 
