@@ -1447,9 +1447,9 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_job(job_name, username, self.run_timestamp)
         code = codegen.build()
         returncode, job_id_str, stderr = self.run_on_head(handle,
-                                      code,
-                                      stream_logs=False,
-                                      require_outputs=True)
+                                                          code,
+                                                          stream_logs=False,
+                                                          require_outputs=True)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
         try:
