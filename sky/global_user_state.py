@@ -52,7 +52,7 @@ _CURSOR.execute(
     CREATE TABLE IF NOT EXISTS storage (
     name TEXT PRIMARY KEY,
     lauched_at INTEGER,
-    handle BLOB, 
+    handle BLOB,
     last_use TEXT,
     status TEXT)"""
 )

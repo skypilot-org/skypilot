@@ -601,7 +601,7 @@ class GcsStore(AbstractStore):
         if self.source.startswith('gs://'):
             raise ValueError(
                 'Attempted to connect to a non-existent bucket: ' f'{self.source}'
-            ) from e
+            )
         return self._create_gcs_bucket(self.name), True
 
     def _download_file(self, remote_path: str, local_path: str) -> None:

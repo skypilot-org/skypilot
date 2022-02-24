@@ -26,7 +26,7 @@ class Zone(collections.namedtuple('Zone', ['name'])):
 class Cloud:
     """A cloud provider."""
 
-    #### Regions/Zones ####
+    # ----------------- Regions/Zones -----------------
 
     @classmethod
     def regions(cls) -> List[Region]:
@@ -67,7 +67,7 @@ class Cloud:
         """
         raise NotImplementedError
 
-    #### Normal methods ####
+    # ----------------- Normal methods -----------------
 
     # TODO: incorporate region/zone into the API.
     def instance_type_to_hourly_cost(self, instance_type, use_spot):

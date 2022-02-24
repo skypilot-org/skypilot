@@ -26,7 +26,7 @@ class AWS(clouds.Cloud):
     _REPR = 'AWS'
     _regions: List[clouds.Region] = []
 
-    #### Regions/Zones ####
+    # ----------------- Regions/Zones -----------------
 
     @classmethod
     def regions(cls):
@@ -104,7 +104,7 @@ class AWS(clouds.Cloud):
         assert region_name in amis, region_name
         return amis[region_name]
 
-    #### Normal methods ####
+    # ----------------- Normal methods -----------------
 
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
         return service_catalog.get_hourly_cost(
@@ -211,7 +211,7 @@ class AWS(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         help_str = (
             '\n    For more info: '
-            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
+            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # noqa: E501 line too long
         )
         # This file is required because it will be synced to remote VMs for
         # `aws` to access private storage buckets.

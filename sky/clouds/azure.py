@@ -193,7 +193,7 @@ class Azure(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         help_str = (
             '\n    For more info: '
-            'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # pylint: disable=line-too-long
+            'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # noqa: E501 line too long
         )
         # This file is required because it will be synced to remote VMs for
         # `az` to access private storage buckets.

@@ -19,21 +19,21 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
         clouds = [clouds]
 
     results = []
-    for cloud in clouds:
+    for _cloud in clouds:
         try:
             cloud_module = importlib.import_module(
-                f'sky.clouds.service_catalog.{cloud}_catalog'
+                f'sky.clouds.service_catalog.{_cloud}_catalog'
             )
         except ModuleNotFoundError:
             raise ValueError(
                 'Cannot find module "sky.clouds.service_catalog'
-                f'.{cloud}_catalog" for cloud "{cloud}".'
+                f'.{_cloud}_catalog" for cloud "{_cloud}".'
             ) from None
         try:
             method = getattr(cloud_module, method_name)
         except AttributeError:
             raise AttributeError(
-                f'Module "{cloud}_catalog" does not '
+                f'Module "{_cloud}_catalog" does not '
                 f'implement the "{method_name}" method'
             ) from None
         results.append(method(*args, **kwargs))

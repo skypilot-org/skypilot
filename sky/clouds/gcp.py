@@ -60,7 +60,7 @@ class GCP(clouds.Cloud):
         'n1-highmem-96': 1.195488,
     }
 
-    #### Regions/Zones ####
+    # ----------------- Regions/Zones -----------------
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
@@ -139,7 +139,7 @@ class GCP(clouds.Cloud):
             for zone in region.zones:
                 yield (region, [zone])
 
-    #### Normal methods ####
+    # ----------------- Normal methods -----------------
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
         if use_spot:
