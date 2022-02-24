@@ -169,24 +169,21 @@ class Storage(object):
         self.persistent = persistent
 
         scheme = urllib.parse.urlsplit(self.source).scheme
-        is_bucket_link = False
+        is_bucket_url = False
         if scheme == '':
             self.source = os.path.abspath(os.path.expanduser(source))
             # Check if local path exists
             if not os.path.exists(self.source):
                 raise ValueError(
                     f'Local source path does not exist: {self.source}')
-            # Get real path if the source is a symlink
+            # Raise warning if user's path is a symlink
             elif os.path.islink(self.source):
-                # AWS, GCP sync does not support symlink, hence the conversion
-                old_source = self.source
-                self.source = os.path.realpath(self.source)
-                logger.warning(f'Source path {old_source} is a symbolic link, '
-                               'converting to target path {self.source}')
+                logger.warning(f'Source path {self.source} is a symlink. '
+                               'Referenced contents are uploaded, matching '
+                               'the default behavior for S3 and GCS syncing.')
 
         elif scheme in ['s3', 'gs']:
-            is_bucket_link = True
-            pass
+            is_bucket_url = True
         else:
             raise ValueError(
                 f'Supported paths: local, s3://, gs://. Got: {self.source}')
@@ -207,7 +204,7 @@ class Storage(object):
                     f'\nFetching source {self.handle.source} from Sky database.'
                 )
                 self.source = self.handle.source
-            elif not is_bucket_link and self.source != self.handle.source:
+            elif not is_bucket_url and self.source != self.handle.source:
                 raise ValueError(
                     f'Storage {self.name} was found in database, but the '
                     f'declared source {self.source} does not match the '

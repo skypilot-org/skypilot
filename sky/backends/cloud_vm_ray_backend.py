@@ -1094,15 +1094,20 @@ class CloudVmRayBackend(backends.Backend):
         fore = colorama.Fore
         style = colorama.Style
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        full_workdir = os.path.abspath(os.path.expanduser(workdir))
         # TODO(zhwu): make this in parallel
         for i, ip in enumerate(ip_list):
             node_name = f'worker{i}' if i > 0 else 'head'
             logger.info(
-                f'{fore.CYAN}Syncing: {style.BRIGHT} workdir -> {node_name}'
-                f'{style.RESET_ALL}.')
+                f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
+                f'{node_name}{style.RESET_ALL}.')
+            if os.path.islink(full_workdir):
+                logger.warning(
+                    f'{fore.RED}Workdir {workdir} is a symlink. '
+                    f'Symlink contents are not uploaded.{style.RESET_ALL}')
             self._rsync_up(handle,
                            ip=ip,
-                           source=f'{workdir}/',
+                           source=f'{workdir}',
                            target=SKY_REMOTE_WORKDIR,
                            with_outputs=True)
 
@@ -1132,12 +1137,20 @@ class CloudVmRayBackend(backends.Backend):
 
         def sync_to_all_nodes(src: str,
                               dst: str,
-                              command: Optional[str] = None):
+                              command: Optional[str] = None,
+                              run_rsync: Optional[bool] = False):
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
                 logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
                             f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
+
+                full_src = os.path.abspath(os.path.expanduser(src))
+                if os.path.islink(full_src):
+                    logger.warning(
+                        f'{fore.RED}Source path {src} is a symlink. '
+                        f'Symlink contents are not uploaded.{style.RESET_ALL}')
+
                 if command is not None:
                     backend_utils.run_command_on_ip_via_ssh(
                         ip,
@@ -1147,7 +1160,7 @@ class CloudVmRayBackend(backends.Backend):
                         log_path=os.path.join(self.log_dir, 'file_mounts.log'),
                         check=True,
                         ssh_control_name=self._ssh_control_name(handle))
-                else:
+                if run_rsync:
                     # TODO(zhwu): Logging to 'file_mounts.log'
                     # TODO(zhwu): Optimize for large amount of files.
                     # zip / transfer/ unzip
@@ -1176,10 +1189,6 @@ class CloudVmRayBackend(backends.Backend):
 
             if not task_lib.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
-                if os.path.islink(full_src):
-                    logger.warning(
-                        f'File-mount source path {src} is a symlink. '
-                        'The directory contents will be synced to cloud.')
 
                 if os.path.isfile(full_src):
                     mkdir_for_wrapped_dst = \
@@ -1188,8 +1197,10 @@ class CloudVmRayBackend(backends.Backend):
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
 
                 # TODO: Fix method so that mkdir and rsync run together
-                sync_to_all_nodes(src, dst, mkdir_for_wrapped_dst)
-                sync_to_all_nodes(src, wrapped_dst)
+                sync_to_all_nodes(src=src,
+                                  dst=wrapped_dst,
+                                  command=mkdir_for_wrapped_dst,
+                                  run_rsync=True)
                 continue
 
             storage = cloud_stores.get_storage_from_path(src)
@@ -1659,6 +1670,7 @@ class CloudVmRayBackend(backends.Backend):
             raise ValueError(
                 f'The cluster "{handle.cluster_name}" appears to be down. '
                 'Run a re-provisioning command (e.g., sky launch) and retry.')
+
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
         # Build command.
@@ -1666,7 +1678,7 @@ class CloudVmRayBackend(backends.Backend):
         # shooting a lot of messages to the output. --info=progress2 is used
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', '-Pavz', '-k']
+        rsync_command = ['rsync', '-Pavz']
         filter_path = os.path.join(source, '.gitignore')
         if os.path.exists(filter_path):
             rsync_command.append(f'--filter=\':- {filter_path}\'')
@@ -1679,6 +1691,7 @@ class CloudVmRayBackend(backends.Backend):
             f'{ssh_user}@{ip}:{target}',
         ])
         command = ' '.join(rsync_command)
+
         if with_outputs:
             # TODO(zhwu): Test this if the command will be still running in the
             # background, after the current program is killed.
