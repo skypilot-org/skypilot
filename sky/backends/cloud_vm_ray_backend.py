@@ -1241,9 +1241,9 @@ class CloudVmRayBackend(backends.Backend):
 
         # (2) Run the commands to create symlinks on all the nodes.
         symlink_command = ' && '.join(symlink_commands)
+        if not symlink_command:
+            return
         for ip in ip_list:
-            if not symlink_command:
-                break
             backend_utils.run_command_on_ip_via_ssh(
                 ip,
                 symlink_command,
