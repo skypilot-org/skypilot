@@ -603,7 +603,7 @@ def run_command_on_ip_via_ssh(
     stream_logs: bool = True,
     ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
     ssh_control_name: Optional[str] = None,
-) -> Union[Tuple[int, str, str], int]:
+) -> Union[int, Tuple[int, str, str]]:
     """Uses 'ssh' to run 'cmd' on a node with ip.
 
     Args:

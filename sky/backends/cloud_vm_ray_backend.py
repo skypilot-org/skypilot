@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import textwrap
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 from rich import console as rich_console
@@ -1858,7 +1858,7 @@ class CloudVmRayBackend(backends.Backend):
         ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
-    ) -> Tuple[subprocess.Popen, str, str]:
+    ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
         head_ip = self._get_head_ip(handle, use_cached_head_ip)
         ssh_user, ssh_private_key = self._get_ssh_credential(
