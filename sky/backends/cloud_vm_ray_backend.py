@@ -1115,7 +1115,7 @@ class CloudVmRayBackend(backends.Backend):
         dir_size = _path_size(full_workdir)
         if dir_size >= 100:
             logger.warning(
-                f'{fore.YELLOW}The size of workdir {workdir}'
+                f'{fore.YELLOW}The size of workdir {workdir} '
                 f'is {dir_size} MB, exceeding 100 MB. '
                 f'Try to keep workdir small, as large sizes will slow '
                 f'down rsync.{style.RESET_ALL}')
@@ -1220,10 +1220,9 @@ class CloudVmRayBackend(backends.Backend):
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
 
                 src_size = _path_size(full_src)
-                print(src_size)
                 if src_size >= 100:
                     logger.warning(
-                        f'{fore.YELLOW}The size of file mount src {src}'
+                        f'{fore.YELLOW}The size of file mount src {src} '
                         f'is {src_size} MB, exceeding 100 MB. '
                         f'Try to keep src small, as large sizes will slow '
                         f'down rsync.{style.RESET_ALL}')
