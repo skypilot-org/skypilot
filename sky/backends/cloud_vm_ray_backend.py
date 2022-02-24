@@ -1196,7 +1196,7 @@ class CloudVmRayBackend(backends.Backend):
                 else:
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
 
-                # TODO: Fix method so that mkdir and rsync run together
+                # TODO(mluo): Fix method so that mkdir and rsync run together
                 sync_to_all_nodes(src=src,
                                   dst=wrapped_dst,
                                   command=mkdir_for_wrapped_dst,
