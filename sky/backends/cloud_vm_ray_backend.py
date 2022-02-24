@@ -347,8 +347,11 @@ class RayCodeGen:
             if sum(return_codes) != 0:    
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 time.sleep(1)
-                print('Job {self.job_id} failed with return_codes', return_codes, 
-                       file=sys.stderr, flush=True)
+                print('{colorama.Fore.RED}Job {self.job_id} failed with '
+                      'return_code list: {colorama.Style.RESET_ALL}',
+                      return_codes,
+                      file=sys.stderr,
+                      flush=True)
             else:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
             """)
