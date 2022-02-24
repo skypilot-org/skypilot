@@ -61,6 +61,23 @@ def get_public_key_path(private_key_path):
     return private_key_path + '.pub'
 
 
+def get_or_generate_keys(private_key_path: str, public_key_path: str):
+    """Returns private and public keys from the given paths.
+
+    If the private_key_path is not provided or does not exist, then a new
+    keypair is generated and written to the path.
+    """
+    if private_key_path is None or not os.path.exists(private_key_path):
+        public_key, private_key = generate_rsa_key_pair()
+        save_key_pair(private_key_path, public_key_path, private_key,
+                      public_key)
+    else:
+        assert os.path.exists(public_key_path)
+        public_key = open(public_key_path, 'rb').read().decode('utf-8')
+        private_key = open(private_key_path, 'rb').read().decode('utf-8')
+    return private_key, public_key
+
+
 # Snippets of code inspired from
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
@@ -75,14 +92,7 @@ def setup_aws_authentication(config):
     public_key_path = get_public_key_path(private_key_path)
 
     # Generating ssh key if it does not exist
-    if private_key_path is None or not os.path.exists(private_key_path):
-        public_key, private_key = generate_rsa_key_pair()
-        save_key_pair(private_key_path, public_key_path, private_key,
-                      public_key)
-    else:
-        assert os.path.exists(public_key_path)
-        public_key = open(public_key_path, 'rb').read().decode('utf-8')
-        private_key = None
+    _, public_key = get_or_generate_keys(private_key_path, public_key_path)
 
     ec2 = aws.client('ec2', region_name=config['provider']['region'])
     key_pairs = ec2.describe_key_pairs()['KeyPairs']
@@ -154,14 +164,7 @@ def setup_gcp_authentication(config):
     ssh_keys = project_keys.split('\n') if project_keys else []
 
     # Generating ssh key if it does not exist
-    if private_key_path is None or not os.path.exists(private_key_path):
-        public_key, private_key = generate_rsa_key_pair()
-        save_key_pair(private_key_path, public_key_path, private_key,
-                      public_key)
-    else:
-        assert os.path.exists(public_key_path)
-        public_key = open(public_key_path, 'rb').read().decode('utf-8')
-        private_key = None
+    _, public_key = get_or_generate_keys(private_key_path, public_key_path)
 
     # Check if ssh key in Google Project's metadata
     public_key_token = public_key.split(' ')[1]
@@ -215,6 +218,10 @@ def setup_azure_authentication(config):
 
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = get_public_key_path(private_key_path)
+
+    # Generating ssh key if it does not exist
+    _, _ = get_or_generate_keys(private_key_path, public_key_path)
+
     # Need to convert /Users/<username> back to ~ because Ray uses the same
     # path for finding the public key path on both local and head node.
     public_key_path = _unexpand_user(public_key_path)
