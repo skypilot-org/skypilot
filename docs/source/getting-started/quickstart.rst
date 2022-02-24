@@ -31,23 +31,23 @@ Let's provision an instance with a single K80 GPU.
 
 .. code-block:: bash
 
-    # Provisions/reuses an interactive node with a single K80 GPU.
-    # Any of the interactive node commands (gpunode, tpunode, cpunode)
-    # will automatically log in to the cluster.
-    sky gpunode -c mygpu --gpus K80
+  # Provisions/reuses an interactive node with a single K80 GPU.
+  # Any of the interactive node commands (gpunode, tpunode, cpunode)
+  # will automatically log in to the cluster.
+  sky gpunode -c mygpu --gpus K80
 
-    Last login: Wed Feb 23 22:35:47 2022 from 136.152.143.101
-    ubuntu@ip-172-31-86-108:~$ gpustat
-    ip-172-31-86-108     Wed Feb 23 22:42:43 2022  450.142.00
-    [0] Tesla K80        | 31°C,   0 % |     0 / 11441 MB |
-    ubuntu@ip-172-31-86-108:~$
-    ^D
+  Last login: Wed Feb 23 22:35:47 2022 from 136.152.143.101
+  ubuntu@ip-172-31-86-108:~$ gpustat
+  ip-172-31-86-108     Wed Feb 23 22:42:43 2022  450.142.00
+  [0] Tesla K80        | 31°C,   0 % |     0 / 11441 MB |
+  ubuntu@ip-172-31-86-108:~$
+  ^D
 
-    # View the machine in the cluster table.
-    sky status
+  # View the machine in the cluster table.
+  sky status
 
-    NAME   LAUNCHED        RESOURCES                     COMMAND                          STATUS
-    mygpu  a few secs ago  1x Azure(Standard_NC6_Promo)  sky gpunode -c mygpu --gpus K80  UP
+  NAME   LAUNCHED        RESOURCES                     COMMAND                          STATUS
+  mygpu  a few secs ago  1x Azure(Standard_NC6_Promo)  sky gpunode -c mygpu --gpus K80  UP
 
 After you are done, run :code:`sky down mygpu` to terminate the cluster. Find more details
 on managing the lifecycle of your cluster :ref:`here <interactive-nodes>`.
@@ -78,27 +78,32 @@ requiring an NVIDIA Tesla K80 GPU on AWS. See more example yaml files in the `re
 
 .. code-block:: yaml
 
-   # hello_sky.yaml
+  # hello_sky.yaml
 
-   resources:
-     # Optional; if left out, pick from the available clouds.
-     cloud: aws
+  resources:
+    # Optional; if left out, pick from the available clouds.
+    cloud: aws
 
-     # Get 1 K80 GPU.  Use <name>:<n> to get more (e.g., "K80:8").
-     accelerators: K80
+    accelerators: V100:1 # 1x NVIDIA V100 GPU
 
-   # Working directory (optional) containing the project codebase.
-   # This directory will be synced to ~/sky_workdir on the provisioned cluster.
-   workdir: .
+  # Working directory (optional) containing the project codebase.
+  # This directory will be synced to ~/sky_workdir on the provisioned cluster.
+  workdir: .
 
-   # Typical use: pip install -r requirements.txt
-   setup: |
-     echo "running setup"
+  # Typical use: pip install -r requirements.txt
+  setup: |
+    echo "running setup"
+    # If using a `my_setup.sh` script that requires conda,
+    # invoke it as below to ensure `conda activate` works:
+    # bash -i my_setup.sh
 
-   # Typical use: make use of resources, such as running training.
-   run: |
-     echo "hello sky!"
-     conda env list
+  # Typical use: make use of resources, such as running training.
+  run: |
+    echo "hello sky!"
+    conda env list
+    # If using a `my_run.sh` script that requires conda,
+    # invoke it as below to ensure `conda activate` works:
+    # `bash -i my_run.sh`
 
 Sky handles selecting an appropriate VM based on user-specified resource
 constraints, launching the cluster on an appropriate cloud provider, and
@@ -108,7 +113,7 @@ To launch a task based on our above YAML spec, we can use :code:`sky launch`.
 
 .. code-block:: console
 
-   $ sky launch -c mycluster hello_sky.yaml
+  $ sky launch -c mycluster hello_sky.yaml
 
 The :code:`-c` option allows us to specify a cluster name. If a cluster with the
 same name already exists, Sky will reuse that cluster. If no such cluster
@@ -120,7 +125,7 @@ We can view our existing clusters by running :code:`sky status`:
 
 .. code-block:: console
 
-   $ sky status
+  $ sky status
 
 This may show multiple clusters, if you have created several:
 
@@ -134,7 +139,7 @@ If you would like to log into the a cluster, Sky provides convenient SSH access 
 
 .. code-block:: console
 
-   $ ssh mycluster
+  $ ssh mycluster
 
 If you would like to transfer files to and from the cluster, *rsync* or *scp* can be used:
 

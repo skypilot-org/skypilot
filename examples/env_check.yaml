@@ -25,4 +25,6 @@ run: |
   fi
 
   echo NODE ID: $SKY_NODE_RANK
-  echo NODE IP: ${SKY_NODE_IPS[$SKY_NODE_RANK]}
+  echo NODE IPS: "$SKY_NODE_IPS"
+  worker_addr=`echo "$SKY_NODE_IPS" | sed -n 2p`
+  echo Worker IP: $worker_addr
