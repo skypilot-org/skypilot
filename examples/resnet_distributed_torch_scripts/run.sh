@@ -3,7 +3,7 @@
 conda activate resnet
 cd pytorch-distributed-resnet
 num_nodes=`echo "$SKY_NODE_IPS" | wc -l`
-master_addr=`echo "$SKY_NODE_IPS" | sed -n 1p`
+master_addr=`echo "$SKY_NODE_IPS" | head -n1`
 echo MASTER_ADDR $master_addr
 python3 -m torch.distributed.launch --nproc_per_node=1 \
 --nnodes=$num_nodes --node_rank=${SKY_NODE_RANK} --master_addr=$master_addr \
