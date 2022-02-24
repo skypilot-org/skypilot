@@ -648,6 +648,7 @@ class RetryingVmProvisioner(object):
                             dryrun: bool, stream_logs: bool, cluster_name: str):
         """The provision retry loop."""
         style = colorama.Style
+        fore = colorama.Fore
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
@@ -733,7 +734,7 @@ class RetryingVmProvisioner(object):
 
                 cluster_name = config_dict['cluster_name']
                 plural = '' if num_nodes == 1 else 's'
-                logger.info(f'{style.BRIGHT}Successfully provisioned or found'
+                logger.info(f'{fore.GREEN}Successfully provisioned or found'
                             f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'

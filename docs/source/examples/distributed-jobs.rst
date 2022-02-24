@@ -30,7 +30,7 @@ For example, here is a simple PyTorch Distributed training example:
     master_addr=`echo "$SKY_NODE_IPS" | sed -n 1p`
     python3 -m torch.distributed.launch --nproc_per_node=1 \
       --nnodes=$num_nodes --node_rank=${SKY_NODE_RANK} --master_addr=$master_addr \
-    --master_port=8008 resnet_ddp.py --num_epochs 20
+      --master_port=8008 resnet_ddp.py --num_epochs 20
 
 In the above, :code:`num_nodes: 2` specifies that this task is to be run on 2
 nodes. The commands in :code:`run` are executed on both nodes.  Several useful
@@ -41,4 +41,4 @@ environment variables are available to distinguish per-node commands:
 - :code:`SKY_NODE_IPS`: a string of IP addresses of the nodes reserved to execute
   the task, where each line contains one IP address. You can retrieve the number of
   nodes by :code:`echo "$SKY_NODE_IPS" | wc -l` and the IP address of node-3 by
-  :code:`echo "$SKY_NODE_IPS" | cut -n 3p`
+  :code:`echo "$SKY_NODE_IPS" | sed -n 3p`

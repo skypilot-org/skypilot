@@ -84,8 +84,7 @@ requiring an NVIDIA Tesla K80 GPU on AWS. See more example yaml files in the `re
     # Optional; if left out, pick from the available clouds.
     cloud: aws
 
-    # Get 1 K80 GPU.  Use <name>:<n> to get more (e.g., "K80:8").
-    accelerators: K80
+    accelerators: V100:1 # 1x NVIDIA V100 GPU
 
   # Working directory (optional) containing the project codebase.
   # This directory will be synced to ~/sky_workdir on the provisioned cluster.

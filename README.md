@@ -18,8 +18,7 @@ resources:
   # Optional; if left out, pick from the available clouds.
   cloud: aws
 
-  # Get 1 K80 GPU.  Use <name>:<n> to get more (e.g., "K80:8").
-  accelerators: K80
+  accelerators: V100:1 # 1x NVIDIA V100 GPU
 
 # Working directory (optional) containing the project codebase.
 # This directory will be synced to ~/sky_workdir on the provisioned cluster.
@@ -38,7 +37,7 @@ run: |
   conda env list
   # If using a `my_run.sh` script that requires conda,
   # invoke it as below to ensure `conda activate` works:
-  # `bash -i my_run.sh`
+  # bash -i my_run.sh
 ```
 
 ## Getting Started
