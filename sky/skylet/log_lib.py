@@ -85,7 +85,7 @@ def run_with_log(
     log_path: str,
     stream_logs: bool = False,
     start_streaming_at: str = '',
-    return_code: bool = False,
+    require_outputs: bool = False,
     check: bool = False,
     shell: bool = False,
     with_ray: bool = False,
@@ -144,12 +144,10 @@ def run_with_log(
         )
         proc.wait()
         if proc.returncode and check:
-            if stderr:
-                print(stderr, file=sys.stderr)
             raise subprocess.CalledProcessError(proc.returncode, cmd)
-        if return_code:
-            return proc.returncode
-        return proc, stdout, stderr
+        if require_outputs:
+            return proc.returncode, stdout, stderr
+        return proc.returncode
 
 
 def make_task_bash_script(codegen: str) -> str:
@@ -190,7 +188,6 @@ def run_bash_command_with_log(bash_command: str,
             ['/bin/bash', '-i', script_path],
             log_path,
             stream_logs=stream_logs,
-            return_code=True,
             with_ray=with_ray,
         )
 

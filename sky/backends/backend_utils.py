@@ -593,9 +593,9 @@ def run_command_on_ip_via_ssh(
     ssh_private_key: str,
     port_forward: Optional[List[int]] = None,
     # Advanced options.
+    require_outputs: bool = False,
     log_path: str = '/dev/null',
     stream_logs: bool = True,
-    check: bool = False,
     ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
     ssh_control_name: Optional[str] = None,
 ) -> Tuple[subprocess.Popen, str, str]:
@@ -631,7 +631,7 @@ def run_command_on_ip_via_ssh(
     if ssh_mode == SshMode.LOGIN:
         assert isinstance(cmd, list), 'cmd must be a list for login mode.'
         command = base_ssh_command + cmd
-        proc = run(command, shell=False, check=check)
+        proc = run(command, shell=False)
         return proc, '', ''
     if isinstance(cmd, list):
         cmd = ' '.join(cmd)
@@ -647,7 +647,10 @@ def run_command_on_ip_via_ssh(
         shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                     f'PYTHONWARNINGS=ignore && ({cmd})'),
     ]
-    return log_lib.run_with_log(command, log_path, stream_logs, check=check)
+    return log_lib.run_with_log(command,
+                                log_path,
+                                stream_logs,
+                                require_outputs=require_outputs)
 
 
 def run(cmd, **kwargs):
