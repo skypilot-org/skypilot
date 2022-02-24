@@ -27,6 +27,9 @@ the files to a cloud store (e.g. S3, GCS) and have them persist there by
 specifying the :code:`name`, :code:`source` and :code:`persistent` fields. By
 enabling persistence, file_mount sync can be made significantly faster.
 
+.. note::
+    Unlike :code:`file_mounts`, Sky Storage will upload a symbolic link's referenced contents to a cloud store.
+
 .. code-block:: yaml
 
     name: storage-demo
