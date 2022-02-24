@@ -356,7 +356,8 @@ def write_cluster_config(to_provision: Resources,
             except ModuleNotFoundError as e:
                 raise ModuleNotFoundError('Unable to import azure python '
                                           'module. Is azure-cli python package '
-                                          'installed?') from e
+                                          'installed? Try pip install '
+                                          '.[azure] in the sky repo.') from e
             except Exception as e:
                 raise RuntimeError(
                     'Failed to get subscription id from azure cli. '
