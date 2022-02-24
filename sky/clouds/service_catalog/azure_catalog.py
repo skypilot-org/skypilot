@@ -33,8 +33,10 @@ def get_accelerators_from_instance_type(
 def get_instance_type_for_accelerator(acc_name: str,
                                       acc_count: int) -> Optional[str]:
     """Returns the instance type with the required count of accelerators."""
-    return common.get_instance_type_for_accelerator_impl(
-        _df, acc_name, acc_count)
+    return common.get_instance_type_for_accelerator_impl(_df,
+                                                         acc_name,
+                                                         acc_count,
+                                                         cloud='azure')
 
 
 def get_region_zones_for_instance_type(instance_type: str,

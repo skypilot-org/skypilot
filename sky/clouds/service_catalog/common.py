@@ -6,6 +6,7 @@ import pandas as pd
 
 from sky.clouds import cloud as cloud_lib
 from sky import sky_logging
+import colorama
 
 logger = sky_logging.init_logger(__name__)
 
@@ -86,6 +87,7 @@ def get_instance_type_for_accelerator_impl(
     df: pd.DataFrame,
     acc_name: str,
     acc_count: int,
+    cloud: str,
 ) -> Optional[str]:
     """Returns the instance type with the required count of accelerators."""
     result = df[(df['AcceleratorName'] == acc_name) &
@@ -93,14 +95,17 @@ def get_instance_type_for_accelerator_impl(
     if len(result) == 0:
         fuzzy_result = df[(df['AcceleratorName'].str.contains(acc_name)) &
                           (df['AcceleratorCount'] >= acc_count)]
-        x = fuzzy_result[['AcceleratorName',
-                          'AcceleratorCount']].drop_duplicates()
-        logger.info(
-            f'No resource satisfying {acc_name}:{acc_count}. Did you mean:'
-        )
-        for _, row in x.iterrows():
+        fuzzy_result = fuzzy_result[['AcceleratorName',
+                                     'AcceleratorCount']].drop_duplicates()
+        if len(fuzzy_result) > 0:
             logger.info(
-                f'--gpus {row["AcceleratorName"]}:{row["AcceleratorCount"]}')
+                f'No resource satisfying {acc_name}:{acc_count} on {cloud}. '
+                'Did you mean:')
+            for _, row in fuzzy_result.iterrows():
+                logger.info(
+                    f'{colorama.Fore.CYAN}'
+                    f'--gpus {row["AcceleratorName"]}:{row["AcceleratorCount"]}'
+                    f'{colorama.Style.RESET_ALL}')
         return None
     instance_types = set(result['InstanceType'])
     if len(instance_types) > 1:
