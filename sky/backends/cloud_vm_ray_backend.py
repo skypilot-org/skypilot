@@ -8,6 +8,7 @@ import inspect
 import json
 import os
 import re
+import sys
 import subprocess
 import tempfile
 import textwrap
@@ -245,8 +246,8 @@ class RayCodeGen:
                     for i in range(pg.bundle_count)
                 ])
                 print('SKY INFO: Placement group IPs:', ip_list)
-                ip_list_str = ' '.join([repr(ip) for ip in ip_list])
-                export_sky_env_vars = 'export SKY_NODE_IPS=(' + ip_list_str + ')\\n'
+                ip_list_str = '\\n'.join(ip_list)
+                export_sky_env_vars = 'export SKY_NODE_IPS="' + ip_list_str + '"\\n'
                 """),
         ]
 
@@ -651,6 +652,7 @@ class RetryingVmProvisioner(object):
                             dryrun: bool, stream_logs: bool, cluster_name: str):
         """The provision retry loop."""
         style = colorama.Style
+        fore = colorama.Fore
         # Get log_path name
         log_path = os.path.join(self.log_dir, 'provision.log')
         log_abs_path = os.path.abspath(log_path)
@@ -736,9 +738,8 @@ class RetryingVmProvisioner(object):
 
                 cluster_name = config_dict['cluster_name']
                 plural = '' if num_nodes == 1 else 's'
-                logger.info(
-                    f'{style.BRIGHT}Successfully provisioned or found'
-                    f' existing VM{plural}. Setup completed.{style.RESET_ALL}')
+                logger.info(f'{fore.GREEN}Successfully provisioned or found'
+                            f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -1227,13 +1228,10 @@ class CloudVmRayBackend(backends.Backend):
 
         if task.setup is None:
             return
-        codegen = textwrap.dedent(f"""\
-            #!/bin/bash
-            # TODO(zhwu): Move this to bashrc
-            . $(conda info --base)/etc/profile.d/conda.sh
-            {task.setup}""")
+
+        setup_script = log_lib.make_task_bash_script(task.setup)
         with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
-            f.write(codegen)
+            f.write(setup_script)
             f.flush()
             setup_sh_path = f.name
             setup_file = os.path.basename(setup_sh_path)
@@ -1255,14 +1253,23 @@ class CloudVmRayBackend(backends.Backend):
                                source=setup_sh_path,
                                target=f'/tmp/{setup_file}',
                                with_outputs=False)
-                backend_utils.run_command_on_ip_via_ssh(
-                    ip,
-                    f'cd {SKY_REMOTE_WORKDIR}; /bin/bash /tmp/{setup_file}',
-                    ssh_user=ssh_user,
-                    ssh_private_key=ssh_private_key,
-                    log_path=os.path.join(self.log_dir, 'setup.log'),
-                    check=True,
-                    ssh_control_name=self._ssh_control_name(handle))
+                try:
+                    backend_utils.run_command_on_ip_via_ssh(
+                        ip,
+                        # -i will make sure `conda activate` works
+                        f'/bin/bash -i /tmp/{setup_file}',
+                        ssh_user=ssh_user,
+                        ssh_private_key=ssh_private_key,
+                        log_path=os.path.join(self.log_dir, 'setup.log'),
+                        check=True,
+                        ssh_control_name=self._ssh_control_name(handle))
+                except subprocess.CalledProcessError as e:
+                    logger.error(f'{fore.RED}Setup failed with return code'
+                                 f' {e.returncode}.{style.RESET_ALL}')
+                    # Suppress the error traceback. Fail as soon as
+                    # possible (head node).
+                    sys.exit(e.returncode)
+        logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()
