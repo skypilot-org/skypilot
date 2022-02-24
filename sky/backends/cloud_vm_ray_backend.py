@@ -245,7 +245,7 @@ class RayCodeGen:
                                      placement_group_bundle_index=i).remote()
                     for i in range(pg.bundle_count)
                 ])
-                print('SKY INFO: Placement group IPs:', ip_list)
+                print('SKY INFO: Reserved IPs:', ip_list)
                 ip_list_str = '\\n'.join(ip_list)
                 export_sky_env_vars = 'export SKY_NODE_IPS="' + ip_list_str + '"\\n'
                 """),
@@ -347,8 +347,8 @@ class RayCodeGen:
             if sum(return_codes) != 0:    
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 time.sleep(1)
-                print('{colorama.Fore.RED}Job {self.job_id} failed with '
-                      'return_code list: {colorama.Style.RESET_ALL}',
+                print('SKY INFO: {colorama.Fore.RED}Job {self.job_id} failed with '
+                      'return_code list:{colorama.Style.RESET_ALL}',
                       return_codes,
                       file=sys.stderr,
                       flush=True)
