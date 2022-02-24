@@ -62,7 +62,7 @@ def get_public_key_path(private_key_path):
 
 
 def get_or_generate_keys(private_key_path: str, public_key_path: str):
-    """Returns a public key from the given paths.
+    """Returns private and public keys from the given paths.
 
     If the private_key_path is not provided or does not exist, then a new
     keypair is generated and written to the path.
@@ -74,7 +74,8 @@ def get_or_generate_keys(private_key_path: str, public_key_path: str):
     else:
         assert os.path.exists(public_key_path)
         public_key = open(public_key_path, 'rb').read().decode('utf-8')
-    return public_key
+        private_key = open(private_key_path, 'rb').read().decode('utf-8')
+    return private_key, public_key
 
 
 # Snippets of code inspired from
@@ -91,7 +92,7 @@ def setup_aws_authentication(config):
     public_key_path = get_public_key_path(private_key_path)
 
     # Generating ssh key if it does not exist
-    public_key = get_or_generate_keys(private_key_path, public_key_path)
+    _, public_key = get_or_generate_keys(private_key_path, public_key_path)
 
     ec2 = aws.client('ec2', region_name=config['provider']['region'])
     key_pairs = ec2.describe_key_pairs()['KeyPairs']
@@ -163,7 +164,7 @@ def setup_gcp_authentication(config):
     ssh_keys = project_keys.split('\n') if project_keys else []
 
     # Generating ssh key if it does not exist
-    public_key = get_or_generate_keys(private_key_path, public_key_path)
+    _, public_key = get_or_generate_keys(private_key_path, public_key_path)
 
     # Check if ssh key in Google Project's metadata
     public_key_token = public_key.split(' ')[1]
@@ -219,7 +220,7 @@ def setup_azure_authentication(config):
     public_key_path = get_public_key_path(private_key_path)
 
     # Generating ssh key if it does not exist
-    _ = get_or_generate_keys(private_key_path, public_key_path)
+    _, _ = get_or_generate_keys(private_key_path, public_key_path)
 
     # Need to convert /Users/<username> back to ~ because Ray uses the same
     # path for finding the public key path on both local and head node.
