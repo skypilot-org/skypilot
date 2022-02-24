@@ -115,8 +115,15 @@ class GcsCloudStorage(CloudStorage):
         commands = list(self._GET_GSUTIL)
         commands.append(f'{self._GSUTIL} ls -d {url}')
         command = ' && '.join(commands)
-        p = backend_utils.run(command, stdout=subprocess.PIPE)
-        out = p.stdout.decode().strip()
+        max_retries = 5
+        import pdb
+        pdb.set_trace()
+        for _ in range(max_retries):
+            p = backend_utils.run(command, stdout=subprocess.PIPE)
+            out = p.stdout.decode().strip()
+            # Using Gcloud first time will mess up command output
+            if 'Welcome to the Google Cloud SDK!' not in out:
+                break
         # If <url> is a bucket root, then we only need `gsutil` to succeed
         # to make sure the bucket exists. It is already a directory.
         _, key = data_utils.split_gcs_path(url)
