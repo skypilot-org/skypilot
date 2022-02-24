@@ -27,6 +27,9 @@ the files to a cloud store (e.g. S3, GCS) and have them persist there by
 specifying the :code:`name`, :code:`source` and :code:`persistent` fields. By
 enabling persistence, file_mount sync can be made significantly faster.
 
+.. note:: 
+    Symbolic links are handled differently in :code:`file_mounts` depending on whether Sky Storage is used. For mounts backed by Sky Storage, referenced data for all symbolic links is copied to remote. For mounts not using Sky Storage (e.g., those using rsync) the symbolic links are directly copied. Their targets must be separately mounted or else the symlinks may break.
+
 .. code-block:: yaml
 
     name: storage-demo

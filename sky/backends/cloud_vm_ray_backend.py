@@ -1110,15 +1110,20 @@ class CloudVmRayBackend(backends.Backend):
         fore = colorama.Fore
         style = colorama.Style
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        full_workdir = os.path.abspath(os.path.expanduser(workdir))
         # TODO(zhwu): make this in parallel
         for i, ip in enumerate(ip_list):
             node_name = f'worker{i}' if i > 0 else 'head'
             logger.info(
-                f'{fore.CYAN}Syncing: {style.BRIGHT} workdir -> {node_name}'
-                f'{style.RESET_ALL}.')
+                f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
+                f'{node_name}{style.RESET_ALL}.')
+            if os.path.islink(full_workdir):
+                logger.warning(
+                    f'{fore.RED}Workdir {workdir} is a symlink. '
+                    f'Symlink contents are not uploaded.{style.RESET_ALL}')
             self._rsync_up(handle,
                            ip=ip,
-                           source=f'{workdir}/',
+                           source=f'{workdir}',
                            target=SKY_REMOTE_WORKDIR,
                            with_outputs=True)
 
@@ -1148,12 +1153,20 @@ class CloudVmRayBackend(backends.Backend):
 
         def sync_to_all_nodes(src: str,
                               dst: str,
-                              command: Optional[str] = None):
+                              command: Optional[str] = None,
+                              run_rsync: Optional[bool] = False):
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
                 logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
                             f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
+
+                full_src = os.path.abspath(os.path.expanduser(src))
+                if os.path.islink(full_src):
+                    logger.warning(
+                        f'{fore.RED}Source path {src} is a symlink. '
+                        f'Symlink contents are not uploaded.{style.RESET_ALL}')
+
                 if command is not None:
                     returncode = backend_utils.run_command_on_ip_via_ssh(
                         ip,
@@ -1167,7 +1180,7 @@ class CloudVmRayBackend(backends.Backend):
                                      f'{style.RESET_ALL} {command}')
                         sys.exit(returncode)
 
-                else:
+                if run_rsync:
                     # TODO(zhwu): Logging to 'file_mounts.log'
                     # TODO(zhwu): Optimize for large amount of files.
                     # zip / transfer/ unzip
@@ -1195,7 +1208,19 @@ class CloudVmRayBackend(backends.Backend):
                 symlink_commands.append(cmd)
 
             if not task_lib.is_cloud_store_url(src):
-                sync_to_all_nodes(src, wrapped_dst)
+                full_src = os.path.abspath(os.path.expanduser(src))
+
+                if os.path.isfile(full_src):
+                    mkdir_for_wrapped_dst = \
+                        f'mkdir -p {os.path.dirname(wrapped_dst)}'
+                else:
+                    mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+
+                # TODO(mluo): Fix method so that mkdir and rsync run together
+                sync_to_all_nodes(src=src,
+                                  dst=wrapped_dst,
+                                  command=mkdir_for_wrapped_dst,
+                                  run_rsync=True)
                 continue
 
             storage = cloud_stores.get_storage_from_path(src)
@@ -1732,6 +1757,7 @@ class CloudVmRayBackend(backends.Backend):
             raise ValueError(
                 f'The cluster "{handle.cluster_name}" appears to be down. '
                 'Run a re-provisioning command (e.g., sky launch) and retry.')
+
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
         # Build command.
@@ -1752,6 +1778,7 @@ class CloudVmRayBackend(backends.Backend):
             f'{ssh_user}@{ip}:{target}',
         ])
         command = ' '.join(rsync_command)
+
         if with_outputs:
             # TODO(zhwu): Test this if the command will be still running in the
             # background, after the current program is killed.
