@@ -476,7 +476,7 @@ class RetryingVmProvisioner(object):
             for s in stderr_splits:
                 print(s)
             raise RuntimeError(
-                'Errors occurred during provision/file_mounts/setup; '
+                'Errors occurred during provision; '
                 'check logs above.')
         # The underlying ray autoscaler / boto3 will try all zones of a region
         # at once.
@@ -505,7 +505,7 @@ class RetryingVmProvisioner(object):
             for s in stderr_splits:
                 print(s)
             raise RuntimeError(
-                'Errors occurred during provision/file_mounts/setup; '
+                'Errors occurred during provision; '
                 'check logs above.')
 
         logger.warning(f'Got error(s) in {region.name}:')
