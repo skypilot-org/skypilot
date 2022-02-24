@@ -9,32 +9,32 @@ and run command:
 
 .. code-block:: yaml
 
-   # dnn.yaml
+  # dnn.yaml
 
-   name: huggingface
+  name: huggingface
 
-   resources:
-     accelerators: V100:4
+  resources:
+    accelerators: V100:4
 
-   setup: |
-     git clone https://github.com/huggingface/transformers/
-     cd transformers
-     pip3 install .
-     cd examples/pytorch/text-classification
-     pip3 install -r requirements.txt
+  setup: |
+    git clone https://github.com/huggingface/transformers/
+    cd transformers
+    pip3 install .
+    cd examples/pytorch/text-classification
+    pip3 install -r requirements.txt
 
-   run: |
-     cd transformers/examples/pytorch/text-classification
-     python3 run_glue.py \
-       --model_name_or_path bert-base-cased \
-       --dataset_name imdb  \
-       --do_train \
-       --max_seq_length 128 \
-       --per_device_train_batch_size 32 \
-       --learning_rate 2e-5 \
-       --max_steps 50 \
-       --output_dir /tmp/imdb/ --overwrite_output_dir \
-       --fp16
+  run: |
+    cd transformers/examples/pytorch/text-classification
+    python3 run_glue.py \
+      --model_name_or_path bert-base-cased \
+      --dataset_name imdb  \
+      --do_train \
+      --max_seq_length 128 \
+      --per_device_train_batch_size 32 \
+      --learning_rate 2e-5 \
+      --max_steps 50 \
+      --output_dir /tmp/imdb/ --overwrite_output_dir \
+      --fp16
 
 
 We can launch training by running:
@@ -57,12 +57,12 @@ terminal, which is useful for launching long-running jobs concurrently.
 
 .. code-block:: console
 
-   $ # Launch 4 jobs, perhaps with different hyperparameters.
-   $ # We can override the task name with `-n` (optional) and resource requirement with `--gpus` (optional)
-   $ sky exec lm-cluster dnn.yaml -d -n job2 --gpus=V100:1
-   $ sky exec lm-cluster dnn.yaml -d -n job3 --gpus=V100:1
-   $ sky exec lm-cluster dnn.yaml -d -n job4 --gpus=V100:3
-   $ sky exec lm-cluster dnn.yaml -d -n job5 --gpus=V100:2
+  $ # Launch 4 jobs, perhaps with different hyperparameters.
+  $ # We can override the task name with `-n` (optional) and resource requirement with `--gpus` (optional)
+  $ sky exec lm-cluster dnn.yaml -d -n job2 --gpus=V100:1
+  $ sky exec lm-cluster dnn.yaml -d -n job3 --gpus=V100:1
+  $ sky exec lm-cluster dnn.yaml -d -n job4 --gpus=V100:3
+  $ sky exec lm-cluster dnn.yaml -d -n job5 --gpus=V100:2
 
 Because the cluster only has 4 V100 GPU, we will see the following behavior:
 
@@ -76,8 +76,8 @@ If we wish to view the output for each run after it has completed we can use:
 
 .. code-block:: console
 
-   $ # View the jobs in the queue
-   $ sky queue lm-cluster
+  $ # View the jobs in the queue
+  $ sky queue lm-cluster
 
    ID  NAME         USER  SUBMITTED    STARTED     STATUS
    5   job5         user  10 mins ago  10 mins ago RUNNING
@@ -87,11 +87,11 @@ If we wish to view the output for each run after it has completed we can use:
    1   huggingface  user  10 mins ago  1 min ago   SUCCEEDED
 
 
-   $ # Stream the logs of job5 (ID: 5) to the console
-   $ sky logs lm-cluster 5
+  $ # Stream the logs of job5 (ID: 5) to the console
+  $ sky logs lm-cluster 5
 
-   $ # Cancel job job3 (ID: 3)
-   $ sky cancel lm-cluster 3
+  $ # Cancel job job3 (ID: 3)
+  $ sky cancel lm-cluster 3
 
 
 Transferring Checkpoints and Artifacts

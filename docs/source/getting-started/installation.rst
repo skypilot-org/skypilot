@@ -7,11 +7,11 @@ Install Sky using pip:
 
 .. code-block:: console
 
-   $ # Clone the sky codebase
-   $ git clone ssh://git@github.com/sky-proj/sky.git
-   $ cd sky
-   $ # Sky requires python >= 3.6. 3.10+ is currently NOT supported.
-   $ pip install ".[all]"
+  $ # Clone the sky codebase
+  $ git clone ssh://git@github.com/sky-proj/sky.git
+  $ cd sky
+  $ # Sky requires python >= 3.6. 3.10+ is currently NOT supported.
+  $ pip install ".[all]"
 
 If you only want the dependencies for certain clouds, you can also use
 :code:`".[aws,azure,gcp]"`.
@@ -28,27 +28,27 @@ To get the **AWS Access Key** required by the :code:`aws configure`, please refe
 
 .. code-block:: console
 
-   $ # Install boto
-   $ pip install boto3
+  $ # Install boto
+  $ pip install boto3
 
-   $ # Configure your AWS credentials
-   $ aws configure
+  $ # Configure your AWS credentials
+  $ aws configure
 
 
 **GCP**:
 
 .. code-block:: console
 
-   $ pip install google-api-python-client
-   $ # Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart
-   $ conda install -c conda-forge google-cloud-sdk
+  $ pip install google-api-python-client
+  $ # Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart
+  $ conda install -c conda-forge google-cloud-sdk
 
-   $ # Init.
-   $ gcloud init
+  $ # Init.
+  $ gcloud init
 
-   $ # Run this if you don't have a credentials file.
-   $ # This will generate ~/.config/gcloud/application_default_credentials.json.
-   $ gcloud auth application-default login
+  $ # Run this if you don't have a credentials file.
+  $ # This will generate ~/.config/gcloud/application_default_credentials.json.
+  $ gcloud auth application-default login
 
 If you meet the following error (*RemoveError: 'requests' is a dependency of conda and cannot be removed from conda's operating environment*) while running :code:`conda install -c conda-forge google-cloud-sdk`, please try :code:`conda update --force conda` and run it again.
 
@@ -57,12 +57,12 @@ If you meet the following error (*RemoveError: 'requests' is a dependency of con
 
 .. code-block:: console
 
-   $ # Install the Azure CLI
-   $ pip install azure-cli==2.30.0
-   $ # Login azure
-   $ az login
-   $ # Set the subscription to use
-   $ az account set -s <subscription_id>
+  $ # Install the Azure CLI
+  $ pip install azure-cli==2.30.0
+  $ # Login azure
+  $ az login
+  $ # Set the subscription to use
+  $ az account set -s <subscription_id>
 
 **Verifying cloud setup**
 
@@ -71,16 +71,16 @@ the CLI:
 
 .. code-block:: console
 
-   $ # Verify cloud account setup
-   $ sky check
+  $ # Verify cloud account setup
+  $ sky check
 
 This will produce output verifying the correct setup of each supported cloud.
 
 .. code-block:: text
 
-   Checking credentials to enable clouds for Sky.
-      AWS: enabled
-      GCP: enabled
-      Azure: enabled
+  Checking credentials to enable clouds for Sky.
+    AWS: enabled
+    GCP: enabled
+    Azure: enabled
 
-   Sky will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
+  Sky will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.

@@ -12,11 +12,11 @@ Submitting multiple trials with different hyperparameters is simple:
 
 .. code-block:: bash
 
-  # Launch 4 trials in parallel
-  sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-3
-  sky exec mycluster --gpus V100:1 -d -- python train.py --lr 3e-3
-  sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-4
-  sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-2
+  $ # Launch 4 trials in parallel
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-3
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 3e-3
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-4
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-2
 
   # gets queued and will run once a GPU is available
   sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-6

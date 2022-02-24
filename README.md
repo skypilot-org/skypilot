@@ -13,17 +13,23 @@ sky launch -c mycluster hello_sky.yaml
 
 ```yaml
 # hello_sky.yaml
+
 resources:
-  accelerators: V100:1  # 1x NVIDIA V100 GPU
+  # Optional; if left out, pick from the available clouds.
+  cloud: aws
 
-workdir: .  # Sync code dir to cloud
+  accelerators: V100:1 # 1x NVIDIA V100 GPU
 
+# Working directory (optional) containing the project codebase.
+# This directory will be synced to ~/sky_workdir on the provisioned cluster.
+workdir: .
+
+# Typical use: pip install -r requirements.txt
 setup: |
-  # Typical use: pip install -r requirements.txt
   echo "running setup"
 
+# Typical use: make use of resources, such as running training.
 run: |
-  # Typical use: make use of resources, such as running training.
   echo "hello sky!"
   conda env list
 ```
