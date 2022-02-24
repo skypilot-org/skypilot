@@ -1103,6 +1103,22 @@ class CloudVmRayBackend(backends.Backend):
         fore = colorama.Fore
         style = colorama.Style
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        full_workdir = os.path.abspath(os.path.expanduser(workdir))
+
+        def workdir_size(path):
+            return int(
+                subprocess.check_output(['du', '-sh', '-m',
+                                         path]).split()[0].decode('utf-8'))
+
+        # If work directory exceeds 100 MB, raise warning
+        dir_size = workdir_size(full_workdir)
+        if dir_size >= 100:
+            logger.warning(
+                f'{fore.RED}The size of workdir {workdir}'
+                f'is {dir_size} MB, exceeding 100 MB. '
+                f'Try to keep workdir small, as large sizes will cause '
+                f'rsync to run for a long time.{style.RESET_ALL}')
+
         # TODO(zhwu): make this in parallel
         for i, ip in enumerate(ip_list):
             node_name = f'worker{i}' if i > 0 else 'head'
