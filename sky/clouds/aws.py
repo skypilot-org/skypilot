@@ -14,11 +14,9 @@ if TYPE_CHECKING:
 
 
 def _run_output(cmd):
-    proc = subprocess.run(cmd,
-                          shell=True,
-                          check=True,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.PIPE)
+    proc = subprocess.run(
+        cmd, shell=True, check=True, stderr=subprocess.PIPE, stdout=subprocess.PIPE
+    )
     return proc.stdout.decode('ascii')
 
 
@@ -40,25 +38,31 @@ class AWS(clouds.Cloud):
                 #     clouds.Zone('us-west-1a'),
                 #     clouds.Zone('us-west-1b'),
                 # ]),
-                clouds.Region('us-west-2').set_zones([
-                    clouds.Zone('us-west-2a'),
-                    clouds.Zone('us-west-2b'),
-                    clouds.Zone('us-west-2c'),
-                    clouds.Zone('us-west-2d'),
-                ]),
-                clouds.Region('us-east-2').set_zones([
-                    clouds.Zone('us-east-2a'),
-                    clouds.Zone('us-east-2b'),
-                    clouds.Zone('us-east-2c'),
-                ]),
-                clouds.Region('us-east-1').set_zones([
-                    clouds.Zone('us-east-1a'),
-                    clouds.Zone('us-east-1b'),
-                    clouds.Zone('us-east-1c'),
-                    clouds.Zone('us-east-1d'),
-                    clouds.Zone('us-east-1e'),
-                    clouds.Zone('us-east-1f'),
-                ]),
+                clouds.Region('us-west-2').set_zones(
+                    [
+                        clouds.Zone('us-west-2a'),
+                        clouds.Zone('us-west-2b'),
+                        clouds.Zone('us-west-2c'),
+                        clouds.Zone('us-west-2d'),
+                    ]
+                ),
+                clouds.Region('us-east-2').set_zones(
+                    [
+                        clouds.Zone('us-east-2a'),
+                        clouds.Zone('us-east-2b'),
+                        clouds.Zone('us-east-2c'),
+                    ]
+                ),
+                clouds.Region('us-east-1').set_zones(
+                    [
+                        clouds.Zone('us-east-1a'),
+                        clouds.Zone('us-east-1b'),
+                        clouds.Zone('us-east-1c'),
+                        clouds.Zone('us-east-1d'),
+                        clouds.Zone('us-east-1e'),
+                        clouds.Zone('us-east-1f'),
+                    ]
+                ),
             ]
         return cls._regions
 
@@ -79,7 +83,8 @@ class AWS(clouds.Cloud):
             regions = cls.regions()
         else:
             regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'aws')
+                instance_type, use_spot, 'aws'
+            )
         for region in regions:
             if region.name == 'us-west-1':
                 # TODO: troubles launching AMIs.
@@ -102,10 +107,9 @@ class AWS(clouds.Cloud):
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
-        return service_catalog.get_hourly_cost(instance_type,
-                                               region=None,
-                                               use_spot=use_spot,
-                                               clouds='aws')
+        return service_catalog.get_hourly_cost(
+            instance_type, region=None, use_spot=use_spot, clouds='aws'
+        )
 
     def accelerators_to_hourly_cost(self, accelerators):
         # AWS includes accelerators as part of the instance type.  Implementing
@@ -155,10 +159,10 @@ class AWS(clouds.Cloud):
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='aws')
+            instance_type, clouds='aws'
+        )
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources_lib.Resources'):
+    def make_deploy_resources_variables(self, resources: 'resources_lib.Resources'):
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -172,8 +176,7 @@ class AWS(clouds.Cloud):
             'use_spot': r.use_spot,
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def get_feasible_launchable_resources(self, resources: 'resources_lib.Resources'):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
@@ -198,7 +201,8 @@ class AWS(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         instance_type = service_catalog.get_instance_type_for_accelerator(
-            acc, acc_count, clouds='aws')
+            acc, acc_count, clouds='aws'
+        )
         if instance_type is None:
             return []
         return _make(instance_type)
@@ -213,9 +217,10 @@ class AWS(clouds.Cloud):
         # `aws` to access private storage buckets.
         # `aws configure list` does not guarantee this file exists.
         if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
-            return (False,
-                    '~/.aws/credentials does not exist. Run `aws configure`.' +
-                    help_str)
+            return (
+                False,
+                '~/.aws/credentials does not exist. Run `aws configure`.' + help_str,
+            )
         try:
             output = _run_output('aws configure list')
         except subprocess.CalledProcessError:

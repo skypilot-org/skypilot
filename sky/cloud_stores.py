@@ -134,8 +134,7 @@ class GcsCloudStorage(CloudStorage):
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil."""
-        download_via_gsutil = (
-            f'{self._GSUTIL} -m rsync -d -r {source} {destination}')
+        download_via_gsutil = f'{self._GSUTIL} -m rsync -d -r {source} {destination}'
         all_commands = list(self._GET_GSUTIL)
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
@@ -153,8 +152,10 @@ def get_storage_from_path(url: str) -> CloudStorage:
     result = urllib.parse.urlsplit(url)
 
     if result.scheme not in _REGISTRY:
-        assert False, (f'Scheme {result.scheme} not found in'
-                       f' supported storage ({_REGISTRY.keys()}); path {url}')
+        assert False, (
+            f'Scheme {result.scheme} not found in'
+            f' supported storage ({_REGISTRY.keys()}); path {url}'
+        )
     return _REGISTRY[result.scheme]
 
 

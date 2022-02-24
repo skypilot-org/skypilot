@@ -8,7 +8,6 @@ google = None
 
 
 def import_package(func):
-
     @wraps(func)
     def wrapper(*args, **kwargs):
         global googleapiclient, google
@@ -16,11 +15,14 @@ def import_package(func):
             try:
                 import googleapiclient as _googleapiclient
                 import google as _google
+
                 googleapiclient = _googleapiclient
                 google = _google
             except ImportError:
-                raise ImportError('Fail to import dependencies for GCP.'
-                                  'See README for how to install it.') from None
+                raise ImportError(
+                    'Fail to import dependencies for GCP.'
+                    'See README for how to install it.'
+                ) from None
         return func(*args, **kwargs)
 
     return wrapper
@@ -35,6 +37,7 @@ def build(service_name: str, version: str, *args, **kwargs):
         version: Service version (e.g., 'v1').
     """
     from googleapiclient import discovery
+
     return discovery.build(service_name, version, *args, **kwargs)
 
 
@@ -44,6 +47,7 @@ def storage_client():
     GCS Bucket
     """
     from google.cloud import storage
+
     return storage.Client()
 
 
@@ -53,6 +57,7 @@ def anonymous_storage_client():
     Public GCS Buckets
     """
     from google.cloud import storage
+
     return storage.Client.create_anonymous_client()
 
 
@@ -60,6 +65,7 @@ def anonymous_storage_client():
 def not_found_exception():
     """NotFound exception."""
     from google.api_core import exceptions as gcs_exceptions
+
     return gcs_exceptions.NotFound
 
 
@@ -67,4 +73,5 @@ def not_found_exception():
 def forbidden_exception():
     """Forbidden exception."""
     from google.api_core import exceptions as gcs_exceptions
+
     return gcs_exceptions.Forbidden

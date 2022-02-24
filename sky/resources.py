@@ -46,17 +46,20 @@ class Resources:
     ):
         self.cloud = cloud
         self.instance_type = instance_type
-        assert not (instance_type is not None and cloud is None), \
-            'If instance_type is specified, must specify the cloud'
+        assert not (
+            instance_type is not None and cloud is None
+        ), 'If instance_type is specified, must specify the cloud'
         if accelerators is not None:
             if isinstance(accelerators, str):  # Convert to Dict[str, int].
                 if ':' not in accelerators:
                     accelerators = {accelerators: 1}
                 else:
                     splits = accelerators.split(':')
-                    parse_error = ('The "accelerators" field as a str '
-                                   'should be <name> or <name>:<cnt>. '
-                                   f'Found: {accelerators!r}')
+                    parse_error = (
+                        'The "accelerators" field as a str '
+                        'should be <name> or <name>:<cnt>. '
+                        f'Found: {accelerators!r}'
+                    )
                     if len(splits) != 2:
                         raise ValueError(parse_error)
                     try:
@@ -76,8 +79,10 @@ class Resources:
                 if accelerator_args is None:
                     accelerator_args = {}
                 if 'tf_version' not in accelerator_args:
-                    logger.info('Missing tf_version in accelerator_args, using'
-                                ' default (2.5.0)')
+                    logger.info(
+                        'Missing tf_version in accelerator_args, using'
+                        ' default (2.5.0)'
+                    )
                     accelerator_args['tf_version'] = '2.5.0'
 
         self.accelerators = accelerators
@@ -103,8 +108,10 @@ class Resources:
         use_spot = ''
         if self.use_spot:
             use_spot = '[Spot]'
-        return (f'{self.cloud}({self.instance_type}{use_spot}'
-                f'{accelerators}{accelerator_args})')
+        return (
+            f'{self.cloud}({self.instance_type}{use_spot}'
+            f'{accelerators}{accelerator_args})'
+        )
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self.instance_type is not None
@@ -116,11 +123,12 @@ class Resources:
             acc_requested = self.accelerators
             if acc_requested is None:
                 return
-            acc_from_instance_type = (
-                self.cloud.get_accelerators_from_instance_type(
-                    self.instance_type))
+            acc_from_instance_type = self.cloud.get_accelerators_from_instance_type(
+                self.instance_type
+            )
             if not Resources(accelerators=acc_requested).less_demanding_than(
-                    Resources(accelerators=acc_from_instance_type)):
+                Resources(accelerators=acc_from_instance_type)
+            ):
                 raise ValueError(
                     'Infeasible resource demands found:\n'
                     f'  Instance type requested: {self.instance_type}\n'
@@ -128,7 +136,8 @@ class Resources:
                     f'{acc_from_instance_type}\n'
                     f'  Accelerators requested: {acc_requested}\n'
                     f'To fix: either only specify instance_type, or change '
-                    'the accelerators field to be consistent.')
+                    'the accelerators field to be consistent.'
+                )
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
@@ -143,8 +152,7 @@ class Resources:
         if self.accelerators is not None:
             return self.accelerators
         if self.cloud is not None and self.instance_type is not None:
-            return self.cloud.get_accelerators_from_instance_type(
-                self.instance_type)
+            return self.cloud.get_accelerators_from_instance_type(self.instance_type)
         return None
 
     def get_cost(self, seconds: float):
@@ -152,11 +160,11 @@ class Resources:
         hours = seconds / 3600
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
-            self.instance_type, self.use_spot)
+            self.instance_type, self.use_spot
+        )
         # Accelerators (if any).
         if self.accelerators is not None:
-            hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators)
+            hourly_cost += self.cloud.accelerators_to_hourly_cost(self.accelerators)
         return hourly_cost * hours
 
     def is_same_resources(self, other: 'Resources') -> bool:
@@ -172,8 +180,7 @@ class Resources:
             return False
         # self.cloud == other.cloud
 
-        if (self.instance_type is not None and
-                self.instance_type != other.instance_type):
+        if self.instance_type is not None and self.instance_type != other.instance_type:
             return False
         # self.instance_type == other.instance_type
 
@@ -199,8 +206,7 @@ class Resources:
             return False
         # self.cloud <= other.cloud
 
-        if (self.instance_type is not None and
-                self.instance_type != other.instance_type):
+        if self.instance_type is not None and self.instance_type != other.instance_type:
             return False
         # self.instance_type <= other.instance_type
 
@@ -216,8 +222,10 @@ class Resources:
                     return False
         # self.accelerators <= other.accelerators
 
-        if (self.accelerator_args is not None and
-                self.accelerator_args != other.accelerator_args):
+        if (
+            self.accelerator_args is not None
+            and self.accelerator_args != other.accelerator_args
+        ):
             return False
         # self.accelerator_args == other.accelerator_args
 
@@ -240,10 +248,12 @@ class Resources:
 
     def is_empty(self) -> bool:
         """Is this Resources an empty request (all fields None)?"""
-        return all([
-            self.cloud is None,
-            self.instance_type is None,
-            self.accelerators is None,
-            self.accelerator_args is None,
-            not self._use_spot_specified,
-        ])
+        return all(
+            [
+                self.cloud is None,
+                self.instance_type is None,
+                self.accelerators is None,
+                self.accelerator_args is None,
+                not self._use_spot_specified,
+            ]
+        )

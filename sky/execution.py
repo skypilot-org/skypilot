@@ -31,6 +31,7 @@ OptimizeTarget = optimizer.OptimizeTarget
 
 class Stage(enum.Enum):
     """Stages for a run of a sky.Task."""
+
     # TODO: rename actual methods to be consistent.
     OPTIMIZE = 0
     PROVISION = 1
@@ -41,16 +42,18 @@ class Stage(enum.Enum):
     TEARDOWN = 6
 
 
-def _execute(dag: sky.Dag,
-             dryrun: bool = False,
-             teardown: bool = False,
-             stream_logs: bool = True,
-             handle: Any = None,
-             backend: Optional[backends.Backend] = None,
-             optimize_target: OptimizeTarget = OptimizeTarget.COST,
-             stages: Optional[List[Stage]] = None,
-             cluster_name: Optional[str] = None,
-             detach_run: bool = False) -> None:
+def _execute(
+    dag: sky.Dag,
+    dryrun: bool = False,
+    teardown: bool = False,
+    stream_logs: bool = True,
+    handle: Any = None,
+    backend: Optional[backends.Backend] = None,
+    optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    stages: Optional[List[Stage]] = None,
+    cluster_name: Optional[str] = None,
+    detach_run: bool = False,
+) -> None:
     """Runs a DAG.
 
     If the DAG has not been optimized yet, this will call sky.optimize() for
@@ -81,8 +84,7 @@ def _execute(dag: sky.Dag,
 
     cluster_exists = False
     if cluster_name is not None:
-        existing_handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
+        existing_handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         cluster_exists = existing_handle is not None
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
@@ -112,13 +114,14 @@ def _execute(dag: sky.Dag,
                 prev_file_mounts = task.file_mounts
                 if prev_file_mounts is not None:
                     prev_file_mounts = dict(task.file_mounts)
-                task.update_file_mounts(
-                    check.get_cloud_credential_file_mounts())
-                handle = backend.provision(task,
-                                           task.best_resources,
-                                           dryrun=dryrun,
-                                           stream_logs=stream_logs,
-                                           cluster_name=cluster_name)
+                task.update_file_mounts(check.get_cloud_credential_file_mounts())
+                handle = backend.provision(
+                    task,
+                    task.best_resources,
+                    dryrun=dryrun,
+                    stream_logs=stream_logs,
+                    cluster_name=cluster_name,
+                )
                 task.set_file_mounts(prev_file_mounts)
 
         if dryrun:
@@ -130,8 +133,9 @@ def _execute(dag: sky.Dag,
                 backend.sync_workdir(handle, task.workdir)
 
         if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
-            backend.sync_file_mounts(handle, task.file_mounts,
-                                     task.get_cloud_to_remote_file_mounts())
+            backend.sync_file_mounts(
+                handle, task.file_mounts, task.get_cloud_to_remote_file_mounts()
+            )
 
         if stages is None or Stage.SETUP in stages:
             backend.setup(handle, task)
@@ -162,23 +166,27 @@ def _execute(dag: sky.Dag,
             backends.backend_utils.run('sky status')
 
 
-def launch(dag: sky.Dag,
-           dryrun: bool = False,
-           teardown: bool = False,
-           stream_logs: bool = True,
-           backend: Optional[backends.Backend] = None,
-           optimize_target: OptimizeTarget = OptimizeTarget.COST,
-           cluster_name: Optional[str] = None,
-           detach_run: bool = False) -> None:
-    _execute(dag=dag,
-             dryrun=dryrun,
-             teardown=teardown,
-             stream_logs=stream_logs,
-             handle=None,
-             backend=backend,
-             optimize_target=optimize_target,
-             cluster_name=cluster_name,
-             detach_run=detach_run)
+def launch(
+    dag: sky.Dag,
+    dryrun: bool = False,
+    teardown: bool = False,
+    stream_logs: bool = True,
+    backend: Optional[backends.Backend] = None,
+    optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    cluster_name: Optional[str] = None,
+    detach_run: bool = False,
+) -> None:
+    _execute(
+        dag=dag,
+        dryrun=dryrun,
+        teardown=teardown,
+        stream_logs=stream_logs,
+        handle=None,
+        backend=backend,
+        optimize_target=optimize_target,
+        cluster_name=cluster_name,
+        detach_run=detach_run,
+    )
 
 
 def exec(  # pylint: disable=redefined-builtin
@@ -193,18 +201,22 @@ def exec(  # pylint: disable=redefined-builtin
 ) -> None:
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
-        raise ValueError(f'Cluster \'{cluster_name}\' not found.  '
-                         'Use `sky launch` to provision first.')
-    _execute(dag=dag,
-             dryrun=dryrun,
-             teardown=teardown,
-             stream_logs=stream_logs,
-             handle=handle,
-             backend=backend,
-             optimize_target=optimize_target,
-             stages=[
-                 Stage.SYNC_WORKDIR,
-                 Stage.EXEC,
-             ],
-             cluster_name=cluster_name,
-             detach_run=detach_run)
+        raise ValueError(
+            f'Cluster \'{cluster_name}\' not found.  '
+            'Use `sky launch` to provision first.'
+        )
+    _execute(
+        dag=dag,
+        dryrun=dryrun,
+        teardown=teardown,
+        stream_logs=stream_logs,
+        handle=handle,
+        backend=backend,
+        optimize_target=optimize_target,
+        stages=[
+            Stage.SYNC_WORKDIR,
+            Stage.EXEC,
+        ],
+        cluster_name=cluster_name,
+        detach_run=detach_run,
+    )

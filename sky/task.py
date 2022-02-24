@@ -17,14 +17,17 @@ CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
-_VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
-                     ' uppercase letters, digits, underscores, periods,'
-                     ' and dashes. Must start and end with alphanumeric'
-                     ' characters. No triple dashes or underscores.')
+_VALID_NAME_DESCR = (
+    'ASCII characters and may contain lowercase and'
+    ' uppercase letters, digits, underscores, periods,'
+    ' and dashes. Must start and end with alphanumeric'
+    ' characters. No triple dashes or underscores.'
+)
 
 _RUN_FN_CHECK_FAIL_MSG = (
     'run command generator must take exactly 2 arguments: node_rank (int) and'
-    'a list of node ip addresses (List[str]). Got {run_sig}')
+    'a list of node ip addresses (List[str]). Got {run_sig}'
+)
 
 
 def is_cloud_store_url(url):
@@ -110,8 +113,11 @@ class Task:
         self.storage_plans = {}
         self.setup = setup
         self.workdir = workdir
-        self.docker_image = docker_image if docker_image \
+        self.docker_image = (
+            docker_image
+            if docker_image
             else 'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'
+        )
         self._explicit_num_nodes = num_nodes  # Used as a scheduling constraint.
         self.num_nodes = 1 if num_nodes is None else num_nodes
         self.inputs = None
@@ -133,8 +139,9 @@ class Task:
 
     def _validate(self):
         if not _is_valid_name(self.name):
-            raise ValueError(f'Invalid task name {self.name}. Valid name: '
-                             f'{_VALID_NAME_DESCR}')
+            raise ValueError(
+                f'Invalid task name {self.name}. Valid name: ' f'{_VALID_NAME_DESCR}'
+            )
 
         # Check self.run
         if callable(self.run):
@@ -155,19 +162,23 @@ class Task:
             if run_closure.nonlocals:
                 raise ValueError(
                     'run command generator must be self contained. '
-                    f'Found nonlocals: {run_closure.nonlocals}')
+                    f'Found nonlocals: {run_closure.nonlocals}'
+                )
             if run_closure.globals:
                 raise ValueError(
                     'run command generator must be self contained. '
-                    f'Found globals: {run_closure.globals}')
+                    f'Found globals: {run_closure.globals}'
+                )
             if run_closure.unbound:
                 # Do not raise an error here. Import statements, which are
                 # allowed, will be considered as unbounded.
                 pass
         elif self.run is not None and not isinstance(self.run, str):
-            raise ValueError('run must be either a shell script (str) or '
-                             f'a command generator ({CommandGen}). '
-                             f'Got {type(self.run)}')
+            raise ValueError(
+                'run must be either a shell script (str) or '
+                f'a command generator ({CommandGen}). '
+                f'Got {type(self.run)}'
+            )
 
     @staticmethod
     def from_yaml(yaml_path):
@@ -175,8 +186,9 @@ class Task:
             config = yaml.safe_load(f)
 
         if isinstance(config, str):
-            raise ValueError('YAML loaded as str, not as dict. '
-                             f'Is it correct? Path: {yaml_path}')
+            raise ValueError(
+                'YAML loaded as str, not as dict. ' f'Is it correct? Path: {yaml_path}'
+            )
 
         if config is None:
             config = {}
@@ -208,16 +220,14 @@ class Task:
                     name = src.get('name')
                     source = src.get('source')
                     if not name or not source:
-                        raise ValueError('Inline storage objects need both name'
-                                         ' and source path to be specified.')
+                        raise ValueError(
+                            'Inline storage objects need both name'
+                            ' and source path to be specified.'
+                        )
                     fm_storages.append(src)
-                    fm_storage_mounts.append({
-                        'storage': name,
-                        'mount_path': dst_path
-                    })
+                    fm_storage_mounts.append({'storage': name, 'mount_path': dst_path})
                 else:
-                    raise ValueError(f'Unable to parse file_mount '
-                                     f'{dst_path}:{src}')
+                    raise ValueError(f'Unable to parse file_mount ' f'{dst_path}:{src}')
             task.set_file_mounts(copy_mounts)
 
         # Process storage objects - both from file_mounts and from YAML
@@ -226,8 +236,10 @@ class Task:
             if isinstance(yaml_storages, dict):
                 yaml_storages = [yaml_storages]
             if not isinstance(yaml_storages, list):
-                raise ValueError(f'Invalid storage specification.'
-                                 f' Expected list, got {yaml_storages}')
+                raise ValueError(
+                    f'Invalid storage specification.'
+                    f' Expected list, got {yaml_storages}'
+                )
         else:
             yaml_storages = []
 
@@ -237,13 +249,15 @@ class Task:
             name = storage.get('name')
             source = storage.get('source')
             force_stores = storage.get('force_stores')
-            assert name and source, \
-                   'Storage Object needs name and source path specified.'
-            persistent = True if storage.get(
-                'persistent') is None else storage['persistent']
-            storage_obj = storage_lib.Storage(name=name,
-                                              source=source,
-                                              persistent=persistent)
+            assert (
+                name and source
+            ), 'Storage Object needs name and source path specified.'
+            persistent = (
+                True if storage.get('persistent') is None else storage['persistent']
+            )
+            storage_obj = storage_lib.Storage(
+                name=name, source=source, persistent=persistent
+            )
             if force_stores is not None:
                 assert set(force_stores) <= {'s3', 'gcs', 'azure_blob'}
                 for cloud_type in force_stores:
@@ -261,8 +275,10 @@ class Task:
             if isinstance(yaml_storage_mounts, dict):
                 yaml_storage_mounts = [yaml_storage_mounts]
             if not isinstance(yaml_storage_mounts, list):
-                raise ValueError(f'Invalid storage mount specification.'
-                                 f' Expected list, got {yaml_storage_mounts}')
+                raise ValueError(
+                    f'Invalid storage mount specification.'
+                    f' Expected list, got {yaml_storage_mounts}'
+                )
         else:
             yaml_storage_mounts = []
 
@@ -271,10 +287,8 @@ class Task:
         for storage_mount in all_storage_mounts:
             name = storage_mount.get('storage')
             storage_mount_path = storage_mount.get('mount_path')
-            assert name, \
-                'Storage mount must have name reference to Storage object.'
-            assert storage_mount_path, \
-                'Storage mount path cannot be empty.'
+            assert name, 'Storage mount must have name reference to Storage object.'
+            assert storage_mount_path, 'Storage mount path cannot be empty.'
             storage = task_storages[name]
             task_storage_mounts[storage_mount_path] = storage
         task.set_storage_mounts(task_storage_mounts)
@@ -284,15 +298,17 @@ class Task:
             inputs = list(inputs_dict.keys())[0]
             estimated_size_gigabytes = list(inputs_dict.values())[0]
             # TODO: allow option to say (or detect) no download/egress cost.
-            task.set_inputs(inputs=inputs,
-                            estimated_size_gigabytes=estimated_size_gigabytes)
+            task.set_inputs(
+                inputs=inputs, estimated_size_gigabytes=estimated_size_gigabytes
+            )
 
         if config.get('outputs') is not None:
             outputs_dict = config['outputs']
             outputs = list(outputs_dict.keys())[0]
             estimated_size_gigabytes = list(outputs_dict.values())[0]
-            task.set_outputs(outputs=outputs,
-                             estimated_size_gigabytes=estimated_size_gigabytes)
+            task.set_outputs(
+                outputs=outputs, estimated_size_gigabytes=estimated_size_gigabytes
+            )
 
         resources = config.get('resources')
         if resources is not None:
@@ -301,8 +317,7 @@ class Task:
             if resources.get('accelerators') is not None:
                 resources['accelerators'] = resources['accelerators']
             if resources.get('accelerator_args') is not None:
-                resources['accelerator_args'] = dict(
-                    resources['accelerator_args'])
+                resources['accelerator_args'] = dict(resources['accelerator_args'])
             if resources.get('use_spot') is not None:
                 resources['use_spot'] = resources['use_spot']
             # FIXME: We should explicitly declare all the parameters
@@ -376,7 +391,8 @@ class Task:
         if self.time_estimator_func is None:
             raise NotImplementedError(
                 'Node [{}] does not have a cost model set; '
-                'call set_time_estimator() first'.format(self))
+                'call set_time_estimator() first'.format(self)
+            )
         return self.time_estimator_func(resources)
 
     def set_storage_mounts(
@@ -422,25 +438,32 @@ class Task:
             storage_type = storage_plans[store]
             if storage_type is storage_lib.StorageType.S3:
                 # TODO: allow for Storage mounting of different clouds
-                self.update_file_mounts({
-                    mnt_path: 's3://' + store.name,
-                })
+                self.update_file_mounts(
+                    {
+                        mnt_path: 's3://' + store.name,
+                    }
+                )
             elif storage_type is storage_lib.StorageType.GCS:
                 # Remember to run `gcloud auth application-default login`
                 self.setup = (
                     '([[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && '
                     'echo GOOGLE_APPLICATION_CREDENTIALS='
                     '~/.config/gcloud/application_default_credentials.json >> '
-                    f'~/.bashrc || true); {self.setup or "true"}')
-                self.update_file_mounts({
-                    mnt_path: 'gs://' + store.name,
-                })
+                    f'~/.bashrc || true); {self.setup or "true"}'
+                )
+                self.update_file_mounts(
+                    {
+                        mnt_path: 'gs://' + store.name,
+                    }
+                )
             elif storage_type is storage_lib.StorageType.AZURE:
                 # TODO when Azure Blob is done: sync ~/.azure
                 assert False, 'TODO: Azure Blob not mountable yet'
             else:
-                raise ValueError(f'Storage Type {storage_type} \
-                    does not exist!')
+                raise ValueError(
+                    f'Storage Type {storage_type} \
+                    does not exist!'
+                )
 
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> None:
         """Sets the file mounts for this Task.
@@ -474,10 +497,10 @@ class Task:
                 raise ValueError(
                     'File mount paths cannot end with a slash '
                     '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                    f'Found: target={target} source={source}')
+                    f'Found: target={target} source={source}'
+                )
             if is_cloud_store_url(target):
-                raise ValueError(
-                    'File mount destination paths cannot be cloud storage')
+                raise ValueError('File mount destination paths cannot be cloud storage')
         self.file_mounts = file_mounts
         return self
 

@@ -8,7 +8,6 @@ docker = None
 
 
 def import_package(func):
-
     @wraps(func)
     def wrapper(*args, **kwargs):
         global docker
@@ -16,8 +15,10 @@ def import_package(func):
             try:
                 import docker as _docker
             except ImportError:
-                raise ImportError('Fail to import dependencies for Docker. '
-                                  'See README for how to install it.') from None
+                raise ImportError(
+                    'Fail to import dependencies for Docker. '
+                    'See README for how to install it.'
+                ) from None
             docker = _docker
         return func(*args, **kwargs)
 

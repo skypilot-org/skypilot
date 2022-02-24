@@ -18,6 +18,7 @@ class InstanceTypeInfo(NamedTuple):
     - memory: Instance memory in GiB.
     - price: Regular instance price per hour.
     """
+
     cloud: str
     instance_type: str
     accelerator_name: str
@@ -26,8 +27,7 @@ class InstanceTypeInfo(NamedTuple):
 
 
 def get_data_path(filename: str) -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data',
-                        filename)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', filename)
 
 
 def read_catalog(filename: str) -> pd.DataFrame:
@@ -85,8 +85,9 @@ def get_instance_type_for_accelerator_impl(
     acc_count: int,
 ) -> Optional[str]:
     """Returns the instance type with the required count of accelerators."""
-    result = df[(df['AcceleratorName'] == acc_name) &
-                (df['AcceleratorCount'] == acc_count)]
+    result = df[
+        (df['AcceleratorName'] == acc_name) & (df['AcceleratorCount'] == acc_count)
+    ]
     if len(result) == 0:
         return None
     instance_types = set(result['InstanceType'])
@@ -98,20 +99,22 @@ def get_instance_type_for_accelerator_impl(
             # - M60, offered by AWS g3s.xl and g3.4xl
             # - "Promo" instance types offered by Azure
             its = sorted(instance_types)
-            assert its == ['g3.4xlarge', 'g3s.xlarge'
-                          ] or its[0] + '_Promo' == its[1], its
+            assert (
+                its == ['g3.4xlarge', 'g3s.xlarge'] or its[0] + '_Promo' == its[1]
+            ), its
         elif len(instance_types) == 4:
             its = sorted(instance_types)
             assert its == [
-                'Standard_NV12s_v3', 'Standard_NV6', 'Standard_NV6_Promo',
-                'Standard_NV6s_v2'
+                'Standard_NV12s_v3',
+                'Standard_NV6',
+                'Standard_NV6_Promo',
+                'Standard_NV6s_v2',
             ], its
         else:
             # - T4, offered by AWS g4dn.{1,2,4,8,16}xl
             # - T4, offered by Azure Standard_NC{4,8,16}as_T4_v3
             for t in instance_types:
-                assert t.startswith('g4dn') or t.endswith(
-                    '_T4_v3'), instance_types
+                assert t.startswith('g4dn') or t.endswith('_T4_v3'), instance_types
         result.sort_values('Price', ascending=True, inplace=True)
     return result.iloc[0]['InstanceType']
 
@@ -132,9 +135,11 @@ def list_accelerators_impl(
     """
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
-    df = df[[
-        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB'
-    ]].dropna(subset=['AcceleratorName']).drop_duplicates()
+    df = (
+        df[['InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB']]
+        .dropna(subset=['AcceleratorName'])
+        .drop_duplicates()
+    )
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter, regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
@@ -157,15 +162,15 @@ def list_accelerators_impl(
     return {k: make_list_from_df(v) for k, v in grouped}
 
 
-def get_region_zones(df: pd.DataFrame,
-                     use_spot: bool) -> List[cloud_lib.Region]:
+def get_region_zones(df: pd.DataFrame, use_spot: bool) -> List[cloud_lib.Region]:
     """Returns a list of regions/zones from a dataframe."""
     price_str = 'SpotPrice' if use_spot else 'Price'
     df = df.dropna(subset=[price_str]).sort_values(price_str)
     regions = [cloud_lib.Region(region) for region in df['Region'].unique()]
     if 'AvailabilityZone' in df.columns:
         zones_in_region = df.groupby('Region')['AvailabilityZone'].apply(
-            lambda x: [cloud_lib.Zone(zone) for zone in x])
+            lambda x: [cloud_lib.Zone(zone) for zone in x]
+        )
         for region in regions:
             region.set_zones(zones_in_region[region.name])
     return regions

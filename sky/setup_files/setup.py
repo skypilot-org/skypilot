@@ -27,7 +27,7 @@ install_requires = [
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
-    'grpcio<=1.43.0'
+    'grpcio<=1.43.0',
 ]
 
 extras_require = {

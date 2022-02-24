@@ -27,8 +27,8 @@ def _filter_out_blocked_clouds(task: sky.Task):
 
 
 def _filter_out_blocked_launchable_resources(
-        launchable_resources: List[Resources],
-        blocked_launchable_resources: List[Resources]):
+    launchable_resources: List[Resources], blocked_launchable_resources: List[Resources]
+):
     """Whether the resources are blocked."""
     available_resources = []
     for resources in launchable_resources:
@@ -51,17 +51,17 @@ def fill_in_launchable_resources(
         if resources.is_launchable():
             launchable[resources] = [resources]
         elif resources.cloud is not None:
-            launchable[
-                resources] = resources.cloud.get_feasible_launchable_resources(
-                    resources)
+            launchable[resources] = resources.cloud.get_feasible_launchable_resources(
+                resources
+            )
         else:
             # Remove blocked clouds.
             available_clouds = _filter_out_blocked_clouds(task)
             for cloud in available_clouds:
-                feasible_resources = cloud.get_feasible_launchable_resources(
-                    resources)
+                feasible_resources = cloud.get_feasible_launchable_resources(resources)
                 launchable[resources].extend(feasible_resources)
         launchable[resources] = _filter_out_blocked_launchable_resources(
-            launchable[resources], blocked_launchable_resources)
+            launchable[resources], blocked_launchable_resources
+        )
 
     return launchable

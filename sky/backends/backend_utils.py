@@ -44,9 +44,9 @@ _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 # Keep the following two fields in sync with the cluster template:
 
 
-def _fill_template(template_name: str,
-                   variables: Dict,
-                   output_path: Optional[str] = None) -> str:
+def _fill_template(
+    template_name: str, variables: Dict, output_path: Optional[str] = None
+) -> str:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
@@ -59,8 +59,9 @@ def _fill_template(template_name: str,
     if output_path is None:
         assert 'cluster_name' in variables, 'cluster_name is required.'
         cluster_name = variables['cluster_name']
-        output_path = pathlib.Path(
-            os.path.expanduser(SKY_USER_FILE_PATH)) / f'{cluster_name}.yml'
+        output_path = (
+            pathlib.Path(os.path.expanduser(SKY_USER_FILE_PATH)) / f'{cluster_name}.yml'
+        )
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
     output_path = os.path.abspath(output_path)
@@ -113,8 +114,7 @@ class FileMountHelper(object):
             restrictions; they are delegated to rsync behaviors.
         """
         assert os.path.isabs(source), source
-        assert not source.endswith('/') and not target.endswith('/'), (source,
-                                                                       target)
+        assert not source.endswith('/') and not target.endswith('/'), (source, target)
         # Below, use sudo in case the symlink needs sudo access to create.
         # Prepare to create the symlink:
         #  1. make sure its dir(s) exist & are owned by $USER.
@@ -125,9 +125,11 @@ class FileMountHelper(object):
             # (excluding /).
             f'sudo mkdir -p {dir_of_symlink}',
             # p: path so far
-            ('(p=""; '
-             f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
-             'p=${p}/${w}; sudo chown $USER $p; done)')
+            (
+                '(p=""; '
+                f'for w in $(echo {dir_of_symlink} | tr "/" " "); do '
+                'p=${p}/${w}; sudo chown $USER $p; done)'
+            ),
         ]
         #  2. remove any existing symlink (ln -f may throw 'cannot
         #     overwrite directory', if the link exists and points to a
@@ -154,9 +156,16 @@ class SSHConfigHelper(object):
     ssh_conf_path = '~/.ssh/config'
 
     @classmethod
-    def _get_generated_config(cls, autogen_comment: str, host_name: str,
-                              ip: str, username: str, ssh_key_path: str):
-        codegen = textwrap.dedent(f"""\
+    def _get_generated_config(
+        cls,
+        autogen_comment: str,
+        host_name: str,
+        ip: str,
+        username: str,
+        ssh_key_path: str,
+    ):
+        codegen = textwrap.dedent(
+            f"""\
             {autogen_comment}
             Host {host_name}
               HostName {ip}
@@ -166,7 +175,8 @@ class SSHConfigHelper(object):
               ForwardAgent yes
               StrictHostKeyChecking no
               Port 22
-            """)
+            """
+        )
         return codegen
 
     @classmethod
@@ -194,8 +204,9 @@ class SSHConfigHelper(object):
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
-        sky_autogen_comment = '# Added by sky (use `sky stop/down' + \
-                            f'-c {cluster_name}` to remove)'
+        sky_autogen_comment = (
+            '# Added by sky (use `sky stop/down' + f'-c {cluster_name}` to remove)'
+        )
         overwrite = False
         overwrite_begin_idx = None
 
@@ -212,8 +223,10 @@ class SSHConfigHelper(object):
                         overwrite = True
                         overwrite_begin_idx = i - 1
                     else:
-                        logger.warning(f'{cls.ssh_conf_path} contains '
-                                       f'host named {cluster_name}.')
+                        logger.warning(
+                            f'{cls.ssh_conf_path} contains '
+                            f'host named {cluster_name}.'
+                        )
                         host_name = ip
                         logger.warning(f'Using {ip} to identify host instead.')
                     break
@@ -222,15 +235,17 @@ class SSHConfigHelper(object):
             with open(config_path, 'w') as f:
                 f.writelines(config)
 
-        codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
-                                            username, key_path)
+        codegen = cls._get_generated_config(
+            sky_autogen_comment, host_name, ip, username, key_path
+        )
 
         # Add (or overwrite) the new config.
         if overwrite:
             assert overwrite_begin_idx is not None
             updated_lines = codegen.splitlines(keepends=True) + ['\n']
-            config[overwrite_begin_idx:overwrite_begin_idx +
-                   len(updated_lines)] = updated_lines
+            config[
+                overwrite_begin_idx : overwrite_begin_idx + len(updated_lines)
+            ] = updated_lines
             with open(config_path, 'w') as f:
                 f.write(''.join(config).strip())
                 f.write('\n')
@@ -266,8 +281,10 @@ class SSHConfigHelper(object):
         start_line_idx = None
         for i, line in enumerate(config):
             next_line = config[i + 1] if i + 1 < len(config) else ''
-            if line.strip() == f'HostName {ip}' and next_line.strip(
-            ) == f'User {username}':
+            if (
+                line.strip() == f'HostName {ip}'
+                and next_line.strip() == f'User {username}'
+            ):
                 start_line_idx = i - 1
                 break
 
@@ -285,29 +302,32 @@ class SSHConfigHelper(object):
         cursor = start_line_idx + 1
         start_line_idx -= 1  # remove auto-generated comment
         while cursor < len(config):
-            if config[cursor].strip().startswith(
-                    '# ') or config[cursor].strip().startswith('Host '):
+            if config[cursor].strip().startswith('# ') or config[
+                cursor
+            ].strip().startswith('Host '):
                 end_line_idx = cursor
                 break
             cursor += 1
 
         # Remove sky-generated config and update the file.
-        config[prev_end_line_idx:end_line_idx] = [
-            '\n'
-        ] if end_line_idx is not None else []
+        config[prev_end_line_idx:end_line_idx] = (
+            ['\n'] if end_line_idx is not None else []
+        )
         with open(config_path, 'w') as f:
             f.write(''.join(config).strip())
             f.write('\n')
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
-def write_cluster_config(to_provision: Resources,
-                         num_nodes: int,
-                         cluster_config_template: str,
-                         cluster_name: str,
-                         region: Optional[clouds.Region] = None,
-                         zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False):
+def write_cluster_config(
+    to_provision: Resources,
+    num_nodes: int,
+    cluster_config_template: str,
+    cluster_name: str,
+    region: Optional[clouds.Region] = None,
+    zones: Optional[List[clouds.Zone]] = None,
+    dryrun: bool = False,
+):
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -327,9 +347,9 @@ def write_cluster_config(to_provision: Resources,
         region = cloud.get_default_region()
         zones = region.zones
     else:
-        assert isinstance(
-            cloud, clouds.Azure
-        ) or zones is not None, 'Set either both or neither for: region, zones.'
+        assert (
+            isinstance(cloud, clouds.Azure) or zones is not None
+        ), 'Set either both or neither for: region, zones.'
     region = region.name
     if isinstance(cloud, clouds.AWS):
         # Only AWS supports multiple zones in the 'availability_zone' field.
@@ -354,10 +374,12 @@ def write_cluster_config(to_provision: Resources,
                 if not azure_subscription_id:
                     raise ValueError  # The error message will be replaced.
             except ModuleNotFoundError as e:
-                raise ModuleNotFoundError('Unable to import azure python '
-                                          'module. Is azure-cli python package '
-                                          'installed? Try pip install '
-                                          '.[azure] in the sky repo.') from e
+                raise ModuleNotFoundError(
+                    'Unable to import azure python '
+                    'module. Is azure-cli python package '
+                    'installed? Try pip install '
+                    '.[azure] in the sky repo.'
+                ) from e
             except Exception as e:
                 raise RuntimeError(
                     'Failed to get subscription id from azure cli. '
@@ -391,7 +413,9 @@ def write_cluster_config(to_provision: Resources,
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
-            }))
+            },
+        ),
+    )
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
@@ -406,17 +430,22 @@ def write_cluster_config(to_provision: Resources,
         scripts = tuple(
             _fill_template(
                 template_name,
-                dict(resources_vars, **{
-                    'zones': ','.join(zones),
-                    'tpu_name': tpu_name,
-                }),
+                dict(
+                    resources_vars,
+                    **{
+                        'zones': ','.join(zones),
+                        'tpu_name': tpu_name,
+                    },
+                ),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in ~/.sky/generated/ to be consistent
                 # with cluster yamls.
                 output_path=os.path.join(user_file_dir, template_name).replace(
-                    '.sh.j2', f'.{cluster_name}.sh'),
-            ) for template_name in
-            ['gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'])
+                    '.sh.j2', f'.{cluster_name}.sh'
+                ),
+            )
+            for template_name in ['gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2']
+        )
         config_dict['tpu-create-script'] = scripts[0]
         config_dict['tpu-delete-script'] = scripts[1]
         config_dict['tpu_name'] = tpu_name
@@ -451,26 +480,24 @@ def read_yaml(path):
 def dump_yaml(path, config):
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
-
         def write_line_break(self, data=None):
             super().write_line_break(data)
             if len(self.indents) == 1:
                 super().write_line_break()
 
     with open(path, 'w') as f:
-        yaml.dump(config,
-                  f,
-                  Dumper=LineBreakDumper,
-                  sort_keys=False,
-                  default_flow_style=False)
+        yaml.dump(
+            config, f, Dumper=LineBreakDumper, sort_keys=False, default_flow_style=False
+        )
 
 
 def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
-def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
-                                 num_nodes: int) -> bool:
+def wait_until_ray_cluster_ready(
+    cloud: clouds.Cloud, cluster_config_file: str, num_nodes: int
+) -> bool:
     """Returns whether the entire ray cluster is ready."""
     # FIXME: It may takes a while for the cluster to be available for ray,
     # especially for Azure, causing `ray exec` to fail.
@@ -484,11 +511,13 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
     else:
         assert False, f'No support for distributed clusters for {cloud}.'
     while True:
-        proc = subprocess.run(f'ray exec {cluster_config_file} "ray status"',
-                              shell=True,
-                              check=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
+        proc = subprocess.run(
+            f'ray exec {cluster_config_file} "ray status"',
+            shell=True,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         output = proc.stdout.decode('ascii')
         logger.info(output)
         if f'{expected_worker_count} {worker_str}' in output:
@@ -502,10 +531,9 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
     return True  # success
 
 
-def ssh_options_list(ssh_private_key: Optional[str],
-                     ssh_control_name: Optional[str],
-                     *,
-                     timeout=30) -> List[str]:
+def ssh_options_list(
+    ssh_private_key: Optional[str], ssh_control_name: Optional[str], *, timeout=30
+) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
@@ -531,21 +559,27 @@ def ssh_options_list(ssh_private_key: Optional[str],
         'ConnectTimeout': f'{timeout}s',
     }
     if ssh_control_name is not None:
-        arg_dict.update({
-            # Control path: important optimization as we do multiple ssh in one
-            # sky.launch().
-            'ControlMaster': 'auto',
-            'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
-            'ControlPersist': '30s',
-        })
-    ssh_key_option = [
-        '-i',
-        ssh_private_key,
-    ] if ssh_private_key is not None else []
+        arg_dict.update(
+            {
+                # Control path: important optimization as we do multiple ssh in one
+                # sky.launch().
+                'ControlMaster': 'auto',
+                'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
+                'ControlPersist': '30s',
+            }
+        )
+    ssh_key_option = (
+        [
+            '-i',
+            ssh_private_key,
+        ]
+        if ssh_private_key is not None
+        else []
+    )
     return ssh_key_option + [
-        x for y in (['-o', f'{k}={v}']
-                    for k, v in arg_dict.items()
-                    if v is not None) for x in y
+        x
+        for y in (['-o', f'{k}={v}'] for k, v in arg_dict.items() if v is not None)
+        for x in y
     ]
 
 
@@ -554,13 +588,14 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     username = getpass.getuser()
-    path = (f'/tmp/sky_ssh_{username}/{ssh_control_filename}')
+    path = f'/tmp/sky_ssh_{username}/{ssh_control_filename}'
     os.makedirs(path, exist_ok=True)
     return path
 
 
 class SshMode(enum.Enum):
     """Enum for SSH mode."""
+
     # Do not allocating pseudo-tty to avoid user input corrupting the output.
     NON_INTERACTIVE = 0
     # Allocate a pseudo-tty, quit the ssh session after the cmd finishes.
@@ -569,9 +604,15 @@ class SshMode(enum.Enum):
     LOGIN = 2
 
 
-def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
-                      ssh_mode: SshMode, port_forward: Optional[List[int]],
-                      ssh_control_name: Optional[str]) -> List[str]:
+def _ssh_base_command(
+    ip: str,
+    ssh_private_key: str,
+    ssh_user: str,
+    *,
+    ssh_mode: SshMode,
+    port_forward: Optional[List[int]],
+    ssh_control_name: Optional[str],
+) -> List[str]:
     ssh = ['ssh']
     if ssh_mode == SshMode.NON_INTERACTIVE:
         # Disable pseudo-terminal allocation. Otherwise, the output of
@@ -583,11 +624,11 @@ def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
     if port_forward is not None:
         for port in port_forward:
             local = remote = port
-            logger.info(
-                f'Forwarding port {local} to port {remote} on localhost.')
+            logger.info(f'Forwarding port {local} to port {remote} on localhost.')
             ssh += ['-L', f'{remote}:localhost:{local}']
-    return ssh + ssh_options_list(ssh_private_key,
-                                  ssh_control_name) + [f'{ssh_user}@{ip}']
+    return (
+        ssh + ssh_options_list(ssh_private_key, ssh_control_name) + [f'{ssh_user}@{ip}']
+    )
 
 
 def run_command_on_ip_via_ssh(
@@ -627,12 +668,14 @@ def run_command_on_ip_via_ssh(
     Returns:
         A tuple of (process, stdout, stderr).
     """
-    base_ssh_command = _ssh_base_command(ip,
-                                         ssh_private_key,
-                                         ssh_user=ssh_user,
-                                         ssh_mode=ssh_mode,
-                                         port_forward=port_forward,
-                                         ssh_control_name=ssh_control_name)
+    base_ssh_command = _ssh_base_command(
+        ip,
+        ssh_private_key,
+        ssh_user=ssh_user,
+        ssh_mode=ssh_mode,
+        port_forward=port_forward,
+        ssh_control_name=ssh_control_name,
+    )
     if ssh_mode == SshMode.LOGIN:
         assert isinstance(cmd, list), 'cmd must be a list for login mode.'
         command = base_ssh_command + cmd
@@ -649,8 +692,10 @@ def run_command_on_ip_via_ssh(
         '-i',
     ]
     command += [
-        shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                    f'PYTHONWARNINGS=ignore && ({cmd})'),
+        shlex.quote(
+            f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
+            f'PYTHONWARNINGS=ignore && ({cmd})'
+        ),
     ]
     return log_lib.run_with_log(command, log_path, stream_logs, check=check)
 
@@ -664,18 +709,13 @@ def run(cmd, **kwargs):
     executable = kwargs.pop('executable', '/bin/bash')
     if not shell:
         executable = None
-    return subprocess.run(cmd,
-                          shell=shell,
-                          check=check,
-                          executable=executable,
-                          **kwargs)
+    return subprocess.run(
+        cmd, shell=shell, check=check, executable=executable, **kwargs
+    )
 
 
 def run_no_outputs(cmd, **kwargs):
-    return run(cmd,
-               stdout=subprocess.DEVNULL,
-               stderr=subprocess.DEVNULL,
-               **kwargs)
+    return run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
 
 
 def check_local_gpus() -> bool:
@@ -689,16 +729,20 @@ def check_local_gpus() -> bool:
     False if not.
     """
     is_functional = False
-    installation_check = subprocess.run(['which', 'nvidia-smi'],
-                                        stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.DEVNULL,
-                                        check=False)
+    installation_check = subprocess.run(
+        ['which', 'nvidia-smi'],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
     is_installed = installation_check.returncode == 0
     if is_installed:
-        execution_check = subprocess.run(['nvidia-smi'],
-                                         stdout=subprocess.DEVNULL,
-                                         stderr=subprocess.DEVNULL,
-                                         check=False)
+        execution_check = subprocess.run(
+            ['nvidia-smi'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
         is_functional = execution_check.returncode == 0
     return is_functional
 
@@ -710,7 +754,8 @@ def generate_cluster_name():
 
 
 def get_backend_from_handle(
-        handle: backends.Backend.ResourceHandle) -> backends.Backend:
+    handle: backends.Backend.ResourceHandle,
+) -> backends.Backend:
     """Gets a Backend object corresponding to a handle.
 
     Inspects handle type to infer the backend used for the resource.
@@ -720,8 +765,7 @@ def get_backend_from_handle(
     elif isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
         backend = backends.LocalDockerBackend()
     else:
-        raise NotImplementedError(
-            f'Handle type {type(handle)} is not supported yet.')
+        raise NotImplementedError(f'Handle type {type(handle)} is not supported yet.')
     return backend
 
 

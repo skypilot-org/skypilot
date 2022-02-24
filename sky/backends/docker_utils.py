@@ -25,8 +25,9 @@ DOCKERFILE_SETUPCMD = """RUN {setup_command}"""
 DOCKERFILE_COPYCMD = """COPY {copy_command}"""
 DOCKERFILE_RUNCMD = """CMD {run_command}"""
 
-CONDA_SETUP_PREFIX = '. $(conda info --base)/etc/profile.d/conda.sh 2> ' \
-                     '/dev/null || true '
+CONDA_SETUP_PREFIX = (
+    '. $(conda info --base)/etc/profile.d/conda.sh 2> ' '/dev/null || true '
+)
 
 SKY_DOCKER_SETUP_SCRIPT = 'sky_setup.sh'
 SKY_DOCKER_RUN_SCRIPT = 'sky_run.sh'
@@ -73,10 +74,12 @@ def create_dockerfile(
         # NOTE: This relies on copy_path being copied to build context.
         copy_docker_cmd = f'{workdir_name} /{workdir_name}/'
         dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
-            copy_command=copy_docker_cmd)
+            copy_command=copy_docker_cmd
+        )
 
-    def add_script_to_dockerfile(dockerfile_contents: str, multiline_cmds: str,
-                                 out_filename: str):
+    def add_script_to_dockerfile(
+        dockerfile_contents: str, multiline_cmds: str, out_filename: str
+    ):
         # Converts multiline commands to a script and adds the script to the
         # dockerfile. You still need to add the docker command to run the
         # script (either as CMD or RUN).
@@ -87,23 +90,23 @@ def create_dockerfile(
         copy_cmd = f'{out_filename} /sky/{out_filename}'
 
         # Set permissions and add to dockerfile
-        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
-            copy_command=copy_cmd)
+        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(copy_command=copy_cmd)
         dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(
-            setup_command=f'chmod +x ./sky/{out_filename}')
+            setup_command=f'chmod +x ./sky/{out_filename}'
+        )
         return dockerfile_contents
 
     # ===== SETUP ======
-    dockerfile_contents = add_script_to_dockerfile(dockerfile_contents,
-                                                   setup_command,
-                                                   SKY_DOCKER_SETUP_SCRIPT)
+    dockerfile_contents = add_script_to_dockerfile(
+        dockerfile_contents, setup_command, SKY_DOCKER_SETUP_SCRIPT
+    )
     cmd = f'./sky/{SKY_DOCKER_SETUP_SCRIPT}'
     dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(setup_command=cmd)
 
     # ===== RUN ======
-    dockerfile_contents = add_script_to_dockerfile(dockerfile_contents,
-                                                   run_command,
-                                                   SKY_DOCKER_RUN_SCRIPT)
+    dockerfile_contents = add_script_to_dockerfile(
+        dockerfile_contents, run_command, SKY_DOCKER_RUN_SCRIPT
+    )
     cmd = f'./sky/{SKY_DOCKER_RUN_SCRIPT}'
     dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=cmd)
 
@@ -120,21 +123,26 @@ def _execute_build(tag, context_path):
     Executes a dockerfile build with the given context.
     The context path must contain the dockerfile and all dependencies.
     """
-    assert tag is not None, 'Image tag cannot be None - have you specified a ' \
-                            'task name? '
+    assert tag is not None, (
+        'Image tag cannot be None - have you specified a ' 'task name? '
+    )
     docker_client = docker.from_env()
     try:
         unused_image, unused_build_logs = docker_client.images.build(
-            path=context_path, tag=tag, rm=True, quiet=False)
+            path=context_path, tag=tag, rm=True, quiet=False
+        )
     except docker.build_error() as e:
         colorama.init()
         style = colorama.Style
         fore = colorama.Fore
-        logger.error(f'{fore.RED}Image build for {tag} failed - are your setup '
-                     f'commands correct? Logs below{style.RESET_ALL}')
+        logger.error(
+            f'{fore.RED}Image build for {tag} failed - are your setup '
+            f'commands correct? Logs below{style.RESET_ALL}'
+        )
         logger.error(
             f'{style.BRIGHT}Image context is available at {context_path}'
-            f'{style.RESET_ALL}')
+            f'{style.RESET_ALL}'
+        )
         for line in e.build_log:
             if 'stream' in line:
                 logger.error(line['stream'].strip())
@@ -157,11 +165,13 @@ def build_dockerimage(task, tag):
     copy_path = os.path.join(task.workdir, '') if task.workdir else task.workdir
 
     # Create dockerfile
-    _, img_metadata = create_dockerfile(base_image=task.docker_image,
-                                        setup_command=task.setup,
-                                        copy_path=copy_path,
-                                        run_command=task.run,
-                                        build_dir=temp_dir)
+    _, img_metadata = create_dockerfile(
+        base_image=task.docker_image,
+        setup_command=task.setup,
+        copy_path=copy_path,
+        run_command=task.run,
+        build_dir=temp_dir,
+    )
 
     # Copy copy_path contents to tempdir
     if copy_path:
@@ -180,7 +190,7 @@ def build_dockerimage(task, tag):
 
 
 def build_dockerimage_from_task(task: task_mod.Task):
-    """ Builds a docker image from a Task"""
+    """Builds a docker image from a Task"""
     tag, img_metadata = build_dockerimage(task, tag=task.name)
     return tag, img_metadata
 
@@ -200,18 +210,20 @@ def make_bash_from_multiline(codegen: str) -> str:
         script: str: str of shell script that can be written to a file
     """
     script = [
-        textwrap.dedent(f"""\
+        textwrap.dedent(
+            f"""\
         #!/bin/bash
-        {CONDA_SETUP_PREFIX}"""),
+        {CONDA_SETUP_PREFIX}"""
+        ),
         codegen,
     ]
     script = '\n'.join(script)
     return script
 
 
-def bash_codegen(workdir_name: str,
-                 multiline_cmds: Optional[str],
-                 out_path: Optional[str] = None):
+def bash_codegen(
+    workdir_name: str, multiline_cmds: Optional[str], out_path: Optional[str] = None
+):
     # Generate commands (if they exist) script and write to file
     if not multiline_cmds:
         multiline_cmds = ''

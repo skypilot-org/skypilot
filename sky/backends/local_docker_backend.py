@@ -90,10 +90,7 @@ class LocalDockerBackend(backends.Backend):
 
     # Define the Docker-in-Docker mount
     _dind_mount = {
-        '/var/run/docker.sock': {
-            'bind': '/var/run/docker.sock',
-            'mode': 'rw'
-        }
+        '/var/run/docker.sock': {'bind': '/var/run/docker.sock', 'mode': 'rw'}
     }
 
     def __init__(self, use_gpu: Union[bool, str] = 'auto'):
@@ -105,8 +102,9 @@ class LocalDockerBackend(backends.Backend):
               and automatically sets the container runtime.
 
         """
-        self._use_gpu = backend_utils.check_local_gpus() if use_gpu == 'auto' \
-            else use_gpu
+        self._use_gpu = (
+            backend_utils.check_local_gpus() if use_gpu == 'auto' else use_gpu
+        )
         self.volume_mounts = {}  # Stores the ResourceHandle->volume mounts map
         self.images = {}  # Stores the ResourceHandle->[image_tag, metadata] map
         self.containers = {}
@@ -134,40 +132,45 @@ class LocalDockerBackend(backends.Backend):
             for k, v in c.labels.items():
                 if k.startswith(_DOCKER_LABEL_PREFIX):
                     # Remove 'skymeta_' from key
-                    metadata[k[len(_DOCKER_LABEL_PREFIX):]] = v
+                    metadata[k[len(_DOCKER_LABEL_PREFIX) :]] = v
             self.images = {c.name: [c.image, metadata]}
             self.containers[c.name] = c
 
-    def provision(self,
-                  task: Task,
-                  to_provision: Resources,
-                  dryrun: bool,
-                  stream_logs: bool,
-                  cluster_name: Optional[str] = None) -> ResourceHandle:
+    def provision(
+        self,
+        task: Task,
+        to_provision: Resources,
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: Optional[str] = None,
+    ) -> ResourceHandle:
         """
         Builds docker image for the task and returns the cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
         docker.
         """
-        assert task.name is not None, 'Task name cannot be None - have you ' \
-                                      'specified a task name?'
+        assert task.name is not None, (
+            'Task name cannot be None - have you ' 'specified a task name?'
+        )
         if cluster_name is None:
             cluster_name = backend_utils.generate_cluster_name()
         if stream_logs:
             logger.info(
                 'Streaming build logs is not supported in LocalDockerBackend. '
-                'Build logs will be shown on failure.')
+                'Build logs will be shown on failure.'
+            )
         handle = LocalDockerBackend.ResourceHandle(cluster_name)
-        logger.info(f'Building docker image for task {task.name}. '
-                    'This might take some time.')
+        logger.info(
+            f'Building docker image for task {task.name}. ' 'This might take some time.'
+        )
         image_tag, metadata = docker_utils.build_dockerimage_from_task(task)
         self.images[handle] = [image_tag, metadata]
         logger.info(f'Image {image_tag} built.')
         logger.info('Provisioning complete.')
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                cluster_handle=handle,
-                                                ready=False)
+        global_user_state.add_or_update_cluster(
+            cluster_name, cluster_handle=handle, ready=False
+        )
         return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -175,9 +178,11 @@ class LocalDockerBackend(backends.Backend):
 
         This happens in the execute step.
         """
-        logger.info('Since the workdir is synced at build time, sync_workdir is'
-                    ' a NoOp. If you are running sky exec, your workdir has not'
-                    ' been updated.')
+        logger.info(
+            'Since the workdir is synced at build time, sync_workdir is'
+            ' a NoOp. If you are running sky exec, your workdir has not'
+            ' been updated.'
+        )
 
     def sync_file_mounts(
         self,
@@ -186,8 +191,9 @@ class LocalDockerBackend(backends.Backend):
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
     ) -> None:
         """File mounts in Docker are implemented with volume mounts (-v)."""
-        assert not cloud_to_remote_file_mounts, \
-            'Only local file mounts are supported with LocalDockerBackend.'
+        assert (
+            not cloud_to_remote_file_mounts
+        ), 'Only local file mounts are supported with LocalDockerBackend.'
         docker_mounts = {}
 
         # Add DIND socket mount
@@ -196,10 +202,7 @@ class LocalDockerBackend(backends.Backend):
         # Add other mounts
         if all_file_mounts:
             for container_path, local_path in all_file_mounts.items():
-                docker_mounts[local_path] = {
-                    'bind': container_path,
-                    'mode': 'rw'
-                }
+                docker_mounts[local_path] = {'bind': container_path, 'mode': 'rw'}
         self.volume_mounts[handle] = docker_mounts
 
     def setup(self, handle: ResourceHandle, task: Task) -> None:
@@ -213,13 +216,16 @@ class LocalDockerBackend(backends.Backend):
         del task  # unused
         colorama.init()
         style = colorama.Style
-        assert handle in self.images, \
-            f'No image found for {handle}, have you run Backend.provision()?'
+        assert (
+            handle in self.images
+        ), f'No image found for {handle}, have you run Backend.provision()?'
         image_tag, metadata = self.images[handle]
         volumes = self.volume_mounts[handle]
         runtime = 'nvidia' if self._use_gpu else None
-        logger.info(f'Image {image_tag} found. Running container now. use_gpu '
-                    f'is {self._use_gpu}')
+        logger.info(
+            f'Image {image_tag} found. Running container now. use_gpu '
+            f'is {self._use_gpu}'
+        )
         cluster_name = global_user_state.get_cluster_name_from_handle(handle)
         # Encode metadata in docker labels:
         labels = {f'{_DOCKER_LABEL_PREFIX}{k}': v for k, v in metadata.items()}
@@ -241,12 +247,14 @@ class LocalDockerBackend(backends.Backend):
                 privileged=True,
                 volumes=volumes,
                 runtime=runtime,
-                labels=labels)
+                labels=labels,
+            )
         except docker.api_error() as e:
             if 'Unknown runtime specified nvidia' in e.explanation:
                 logger.error(
                     'Unable to run container - nvidia runtime for docker not '
-                    'found. Have you installed nvidia-docker on your machine?')
+                    'found. Have you installed nvidia-docker on your machine?'
+                )
             global_user_state.remove_cluster(cluster_name, terminate=True)
             raise e
         self.containers[handle] = container
@@ -255,23 +263,25 @@ class LocalDockerBackend(backends.Backend):
             f'To get a shell in your container, run: {style.BRIGHT}docker exec '
             f'-it {container.name} /bin/bash{style.RESET_ALL}.\n'
             f'You can debug the image by running: {style.BRIGHT}docker run -it '
-            f'{image_tag} /bin/bash{style.RESET_ALL}.\n')
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                cluster_handle=handle,
-                                                ready=True)
+            f'{image_tag} /bin/bash{style.RESET_ALL}.\n'
+        )
+        global_user_state.add_or_update_cluster(
+            cluster_name, cluster_handle=handle, ready=True
+        )
 
-    def execute(self, handle: ResourceHandle, task: Task,
-                detach_run: bool) -> None:
-        """ Launches the container."""
+    def execute(self, handle: ResourceHandle, task: Task, detach_run: bool) -> None:
+        """Launches the container."""
 
         if detach_run:
-            raise NotImplementedError('detach_run=True is not supported in '
-                                      'LocalDockerBackend.')
+            raise NotImplementedError(
+                'detach_run=True is not supported in ' 'LocalDockerBackend.'
+            )
 
         if task.num_nodes > 1:
             raise NotImplementedError(
                 'Tasks with num_nodes > 1 is currently not supported in '
-                'LocalDockerBackend.')
+                'LocalDockerBackend.'
+            )
 
         # Handle a basic task
         if task.run is None:
@@ -280,19 +290,22 @@ class LocalDockerBackend(backends.Backend):
 
         self._execute_task_one_node(handle, task)
 
-    def _execute_task_one_node(self, handle: ResourceHandle,
-                               task: task_lib.Task) -> None:
+    def _execute_task_one_node(
+        self, handle: ResourceHandle, task: task_lib.Task
+    ) -> None:
         container = self.containers[handle]
         _, image_metadata = self.images[handle]
         with tempfile.NamedTemporaryFile(mode='w') as temp_file:
             script_contents = docker_utils.bash_codegen(
-                workdir_name=image_metadata['workdir_name'],
-                multiline_cmds=task.run)
+                workdir_name=image_metadata['workdir_name'], multiline_cmds=task.run
+            )
             temp_file.write(script_contents)
             temp_file.flush()
             script_path = temp_file.name
-            cmd = f'chmod +x {script_path} && docker cp {script_path} ' \
-                  f'{container.name}:/sky/{docker_utils.SKY_DOCKER_RUN_SCRIPT}'
+            cmd = (
+                f'chmod +x {script_path} && docker cp {script_path} '
+                f'{container.name}:/sky/{docker_utils.SKY_DOCKER_RUN_SCRIPT}'
+            )
             subprocess.run(cmd, shell=True, check=True)
 
         _, exec_log = container.exec_run(
@@ -302,7 +315,8 @@ class LocalDockerBackend(backends.Backend):
             stdin=True,
             tty=True,
             stream=True,
-            privileged=True)
+            privileged=True,
+        )
 
         # For consistency in behavior with CloudVMRayBackend, we catch ctrl+c
         # during execution and manually kill the process in the container
@@ -310,14 +324,14 @@ class LocalDockerBackend(backends.Backend):
             for line in exec_log:
                 logger.info(line.decode('utf-8').strip())
         except KeyboardInterrupt:
-            logger.info('Keyboard interrupt detected, killing process in '
-                        'container.')
+            logger.info('Keyboard interrupt detected, killing process in ' 'container.')
             _, kill_log = container.exec_run(
                 cmd='/bin/bash -c "pgrep sky_run.sh | xargs kill"',
                 stdout=True,
                 stderr=True,
                 stream=True,
-                privileged=True)
+                privileged=True,
+            )
             for line in kill_log:
                 logger.info(line.decode('utf-8').strip())
 
@@ -330,25 +344,32 @@ class LocalDockerBackend(backends.Backend):
         container.reload()
 
         if container.status == 'running':
-            logger.info('Your container is now running with name '
-                        f'{style.BRIGHT}{container.name}{style.RESET_ALL}')
+            logger.info(
+                'Your container is now running with name '
+                f'{style.BRIGHT}{container.name}{style.RESET_ALL}'
+            )
             logger.info(
                 f'To get a shell in your container, run {style.BRIGHT}docker '
-                f'exec -it {container.name} /bin/bash{style.RESET_ALL}')
+                f'exec -it {container.name} /bin/bash{style.RESET_ALL}'
+            )
         else:
-            logger.info('Your container has finished running. Name was '
-                        f'{style.BRIGHT}{container.name}{style.RESET_ALL}')
+            logger.info(
+                'Your container has finished running. Name was '
+                f'{style.BRIGHT}{container.name}{style.RESET_ALL}'
+            )
         logger.info(
             'To create a new container for debugging without running the '
             f'task run command, run {style.BRIGHT}docker run -it '
-            f'{container.image.tags[0]} /bin/bash{style.RESET_ALL}')
+            f'{container.image.tags[0]} /bin/bash{style.RESET_ALL}'
+        )
 
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         """Teardown kills the container."""
         if not terminate:
             logger.warning(
                 'LocalDockerBackend.teardown() will terminate '
-                'containers for now, despite receiving terminate=False.')
+                'containers for now, despite receiving terminate=False.'
+            )
 
         # If handle is not found in the self.containers, it implies it has
         # already been removed externally in docker. No action is needed

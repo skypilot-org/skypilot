@@ -37,12 +37,12 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
       s3_bucket_name: str; Name of the Amazon S3 Bucket
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
-    from oauth2client.client import GoogleCredentials  # pylint: disable=import-outside-toplevel
+    from oauth2client.client import (
+        GoogleCredentials,
+    )  # pylint: disable=import-outside-toplevel
 
     credentials = GoogleCredentials.get_application_default()
-    storagetransfer = gcp.build('storagetransfer',
-                                'v1',
-                                credentials=credentials)
+    storagetransfer = gcp.build('storagetransfer', 'v1', credentials=credentials)
 
     session = aws.session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
@@ -52,10 +52,14 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     project_id = gcp_credentials['project_id']
 
     # Update cloud bucket IAM role to allow for data transfer
-    storage_account = storagetransfer.googleServiceAccounts().get(
-        projectId=project_id).execute()
-    _add_bucket_iam_member(gs_bucket_name, 'roles/storage.admin',
-                           'serviceAccount:' + storage_account['accountEmail'])
+    storage_account = (
+        storagetransfer.googleServiceAccounts().get(projectId=project_id).execute()
+    )
+    _add_bucket_iam_member(
+        gs_bucket_name,
+        'roles/storage.admin',
+        'serviceAccount:' + storage_account['accountEmail'],
+    )
 
     starttime = datetime.utcnow()
     transfer_job = {
@@ -81,12 +85,12 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
                 'awsAccessKey': {
                     'accessKeyId': aws_credentials.access_key,
                     'secretAccessKey': aws_credentials.secret_key,
-                }
+                },
             },
             'gcsDataSink': {
                 'bucketName': gs_bucket_name,
-            }
-        }
+            },
+        },
     }
 
     result = storagetransfer.transferJobs().create(body=transfer_job).execute()
@@ -96,9 +100,9 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
 def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
     """Creates a one-time transfer from Google Cloud Storage to Amazon S3.
 
-     Args:
-      gs_bucket_name: str; Name of the Google Cloud Storage Bucket
-      s3_bucket_name: str; Name of the Amazon S3 Bucket
+    Args:
+     gs_bucket_name: str; Name of the Google Cloud Storage Bucket
+     s3_bucket_name: str; Name of the Amazon S3 Bucket
     """
     sync_command = f'gsutil -m rsync -rd gs://{gs_bucket_name} \
         s3://{s3_bucket_name}'

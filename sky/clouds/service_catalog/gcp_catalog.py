@@ -41,17 +41,15 @@ def _get_accelerator(
     count: int,
     region: Optional[str],
 ) -> pd.DataFrame:
-    idx = (df['AcceleratorName'] == accelerator) & (df['AcceleratorCount']
-                                                    == count)
+    idx = (df['AcceleratorName'] == accelerator) & (df['AcceleratorCount'] == count)
     if region is not None:
         idx &= df['Region'] == region
     return df[idx]
 
 
-def get_accelerator_hourly_cost(accelerator: str,
-                                count: int,
-                                region: Optional[str] = None,
-                                use_spot: bool = False) -> float:
+def get_accelerator_hourly_cost(
+    accelerator: str, count: int, region: Optional[str] = None, use_spot: bool = False
+) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     if region is None:
         region = _DEFAULT_REGION
@@ -84,7 +82,9 @@ def list_accelerators(
             new_infos.append(
                 info._replace(
                     instance_type=_A100_INSTANCE_TYPES[info.accelerator_count],
-                    memory=_A100_HOST_MEMORY[info.accelerator_count]))
+                    memory=_A100_HOST_MEMORY[info.accelerator_count],
+                )
+            )
         results['A100'] = new_infos
     return results
 

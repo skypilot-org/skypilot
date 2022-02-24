@@ -117,21 +117,21 @@ class Storage(object):
         - (optional) Set of Clouds added to the Storage object
         """
 
-        def __init__(self,
-                     *,
-                     storage_name: str,
-                     source: str,
-                     clouds: Set[StorageType] = None):
+        def __init__(
+            self, *, storage_name: str, source: str, clouds: Set[StorageType] = None
+        ):
             assert storage_name is not None and source is not None
             self.storage_name = storage_name
             self.source = source
             self.clouds = {} if clouds is None else clouds
 
         def __repr__(self):
-            return (f'StorageMetadata('
-                    f'\n\tstorage_name={self.storage_name},'
-                    f'\n\tsource={self.source},'
-                    f'\n\tclouds={self.clouds})')
+            return (
+                f'StorageMetadata('
+                f'\n\tstorage_name={self.storage_name},'
+                f'\n\tsource={self.source},'
+                f'\n\tclouds={self.clouds})'
+            )
 
         def add_cloud(self, cloud: StorageType) -> None:
             if cloud.value not in self.clouds:
@@ -144,11 +144,13 @@ class Storage(object):
         def get_storage_name(self) -> str:
             return self.storage_name
 
-    def __init__(self,
-                 name: str,
-                 source: Path,
-                 stores: Optional[Dict[StorageType, AbstractStore]] = None,
-                 persistent: bool = True):
+    def __init__(
+        self,
+        name: str,
+        source: Path,
+        stores: Optional[Dict[StorageType, AbstractStore]] = None,
+        persistent: bool = True,
+    ):
         """Initializes a Storage object.
 
         Three fields are required: the name of the storage, the source
@@ -174,19 +176,21 @@ class Storage(object):
             self.source = os.path.abspath(os.path.expanduser(source))
             # Check if local path exists
             if not os.path.exists(self.source):
-                raise ValueError(
-                    f'Local source path does not exist: {self.source}')
+                raise ValueError(f'Local source path does not exist: {self.source}')
             # Raise warning if user's path is a symlink
             elif os.path.islink(self.source):
-                logger.warning(f'Source path {self.source} is a symlink. '
-                               'Referenced contents are uploaded, matching '
-                               'the default behavior for S3 and GCS syncing.')
+                logger.warning(
+                    f'Source path {self.source} is a symlink. '
+                    'Referenced contents are uploaded, matching '
+                    'the default behavior for S3 and GCS syncing.'
+                )
 
         elif scheme in ['s3', 'gs']:
             is_bucket_url = True
         else:
             raise ValueError(
-                f'Supported paths: local, s3://, gs://. Got: {self.source}')
+                f'Supported paths: local, s3://, gs://. Got: {self.source}'
+            )
 
         # Sky optimizer either adds a storage object instance or selects
         # from existing ones
@@ -195,8 +199,9 @@ class Storage(object):
         # Logic to rebuild Storage if it is in global user state
         self.handle = global_user_state.get_handle_from_storage_name(self.name)
         if self.handle:
-            logger.info('Detected existing storage object, '
-                        f'loading Storage: {self.name}')
+            logger.info(
+                'Detected existing storage object, ' f'loading Storage: {self.name}'
+            )
             status = global_user_state.get_storage_status(self.name)
             if self.source is None:
                 logger.info(
@@ -210,14 +215,16 @@ class Storage(object):
                     f'declared source {self.source} does not match the '
                     f'source in the database {self.handle.source}. Either '
                     ' specify the same source in your Storage '
-                    'declaration or use a new storage name.')
+                    'declaration or use a new storage name.'
+                )
 
             if self.handle.clouds:
                 for i, s_type in enumerate(self.handle.clouds):
-                    if status == StorageStatus.UPLOAD_FAIL and i == len(
-                            self.handle.clouds) - 1:
-                        logger.info(
-                            f'Retrying upload on most recent cloud: {s_type}.')
+                    if (
+                        status == StorageStatus.UPLOAD_FAIL
+                        and i == len(self.handle.clouds) - 1
+                    ):
+                        logger.info(f'Retrying upload on most recent cloud: {s_type}.')
                     else:
                         logger.info(f'Verifying Bucket Contents: {s_type}')
                     if s_type == StorageType.S3.value:
@@ -226,11 +233,12 @@ class Storage(object):
                         self.get_or_copy_to_gcs()
             return
 
-        self.handle = self.StorageMetadata(storage_name=self.name,
-                                           source=self.source,
-                                           clouds=list(self.stores.keys()))
-        global_user_state.add_or_update_storage(self.name, self.handle,
-                                                StorageStatus.INIT)
+        self.handle = self.StorageMetadata(
+            storage_name=self.name, source=self.source, clouds=list(self.stores.keys())
+        )
+        global_user_state.add_or_update_storage(
+            self.name, self.handle, StorageStatus.INIT
+        )
 
         # If source is a pre-existing bucket, connect to the bucket
         # If the bucket does not exist, this will error out
@@ -240,33 +248,27 @@ class Storage(object):
             self.get_or_copy_to_gcs()
 
     def get_or_copy_to_s3(self):
-        """Adds AWS S3 Store to Storage
-        """
+        """Adds AWS S3 Store to Storage"""
         try:
-            global_user_state.set_storage_status(self.name,
-                                                 StorageStatus.UPLOAD_AWS)
+            global_user_state.set_storage_status(self.name, StorageStatus.UPLOAD_AWS)
             s3_store = self.add_store(StorageType.S3)
             global_user_state.set_storage_status(self.name, StorageStatus.DONE)
             return 's3://' + s3_store.name
         except Exception as e:
             logger.error('Sky could not upload to S3 Bucket')
-            global_user_state.set_storage_status(self.name,
-                                                 StorageStatus.UPLOAD_FAIL)
+            global_user_state.set_storage_status(self.name, StorageStatus.UPLOAD_FAIL)
             raise e from e
 
     def get_or_copy_to_gcs(self):
-        """Adds GCS Store to Storage
-        """
+        """Adds GCS Store to Storage"""
         try:
-            global_user_state.set_storage_status(self.name,
-                                                 StorageStatus.UPLOAD_GCP)
+            global_user_state.set_storage_status(self.name, StorageStatus.UPLOAD_GCP)
             gs_store = self.add_store(StorageType.GCS)
             global_user_state.set_storage_status(self.name, StorageStatus.DONE)
             return 'gs://' + gs_store.name
         except Exception as e:
             logger.error('Sky could not upload to GCS Bucket')
-            global_user_state.set_storage_status(self.name,
-                                                 StorageStatus.UPLOAD_FAIL)
+            global_user_state.set_storage_status(self.name, StorageStatus.UPLOAD_FAIL)
             raise e from e
 
     def get_or_copy_to_azure_blob(self):
@@ -305,8 +307,7 @@ class Storage(object):
         return store
 
     def delete(self, cloud_type: StorageType = None) -> None:
-        """Deletes data for all storage objects.
-        """
+        """Deletes data for all storage objects."""
         if not self.stores:
             logger.info('No backing stores found.')
         if cloud_type:
@@ -330,14 +331,17 @@ class S3Store(AbstractStore):
         if self.source.startswith('s3://'):
             assert name == data_utils.split_s3_path(source)[0], (
                 'S3 Bucket is specified as path, the name should be the '
-                'same as S3 bucket.')
+                'same as S3 bucket.'
+            )
         elif self.source.startswith('gs://'):
             assert name == data_utils.split_gcs_path(source)[0], (
                 'GCS Bucket is specified as path, the name should be the '
-                'same as GCS bucket.')
+                'same as GCS bucket.'
+            )
             assert data_utils.verify_gcs_bucket(name), (
                 f'Source specified as {source}, a GCS bucket. ',
-                'GCS Bucket should exist.')
+                'GCS Bucket should exist.',
+            )
 
         self.client = data_utils.create_s3_client(region)
         self.region = region
@@ -370,8 +374,9 @@ class S3Store(AbstractStore):
         """
         sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'
         logger.info(f'Executing: {sync_command}')
-        with subprocess.Popen(sync_command.split(' '),
-                              stderr=subprocess.PIPE) as process:
+        with subprocess.Popen(
+            sync_command.split(' '), stderr=subprocess.PIPE
+        ) as process:
             while True:
                 line = process.stderr.readline()
                 if not line:
@@ -380,10 +385,12 @@ class S3Store(AbstractStore):
                 logger.info(str_line)
                 if 'Access Denied' in str_line:
                     process.kill()
-                    logger.error('Sky Storage failed to upload files to '
-                                 'the S3 bucket. The bucket does not have '
-                                 'write permissions. It is possible that '
-                                 'the bucket is public.')
+                    logger.error(
+                        'Sky Storage failed to upload files to '
+                        'the S3 bucket. The bucket does not have '
+                        'write permissions. It is possible that '
+                        'the bucket is public.'
+                    )
                     e = PermissionError('Can\'t write to bucket!')
                     logger.error(e)
                     raise e
@@ -417,13 +424,15 @@ class S3Store(AbstractStore):
                 logger.error(
                     'Failed to connect to an existing bucket. \n'
                     'Check if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly.')
+                    '2) the bucket permissions are not setup correctly.'
+                )
                 logger.error(e)
                 raise e
         if self.source.startswith('s3://'):
             # Create new bucket is the bucket does not exist
             raise ValueError(
-                f'Attempted to connect to a non-existent bucket: {self.source}')
+                f'Attempted to connect to a non-existent bucket: {self.source}'
+            )
         return self._create_s3_bucket(self.name), True
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
@@ -436,9 +445,7 @@ class S3Store(AbstractStore):
         """
         self.bucket.download_file(remote_path, local_path)
 
-    def _create_s3_bucket(self,
-                          bucket_name: str,
-                          region='us-east-2') -> StorageHandle:
+    def _create_s3_bucket(self, bucket_name: str, region='us-east-2') -> StorageHandle:
         """Creates S3 bucket with specific name in specific region
 
         Args:
@@ -451,8 +458,9 @@ class S3Store(AbstractStore):
                 s3_client.create_bucket(Bucket=bucket_name)
             else:
                 location = {'LocationConstraint': region}
-                s3_client.create_bucket(Bucket=bucket_name,
-                                        CreateBucketConfiguration=location)
+                s3_client.create_bucket(
+                    Bucket=bucket_name, CreateBucketConfiguration=location
+                )
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
         except aws.client_exception() as e:
             logger.error(e)
@@ -486,15 +494,18 @@ class GcsStore(AbstractStore):
         if self.source.startswith('s3://'):
             assert name == data_utils.split_s3_path(source)[0], (
                 'S3 Bucket is specified as path, the name should be the '
-                'same as S3 bucket.')
+                'same as S3 bucket.'
+            )
             assert data_utils.verify_s3_bucket(name), (
                 f'Source specified as {source}, an S3 bucket. ',
-                'S3 Bucket should exist.')
+                'S3 Bucket should exist.',
+            )
 
         elif self.source.startswith('gs://'):
             assert name == data_utils.split_gcs_path(source)[0], (
                 'GCS Bucket is specified as path, the name should be the '
-                'same as GCS bucket.')
+                'same as GCS bucket.'
+            )
 
         self.client = gcp.storage_client()
         self.region = region
@@ -522,8 +533,9 @@ class GcsStore(AbstractStore):
         """Syncs a local directory to a GCS bucket."""
         sync_command = f'gsutil -m rsync -d -r {self.source} gs://{self.name}/'
         logger.info(f'Executing: {sync_command}')
-        with subprocess.Popen(sync_command.split(' '),
-                              stderr=subprocess.PIPE) as process:
+        with subprocess.Popen(
+            sync_command.split(' '), stderr=subprocess.PIPE
+        ) as process:
             while True:
                 line = process.stderr.readline()
                 if not line:
@@ -532,10 +544,12 @@ class GcsStore(AbstractStore):
                 logger.info(str_line)
                 if 'AccessDeniedException' in str_line:
                     process.kill()
-                    logger.error('Sky Storage failed to upload files to '
-                                 'GCS. The bucket does not have '
-                                 'write permissions. It is possible that '
-                                 'the bucket is public.')
+                    logger.error(
+                        'Sky Storage failed to upload files to '
+                        'GCS. The bucket does not have '
+                        'write permissions. It is possible that '
+                        'the bucket is public.'
+                    )
                     e = PermissionError('Can\'t write to bucket!')
                     logger.error(e)
                     raise e
@@ -560,8 +574,7 @@ class GcsStore(AbstractStore):
             pass
         except gcp.forbidden_exception():
             # Try public bucket to see if bucket exists
-            logger.info(
-                'External Bucket detected; Connecting to external bucket...')
+            logger.info('External Bucket detected; Connecting to external bucket...')
             try:
                 a_client = gcp.anonymous_storage_client()
                 bucket = a_client.bucket(self.name)
@@ -572,20 +585,23 @@ class GcsStore(AbstractStore):
                 logger.error(
                     'Failed to connect to external bucket. \n'
                     'Check if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly.')
+                    '2) the bucket permissions are not setup correctly.'
+                )
                 logger.error(e)
                 raise e
             except ValueError as e:
                 logger.error(
                     'Attempted to access a private external bucket. \n'
                     'Check if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly.')
+                    '2) the bucket permissions are not setup correctly.'
+                )
                 logger.error(e)
                 raise e
 
         if self.source.startswith('gs://'):
-            raise ValueError('Attempted to connect to a non-existent bucket: '
-                             f'{self.source}') from e
+            raise ValueError(
+                'Attempted to connect to a non-existent bucket: ' f'{self.source}'
+            ) from e
         return self._create_gcs_bucket(self.name), True
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
@@ -598,9 +614,9 @@ class GcsStore(AbstractStore):
         blob = self.bucket.blob(remote_path)
         blob.download_to_filename(local_path, timeout=None)
 
-    def _create_gcs_bucket(self,
-                           bucket_name: str,
-                           region='us-central1') -> StorageHandle:
+    def _create_gcs_bucket(
+        self, bucket_name: str, region='us-central1'
+    ) -> StorageHandle:
         """Creates GCS bucket with specific name in specific region
 
         Args:
@@ -612,7 +628,8 @@ class GcsStore(AbstractStore):
         new_bucket = self.client.create_bucket(bucket, location=region)
         logger.info(
             f'Created GCS bucket {new_bucket.name} in {new_bucket.location} '
-            f'with storage class {new_bucket.storage_class}')
+            f'with storage class {new_bucket.storage_class}'
+        )
         return new_bucket
 
     def _delete_gcs_bucket(self, bucket_name: str) -> None:
@@ -626,7 +643,9 @@ class GcsStore(AbstractStore):
             bucket.delete(force=True)
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
-            logger.error('External Bucket detected; User not allowed to delete '
-                         'external bucket!')
+            logger.error(
+                'External Bucket detected; User not allowed to delete '
+                'external bucket!'
+            )
             logger.error(e)
             raise e

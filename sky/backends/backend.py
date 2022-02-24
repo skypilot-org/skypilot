@@ -19,16 +19,17 @@ class Backend:
     # Backend-specific handle to the launched resources (e.g., a cluster).
     # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
     class ResourceHandle:
-
         def get_cluster_name(self) -> str:
             raise NotImplementedError
 
-    def provision(self,
-                  task: Task,
-                  to_provision: Resources,
-                  dryrun: bool,
-                  stream_logs: bool,
-                  cluster_name: Optional[str] = None) -> ResourceHandle:
+    def provision(
+        self,
+        task: Task,
+        to_provision: Resources,
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: Optional[str] = None,
+    ) -> ResourceHandle:
         raise NotImplementedError
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -48,8 +49,7 @@ class Backend:
     def add_storage_objects(self, task: Task) -> None:
         raise NotImplementedError
 
-    def execute(self, handle: ResourceHandle, task: Task,
-                detach_run: bool) -> None:
+    def execute(self, handle: ResourceHandle, task: Task, detach_run: bool) -> None:
         raise NotImplementedError
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:

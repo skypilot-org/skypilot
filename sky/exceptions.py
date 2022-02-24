@@ -11,4 +11,5 @@ class ResourcesUnavailableError(Exception):
 
 class ResourcesMismatchError(Exception):
     """Raised when resources are mismatched."""
+
     pass

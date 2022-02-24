@@ -7,6 +7,7 @@ class DagContext:
 
     Currently, we only use one sky.Dag.
     """
+
     _current_dag = None
     _previous_dags = []
 

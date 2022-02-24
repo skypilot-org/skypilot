@@ -11,8 +11,7 @@ import tempfile
 import sky
 
 
-def _cleanup_wheels_dir(wheel_dir: pathlib.Path,
-                        latest_wheel: Optional[pathlib.Path]):
+def _cleanup_wheels_dir(wheel_dir: pathlib.Path, latest_wheel: Optional[pathlib.Path]):
     # cleanup older wheels
     for f in wheel_dir.iterdir():
         if f != latest_wheel:
@@ -38,8 +37,7 @@ def build_sky_wheel() -> pathlib.Path:
     _cleanup_wheels_dir(wheel_dir, None)
 
     # prepare files
-    (wheel_dir / 'sky').symlink_to(package_root / 'sky',
-                                   target_is_directory=True)
+    (wheel_dir / 'sky').symlink_to(package_root / 'sky', target_is_directory=True)
     setup_files_dir = package_root / 'sky' / 'setup_files'
     for f in setup_files_dir.iterdir():
         if f.is_file():
@@ -51,16 +49,16 @@ def build_sky_wheel() -> pathlib.Path:
     try:
         # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
         # the output.
-        subprocess.run([
-            'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
-            str(wheel_dir)
-        ],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.PIPE,
-                       check=True)
+        subprocess.run(
+            ['pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir', str(wheel_dir)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
     except subprocess.CalledProcessError as e:
-        raise RuntimeError('Fail to build pip wheel for Sky. '
-                           f'Error message: {e.stderr.decode()}') from e
+        raise RuntimeError(
+            'Fail to build pip wheel for Sky. ' f'Error message: {e.stderr.decode()}'
+        ) from e
     try:
         latest_wheel = max(wheel_dir.glob('sky-*.whl'), key=os.path.getctime)
     except ValueError:

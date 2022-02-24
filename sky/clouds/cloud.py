@@ -5,6 +5,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 class Region(collections.namedtuple('Region', ['name'])):
     """A region."""
+
     name: str
     zones: List['Zone'] = []
 
@@ -17,6 +18,7 @@ class Region(collections.namedtuple('Region', ['name'])):
 
 class Zone(collections.namedtuple('Zone', ['name'])):
     """A zone, typically grouped under a region."""
+
     name: str
     region: Region
 

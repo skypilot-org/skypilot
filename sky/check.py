@@ -18,9 +18,11 @@ def check(quiet: bool = False) -> None:
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
         status_color = 'green' if ok else 'red'
-        echo('  ' +
-             click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-             ' ' * 10)
+        echo(
+            '  '
+            + click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True)
+            + ' ' * 10
+        )
         if ok:
             enabled_clouds.append(str(cloud))
         else:
@@ -32,12 +34,16 @@ def check(quiet: bool = False) -> None:
                 'No cloud is enabled. Sky will not be able to run any task. '
                 'Run `sky check` for more info.',
                 fg='red',
-                bold=True))
+                bold=True,
+            )
+        )
         raise SystemExit()
     else:
-        echo('\nSky will use only the enabled clouds to run tasks. '
-             'To change this, configure cloud credentials, '
-             'and run ' + click.style('sky check', bold=True) + '.')
+        echo(
+            '\nSky will use only the enabled clouds to run tasks. '
+            'To change this, configure cloud credentials, '
+            'and run ' + click.style('sky check', bold=True) + '.'
+        )
 
     global_user_state.set_enabled_clouds(enabled_clouds)
 

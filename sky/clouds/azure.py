@@ -10,11 +10,9 @@ from sky.clouds import service_catalog
 
 
 def _run_output(cmd):
-    proc = subprocess.run(cmd,
-                          shell=True,
-                          check=True,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.PIPE)
+    proc = subprocess.run(
+        cmd, shell=True, check=True, stderr=subprocess.PIPE, stdout=subprocess.PIPE
+    )
     return proc.stdout.decode('ascii')
 
 
@@ -25,10 +23,9 @@ class Azure(clouds.Cloud):
     _regions: List[clouds.Region] = []
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
-        return service_catalog.get_hourly_cost(instance_type,
-                                               region=None,
-                                               use_spot=use_spot,
-                                               clouds='azure')
+        return service_catalog.get_hourly_cost(
+            instance_type, region=None, use_spot=use_spot, clouds='azure'
+        )
 
     def accelerators_to_hourly_cost(self, accelerators):
         # Azure includes accelerators as part of the instance type.
@@ -76,13 +73,11 @@ class Azure(clouds.Cloud):
             'image_publisher': 'microsoft-dsvm',
             'image_offer': 'ubuntu-2004',
             'image_sku': '2004-gen2',
-            'image_version': '21.11.04'
+            'image_version': '21.11.04',
         }
 
         # ubuntu-2004 does not work on A100
-        if instance_type in [
-                'Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4'
-        ]:
+        if instance_type in ['Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4']:
             image_config['image_offer'] = 'ubuntu-hpc'
             image_config['image_sku'] = '2004'
             image_config['image_version'] = '20.04.2021120101'
@@ -123,7 +118,8 @@ class Azure(clouds.Cloud):
             regions = cls.regions()
         else:
             regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, clouds='azure')
+                instance_type, use_spot, clouds='azure'
+            )
         for region in regions:
             yield region, region.zones
 
@@ -135,27 +131,31 @@ class Azure(clouds.Cloud):
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='azure')
+            instance_type, clouds='azure'
+        )
 
     def make_deploy_resources_variables(self, resources):
         r = resources
-        assert not r.use_spot, \
-            'Our subscription offer ID does not support spot instances.'
+        assert (
+            not r.use_spot
+        ), 'Our subscription offer ID does not support spot instances.'
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
-        from sky.clouds.service_catalog import azure_catalog  # pylint: disable=import-outside-toplevel
-        gen_version = azure_catalog.get_gen_version_from_instance_type(
-            r.instance_type)
+        from sky.clouds.service_catalog import (
+            azure_catalog,
+        )  # pylint: disable=import-outside-toplevel
+
+        gen_version = azure_catalog.get_gen_version_from_instance_type(r.instance_type)
         image_config = self._get_image_config(gen_version, r.instance_type)
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
-            **image_config
+            **image_config,
         }
 
     def get_feasible_launchable_resources(self, resources):
@@ -183,7 +183,8 @@ class Azure(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         instance_type = service_catalog.get_instance_type_for_accelerator(
-            acc, acc_count, clouds='azure')
+            acc, acc_count, clouds='azure'
+        )
         if instance_type is None:
             return []
         return _make(instance_type)
@@ -201,8 +202,8 @@ class Azure(clouds.Cloud):
         if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
             return (
                 False,
-                f'{azure_token_cache_file} does not exist. Run `az login`.' +
-                help_str)
+                f'{azure_token_cache_file} does not exist. Run `az login`.' + help_str,
+            )
         try:
             output = _run_output('az account show --output=json')
         except subprocess.CalledProcessError:

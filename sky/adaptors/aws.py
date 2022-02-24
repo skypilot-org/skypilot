@@ -9,7 +9,6 @@ botocore = None
 
 
 def import_package(func):
-
     @wraps(func)
     def wrapper(*args, **kwargs):
         global boto3, botocore
@@ -17,11 +16,14 @@ def import_package(func):
             try:
                 import boto3 as _boto3
                 import botocore as _botocore
+
                 boto3 = _boto3
                 botocore = _botocore
             except ImportError:
-                raise ImportError('Fail to import dependencies for AWS.'
-                                  'See README for how to install it.') from None
+                raise ImportError(
+                    'Fail to import dependencies for AWS.'
+                    'See README for how to install it.'
+                ) from None
         return func(*args, **kwargs)
 
     return wrapper
@@ -59,4 +61,5 @@ def session():
 def client_exception():
     """Client exception."""
     from botocore import exceptions
+
     return exceptions.ClientError

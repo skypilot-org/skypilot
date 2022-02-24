@@ -14,9 +14,9 @@ _df = common.read_catalog('azure.csv')
 _DEFAULT_REGION = 'southcentralus'
 
 
-def get_hourly_cost(instance_type: str,
-                    region: Optional[str] = None,
-                    use_spot: bool = False) -> float:
+def get_hourly_cost(
+    instance_type: str, region: Optional[str] = None, use_spot: bool = False
+) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
     if region is None:
@@ -25,20 +25,18 @@ def get_hourly_cost(instance_type: str,
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
 
-def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
+def get_accelerators_from_instance_type(instance_type: str) -> Optional[Dict[str, int]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
-def get_instance_type_for_accelerator(acc_name: str,
-                                      acc_count: int) -> Optional[str]:
+def get_instance_type_for_accelerator(acc_name: str, acc_count: int) -> Optional[str]:
     """Returns the instance type with the required count of accelerators."""
-    return common.get_instance_type_for_accelerator_impl(
-        _df, acc_name, acc_count)
+    return common.get_instance_type_for_accelerator_impl(_df, acc_name, acc_count)
 
 
-def get_region_zones_for_instance_type(instance_type: str,
-                                       use_spot: bool) -> List[cloud.Region]:
+def get_region_zones_for_instance_type(
+    instance_type: str, use_spot: bool
+) -> List[cloud.Region]:
     df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
@@ -54,7 +52,7 @@ def get_gen_version_from_instance_type(instance_type: str) -> Optional[int]:
 
 
 def list_accelerators(
-        gpus_only: bool,
-        name_filter: Optional[str]) -> Dict[str, List[common.InstanceTypeInfo]]:
+    gpus_only: bool, name_filter: Optional[str]
+) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Azure offering GPUs."""
     return common.list_accelerators_impl('Azure', _df, gpus_only, name_filter)

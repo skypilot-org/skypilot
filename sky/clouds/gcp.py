@@ -67,38 +67,50 @@ class GCP(clouds.Cloud):
         if not cls._regions:
             # https://cloud.google.com/compute/docs/regions-zones
             cls._regions = [
-                clouds.Region('us-west1').set_zones([
-                    clouds.Zone('us-west1-a'),
-                    clouds.Zone('us-west1-b'),
-                    # clouds.Zone('us-west1-c'),  # No GPUs.
-                ]),
-                clouds.Region('us-central1').set_zones([
-                    clouds.Zone('us-central1-a'),
-                    clouds.Zone('us-central1-b'),
-                    clouds.Zone('us-central1-c'),
-                    clouds.Zone('us-central1-f'),
-                ]),
-                clouds.Region('us-east1').set_zones([
-                    clouds.Zone('us-east1-b'),
-                    clouds.Zone('us-east1-c'),
-                    clouds.Zone('us-east1-d'),
-                ]),
-                clouds.Region('us-east4').set_zones([
-                    clouds.Zone('us-east4-a'),
-                    clouds.Zone('us-east4-b'),
-                    clouds.Zone('us-east4-c'),
-                ]),
-                clouds.Region('us-west2').set_zones([
-                    # clouds.Zone('us-west2-a'),  # No GPUs.
-                    clouds.Zone('us-west2-b'),
-                    clouds.Zone('us-west2-c'),
-                ]),
+                clouds.Region('us-west1').set_zones(
+                    [
+                        clouds.Zone('us-west1-a'),
+                        clouds.Zone('us-west1-b'),
+                        # clouds.Zone('us-west1-c'),  # No GPUs.
+                    ]
+                ),
+                clouds.Region('us-central1').set_zones(
+                    [
+                        clouds.Zone('us-central1-a'),
+                        clouds.Zone('us-central1-b'),
+                        clouds.Zone('us-central1-c'),
+                        clouds.Zone('us-central1-f'),
+                    ]
+                ),
+                clouds.Region('us-east1').set_zones(
+                    [
+                        clouds.Zone('us-east1-b'),
+                        clouds.Zone('us-east1-c'),
+                        clouds.Zone('us-east1-d'),
+                    ]
+                ),
+                clouds.Region('us-east4').set_zones(
+                    [
+                        clouds.Zone('us-east4-a'),
+                        clouds.Zone('us-east4-b'),
+                        clouds.Zone('us-east4-c'),
+                    ]
+                ),
+                clouds.Region('us-west2').set_zones(
+                    [
+                        # clouds.Zone('us-west2-a'),  # No GPUs.
+                        clouds.Zone('us-west2-b'),
+                        clouds.Zone('us-west2-c'),
+                    ]
+                ),
                 # Ignoring us-west3 as it doesn't have GPUs.
-                clouds.Region('us-west4').set_zones([
-                    clouds.Zone('us-west4-a'),
-                    clouds.Zone('us-west4-b'),
-                    # clouds.Zone('us-west4-c'),  # No GPUs.
-                ]),
+                clouds.Region('us-west4').set_zones(
+                    [
+                        clouds.Zone('us-west4-a'),
+                        clouds.Zone('us-west4-b'),
+                        # clouds.Zone('us-west4-c'),  # No GPUs.
+                    ]
+                ),
             ]
         return cls._regions
 
@@ -120,7 +132,8 @@ class GCP(clouds.Cloud):
             acc = list(accelerators.keys())[0]
             acc_count = list(accelerators.values())[0]
             regions = service_catalog.get_region_zones_for_accelerators(
-                acc, acc_count, use_spot, clouds='gcp')
+                acc, acc_count, use_spot, clouds='gcp'
+            )
 
         for region in regions:
             for zone in region.zones:
@@ -136,9 +149,7 @@ class GCP(clouds.Cloud):
     def accelerators_to_hourly_cost(self, accelerators):
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
-        return service_catalog.get_accelerator_hourly_cost(acc,
-                                                           acc_count,
-                                                           clouds='gcp')
+        return service_catalog.get_accelerator_hourly_cost(acc, acc_count, clouds='gcp')
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -181,9 +192,9 @@ class GCP(clouds.Cloud):
         if accelerators is not None:
             assert len(accelerators) == 1, r
             acc, acc_count = list(accelerators.items())[0]
-            resources_vars['custom_resources'] = json.dumps(accelerators,
-                                                            separators=(',',
-                                                                        ':'))
+            resources_vars['custom_resources'] = json.dumps(
+                accelerators, separators=(',', ':')
+            )
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
@@ -203,11 +214,13 @@ class GCP(clouds.Cloud):
             return [resources]
         if resources.accelerators is not None:
             available_accelerators = service_catalog.list_accelerators(
-                gpus_only=False, clouds='gcp')
+                gpus_only=False, clouds='gcp'
+            )
             for acc, acc_count in resources.accelerators.items():
                 if acc not in available_accelerators or not any(
-                        acc_count == info.accelerator_count
-                        for info in available_accelerators[acc]):
+                    acc_count == info.accelerator_count
+                    for info in available_accelerators[acc]
+                ):
                     return []
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
@@ -231,8 +244,8 @@ class GCP(clouds.Cloud):
             # VMs for `gsutil` to access private storage buckets.
             # `auth.default()` does not guarantee these files exist.
             for file in [
-                    '~/.config/gcloud/access_tokens.db',
-                    '~/.config/gcloud/credentials.db'
+                '~/.config/gcloud/access_tokens.db',
+                '~/.config/gcloud/credentials.db',
             ]:
                 assert os.path.isfile(os.path.expanduser(file))
             # Calling `auth.default()` ensures the GCP client library works,
