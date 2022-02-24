@@ -27,17 +27,11 @@ workdir: .
 # Typical use: pip install -r requirements.txt
 setup: |
   echo "running setup"
-  # If using a `my_setup.sh` script that requires conda,
-  # invoke it as below to ensure `conda activate` works:
-  # bash -i my_setup.sh
 
 # Typical use: make use of resources, such as running training.
 run: |
   echo "hello sky!"
   conda env list
-  # If using a `my_run.sh` script that requires conda,
-  # invoke it as below to ensure `conda activate` works:
-  # bash -i my_run.sh
 ```
 
 ## Getting Started
