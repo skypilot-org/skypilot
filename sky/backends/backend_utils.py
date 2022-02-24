@@ -353,12 +353,17 @@ def write_cluster_config(to_provision: Resources,
                 azure_subscription_id = azure.get_subscription_id()
                 if not azure_subscription_id:
                     raise ValueError  # The error message will be replaced.
-            except Exception:
+            except ModuleNotFoundError as e:
+                raise ModuleNotFoundError('Unable to import azure python '
+                                          'module. Is azure-cli python package '
+                                          'installed? Try pip install '
+                                          '.[azure] in the sky repo.') from e
+            except Exception as e:
                 raise RuntimeError(
-                    'Fail to get subscription id from azure cli. '
-                    'Make sure you have login in and fix it with this Azure '
+                    'Failed to get subscription id from azure cli. '
+                    'Make sure you have logged in and run this Azure '
                     'cli command: "az account set -s <subscription_id>".'
-                ) from None
+                ) from e
 
     assert cluster_name is not None
 
