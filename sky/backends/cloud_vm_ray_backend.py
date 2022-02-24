@@ -1120,7 +1120,7 @@ class CloudVmRayBackend(backends.Backend):
             if os.path.islink(full_workdir):
                 logger.warning(
                     f'{fore.RED}Workdir {workdir} is a symlink. '
-                    f'Symlink contents are not uploaded.{style.RESET_ALL}')
+                    f'Symlink contents are uploaded.{style.RESET_ALL}')
             self._rsync_up(handle,
                            ip=ip,
                            source=f'{workdir}/',
