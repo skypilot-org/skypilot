@@ -169,14 +169,21 @@ class Storage(object):
         self.persistent = persistent
 
         scheme = urllib.parse.urlsplit(self.source).scheme
+        is_bucket_url = False
         if scheme == '':
             self.source = os.path.abspath(os.path.expanduser(source))
             # Check if local path exists
             if not os.path.exists(self.source):
                 raise ValueError(
                     f'Local source path does not exist: {self.source}')
+            # Raise warning if user's path is a symlink
+            elif os.path.islink(self.source):
+                logger.warning(f'Source path {self.source} is a symlink. '
+                               'Referenced contents are uploaded, matching '
+                               'the default behavior for S3 and GCS syncing.')
+
         elif scheme in ['s3', 'gs']:
-            pass
+            is_bucket_url = True
         else:
             raise ValueError(
                 f'Supported paths: local, s3://, gs://. Got: {self.source}')
@@ -197,11 +204,11 @@ class Storage(object):
                     f'\nFetching source {self.handle.source} from Sky database.'
                 )
                 self.source = self.handle.source
-            elif self.source != self.handle.source:
+            elif not is_bucket_url and self.source != self.handle.source:
                 raise ValueError(
-                    'Storage {self.name} was found in database, but the '
-                    'declared source {self.source} does not match the '
-                    'source in the database {self.handle.source}. Either '
+                    f'Storage {self.name} was found in database, but the '
+                    f'declared source {self.source} does not match the '
+                    f'source in the database {self.handle.source}. Either '
                     ' specify the same source in your Storage '
                     'declaration or use a new storage name.')
 
