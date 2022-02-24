@@ -1256,7 +1256,7 @@ class CloudVmRayBackend(backends.Backend):
                 try:
                     backend_utils.run_command_on_ip_via_ssh(
                         ip,
-                        # -i will make sure `conda activate` works
+                        # Need this `-i` option to make sure `source ~/.bashrc` work.
                         f'/bin/bash -i /tmp/{setup_file}',
                         ssh_user=ssh_user,
                         ssh_private_key=ssh_private_key,
