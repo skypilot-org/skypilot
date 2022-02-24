@@ -116,12 +116,11 @@ class GcsCloudStorage(CloudStorage):
         commands.append(f'{self._GSUTIL} ls -d {url}')
         command = ' && '.join(commands)
         max_retries = 5
-        import pdb
-        pdb.set_trace()
         for _ in range(max_retries):
             p = backend_utils.run(command, stdout=subprocess.PIPE)
             out = p.stdout.decode().strip()
-            # Using Gcloud first time will mess up command output
+            # Initial User Bug: Using Gcloud first time will append
+            # Gcloud introdcutory message to process output
             if 'Welcome to the Google Cloud SDK!' not in out:
                 break
         # If <url> is a bucket root, then we only need `gsutil` to succeed
