@@ -10,7 +10,7 @@ num_nodes: 2
 workdir: .
 
 setup: |
-    bash -i examples/resnet_distributed_torch_scripts/setup.sh
+    bash examples/resnet_distributed_torch_scripts/setup.sh
 
 run: |
-    bash -i examples/resnet_distributed_torch_scripts/run.sh
+    bash examples/resnet_distributed_torch_scripts/run.sh

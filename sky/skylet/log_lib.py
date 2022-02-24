@@ -157,7 +157,9 @@ def make_task_bash_script(codegen: str) -> str:
         textwrap.dedent(f"""\
                 #!/bin/bash
                 source ~/.bashrc
+                set -a
                 . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
+                set +a
                 cd {SKY_REMOTE_WORKDIR}"""),
         codegen,
     ]
