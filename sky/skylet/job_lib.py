@@ -15,8 +15,7 @@ import pendulum
 
 from sky.skylet import util_lib
 
-SKY_LOGS_DIRECTORY = os.path.expanduser('~/sky_logs')
-SKY_REMOTE_LOGS_ROOT = '~'
+SKY_LOGS_DIRECTORY = '/tmp/sky_logs'
 
 
 class JobStatus(enum.Enum):

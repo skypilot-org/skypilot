@@ -43,7 +43,6 @@ SKY_DIRSIZE_WARN_THRESHOLD = 100
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
-SKY_REMOTE_LOGS_ROOT = job_lib.SKY_REMOTE_LOGS_ROOT
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
 SKYLET_REMOTE_PATH = backend_utils.SKY_REMOTE_PATH
 
@@ -679,8 +678,6 @@ class RetryingVmProvisioner(object):
                 continue
             zone_str = ','.join(
                 z.name for z in zones) if zones is not None else 'all zones'
-            logger.info(f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
-                        f'{region.name}{style.RESET_ALL} ({zone_str})')
             config_dict = backend_utils.write_cluster_config(
                 to_provision,
                 num_nodes,
@@ -709,13 +706,21 @@ class RetryingVmProvisioner(object):
                 launched_resources=to_provision,
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
+            cluster_exists = global_user_state.get_cluster_name_from_handle(
+                handle) is not None
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
 
+            logging_info = {
+                'restart': cluster_exists,
+                'cloud': to_provision.cloud,
+                'region_name': region.name,
+                'zone_str': zone_str,
+            }
             gang_failed, rc, stdout, stderr = self._gang_schedule_ray_up(
                 to_provision.cloud, num_nodes, cluster_config_file,
-                log_abs_path, stream_logs)
+                log_abs_path, stream_logs, logging_info)
 
             if gang_failed or rc != 0:
                 if gang_failed:
@@ -761,7 +766,8 @@ class RetryingVmProvisioner(object):
 
     def _gang_schedule_ray_up(self, to_provision_cloud: clouds.Cloud,
                               num_nodes: int, cluster_config_file: str,
-                              log_abs_path: str, stream_logs: bool):
+                              log_abs_path: str, stream_logs: bool,
+                              logging_info: dict):
         """Provisions a cluster via 'ray up' with gang scheduling.
 
         Benefits:
@@ -812,7 +818,13 @@ class RetryingVmProvisioner(object):
             public_key_path = config['auth']['ssh_public_key']
             file_mounts[public_key_path] = public_key_path
 
-        with console.status('[bold cyan]Starting cluster...'):
+        startup_verb = 'Starting' if logging_info['restart'] else 'Provisioning'
+        cloud_name = logging_info['cloud']
+        region_name = logging_info['region_name']
+        zone_str = logging_info['zone_str']
+        with console.status(f'[bold cyan]{startup_verb} on '
+                            f'{cloud_name} [green]{region_name}[/] '
+                            f'[white]({zone_str})'):
             # ray up.
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
@@ -1345,7 +1357,7 @@ class CloudVmRayBackend(backends.Backend):
         log_dir = log_dir.strip()
 
         local_log_dir = log_dir
-        remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, log_dir)
+        remote_log_dir = log_dir
 
         style = colorama.Style
         fore = colorama.Fore
@@ -1408,7 +1420,7 @@ class CloudVmRayBackend(backends.Backend):
                            with_outputs=False)
 
         job_log_path = os.path.join(self.log_dir, 'job_submit.log')
-        remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, self.log_dir)
+        remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         assert executable == 'python3', executable
@@ -1525,8 +1537,7 @@ class CloudVmRayBackend(backends.Backend):
     def _execute_task_one_node(self, handle: ResourceHandle, task: Task,
                                job_id: int, detach_run: bool) -> None:
         # Launch the command as a Ray task.
-        log_dir = os.path.join(f'{SKY_REMOTE_LOGS_ROOT}', f'{self.log_dir}',
-                               'tasks')
+        log_dir = os.path.join(f'{self.log_dir}', 'tasks')
         log_path = os.path.join(log_dir, 'run.log')
 
         accelerator_dict = _get_task_demands_dict(task)
@@ -1560,8 +1571,7 @@ class CloudVmRayBackend(backends.Backend):
         #   ray.init(...)
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
-        log_dir_base = os.path.join(f'{SKY_REMOTE_LOGS_ROOT}',
-                                    f'{self.log_dir}')
+        log_dir_base = self.log_dir
         log_dir = os.path.join(log_dir_base, 'tasks')
         accelerator_dict = _get_task_demands_dict(task)
 
