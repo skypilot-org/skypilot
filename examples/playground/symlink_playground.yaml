@@ -1,0 +1,28 @@
+# Intended Behavior: 
+#  - Workdir/Standard File Mount: Only upload symlink
+#  - Sky Storage: Upload symlink folder contents
+name: symlink-playground
+
+resources:
+  cloud: aws
+  instance_type: m5.2xlarge
+
+# Symlink: ln -s [data_path] ~/Downloads/temp1
+workdir: ~/Downloads/temp1
+
+file_mounts:
+  # Should only upload temp1 (not folder contents)
+  /datasets: ~/Downloads/temp1
+
+  # Should upload folder contents of temp1
+  /datasets-storage:
+    name: mluo-data
+    source: ~/Downloads/temp1
+    force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
+    persistent: True  # Defaults to True, can be set to false.
+
+  /datasets-s3: s3://mluo-data
+
+run: |
+  pwd
+  ls -la /
