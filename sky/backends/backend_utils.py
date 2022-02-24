@@ -603,7 +603,7 @@ def run_command_on_ip_via_ssh(
     stream_logs: bool = True,
     ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
     ssh_control_name: Optional[str] = None,
-) -> Tuple[subprocess.Popen, str, str]:
+) -> Union[Tuple[int, str, str], int]:
     """Uses 'ssh' to run 'cmd' on a node with ip.
 
     Args:
@@ -636,8 +636,8 @@ def run_command_on_ip_via_ssh(
     if ssh_mode == SshMode.LOGIN:
         assert isinstance(cmd, list), 'cmd must be a list for login mode.'
         command = base_ssh_command + cmd
-        proc = run(command, shell=False)
-        return proc, '', ''
+        proc = run(command, shell=False, check=False)
+        return proc.returncode, '', ''
     if isinstance(cmd, list):
         cmd = ' '.join(cmd)
     # We need this to correctly run the cmd, and get the output.
