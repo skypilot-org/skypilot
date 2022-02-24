@@ -1114,9 +1114,11 @@ class CloudVmRayBackend(backends.Backend):
                 logger.warning(
                     f'{fore.RED}Workdir {workdir} is a symlink. '
                     f'Symlink contents are not uploaded.{style.RESET_ALL}')
+            else:
+                workdir = f'{workdir}/'
             self._rsync_up(handle,
                            ip=ip,
-                           source=f'{workdir}',
+                           source=workdir,
                            target=SKY_REMOTE_WORKDIR,
                            with_outputs=True)
 
@@ -1159,6 +1161,8 @@ class CloudVmRayBackend(backends.Backend):
                     logger.warning(
                         f'{fore.RED}Source path {src} is a symlink. '
                         f'Symlink contents are not uploaded.{style.RESET_ALL}')
+                elif not os.path.isfile(full_src):
+                    src = f'{src}/'
 
                 if command is not None:
                     backend_utils.run_command_on_ip_via_ssh(
