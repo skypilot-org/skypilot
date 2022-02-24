@@ -796,7 +796,12 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
             'Please re-launch it with `sky launch` to view the job queue.')
         return
 
-    job_table = backend.run_on_head(handle, code, require_outputs=True)[1]
+    returncode, job_table, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True)
+    if returncode != 0:
+        click.echo(stderr)
+        click.secho(f'Failed to run job queue on cluster {cluster}.', fg='red')
     click.echo(f'{job_table}')
 
 

@@ -346,6 +346,7 @@ class RayCodeGen:
             returncodes = ray.get(futures)
             if sum(returncodes) != 0:    
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
+                # This waits for all streaming logs to finish.
                 time.sleep(1)
                 print('SKY INFO: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
@@ -1033,8 +1034,9 @@ class CloudVmRayBackend(backends.Backend):
             returncode = backend_utils.run_command_on_ip_via_ssh(
                 ip, cmd, ssh_user=ssh_user, ssh_private_key=ssh_private_key)
             if returncode != 0:
-                raise RuntimeError(f'{colorama.Fore.RED}Failed to set TPU_NAME '
-                                   f'on node.{colorama.Style.RESET_ALL}')
+                logger.error(f'{colorama.Fore.RED}Failed to set TPU_NAME '
+                             f'on node.{colorama.Style.RESET_ALL}')
+                sys.exit(returncode)
 
     def provision(self,
                   task: Task,
@@ -1261,8 +1263,9 @@ class CloudVmRayBackend(backends.Backend):
                 log_path=os.path.join(self.log_dir, 'file_mounts.log'),
                 ssh_control_name=self._ssh_control_name(handle))
             if returncode != 0:
-                raise RuntimeError(f'{fore.RED}Failed create symlink for: {ip}'
-                                   f'{style.RESET_ALL}')
+                logger.error(f'{fore.RED}Failed create symlink for: {ip}'
+                             f'{style.RESET_ALL}')
+                sys.exit(returncode)
 
     def setup(self, handle: ResourceHandle, task: Task) -> None:
         style = colorama.Style
@@ -1315,10 +1318,16 @@ class CloudVmRayBackend(backends.Backend):
         codegen = backend_utils.JobLibCodeGen()
         codegen.get_log_path(job_id)
         code = codegen.build()
-        log_dir = self.run_on_head(handle,
-                                   code,
-                                   stream_logs=False,
-                                   require_outputs=True)[1].strip()
+        returncode, log_dir, stderr = self.run_on_head(handle,
+                                                       code,
+                                                       stream_logs=False,
+                                                       require_outputs=True)
+        if returncode != 0:
+            logger.error(stderr)
+            logger.error(f'{colorama.Fore.RED}Failed to sync logs.'
+                         f'{colorama.Style.RESET_ALL}')
+            sys.exit(1)
+        log_dir = log_dir.strip()
 
         local_log_dir = log_dir
         remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, log_dir)
@@ -1450,6 +1459,12 @@ class CloudVmRayBackend(backends.Backend):
                                                           require_outputs=True)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
+        if returncode != 0:
+            logger.error(stderr)
+            logger.error(
+                f'{colorama.Fore.RED} Failed to fetch job id.{colorama.Style.RESET_ALL}'
+            )
+            sys.exit(returncode)
         try:
             job_id = int(job_id_str)
         except ValueError as e:
