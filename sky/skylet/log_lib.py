@@ -153,11 +153,16 @@ def run_with_log(
 
 
 def make_task_bash_script(codegen: str) -> str:
+    # set -a is used for exporting all variables functions to the environment
+    # so that bash `user_script` can access `conda activate`. Detail: #436.
+    # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
     script = [
         textwrap.dedent(f"""\
                 #!/bin/bash
                 source ~/.bashrc
+                set -a
                 . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
+                set +a
                 cd {SKY_REMOTE_WORKDIR}"""),
         codegen,
     ]
