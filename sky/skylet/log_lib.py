@@ -90,10 +90,10 @@ def run_with_log(
     shell: bool = False,
     with_ray: bool = False,
     **kwargs,
-) -> Union[None, Tuple[subprocess.Popen, str, str]]:
+) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
 
-    Retruns the process, stdout and stderr of the command.
+    Retruns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
     # Redirect stderr to stdout when using ray, to preserve the order of
