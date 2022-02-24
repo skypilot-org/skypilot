@@ -45,7 +45,8 @@ describe all fields available.
     # Using Sky Storage, you can specify file mounts (all optional).
     file_mounts:
       # This uses rsync to directly copy files from your machine to the remote
-      # VM at /datasets. Rsync will copy symlinks as symlinks.
+      # VM at /datasets. Rsync will copy symlinks as symlinks. The symlink targets
+      # must also be synced using file_mounts to ensure they are functional.
       /datasets: ~/datasets
 
       # This uses Sky Storage to first create a S3 bucket named sky-dataset,
