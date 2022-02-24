@@ -342,12 +342,14 @@ class RayCodeGen:
 
         self._code += [
             textwrap.dedent(f"""\
-            try:
-                ray.get(futures)
-                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
-            except ray.exceptions.WorkerCrashedError as e:
+            return_codes = ray.get(futures)
+            if sum(return_codes) != 0:    
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
-                raise RuntimeError('Command failed, please check the logs.') from e
+                time.sleep(1)
+                print('Job {self.job_id} failed with return_codes', return_codes, 
+                       file=sys.stderr, flush=True)
+            else:
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
             """)
         ]
 
