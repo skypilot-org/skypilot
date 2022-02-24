@@ -935,6 +935,10 @@ def start(clusters: Tuple[str]):
     start the cluster.  (In the second case, any failed setup steps are not
     performed and only a request to start the machines is attempted.)
 
+    Note that auto-failover provisioning is not used when restarting stopped
+    clusters. They will be started on the same cloud and region that was used
+    for provisioned.
+
     If a cluster is already in an UP status, this command has no effect on it.
 
     Examples:
