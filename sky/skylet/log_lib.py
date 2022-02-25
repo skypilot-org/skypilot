@@ -217,9 +217,10 @@ def tail_logs(job_id: int, log_dir: Optional[str],
                 'ray', 'job', 'logs', '--address', '127.0.0.1:8265', '--follow',
                 f'{job_id}'
             ]
-            # Using subprocess.run to improve the performance comparing to
-            # run_with_log.
-            subprocess.run(tail_cmd, check=False)
+            run_with_log(tail_cmd,
+                         log_path='/dev/null',
+                         stream_logs=True,
+                         output_only=True)
         except KeyboardInterrupt:
             return
     else:
