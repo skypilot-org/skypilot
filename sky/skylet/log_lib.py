@@ -86,7 +86,6 @@ def run_with_log(
     stream_logs: bool = False,
     start_streaming_at: str = '',
     require_outputs: bool = False,
-    check: bool = False,
     shell: bool = False,
     with_ray: bool = False,
     redirect_stdout_stderr: bool = True,
@@ -152,8 +151,6 @@ def run_with_log(
                 replace_crlf=with_ray,
             )
         proc.wait()
-        if proc.returncode and check:
-            raise subprocess.CalledProcessError(proc.returncode, cmd)
         if require_outputs:
             return proc.returncode, stdout, stderr
         return proc.returncode
