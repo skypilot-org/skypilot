@@ -101,25 +101,25 @@ def get_instance_type_for_accelerator_impl(
         if len(fuzzy_result) > 0:
             candidate_list = ''
             for _, row in fuzzy_result.iterrows():
-                candidate_list += f' {row["AcceleratorName"]}:{int(row["AcceleratorCount"])}'
-            logger.info(
-                f'No resource satisfying {acc_name}:{int(acc_count)}'
-                f' on {cloud.upper()}. Did you mean:'
-                f'{colorama.Fore.CYAN}'
-                f'{candidate_list}'
-                f'{colorama.Style.RESET_ALL}')
+                candidate_list += (f' {row["AcceleratorName"]}:'
+                                   f'{int(row["AcceleratorCount"])}')
+            logger.info(f'No resource satisfying {acc_name}:{int(acc_count)}'
+                        f' on {cloud.upper()}. Did you mean:'
+                        f'{colorama.Fore.CYAN}'
+                        f'{candidate_list}'
+                        f'{colorama.Style.RESET_ALL}')
         return None
     # Current strategy: choose the cheapest instance
     result.sort_values('Price', ascending=True, inplace=True)
     best_candidate = result.iloc[0]['InstanceType']
     instance_types = list(result['InstanceType'].drop_duplicates())
     if len(result) > 1:
-        logger.info(
-            f'Multiple {cloud.upper()} instances satisfy {acc_name}:{int(acc_count)}. '
-            f'Choosing the cheapest {best_candidate} among: \n'
-            f'{instance_types}.\n'
-            f'Run \'sky show-gpus {acc_name} --cloud {cloud}\' to '
-            'list more details.')
+        logger.info(f'Multiple {cloud.upper()} instances satisfy'
+                    f'{acc_name}:{int(acc_count)}. '
+                    f'Choosing the cheapest {best_candidate} among: \n'
+                    f'{instance_types}.\n'
+                    f'Run \'sky show-gpus {acc_name} --cloud {cloud}\' to '
+                    'list more details.')
     return best_candidate
 
 

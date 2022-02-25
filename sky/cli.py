@@ -1398,7 +1398,8 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                                                    name_filter=gpu_name,
                                                    clouds=cloud)
         if len(result) == 0:
-            yield f'Resources \'{gpu_name}\' not found. Try \'sky show-gpus [--cloud CLOUD]\' '
+            yield f'Resources \'{gpu_name}\' not found. '
+            yield 'Try \'sky show-gpus [--cloud CLOUD]\' '
             yield 'to show available accelerators.'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
