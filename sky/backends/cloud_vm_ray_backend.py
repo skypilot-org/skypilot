@@ -1102,7 +1102,10 @@ class CloudVmRayBackend(backends.Backend):
         _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
         return handle
 
-    def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
+    def sync_workdir(self,
+                     handle: ResourceHandle,
+                     workdir: Path,
+                     num_threads: int = 32) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
@@ -1110,29 +1113,35 @@ class CloudVmRayBackend(backends.Backend):
         style = colorama.Style
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
-        # TODO(zhwu): make this in parallel
-        for i, ip in enumerate(ip_list):
-            node_name = f'worker{i}' if i > 0 else 'head'
+        ip_enum = list(enumerate(ip_list))
+
+        def _sync_workdir_node(idx, ip):
+            node_name = f'worker{idx}' if idx > 0 else 'head'
             logger.info(
                 f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
                 f'{node_name}{style.RESET_ALL}.')
+            source = workdir
             if os.path.islink(full_workdir):
                 logger.warning(
                     f'{fore.RED}Workdir {workdir} is a symlink. '
                     f'Symlink contents are not uploaded.{style.RESET_ALL}')
             else:
-                workdir = f'{workdir}/'
+                source = f'{workdir}/'
             self._rsync_up(handle,
                            ip=ip,
-                           source=workdir,
+                           source=source,
                            target=SKY_REMOTE_WORKDIR,
                            with_outputs=True)
+
+        pp = pool.ThreadPool(processes=num_threads)
+        pp.starmap(_sync_workdir_node, ip_enum)
 
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        num_threads: int = 32,
     ) -> None:
         """Mounts all user files to the remote nodes."""
         # File mounts handling for remote paths possibly without write access:
@@ -1156,19 +1165,20 @@ class CloudVmRayBackend(backends.Backend):
                               dst: str,
                               command: Optional[str] = None,
                               run_rsync: Optional[bool] = False):
-            # TODO(zhwu): make this in parallel
-            for i, ip in enumerate(ip_list):
-                node_name = f'worker{i}' if i > 0 else 'head'
+
+            def _sync_node(idx, ip):
+                node_name = f'worker{idx}' if idx > 0 else 'head'
                 logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
                             f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
 
                 full_src = os.path.abspath(os.path.expanduser(src))
+                thread_src = src
                 if os.path.islink(full_src):
                     logger.warning(
                         f'{fore.RED}Source path {src} is a symlink. '
                         f'Symlink contents are not uploaded.{style.RESET_ALL}')
                 elif not os.path.isfile(full_src):
-                    src = f'{src}/'
+                    thread_src = f'{src}/'
 
                 if command is not None:
                     returncode = backend_utils.run_command_on_ip_via_ssh(
@@ -1187,9 +1197,13 @@ class CloudVmRayBackend(backends.Backend):
                     # zip / transfer/ unzip
                     self._rsync_up(handle,
                                    ip=ip,
-                                   source=src,
+                                   source=thread_src,
                                    target=dst,
                                    with_outputs=True)
+
+            ip_enum = list(enumerate(ip_list))
+            pp = pool.ThreadPool(processes=num_threads)
+            pp.starmap(_sync_node, ip_enum)
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -1251,7 +1265,8 @@ class CloudVmRayBackend(backends.Backend):
         symlink_command = ' && '.join(symlink_commands)
         if not symlink_command:
             return
-        for ip in ip_list:
+
+        def _symlink_node(ip):
             returncode = backend_utils.run_command_on_ip_via_ssh(
                 ip,
                 symlink_command,
@@ -1261,6 +1276,9 @@ class CloudVmRayBackend(backends.Backend):
                 ssh_control_name=self._ssh_control_name(handle))
             backend_utils.handle_returncode(returncode, symlink_command,
                                             'Failed to create symlinks.')
+
+        pp = pool.ThreadPool(processes=num_threads)
+        pp.map(_symlink_node, ip_list)
 
     def setup(self,
               handle: ResourceHandle,
