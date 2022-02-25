@@ -7,9 +7,10 @@ import os
 import selectors
 import subprocess
 import sys
+import time
 import textwrap
 import tempfile
-from typing import List, Optional, Tuple, Union
+from typing import Iterator, List, Optional, Tuple, Union
 
 from sky.skylet import job_lib
 
@@ -203,6 +204,44 @@ def run_bash_command_with_log(bash_command: str,
         )
 
 
+def _follow_job_logs(file,
+                     job_id: int,
+                     sleep_sec: float = 0.2,
+                     start_streaming_at: str = '') -> Iterator[str]:
+    """Yield each line from a file as they are written.
+
+    `sleep_sec` is the time to sleep after empty reads. """
+    line = ''
+    status = job_lib.query_job_status([job_id])[0]
+    start_streaming = False
+    while True:
+        tmp = file.readline()
+        if tmp is not None and tmp != '':
+            line += tmp
+            if '\n' in line or '\r' in line:
+                if start_streaming_at in line:
+                    start_streaming = True
+                if start_streaming:
+                    # TODO(zhwu): Consider using '\33[2K' to clear the
+                    # line when line endswith '\r' (to avoid previous line
+                    # to long problem). `colorama.ansi.clear_line`
+                    yield line
+                line = ''
+        else:
+            # Reach the end of the file, check the status or sleep and
+            # retry.
+
+            # Auto-exit the log tailing, if the job has finished. Check
+            # the job status before query again to avoid unfinished logs.
+            if status not in [
+                    job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
+            ]:
+                return
+
+            if sleep_sec:
+                time.sleep(sleep_sec)
+            status = job_lib.query_job_status([job_id])[0]
+
 def tail_logs(job_id: int, log_dir: Optional[str],
               status: Optional[job_lib.JobStatus]) -> None:
     if log_dir is None:
@@ -213,14 +252,14 @@ def tail_logs(job_id: int, log_dir: Optional[str],
     log_path = os.path.expanduser(log_path)
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
-            tail_cmd = [
-                'ray', 'job', 'logs', '--address', '127.0.0.1:8265', '--follow',
-                f'{job_id}'
-            ]
-            run_with_log(tail_cmd,
-                         log_path='/dev/null',
-                         stream_logs=True,
-                         output_only=True)
+            with open(log_path, 'r', newline='') as log_file:
+                # Using `_follow` instead of `tail -f` to streaming the whole
+                # log and creating a new process for tail.
+                for line in _follow_job_logs(
+                        log_file,
+                        job_id=job_id,
+                        start_streaming_at='SKY INFO: Reserving task slots on'):
+                    print(line, end='', flush=True)
         except KeyboardInterrupt:
             return
     else:
