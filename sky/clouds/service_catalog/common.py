@@ -114,7 +114,7 @@ def get_instance_type_for_accelerator_impl(
     best_candidate = result.iloc[0]['InstanceType']
     instance_types = list(result['InstanceType'].drop_duplicates())
     if len(result) > 1:
-        logger.info(f'Multiple {cloud.upper()} instances satisfy'
+        logger.info(f'Multiple {cloud.upper()} instances satisfy '
                     f'{acc_name}:{int(acc_count)}. '
                     f'Choosing the cheapest {best_candidate} among: \n'
                     f'{instance_types}.\n'
