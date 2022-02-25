@@ -1141,11 +1141,15 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(
                 f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
                 f'{node_name}{style.RESET_ALL}.')
-            self._rsync_up(handle,
-                           ip=ip,
-                           source=workdir,
-                           target=SKY_REMOTE_WORKDIR,
-                           with_outputs=True)
+            with console.status('[bold cyan] Syncing [bright]workdir '
+                                f'({workdir}) -> {node_name})'):
+                self._rsync_up(handle,
+                               ip=ip,
+                               source=workdir,
+                               target=SKY_REMOTE_WORKDIR,
+                               log_path=os.path.join(self.log_dir,
+                                                     'workdir_sync.log'),
+                               stream_logs=False)
 
     def sync_file_mounts(
         self,
@@ -1183,26 +1187,32 @@ class CloudVmRayBackend(backends.Backend):
                 node_name = f'worker{i}' if i > 0 else 'head'
                 logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
                             f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
-                if command is not None:
-                    returncode = backend_utils.run_command_on_ip_via_ssh(
-                        ip,
-                        command,
-                        ssh_user=ssh_user,
-                        ssh_private_key=ssh_private_key,
-                        log_path=os.path.join(self.log_dir, 'file_mounts.log'),
-                        ssh_control_name=self._ssh_control_name(handle))
-                    backend_utils.handle_returncode(
-                        returncode, command, f'Failed to sync {src} to {dst}.')
+                with console.status(f'[bold cyan] Syncing (on {node_name}): '
+                                    f'[bright]{src} -> {dst}'):
+                    if command is not None:
+                        returncode = backend_utils.run_command_on_ip_via_ssh(
+                            ip,
+                            command,
+                            ssh_user=ssh_user,
+                            ssh_private_key=ssh_private_key,
+                            log_path=os.path.join(self.log_dir,
+                                                  'file_mounts.log'),
+                            stream_logs=False,
+                            ssh_control_name=self._ssh_control_name(handle))
+                        backend_utils.handle_returncode(
+                            returncode, command,
+                            f'Failed to sync {src} to {dst}.')
 
-                if run_rsync:
-                    # TODO(zhwu): Logging to 'file_mounts.log'
-                    # TODO(zhwu): Optimize for large amount of files.
-                    # zip / transfer/ unzip
-                    self._rsync_up(handle,
-                                   ip=ip,
-                                   source=src,
-                                   target=dst,
-                                   with_outputs=True)
+                    if run_rsync:
+                        # TODO(zhwu): Optimize for large amount of files.
+                        # zip / transfer/ unzip
+                        self._rsync_up(handle,
+                                       ip=ip,
+                                       source=src,
+                                       target=dst,
+                                       log_path=os.path.join(
+                                           self.log_dir, 'file_mounts.log'),
+                                       stream_logs=True)
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -1316,7 +1326,7 @@ class CloudVmRayBackend(backends.Backend):
                                ip=ip,
                                source=setup_sh_path,
                                target=f'/tmp/{setup_file}',
-                               with_outputs=False)
+                               stream_logs=False)
                 # Need this `-i` option to make sure `source ~/.bashrc` work
                 cmd = f'/bin/bash -i /tmp/{setup_file}'
                 returncode = backend_utils.run_command_on_ip_via_ssh(
@@ -1405,7 +1415,7 @@ class CloudVmRayBackend(backends.Backend):
             self._rsync_up(handle,
                            source=fp.name,
                            target=script_path,
-                           with_outputs=False)
+                           stream_logs=False)
 
         job_log_path = os.path.join(self.log_dir, 'job_submit.log')
         remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, self.log_dir)
@@ -1783,7 +1793,8 @@ class CloudVmRayBackend(backends.Backend):
         handle: ResourceHandle,
         source: str,
         target: str,
-        with_outputs: bool = True,
+        stream_logs: bool = True,
+        log_path: str = '/dev/null',
         ip: Optional[str] = None,
     ) -> None:
         """Runs rsync from 'source' to the cluster's node 'target'."""
@@ -1815,16 +1826,13 @@ class CloudVmRayBackend(backends.Backend):
         ])
         command = ' '.join(rsync_command)
 
-        if with_outputs:
-            # TODO(zhwu): Test this if the command will be still running in the
-            # background, after the current program is killed.
-            proc = backend_utils.run(command, check=False)
-        else:
-            proc = backend_utils.run_no_outputs(command, check=False)
-        if proc.returncode != 0:
-            logger.error(f'{colorama.Fore.RED}Failed to rsync up {source} '
-                         f'-> {target}.{colorama.Style.RESET_ALL}')
-            sys.exit(proc.returncode)
+        returncode = log_lib.run_with_log(command,
+                                          log_path=log_path,
+                                          stream_logs=stream_logs,
+                                          shell=True)
+        backend_utils.handle_returncode(
+            returncode, command, f'Failed to rsync up {source} -> {target}, '
+            f'see {log_path} for details.')
 
     def _ssh_control_name(self, handle: ResourceHandle) -> str:
         return f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'
