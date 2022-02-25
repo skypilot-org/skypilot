@@ -650,6 +650,7 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
                         handle,
                         entrypoint,
                         stream_logs=True,
+                        # Allocate a pseudo-terminal to disable output buffering.
                         ssh_mode=backend_utils.SshMode.INTERACTIVE,
                         under_remote_workdir=True,
                         redirect_stdout_stderr=False)
