@@ -73,15 +73,6 @@ file_mounts: {
 
 initialization_commands: []
 
-# Patterns for files to exclude when running rsync up or rsync down
-rsync_exclude: []
-# rsync_exclude:
-#   - "**/.git"
-#   - "**/.git/**"
-
-rsync_filter:
-  - .gitignore
-
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.

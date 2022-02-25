@@ -16,6 +16,9 @@ time sky launch -c min "$DIR"/minimal.yaml
 sky down min &
 time sky launch -c env "$DIR"/env_check.yaml
 sky down env &
+
+mkdir -p ~/tmp-workdir
+touch ~/tmp-workdir/foo
 time sky launch -c fm "$DIR"/using_file_mounts.yaml
 sky down fm &
 
