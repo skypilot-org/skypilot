@@ -37,7 +37,7 @@ check_python_command_exist() {
             exit 1
     esac
     if ! [ -x "$(command -v "$1")" ]; then
-        echo "$1 not installed. Install the python package with: pip install $1==$VERSION"
+        echo "$1 not installed. Install the python package with: pip install -r requirements-dev.txt"
         exit 1
     fi
 }
@@ -89,7 +89,7 @@ MYPY_FILES=(
 )
 
 BLACK_EXCLUDES=(
-    '--extend-exclude' 'build'
+    '--extend-exclude' 'build/**'
     '--extend-exclude' 'sky/templates/*'
 )
 
@@ -150,7 +150,6 @@ format_files() {
 
 format_all_scripts() {
     command -v flake8 &> /dev/null;
-    HAS_FLAKE8=$?
 
     echo "$(date)" "Black...."
     if [ -z "${FORMAT_SH_PRINT_DIFF-}" ]; then
@@ -159,11 +158,10 @@ format_all_scripts() {
     fi
     echo "$(date)" "MYPY...."
     mypy_on_each "${MYPY_FILES[@]}"
-    if [ $HAS_FLAKE8 ]; then
-      echo "$(date)" "Flake8...."
-      git ls-files -- '*.py' "${GIT_LS_EXCLUDES[@]}" | xargs -P 5 \
-        flake8 --config=.flake8
-    fi
+
+    echo "$(date)" "Flake8...."
+    git ls-files -- '*.py' "${GIT_LS_EXCLUDES[@]}" | xargs -P 5 \
+      flake8 --config=.flake8
 }
 
 # Format all files, and print the diff to stdout for travis.

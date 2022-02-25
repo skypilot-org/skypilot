@@ -2,8 +2,8 @@
 flake8==3.9.1
 black==21.12b0
 mypy==0.782
-flake8-bugbear
-flake8_quotes
+flake8-bugbear==22.1.11
+flake8_quotes==3.3.1
 
 # testing
-pytest
+pytest>=6.2.5
