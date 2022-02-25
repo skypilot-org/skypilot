@@ -242,6 +242,7 @@ def _follow_job_logs(file,
                 time.sleep(sleep_sec)
             status = job_lib.query_job_status([job_id])[0]
 
+
 def tail_logs(job_id: int, log_dir: Optional[str],
               status: Optional[job_lib.JobStatus]) -> None:
     if log_dir is None:
