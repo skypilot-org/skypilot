@@ -116,7 +116,7 @@ mypy_on_each() {
 
 # Format specified files
 format_files() {
-    local shell_files=() python_files=() bazel_files=()
+    local shell_files=() python_files=()
 
     local name
     for name in "$@"; do
@@ -133,9 +133,7 @@ format_files() {
           ;;
       esac
 
-      if [ "${base}" = "WORKSPACE" ] || [ "${base}" = "BUILD" ] || [ "${suffix}" = ".BUILD" ] || [ "${suffix}" = ".bazel" ] || [ "${suffix}" = ".bzl" ]; then
-        bazel_files+=("${name}")
-      elif [ -z "${suffix}" ] && [ "${shebang}" != "${shebang#python}" ] || [ "${suffix}" != "${suffix#.py}" ]; then
+      if [ -z "${suffix}" ] && [ "${shebang}" != "${shebang#python}" ] || [ "${suffix}" != "${suffix#.py}" ]; then
         python_files+=("${name}")
       elif [ -z "${suffix}" ] && [ "${shebang}" != "${shebang%sh}" ] || [ "${suffix}" != "${suffix#.sh}" ]; then
         shell_files+=("${name}")
@@ -201,25 +199,28 @@ format_changed() {
 # arg to use this option.
 if [ "${1-}" == '--files' ]; then
     format_files "${@:2}"
+    echo 'Reformatted specified files. Please review and stage the changes.'
 # If `--all` or `--scripts` are passed, then any further arguments are ignored.
 # Format the entire python directory and other scripts.
 elif [ "${1-}" == '--all-scripts' ]; then
     format_all_scripts "${@}"
     if [ -n "${FORMAT_SH_PRINT_DIFF-}" ]; then git --no-pager diff; fi
+    echo 'Reformatted all scripts. Please review and stage the changes.'
 # Format the all Python, C++, Java and other script files.
 elif [ "${1-}" == '--all' ]; then
     format_all "${@}"
     if [ -n "${FORMAT_SH_PRINT_DIFF-}" ]; then git --no-pager diff; fi
+    echo 'Reformatted all files. Please review and stage the changes.'
 else
     # Only fetch master since that's the branch we're diffing against.
     git fetch origin master || true
 
     # Format only the files that changed in last commit.
     format_changed
+    echo 'Reformatted changed files. Please review and stage the changes.'
 fi
 
 if ! git diff --quiet &>/dev/null; then
-    echo 'Reformatted changed files. Please review and stage the changes.'
     echo 'Files updated:'
     echo
 

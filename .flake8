@@ -1,3 +1,4 @@
+# Formatter config adapted from ray.
 [flake8]
 exclude =
 max-line-length = 88
