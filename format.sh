@@ -68,11 +68,13 @@ tool_version_check "black" "$BLACK_VERSION" "$BLACK_VERSION_REQUIRED"
 tool_version_check "mypy" "$MYPY_VERSION" "$MYPY_VERSION_REQUIRED"
 
 if [[ $(flake8 --version) != *"flake8_quotes"* ]]; then
-    echo "WARNING: Sky uses flake8 with flake8_quotes. Might error without it. Install with: pip install flake8-quotes"
+    echo "flake8_quotes not installed. Install with: pip install -r requirements-dev.txt"
+    exit 1
 fi
 
 if [[ $(flake8 --version) != *"flake8-bugbear"* ]]; then
-    echo "WARNING: Sky uses flake8 with flake8-bugbear. Might error without it. Install with: pip install flake8-bugbear"
+    echo "flake8-bugbear not installed. Install with: pip install -r requirements-dev.txt"
+    exit 1
 fi
 
 # TODO(dmitri): When more of the codebase is typed properly, the mypy flags
