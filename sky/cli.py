@@ -651,7 +651,8 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
                         entrypoint,
                         stream_logs=True,
                         ssh_mode=backend_utils.SshMode.INTERACTIVE,
-                        under_remote_workdir=True)
+                        under_remote_workdir=True,
+                        output_only=True)
                     return
 
         # Override.
