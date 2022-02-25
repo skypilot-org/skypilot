@@ -60,14 +60,6 @@ file_mounts: {
   "{{sky_remote_path}}": "{{sky_local_path}}",
 }
 
-# Patterns for files to exclude when running rsync up or rsync down
-# rsync_exclude:
-#   - "**/.git"
-#   - "**/.git/**"
-
-rsync_filter:
-  - .gitignore
-
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.
