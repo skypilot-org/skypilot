@@ -676,9 +676,9 @@ def handle_returncode(returncode: int,
         stderr: The stderr of the command.
     """
     if returncode != 0:
-        logger.error(f'Failed with code: {command}')
         if stderr is not None:
             logger.error(stderr)
+        logger.error(f'Command failed with code {returncode}: {command}')
         logger.error(
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
         sys.exit(returncode)
