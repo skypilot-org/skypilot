@@ -98,12 +98,11 @@ def get_instance_type_for_accelerator_impl(
         fuzzy_result = fuzzy_result[['AcceleratorName',
                                      'AcceleratorCount']].drop_duplicates()
         if len(fuzzy_result) > 0:
-            logger.info(f'No resource satisfying {acc_name}:{int(acc_count)}'
-                        f' on {cloud.upper()}. Did you mean:')
             row = fuzzy_result.iloc[0]
             logger.info(
+                f'No resource satisfying {acc_name}:{int(acc_count)}'
+                f' on {cloud.upper()}. Did you mean: '
                 f'{colorama.Fore.CYAN}'
-                '--gpus '
                 f'{row["AcceleratorName"]}:{int(row["AcceleratorCount"])}'
                 f'{colorama.Style.RESET_ALL}')
         return None
