@@ -1032,7 +1032,11 @@ class CloudVmRayBackend(backends.Backend):
             cmd = (f'[[ -z $TPU_NAME ]] && echo "export TPU_NAME={tpu_name}" '
                    '>> ~/.bashrc || echo "TPU_NAME already set"')
             returncode = backend_utils.run_command_on_ip_via_ssh(
-                ip, cmd, ssh_user=ssh_user, ssh_private_key=ssh_private_key)
+                ip,
+                cmd,
+                ssh_user=ssh_user,
+                ssh_private_key=ssh_private_key,
+                log_path=os.path.join(self.log_dir, 'tpu_setup.log'))
             backend_utils.handle_returncode(returncode, cmd,
                                             'Failed to set TPU_NAME on node.')
 
@@ -1431,7 +1435,13 @@ class CloudVmRayBackend(backends.Backend):
         code = codegen.build()
         click.secho('Start streaming logs...', fg='yellow')
         try:
-            self.run_on_head(handle, code, stream_logs=True)
+            self.run_on_head(
+                handle,
+                code,
+                stream_logs=True,
+                redirect_stdout_stderr=False,
+                # Allocate a pseudo-terminal to disable output buffering.
+                ssh_mode=backend_utils.SshMode.INTERACTIVE)
         except KeyboardInterrupt:
             # Do nothing. When receiving ctrl-c.
             pass
@@ -1834,6 +1844,7 @@ class CloudVmRayBackend(backends.Backend):
         *,
         port_forward: Optional[List[str]] = None,
         log_path: str = '/dev/null',
+        redirect_stdout_stderr: bool = True,
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
         ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
@@ -1854,6 +1865,7 @@ class CloudVmRayBackend(backends.Backend):
             ssh_private_key=ssh_private_key,
             port_forward=port_forward,
             log_path=log_path,
+            redirect_stdout_stderr=redirect_stdout_stderr,
             stream_logs=stream_logs,
             ssh_mode=ssh_mode,
             ssh_control_name=self._ssh_control_name(handle),
