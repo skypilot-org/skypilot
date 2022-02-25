@@ -1291,7 +1291,7 @@ class CloudVmRayBackend(backends.Backend):
                 symlink_command,
                 ssh_user=ssh_user,
                 ssh_private_key=ssh_private_key,
-                log_path=os.path.join(self.log_dir, 'file_mounts.log'),
+                log_path=log_path
                 ssh_control_name=self._ssh_control_name(handle))
             backend_utils.handle_returncode(returncode, symlink_command,
                                             'Failed to create symlinks.')
