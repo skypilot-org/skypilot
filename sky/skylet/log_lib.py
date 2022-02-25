@@ -247,6 +247,8 @@ def tail_logs(job_id: int, log_dir: Optional[str],
     log_path = os.path.expanduser(log_path)
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
+            # Not using `ray job logs` because it will put progress bar in
+            # multiple lines.
             with open(log_path, 'r', newline='') as log_file:
                 # Using `_follow` instead of `tail -f` to streaming the whole
                 # log and creating a new process for tail.
