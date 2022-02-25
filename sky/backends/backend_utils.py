@@ -654,7 +654,11 @@ def run_command_on_ip_via_ssh(
         shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                     f'PYTHONWARNINGS=ignore && ({cmd})'),
     ]
-    return log_lib.run_with_log(command, log_path, stream_logs, check=check, output_only=output_only)
+    return log_lib.run_with_log(command,
+                                log_path,
+                                stream_logs,
+                                check=check,
+                                output_only=output_only)
 
 
 def run(cmd, **kwargs):

@@ -78,6 +78,7 @@ def redirect_process_output(proc,
                     fout.flush()
     return stdout, stderr
 
+
 def run_with_log(
     cmd: Union[List[str], str],
     log_path: str,
