@@ -1747,7 +1747,7 @@ class CloudVmRayBackend(backends.Backend):
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
         rsync_command = ['rsync', '-Pavz']
-        rsync_command.append(f'--filter=\':- .gitignore\'')
+        rsync_command.append('--filter=\':- .gitignore\'')
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_private_key,
                                            self._ssh_control_name(handle)))
