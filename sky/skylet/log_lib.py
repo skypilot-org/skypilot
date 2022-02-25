@@ -85,16 +85,16 @@ def run_with_log(
     log_path: str,
     stream_logs: bool = False,
     start_streaming_at: str = '',
-    return_none: bool = False,
+    require_outputs: bool = False,
     check: bool = False,
     shell: bool = False,
     with_ray: bool = False,
     output_only: bool = False,
     **kwargs,
-) -> Union[None, Tuple[subprocess.Popen, str, str]]:
+) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
 
-    Retruns the process, stdout and stderr of the command.
+    Retruns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
     assert not (output_only and log_path != '/dev/null')
@@ -152,12 +152,10 @@ def run_with_log(
             )
         proc.wait()
         if proc.returncode and check:
-            if stderr:
-                print(stderr, file=sys.stderr)
             raise subprocess.CalledProcessError(proc.returncode, cmd)
-        if return_none:
-            return None
-        return proc, stdout, stderr
+        if require_outputs:
+            return proc.returncode, stdout, stderr
+        return proc.returncode
 
 
 def make_task_bash_script(codegen: str) -> str:
@@ -190,7 +188,7 @@ def run_bash_command_with_log(bash_command: str,
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
-        run_with_log(
+        return run_with_log(
             # Need this `-i` option to make sure `source ~/.bashrc` work.
             # Do not use shell=True because it will cause the environment
             # set in this task visible to other tasks. shell=False requires
@@ -198,8 +196,6 @@ def run_bash_command_with_log(bash_command: str,
             ['/bin/bash', '-i', script_path],
             log_path,
             stream_logs=stream_logs,
-            return_none=True,
-            check=True,
             with_ray=with_ray,
         )
 
