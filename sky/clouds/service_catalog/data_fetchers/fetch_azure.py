@@ -24,6 +24,8 @@ REGIONS = [
     # 'WestUS3',   # WestUS3 pricing table is broken as of 2021/11.
 ]
 REGION_SET = set(REGIONS)
+# Azure secretly deprecated the M60 family which is still returned by its API.
+# We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 

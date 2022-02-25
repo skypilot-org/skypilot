@@ -1375,12 +1375,13 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                 if gpu in result:
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             yield from gpu_table.get_string()
-            yield '\n\n'
 
             # Google TPUs
             for tpu in service_catalog.get_tpus():
                 if tpu in result:
                     tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+            if len(tpu_table.get_string()) > 0:
+                yield '\n\n'
             yield from tpu_table.get_string()
 
             # Other GPUs
@@ -1396,6 +1397,9 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name,
                                                    clouds=cloud)
+        if len(result) == 0:
+            yield f'Resources \'{gpu_name}\' not found. Try \'sky show-gpus [--cloud CLOUD]\' '
+            yield 'to show available accelerators.'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = util_lib.create_table([

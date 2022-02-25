@@ -84,10 +84,10 @@ def get_accelerators_from_instance_type_impl(
 
 
 def get_instance_type_for_accelerator_impl(
+    cloud: str,
     df: pd.DataFrame,
     acc_name: str,
     acc_count: int,
-    cloud: str,
 ) -> Optional[str]:
     """Returns the instance type with the required count of accelerators."""
     result = df[(df['AcceleratorName'] == acc_name) &
@@ -95,15 +95,18 @@ def get_instance_type_for_accelerator_impl(
     if len(result) == 0:
         fuzzy_result = df[(df['AcceleratorName'].str.contains(acc_name)) &
                           (df['AcceleratorCount'] >= acc_count)]
+        fuzzy_result.sort_values('Price', ascending=True, inplace=True)
         fuzzy_result = fuzzy_result[['AcceleratorName',
                                      'AcceleratorCount']].drop_duplicates()
         if len(fuzzy_result) > 0:
-            row = fuzzy_result.iloc[0]
+            candidate_list = ''
+            for _, row in fuzzy_result.iterrows():
+                candidate_list += f' {row["AcceleratorName"]}:{int(row["AcceleratorCount"])}'
             logger.info(
                 f'No resource satisfying {acc_name}:{int(acc_count)}'
-                f' on {cloud.upper()}. Did you mean: '
+                f' on {cloud.upper()}. Did you mean:'
                 f'{colorama.Fore.CYAN}'
-                f'{row["AcceleratorName"]}:{int(row["AcceleratorCount"])}'
+                f'{candidate_list}'
                 f'{colorama.Style.RESET_ALL}')
         return None
     # Current strategy: choose the cheapest instance
@@ -112,9 +115,9 @@ def get_instance_type_for_accelerator_impl(
     instance_types = list(result['InstanceType'].drop_duplicates())
     if len(result) > 1:
         logger.info(
-            f'Multiple {cloud.upper()} instances satisfy the requirements...'
-            f'Choosing the cheapest candidate {best_candidate} among\n'
-            f'{instance_types}\n'
+            f'Multiple {cloud.upper()} instances satisfy {acc_name}:{int(acc_count)}. '
+            f'Choosing the cheapest {best_candidate} among: \n'
+            f'{instance_types}.\n'
             f'Run \'sky show-gpus {acc_name} --cloud {cloud}\' to '
             'list more details.')
     return best_candidate
