@@ -801,7 +801,7 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
                                                         require_outputs=True)
     if returncode != 0:
         click.echo(stderr)
-        click.secho(f'Failed to run job queue on cluster {cluster}.', fg='red')
+        click.secho(f'Failed to get job queue on cluster {cluster}.', fg='red')
     click.echo(f'{job_table}')
 
 
@@ -870,9 +870,13 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
     # FIXME: Assumes a specific backend.
     backend = backends.CloudVmRayBackend()
-    returncode = backend.run_on_head(handle, code, stream_logs=False)
-    if returncode != 0:
-        click.secho(f'Failed to cancel jobs on cluster {cluster}.', fg='red')
+    returncode, _, stderr = backend.run_on_head(handle,
+                                                code,
+                                                stream_logs=False,
+                                                require_outputs=True)
+    backend_utils.handle_returncode(
+        returncode, code, f'Failed to cancel jobs on cluster {cluster}.',
+        stderr)
 
 
 @cli.command(cls=_DocumentedCodeCommand)

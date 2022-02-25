@@ -1033,10 +1033,8 @@ class CloudVmRayBackend(backends.Backend):
                    '>> ~/.bashrc || echo "TPU_NAME already set"')
             returncode = backend_utils.run_command_on_ip_via_ssh(
                 ip, cmd, ssh_user=ssh_user, ssh_private_key=ssh_private_key)
-            if returncode != 0:
-                logger.error(f'{colorama.Fore.RED}Failed to set TPU_NAME '
-                             f'on node.{colorama.Style.RESET_ALL}')
-                sys.exit(returncode)
+            backend_utils.handle_returncode(returncode, cmd,
+                                            'Failed to set TPU_NAME on node.')
 
     def provision(self,
                   task: Task,
@@ -1179,10 +1177,8 @@ class CloudVmRayBackend(backends.Backend):
                         ssh_private_key=ssh_private_key,
                         log_path=os.path.join(self.log_dir, 'file_mounts.log'),
                         ssh_control_name=self._ssh_control_name(handle))
-                    if returncode != 0:
-                        logger.error(f'{fore.RED}Failed to run command:\n'
-                                     f'{style.RESET_ALL} {command}')
-                        sys.exit(returncode)
+                    backend_utils.handle_returncode(
+                        returncode, command, f'Failed to sync {src} to {dst}.')
 
                 if run_rsync:
                     # TODO(zhwu): Logging to 'file_mounts.log'
@@ -1262,10 +1258,8 @@ class CloudVmRayBackend(backends.Backend):
                 ssh_private_key=ssh_private_key,
                 log_path=os.path.join(self.log_dir, 'file_mounts.log'),
                 ssh_control_name=self._ssh_control_name(handle))
-            if returncode != 0:
-                logger.error(f'{fore.RED}Failed create symlink for: {ip}'
-                             f'{style.RESET_ALL}')
-                sys.exit(returncode)
+            backend_utils.handle_returncode(returncode, symlink_command,
+                                            'Failed to create symlinks.')
 
     def setup(self, handle: ResourceHandle, task: Task) -> None:
         style = colorama.Style
@@ -1299,19 +1293,18 @@ class CloudVmRayBackend(backends.Backend):
                                target=f'/tmp/{setup_file}',
                                with_outputs=False)
                 # Need this `-i` option to make sure `source ~/.bashrc` work
+                cmd = f'/bin/bash -i /tmp/{setup_file}'
                 returncode = backend_utils.run_command_on_ip_via_ssh(
                     ip,
-                    f'/bin/bash -i /tmp/{setup_file}',
+                    cmd,
                     ssh_user=ssh_user,
                     ssh_private_key=ssh_private_key,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
                     ssh_control_name=self._ssh_control_name(handle))
-                if returncode != 0:
-                    logger.error(f'{fore.RED}Setup failed with return code'
-                                 f' {returncode}.{style.RESET_ALL}')
-                    # Suppress the error traceback. Fail as soon as
-                    # possible (head node).
-                    sys.exit(returncode)
+                backend_utils.handle_returncode(
+                    returncode, cmd,
+                    f'Failed to setup with return code {returncode}')
+
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
@@ -1322,11 +1315,8 @@ class CloudVmRayBackend(backends.Backend):
                                                        code,
                                                        stream_logs=False,
                                                        require_outputs=True)
-        if returncode != 0:
-            logger.error(stderr)
-            logger.error(f'{colorama.Fore.RED}Failed to sync logs.'
-                         f'{colorama.Style.RESET_ALL}')
-            sys.exit(1)
+        backend_utils.handle_returncode(returncode, code,
+                                        'Failed to sync logs.', stderr)
         log_dir = log_dir.strip()
 
         local_log_dir = log_dir
@@ -1408,10 +1398,8 @@ class CloudVmRayBackend(backends.Backend):
                                       f'{cd} && {job_submit_cmd}',
                                       log_path=job_log_path,
                                       stream_logs=False)
-        if returncode != 0:
-            logger.error(f'{fore.RED}Fail to submit job {job_id}.'
-                         f'{style.RESET_ALL}')
-            sys.exit(returncode)
+        backend_utils.handle_returncode(returncode, job_submit_cmd,
+                                        f'Failed to submit job {job_id}.')
 
         logger.info('Job submitted with Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
@@ -1459,11 +1447,8 @@ class CloudVmRayBackend(backends.Backend):
                                                           require_outputs=True)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
-        if returncode != 0:
-            logger.error(stderr)
-            logger.error(f'{colorama.Fore.RED}Failed to fetch job id.'
-                         f'{colorama.Style.RESET_ALL}')
-            sys.exit(returncode)
+        backend_utils.handle_returncode(returncode, code,
+                                        'Failed to fetch job id.', stderr)
         try:
             job_id = int(job_id_str)
         except ValueError as e:
