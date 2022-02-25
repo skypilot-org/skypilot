@@ -8,9 +8,8 @@ import selectors
 import subprocess
 import sys
 import textwrap
-import time
 import tempfile
-from typing import Iterator, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from sky.skylet import job_lib
 
@@ -79,7 +78,6 @@ def redirect_process_output(proc,
                     fout.flush()
     return stdout, stderr
 
-
 def run_with_log(
     cmd: Union[List[str], str],
     log_path: str,
@@ -89,6 +87,7 @@ def run_with_log(
     check: bool = False,
     shell: bool = False,
     with_ray: bool = False,
+    output_only: bool = False,
     **kwargs,
 ) -> Union[None, Tuple[subprocess.Popen, str, str]]:
     """Runs a command and logs its output to a file.
@@ -96,11 +95,13 @@ def run_with_log(
     Retruns the process, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
+    assert not (output_only and log_path != '/dev/null')
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
+    stdout = None if output_only else subprocess.PIPE
     stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
     with subprocess.Popen(cmd,
-                          stdout=subprocess.PIPE,
+                          stdout=stdout,
                           stderr=stderr,
                           start_new_session=True,
                           shell=shell,
@@ -125,23 +126,27 @@ def run_with_log(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        # We need this even if the log_path is '/dev/null' to ensure the
-        # progress bar is shown.
-        stdout, stderr = redirect_process_output(
-            proc,
-            log_path,
-            stream_logs,
-            start_streaming_at=start_streaming_at,
-            # Skip these lines caused by `-i` option of bash. Failed to find
-            # other way to turn off these two warning.
-            # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-            skip_lines=[
-                'bash: cannot set terminal process group',
-                'bash: no job control in this shell',
-            ],
-            # Replace CRLF when the output is logged to driver by ray.
-            replace_crlf=with_ray,
-        )
+        if output_only:
+            stdout = ''
+            stderr = ''
+        else:
+            # We need this even if the log_path is '/dev/null' to ensure the
+            # progress bar is shown.
+            stdout, stderr = redirect_process_output(
+                proc,
+                log_path,
+                stream_logs,
+                start_streaming_at=start_streaming_at,
+                # Skip these lines caused by `-i` option of bash. Failed to find
+                # other way to turn off these two warning.
+                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+                skip_lines=[
+                    'bash: cannot set terminal process group',
+                    'bash: no job control in this shell',
+                ],
+                # Replace CRLF when the output is logged to driver by ray.
+                replace_crlf=with_ray,
+            )
         proc.wait()
         if proc.returncode and check:
             if stderr:
@@ -196,47 +201,8 @@ def run_bash_command_with_log(bash_command: str,
         )
 
 
-def _follow_job_logs(file,
-                     job_id: int,
-                     sleep_sec: float = 0.5,
-                     start_streaming_at: str = '') -> Iterator[str]:
-    """Yield each line from a file as they are written.
-
-    `sleep_sec` is the time to sleep after empty reads. """
-    line = ''
-    status = job_lib.query_job_status([job_id])[0]
-    start_streaming = False
-    while True:
-        tmp = file.readline()
-        if tmp is not None and tmp != '':
-            line += tmp
-            if '\n' in line or '\r' in line:
-                if start_streaming_at in line:
-                    start_streaming = True
-                if start_streaming:
-                    # TODO(zhwu): Consider using '\33[2K' to clear the
-                    # line when line endswith '\r' (to avoid previous line
-                    # to long problem). `colorama.ansi.clear_line`
-                    yield line
-                line = ''
-        else:
-            # Reach the end of the file, check the status or sleep and
-            # retry.
-
-            # Auto-exit the log tailing, if the job has finished. Check
-            # the job status before query again to avoid unfinished logs.
-            if status not in [
-                    job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
-            ]:
-                return
-
-            if sleep_sec:
-                time.sleep(sleep_sec)
-            status = job_lib.query_job_status([job_id])[0]
-
-
 def tail_logs(job_id: int, log_dir: Optional[str],
-              status: Optional[job_lib.JobStatus]):
+              status: Optional[job_lib.JobStatus]) -> None:
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
@@ -245,7 +211,12 @@ def tail_logs(job_id: int, log_dir: Optional[str],
     log_path = os.path.expanduser(log_path)
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
-            tail_cmd = ['ray', 'job', 'logs', '--address', '127.0.0.1:8265', '--follow', f'{job_id}']
+            tail_cmd = [
+                'ray', 'job', 'logs', '--address', '127.0.0.1:8265', '--follow',
+                f'{job_id}'
+            ]
+            # Using subprocess.run to improve the performance comparing to
+            # run_with_log.
             subprocess.run(tail_cmd, check=False)
         except KeyboardInterrupt:
             return

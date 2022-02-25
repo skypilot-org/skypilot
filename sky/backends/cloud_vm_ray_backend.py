@@ -1031,6 +1031,7 @@ class CloudVmRayBackend(backends.Backend):
                 cmd,
                 ssh_user=ssh_user,
                 ssh_private_key=ssh_private_key,
+                log_path=os.path.join(self.log_dir, 'tpu_setup.log'),
                 check=True)
 
     def provision(self,
@@ -1423,6 +1424,7 @@ class CloudVmRayBackend(backends.Backend):
                              code,
                              stream_logs=True,
                              check=False,
+                             output_only=True,
                              ssh_mode=backend_utils.SshMode.INTERACTIVE)
         except KeyboardInterrupt:
             # Do nothing. When receiving ctrl-c.
@@ -1808,6 +1810,7 @@ class CloudVmRayBackend(backends.Backend):
         *,
         port_forward: Optional[List[str]] = None,
         log_path: str = '/dev/null',
+        output_only: bool = False,
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
         check: bool = False,
@@ -1828,6 +1831,7 @@ class CloudVmRayBackend(backends.Backend):
             ssh_private_key=ssh_private_key,
             port_forward=port_forward,
             log_path=log_path,
+            output_only=output_only,
             stream_logs=stream_logs,
             check=check,
             ssh_mode=ssh_mode,

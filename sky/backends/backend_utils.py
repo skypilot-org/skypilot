@@ -599,6 +599,8 @@ def run_command_on_ip_via_ssh(
     port_forward: Optional[List[int]] = None,
     # Advanced options.
     log_path: str = '/dev/null',
+    # Do not redirect stdout/stderr to optimize performance.
+    output_only: bool = False,
     stream_logs: bool = True,
     check: bool = False,
     ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
@@ -652,7 +654,7 @@ def run_command_on_ip_via_ssh(
         shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                     f'PYTHONWARNINGS=ignore && ({cmd})'),
     ]
-    return log_lib.run_with_log(command, log_path, stream_logs, check=check)
+    return log_lib.run_with_log(command, log_path, stream_logs, check=check, output_only=output_only)
 
 
 def run(cmd, **kwargs):
