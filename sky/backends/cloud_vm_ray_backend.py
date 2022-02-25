@@ -1435,12 +1435,13 @@ class CloudVmRayBackend(backends.Backend):
         code = codegen.build()
         click.secho('Start streaming logs...', fg='yellow')
         try:
-            self.run_on_head(handle,
-                             code,
-                             stream_logs=True,
-                             check=False,
-                             output_only=True,
-                             ssh_mode=backend_utils.SshMode.INTERACTIVE)
+            self.run_on_head(
+                handle,
+                code,
+                stream_logs=True,
+                redirect_stdout_stderr=False,
+                # Allocate a pseudo-terminal to disable output buffering.
+                ssh_mode=backend_utils.SshMode.INTERACTIVE)
         except KeyboardInterrupt:
             # Do nothing. When receiving ctrl-c.
             pass
@@ -1843,7 +1844,7 @@ class CloudVmRayBackend(backends.Backend):
         *,
         port_forward: Optional[List[str]] = None,
         log_path: str = '/dev/null',
-        output_only: bool = False,
+        redirect_stdout_stderr: bool = True,
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
         ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
@@ -1864,7 +1865,7 @@ class CloudVmRayBackend(backends.Backend):
             ssh_private_key=ssh_private_key,
             port_forward=port_forward,
             log_path=log_path,
-            output_only=output_only,
+            redirect_stdout_stderr=redirect_stdout_stderr,
             stream_logs=stream_logs,
             ssh_mode=ssh_mode,
             ssh_control_name=self._ssh_control_name(handle),

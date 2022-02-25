@@ -89,7 +89,7 @@ def run_with_log(
     check: bool = False,
     shell: bool = False,
     with_ray: bool = False,
-    output_only: bool = False,
+    redirect_stdout_stderr: bool = True,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -97,11 +97,14 @@ def run_with_log(
     Retruns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-    assert not (output_only and log_path != '/dev/null')
+    assert redirect_stdout_stderr or log_path == '/dev/null'
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
-    stdout = None if output_only else subprocess.PIPE
-    stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
+    stdout = stderr = None
+    if redirect_stdout_stderr:
+        stdout = subprocess.PIPE
+        stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
+
     with subprocess.Popen(cmd,
                           stdout=stdout,
                           stderr=stderr,
@@ -128,11 +131,9 @@ def run_with_log(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        if output_only:
-            # Do not redirect stdout/stderr to improve performance.
-            stdout = ''
-            stderr = ''
-        else:
+        stdout = ''
+        stderr = ''
+        if redirect_stdout_stderr:
             # We need this even if the log_path is '/dev/null' to ensure the
             # progress bar is shown.
             stdout, stderr = redirect_process_output(

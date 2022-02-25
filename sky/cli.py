@@ -652,7 +652,7 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
                         stream_logs=True,
                         ssh_mode=backend_utils.SshMode.INTERACTIVE,
                         under_remote_workdir=True,
-                        output_only=True)
+                        redirect_stdout_stderr=False)
                     return
 
         # Override.
