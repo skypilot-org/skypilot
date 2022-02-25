@@ -44,11 +44,11 @@ file_mounts:
   #
   # After syncing the target will be:
   #
-  # /tmp/data/
+  # /tmp/workdir/
   #   a/
   #     b
   #   c
-  /tmp/data: ~/tmp-workdir
+  /tmp/workdir: ~/tmp-workdir
 
   # Relative paths are under ~/ (after sync, ~/relative_dir/ exists).
   relative_dir: ~/tmp-workdir
@@ -80,8 +80,8 @@ run: |
   touch /data/logs/test.log
   touch /data/checkpoints/last.pt
 
-  echo hi >> /tmp/data/new_file
-  # tree /tmp/data
+  echo hi >> /tmp/workdir/new_file
+  # tree /tmp/workdir
 
   ls -lthr ~/.ssh
 
