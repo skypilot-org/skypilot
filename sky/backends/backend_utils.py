@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import colorama
 import datetime
 import enum
 import getpass
@@ -6,6 +7,7 @@ import os
 import pathlib
 import shlex
 import subprocess
+import sys
 import textwrap
 import time
 from typing import Dict, List, Optional, Tuple, Union
@@ -598,12 +600,12 @@ def run_command_on_ip_via_ssh(
     ssh_private_key: str,
     port_forward: Optional[List[int]] = None,
     # Advanced options.
+    require_outputs: bool = False,
     log_path: str = '/dev/null',
     stream_logs: bool = True,
-    check: bool = False,
     ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
     ssh_control_name: Optional[str] = None,
-) -> Tuple[subprocess.Popen, str, str]:
+) -> Union[int, Tuple[int, str, str]]:
     """Uses 'ssh' to run 'cmd' on a node with ip.
 
     Args:
@@ -616,6 +618,7 @@ def run_command_on_ip_via_ssh(
 
         Advanced options:
 
+        require_outputs: Whether to return the stdout/stderr of the command.
         log_path: Redirect stdout/stderr to the log_path.
         stream_logs: Stream logs to the stdout/stderr.
         check: Check the success of the command.
@@ -625,7 +628,9 @@ def run_command_on_ip_via_ssh(
             for optimizing the ssh speed.
 
     Returns:
-        A tuple of (process, stdout, stderr).
+        returncode
+        or
+        A tuple of (returncode, stdout, stderr).
     """
     base_ssh_command = _ssh_base_command(ip,
                                          ssh_private_key,
@@ -636,8 +641,8 @@ def run_command_on_ip_via_ssh(
     if ssh_mode == SshMode.LOGIN:
         assert isinstance(cmd, list), 'cmd must be a list for login mode.'
         command = base_ssh_command + cmd
-        proc = run(command, shell=False, check=check)
-        return proc, '', ''
+        proc = run(command, shell=False, check=False)
+        return proc.returncode, '', ''
     if isinstance(cmd, list):
         cmd = ' '.join(cmd)
     # We need this to correctly run the cmd, and get the output.
@@ -652,7 +657,31 @@ def run_command_on_ip_via_ssh(
         shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                     f'PYTHONWARNINGS=ignore && ({cmd})'),
     ]
-    return log_lib.run_with_log(command, log_path, stream_logs, check=check)
+    return log_lib.run_with_log(command,
+                                log_path,
+                                stream_logs,
+                                require_outputs=require_outputs)
+
+
+def handle_returncode(returncode: int,
+                      command: str,
+                      error_msg: str,
+                      stderr: Optional[str] = None) -> None:
+    """Handle the returncode of a command.
+
+    Args:
+        returncode: The returncode of the command.
+        command: The command that was run.
+        error_msg: The error message to print.
+        stderr: The stderr of the command.
+    """
+    if returncode != 0:
+        if stderr is not None:
+            logger.error(stderr)
+        logger.error(f'Command failed with code {returncode}: {command}')
+        logger.error(
+            f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
+        sys.exit(returncode)
 
 
 def run(cmd, **kwargs):
