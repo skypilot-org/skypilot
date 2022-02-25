@@ -331,10 +331,10 @@ def _create_and_ssh_into_node(
         commands += ['screen', '-D', '-R']
     elif session_manager == 'tmux':
         commands += ['tmux', 'attach', '||', 'tmux', 'new']
-    commands = backend.run_on_head(handle,
-                                   commands,
-                                   port_forward=port_forward,
-                                   ssh_mode=backend_utils.SshMode.LOGIN)
+    backend.run_on_head(handle,
+                        commands,
+                        port_forward=port_forward,
+                        ssh_mode=backend_utils.SshMode.LOGIN)
     cluster_name = global_user_state.get_cluster_name_from_handle(handle)
 
     click.echo('To attach to it again:  ', nl=False)
@@ -796,7 +796,12 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
             'Please re-launch it with `sky launch` to view the job queue.')
         return
 
-    job_table = backend.run_on_head(handle, code)[1]
+    returncode, job_table, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True)
+    if returncode != 0:
+        click.echo(stderr)
+        click.secho(f'Failed to get job queue on cluster {cluster}.', fg='red')
     click.echo(f'{job_table}')
 
 
@@ -865,7 +870,13 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
     # FIXME: Assumes a specific backend.
     backend = backends.CloudVmRayBackend()
-    backend.run_on_head(handle, code, stream_logs=False, check=True)
+    returncode, _, stderr = backend.run_on_head(handle,
+                                                code,
+                                                stream_logs=False,
+                                                require_outputs=True)
+    backend_utils.handle_returncode(
+        returncode, code, f'Failed to cancel jobs on cluster {cluster}.',
+        stderr)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
