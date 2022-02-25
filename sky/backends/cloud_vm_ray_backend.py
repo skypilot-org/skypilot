@@ -1141,7 +1141,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(
                 f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
                 f'{node_name}{style.RESET_ALL}.')
-            with console.status('[bold cyan] Syncing [bright]workdir '
+            with console.status('[bold cyan]Syncing [bright]workdir '
                                 f'({workdir}) -> {node_name})'):
                 self._rsync_up(handle,
                                ip=ip,
@@ -1174,6 +1174,8 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         ssh_user, ssh_private_key = self._get_ssh_credential(
             handle.cluster_yaml)
+        
+        log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         def sync_to_all_nodes(src: str,
                               dst: str,
@@ -1187,7 +1189,7 @@ class CloudVmRayBackend(backends.Backend):
                 node_name = f'worker{i}' if i > 0 else 'head'
                 logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
                             f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
-                with console.status(f'[bold cyan] Syncing (on {node_name}): '
+                with console.status(f'[bold cyan]Syncing (on {node_name}): '
                                     f'[bright]{src} -> {dst}'):
                     if command is not None:
                         returncode = backend_utils.run_command_on_ip_via_ssh(
@@ -1195,8 +1197,7 @@ class CloudVmRayBackend(backends.Backend):
                             command,
                             ssh_user=ssh_user,
                             ssh_private_key=ssh_private_key,
-                            log_path=os.path.join(self.log_dir,
-                                                  'file_mounts.log'),
+                            log_path=log_path,
                             stream_logs=False,
                             ssh_control_name=self._ssh_control_name(handle))
                         backend_utils.handle_returncode(
@@ -1210,8 +1211,7 @@ class CloudVmRayBackend(backends.Backend):
                                        ip=ip,
                                        source=src,
                                        target=dst,
-                                       log_path=os.path.join(
-                                           self.log_dir, 'file_mounts.log'),
+                                       log_path=log_path,
                                        stream_logs=True)
 
         for dst, src in mounts.items():
