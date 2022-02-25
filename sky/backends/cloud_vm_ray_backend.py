@@ -39,6 +39,7 @@ Task = task_lib.Task
 
 Path = str
 PostSetupFn = Callable[[str], Any]
+SKY_DIRSIZE_WARN_THRESHOLD = 100
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
@@ -103,7 +104,8 @@ def _remove_cluster_from_ssh_config(cluster_ip: str,
     backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
 
 
-def _path_size(path: str) -> int:
+def _path_size_megabytes(path: str) -> int:
+    # Returns the size of files occupied in path in megabytes
     return int(
         subprocess.check_output(['du', '-sh', '-m',
                                  path]).split()[0].decode('utf-8'))
@@ -1111,14 +1113,12 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
-        # If work directory exceeds 100 MB, raise warning
-        dir_size = _path_size(full_workdir)
-        if dir_size >= 100:
-            logger.warning(
-                f'{fore.YELLOW}The size of workdir {workdir} '
-                f'is {dir_size} MB, exceeding 100 MB. '
-                f'Try to keep workdir small, as large sizes will slow '
-                f'down rsync.{style.RESET_ALL}')
+        # Raise warning if directory is too large
+        dir_size = _path_size_megabytes(full_workdir)
+        if dir_size >= SKY_DIRSIZE_WARN_THRESHOLD:
+            logger.warning(f'{fore.YELLOW}The size of workdir {workdir} '
+                           f'is {dir_size} MB. Try to keep workdir small, as '
+                           f'large sizes will slowdown rsync.{style.RESET_ALL}')
         if os.path.islink(full_workdir):
             logger.warning(
                 f'{fore.YELLOW}Workdir {workdir} is a symlink. '
@@ -1219,13 +1219,12 @@ class CloudVmRayBackend(backends.Backend):
                 else:
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
 
-                src_size = _path_size(full_src)
-                if src_size >= 100:
+                src_size = _path_size_megabytes(full_src)
+                if src_size >= SKY_DIRSIZE_WARN_THRESHOLD:
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src} '
-                        f'is {src_size} MB, exceeding 100 MB. '
-                        f'Try to keep src small, as large sizes will slow '
-                        f'down rsync.{style.RESET_ALL}')
+                        f'is {src_size} MB. Try to keep src small, as '
+                        f'large sizes will slowdown rsync.{style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(
                         f'{fore.YELLOW}Source path {src} is a symlink. '
