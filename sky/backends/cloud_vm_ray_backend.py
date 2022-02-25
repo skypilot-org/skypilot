@@ -1378,7 +1378,7 @@ class CloudVmRayBackend(backends.Backend):
         job_submit_cmd = (
             f'mkdir -p {remote_log_dir} && ray job submit '
             f'--address=127.0.0.1:8265 --job-id {job_id} --no-wait '
-            f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
+            f'-- "{executable} -u {script_path} 2>&1 | tee {remote_log_path}"')
 
         self.run_on_head(handle,
                          f'{cd} && {job_submit_cmd}',
@@ -1419,7 +1419,11 @@ class CloudVmRayBackend(backends.Backend):
         code = codegen.build()
         click.secho('Start streaming logs...', fg='yellow')
         try:
-            self.run_on_head(handle, code, stream_logs=True, check=False)
+            self.run_on_head(handle,
+                             code,
+                             stream_logs=True,
+                             check=False,
+                             ssh_mode=backend_utils.SshMode.INTERACTIVE)
         except KeyboardInterrupt:
             # Do nothing. When receiving ctrl-c.
             pass

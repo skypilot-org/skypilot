@@ -237,7 +237,6 @@ def _follow_job_logs(file,
 
 def tail_logs(job_id: int, log_dir: Optional[str],
               status: Optional[job_lib.JobStatus]):
-    # TODO(zhwu): Maybe switch to `ray job logs` according to the performance.
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
@@ -246,14 +245,8 @@ def tail_logs(job_id: int, log_dir: Optional[str],
     log_path = os.path.expanduser(log_path)
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
-            with open(log_path, 'r', newline='') as log_file:
-                # Using `_follow` instead of `tail -f` to streaming the whole
-                # log and creating a new process for tail.
-                for line in _follow_job_logs(
-                        log_file,
-                        job_id=job_id,
-                        start_streaming_at='SKY INFO: Reserving task slots on'):
-                    print(line, end='', flush=True)
+            tail_cmd = ['ray', 'job', 'logs', '--address', '127.0.0.1:8265', '--follow', f'{job_id}']
+            subprocess.run(tail_cmd, check=False)
         except KeyboardInterrupt:
             return
     else:
