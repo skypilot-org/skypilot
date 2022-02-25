@@ -128,6 +128,7 @@ def run_with_log(
             stderr=subprocess.DEVNULL,
         )
         if output_only:
+            # Do not redirect stdout/stderr to improve performance.
             stdout = ''
             stderr = ''
         else:
