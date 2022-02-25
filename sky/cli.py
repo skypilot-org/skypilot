@@ -106,6 +106,15 @@ def _parse_accelerator_options(accelerator_options: str) -> Dict[str, float]:
     return accelerators
 
 
+def _get_cloud_handle(cloud: str) -> clouds.Cloud:
+    """Check if cloud is registered and return cloud object."""
+    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
+        raise click.UsageError(
+            f'Cloud \'{cloud}\' is not supported. '
+            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
+    return clouds.CLOUD_REGISTRY.get(cloud)
+
+
 def _interactive_node_cli_command(cli_func):
     """Click command decorator for interactive node commands."""
     assert cli_func.__name__ in _INTERACTIVE_NODE_TYPES, cli_func.__name__
@@ -498,11 +507,7 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         new_resources = copy.deepcopy(list(task.resources)[0])
 
         if cloud is not None:
-            if cloud not in clouds.CLOUD_REGISTRY:
-                raise click.UsageError(
-                    f'Cloud \'{cloud}\' is not supported. '
-                    f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
-            new_resources.cloud = clouds.CLOUD_REGISTRY[cloud]
+            new_resources.cloud = _get_cloud_handle(cloud)
         if gpus is not None:
             new_resources.accelerators = _parse_accelerator_options(gpus)
         if use_spot is not None:
@@ -1145,11 +1150,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     gpus is None and spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    cloud_provider = clouds.CLOUD_REGISTRY.get(cloud, default_resources.cloud)
-    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
-        raise click.UsageError(
-            f'Cloud \'{cloud}\' is not supported. '
-            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
+    cloud_provider = _get_cloud_handle(cloud)
     if gpus is not None:
         gpus = _parse_accelerator_options(gpus)
     elif instance_type is None:
@@ -1225,12 +1226,7 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
-    cloud_provider = clouds.CLOUD_REGISTRY.get(cloud, None)
-    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
-        raise click.UsageError(
-            f'Cloud \'{cloud}\' is not supported. ' + \
-            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}'
-        )
+    cloud_provider = _get_cloud_handle(cloud)
     if instance_type is None:
         instance_type = default_resources.instance_type
     if spot is None:
