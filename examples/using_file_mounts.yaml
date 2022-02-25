@@ -105,5 +105,5 @@ run: |
 
   # ls -lH /data/fake_imagenet | head -n10
 
-  # *.egg-info/ should not exists on remote due to the .gitingore
-  (ls *.egg-info/ && exit 1) || true
+  # sky.egg-info/ should not exists on remote due to the .gitingore
+  ! ls sky.egg-info/
