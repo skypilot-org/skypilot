@@ -16,6 +16,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
+from multiprocessing import pool
 from rich import console as rich_console
 
 import sky
@@ -1261,7 +1262,10 @@ class CloudVmRayBackend(backends.Backend):
             backend_utils.handle_returncode(returncode, symlink_command,
                                             'Failed to create symlinks.')
 
-    def setup(self, handle: ResourceHandle, task: Task) -> None:
+    def setup(self,
+              handle: ResourceHandle,
+              task: Task,
+              num_threads: int = 32) -> None:
         style = colorama.Style
         fore = colorama.Fore
 
@@ -1280,9 +1284,10 @@ class CloudVmRayBackend(backends.Backend):
                                          handle.launched_nodes)
             ssh_user, ssh_private_key = self._get_ssh_credential(
                 handle.cluster_yaml)
-            # TODO(zhwu): make this in parallel
-            for i, ip in enumerate(ip_list):
-                node_name = f' worker{i}' if i > 0 else ' head'
+            ip_enum = list(enumerate(ip_list))
+
+            def _setup_node(idx, ip):
+                node_name = f' worker{idx}' if idx > 0 else ' head'
                 if handle.launched_nodes == 1:
                     node_name = ''
                 logger.info(
@@ -1304,6 +1309,9 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.handle_returncode(
                     returncode, cmd,
                     f'Failed to setup with return code {returncode}')
+
+            pp = pool.ThreadPool(processes=num_threads)
+            pp.starmap(_setup_node, ip_enum)
 
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
 
