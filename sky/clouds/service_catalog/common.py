@@ -5,6 +5,10 @@ from typing import Dict, List, NamedTuple, Optional
 import pandas as pd
 
 from sky.clouds import cloud as cloud_lib
+from sky import sky_logging
+import colorama
+
+logger = sky_logging.init_logger(__name__)
 
 
 class InstanceTypeInfo(NamedTuple):
@@ -80,6 +84,7 @@ def get_accelerators_from_instance_type_impl(
 
 
 def get_instance_type_for_accelerator_impl(
+    cloud: str,
     df: pd.DataFrame,
     acc_name: str,
     acc_count: int,
@@ -88,32 +93,34 @@ def get_instance_type_for_accelerator_impl(
     result = df[(df['AcceleratorName'] == acc_name) &
                 (df['AcceleratorCount'] == acc_count)]
     if len(result) == 0:
+        fuzzy_result = df[(df['AcceleratorName'].str.contains(acc_name)) &
+                          (df['AcceleratorCount'] >= acc_count)]
+        fuzzy_result.sort_values('Price', ascending=True, inplace=True)
+        fuzzy_result = fuzzy_result[['AcceleratorName',
+                                     'AcceleratorCount']].drop_duplicates()
+        if len(fuzzy_result) > 0:
+            candidate_list = ''
+            for _, row in fuzzy_result.iterrows():
+                candidate_list += (f' {row["AcceleratorName"]}:'
+                                   f'{int(row["AcceleratorCount"])}')
+            logger.info(f'No resource satisfying {acc_name}:{int(acc_count)}'
+                        f' on {cloud.upper()}. Did you mean:'
+                        f'{colorama.Fore.CYAN}'
+                        f'{candidate_list}'
+                        f'{colorama.Style.RESET_ALL}')
         return None
-    instance_types = set(result['InstanceType'])
-    if len(instance_types) > 1:
-        # Assert that only one instance type exists for a given accelerator
-        # and count. Throw so we can manually investigate. The current
-        # whitelist consists of:
-        if len(instance_types) == 2:
-            # - M60, offered by AWS g3s.xl and g3.4xl
-            # - "Promo" instance types offered by Azure
-            its = sorted(instance_types)
-            assert its == ['g3.4xlarge', 'g3s.xlarge'
-                          ] or its[0] + '_Promo' == its[1], its
-        elif len(instance_types) == 4:
-            its = sorted(instance_types)
-            assert its == [
-                'Standard_NV12s_v3', 'Standard_NV6', 'Standard_NV6_Promo',
-                'Standard_NV6s_v2'
-            ], its
-        else:
-            # - T4, offered by AWS g4dn.{1,2,4,8,16}xl
-            # - T4, offered by Azure Standard_NC{4,8,16}as_T4_v3
-            for t in instance_types:
-                assert t.startswith('g4dn') or t.endswith(
-                    '_T4_v3'), instance_types
-        result.sort_values('Price', ascending=True, inplace=True)
-    return result.iloc[0]['InstanceType']
+    # Current strategy: choose the cheapest instance
+    result.sort_values('Price', ascending=True, inplace=True)
+    best_candidate = result.iloc[0]['InstanceType']
+    instance_types = list(result['InstanceType'].drop_duplicates())
+    if len(result) > 1:
+        logger.info(f'Multiple {cloud.upper()} instances satisfy '
+                    f'{acc_name}:{int(acc_count)}. '
+                    f'Choosing the cheapest {best_candidate} among: \n'
+                    f'{instance_types}.\n'
+                    f'Run \'sky show-gpus {acc_name} --cloud {cloud}\' to '
+                    'list more details.')
+    return best_candidate
 
 
 def list_accelerators_impl(
