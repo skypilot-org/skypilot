@@ -106,7 +106,7 @@ def _parse_accelerator_options(accelerator_options: str) -> Dict[str, float]:
     return accelerators
 
 
-def _get_cloud_handle(cloud: str) -> clouds.Cloud:
+def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
     """Check if cloud is registered and return cloud object."""
     if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
         raise click.UsageError(
@@ -507,7 +507,7 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         new_resources = copy.deepcopy(list(task.resources)[0])
 
         if cloud is not None:
-            new_resources.cloud = _get_cloud_handle(cloud)
+            new_resources.cloud = _get_cloud(cloud)
         if gpus is not None:
             new_resources.accelerators = _parse_accelerator_options(gpus)
         if use_spot is not None:
@@ -1150,7 +1150,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     gpus is None and spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    cloud_provider = _get_cloud_handle(cloud)
+    cloud_provider = _get_cloud(cloud)
     if gpus is not None:
         gpus = _parse_accelerator_options(gpus)
     elif instance_type is None:
@@ -1226,7 +1226,7 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
-    cloud_provider = _get_cloud_handle(cloud)
+    cloud_provider = _get_cloud(cloud)
     if instance_type is None:
         instance_type = default_resources.instance_type
     if spot is None:
@@ -1399,7 +1399,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                                                    clouds=cloud)
         if len(result) == 0:
             yield f'Resources \'{gpu_name}\' not found. '
-            yield 'Try \'sky show-gpus [--cloud CLOUD]\' '
+            yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):

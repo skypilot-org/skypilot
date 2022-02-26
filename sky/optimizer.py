@@ -209,7 +209,7 @@ class Optimizer:
                     raise exceptions.ResourcesUnavailableError(
                         f'No launchable resource found for task {node}. '
                         'To fix: relax its resource requirements.\n'
-                        'Hint: \'sky show-gpus [--cloud CLOUD] <GPU_NAME>\' '
+                        'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.')
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.info('Defaulting estimated time to 1 hr. '
