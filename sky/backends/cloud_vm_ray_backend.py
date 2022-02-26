@@ -40,6 +40,7 @@ Task = task_lib.Task
 
 Path = str
 PostSetupFn = Callable[[str], Any]
+SKY_DIRSIZE_WARN_THRESHOLD = 100
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
@@ -102,6 +103,13 @@ def _add_cluster_to_ssh_config(cluster_name: str, cluster_ip: str,
 def _remove_cluster_from_ssh_config(cluster_ip: str,
                                     auth_config: Dict[str, str]) -> None:
     backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
+
+
+def _path_size_megabytes(path: str) -> int:
+    # Returns the size of files occupied in path in megabytes
+    return int(
+        subprocess.check_output(['du', '-sh', '-m',
+                                 path]).split()[0].decode('utf-8'))
 
 
 class RayCodeGen:
@@ -1033,7 +1041,11 @@ class CloudVmRayBackend(backends.Backend):
             cmd = (f'[[ -z $TPU_NAME ]] && echo "export TPU_NAME={tpu_name}" '
                    '>> ~/.bashrc || echo "TPU_NAME already set"')
             returncode = backend_utils.run_command_on_ip_via_ssh(
-                ip, cmd, ssh_user=ssh_user, ssh_private_key=ssh_private_key)
+                ip,
+                cmd,
+                ssh_user=ssh_user,
+                ssh_private_key=ssh_private_key,
+                log_path=os.path.join(self.log_dir, 'tpu_setup.log'))
             backend_utils.handle_returncode(returncode, cmd,
                                             'Failed to set TPU_NAME on node.')
 
@@ -1115,21 +1127,29 @@ class CloudVmRayBackend(backends.Backend):
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
         ip_enum = list(enumerate(ip_list))
 
+        # Raise warning if directory is too large
+        dir_size = _path_size_megabytes(full_workdir)
+        if dir_size >= SKY_DIRSIZE_WARN_THRESHOLD:
+            logger.warning(f'{fore.YELLOW}The size of workdir {workdir} '
+                           f'is {dir_size} MB. Try to keep workdir small, as '
+                           f'large sizes will slowdown rsync.{style.RESET_ALL}')
+
         def _sync_workdir_node(idx, ip):
             node_name = f'worker{idx}' if idx > 0 else 'head'
             logger.info(
                 f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
                 f'{node_name}{style.RESET_ALL}.')
-            source = workdir
+            thread_workdir = workdir
             if os.path.islink(full_workdir):
                 logger.warning(
                     f'{fore.RED}Workdir {workdir} is a symlink. '
                     f'Symlink contents are not uploaded.{style.RESET_ALL}')
             else:
-                source = f'{workdir}/'
+                thread_workdir = f'{workdir}/'
+
             self._rsync_up(handle,
                            ip=ip,
-                           source=source,
+                           source=thread_workdir,
                            target=SKY_REMOTE_WORKDIR,
                            with_outputs=True)
 
@@ -1165,19 +1185,15 @@ class CloudVmRayBackend(backends.Backend):
                               dst: str,
                               command: Optional[str] = None,
                               run_rsync: Optional[bool] = False):
+            full_src = os.path.abspath(os.path.expanduser(src))
 
             def _sync_node(idx, ip):
                 node_name = f'worker{idx}' if idx > 0 else 'head'
                 logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
                             f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
-
-                full_src = os.path.abspath(os.path.expanduser(src))
                 thread_src = src
-                if os.path.islink(full_src):
-                    logger.warning(
-                        f'{fore.RED}Source path {src} is a symlink. '
-                        f'Symlink contents are not uploaded.{style.RESET_ALL}')
-                elif not os.path.isfile(full_src):
+                if not os.path.islink(full_src) and not os.path.isfile(
+                        full_src):
                     thread_src = f'{src}/'
 
                 if command is not None:
@@ -1230,6 +1246,17 @@ class CloudVmRayBackend(backends.Backend):
                         f'mkdir -p {os.path.dirname(wrapped_dst)}'
                 else:
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+
+                src_size = _path_size_megabytes(full_src)
+                if src_size >= SKY_DIRSIZE_WARN_THRESHOLD:
+                    logger.warning(
+                        f'{fore.YELLOW}The size of file mount src {src} '
+                        f'is {src_size} MB. Try to keep src small, as '
+                        f'large sizes will slowdown rsync.{style.RESET_ALL}')
+                if os.path.islink(full_src):
+                    logger.warning(
+                        f'{fore.YELLOW}Source path {src} is a symlink. '
+                        f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
                 # TODO(mluo): Fix method so that mkdir and rsync run together
                 sync_to_all_nodes(src=src,
@@ -1457,7 +1484,13 @@ class CloudVmRayBackend(backends.Backend):
         code = codegen.build()
         click.secho('Start streaming logs...', fg='yellow')
         try:
-            self.run_on_head(handle, code, stream_logs=True)
+            self.run_on_head(
+                handle,
+                code,
+                stream_logs=True,
+                redirect_stdout_stderr=False,
+                # Allocate a pseudo-terminal to disable output buffering.
+                ssh_mode=backend_utils.SshMode.INTERACTIVE)
         except KeyboardInterrupt:
             # Do nothing. When receiving ctrl-c.
             pass
@@ -1860,6 +1893,7 @@ class CloudVmRayBackend(backends.Backend):
         *,
         port_forward: Optional[List[str]] = None,
         log_path: str = '/dev/null',
+        redirect_stdout_stderr: bool = True,
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
         ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
@@ -1880,6 +1914,7 @@ class CloudVmRayBackend(backends.Backend):
             ssh_private_key=ssh_private_key,
             port_forward=port_forward,
             log_path=log_path,
+            redirect_stdout_stderr=redirect_stdout_stderr,
             stream_logs=stream_logs,
             ssh_mode=ssh_mode,
             ssh_control_name=self._ssh_control_name(handle),
