@@ -1133,6 +1133,12 @@ class CloudVmRayBackend(backends.Backend):
             logger.warning(f'{fore.YELLOW}The size of workdir {workdir} '
                            f'is {dir_size} MB. Try to keep workdir small, as '
                            f'large sizes will slowdown rsync.{style.RESET_ALL}')
+        workdir_symlink = False
+        if os.path.islink(full_workdir):
+            logger.warning(
+                f'{fore.RED}Workdir {workdir} is a symlink. '
+                f'Symlink contents are not uploaded.{style.RESET_ALL}')
+            workdir_symlink = True
 
         def _sync_workdir_node(idx, ip):
             node_name = f'worker{idx}' if idx > 0 else 'head'
@@ -1140,11 +1146,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
                 f'{node_name}{style.RESET_ALL}.')
             thread_workdir = workdir
-            if os.path.islink(full_workdir):
-                logger.warning(
-                    f'{fore.RED}Workdir {workdir} is a symlink. '
-                    f'Symlink contents are not uploaded.{style.RESET_ALL}')
-            else:
+            if not workdir_symlink:
                 thread_workdir = f'{workdir}/'
 
             self._rsync_up(handle,
