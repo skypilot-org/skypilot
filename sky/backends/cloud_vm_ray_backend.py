@@ -1136,7 +1136,7 @@ class CloudVmRayBackend(backends.Backend):
         workdir_symlink = False
         if os.path.islink(full_workdir):
             logger.warning(
-                f'{fore.RED}Workdir {workdir} is a symlink. '
+                f'{fore.YELLOW}Workdir {workdir} is a symlink. '
                 f'Symlink contents are not uploaded.{style.RESET_ALL}')
             workdir_symlink = True
 
