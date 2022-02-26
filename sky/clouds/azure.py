@@ -79,8 +79,22 @@ class Azure(clouds.Cloud):
             'image_version': '21.11.04'
         }
 
-        # ubuntu-2004 does not work on A100
+        # ubuntu-2004 v21.10.21 and v21.11.04 do not work on K80
+        # due to an NVIDIA driver issue.
+        # See https://docs.microsoft.com/en-us/answers/questions/658624/nc6-dsvm-ubuntu-1804-gen-1-nvidia-smi-has-failed-b.html
         if instance_type in [
+            'Standard_NC6',
+            'Standard_NC6_Promo',
+            'Standard_NC12',
+            'Standard_NC12_Promo',
+            'Standard_NC24',
+            'Standard_NC24_Promo',
+            'Standard_NC24r',
+            'Standard_NC24r_Promo',
+        ]:
+            image_config['image_version'] = '21.08.30'
+        # ubuntu-2004 does not work on A100
+        elif instance_type in [
                 'Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4'
         ]:
             image_config['image_offer'] = 'ubuntu-hpc'
