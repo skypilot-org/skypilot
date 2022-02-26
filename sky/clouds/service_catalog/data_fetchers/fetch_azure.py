@@ -24,6 +24,9 @@ REGIONS = [
     # 'WestUS3',   # WestUS3 pricing table is broken as of 2021/11.
 ]
 REGION_SET = set(REGIONS)
+# Azure secretly deprecated the M60 family which is still returned by its API.
+# We have to manually remove it.
+DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 
 def get_pricing_url(region: Optional[str] = None) -> str:
@@ -93,8 +96,8 @@ def get_gpu_name(family: str) -> str:
         'standardNCSv3Family': 'V100',
         'standardNCPromoFamily': 'K80',
         'StandardNCASv3_T4Family': 'T4',
-        'standardNDSv2Family': 'P40',
-        'standardNDAMSv4_A100Family': 'A100',
+        'standardNDSv2Family': 'V100-32GB',
+        'standardNDAMSv4_A100Family': 'A100-80GB',
         'StandardNDASv4_A100Family': 'A100',
         'standardNVFamily': 'M60',
         'standardNVSv2Family': 'M60',
@@ -169,6 +172,8 @@ def get_all_regions_instance_types_df():
         [df_sku, df_sku.apply(get_additional_columns, axis='columns')],
         axis='columns',
     ).rename(columns={'name': 'InstanceType'})
+    # Filter out deprecated families
+    df_ret = df_ret.loc[~df_ret['family'].isin(DEPRECATED_FAMILIES)]
     return df_ret
 
 
