@@ -513,7 +513,7 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         if cloud is not None:
             new_resources.cloud = _get_cloud(cloud)
         if gpus is not None:
-            new_resources.accelerators = _parse_accelerator_options(gpus)
+            new_resources.set_accelerators(_parse_accelerator_options(gpus))
         if use_spot is not None:
             new_resources.use_spot = use_spot
         if disk_size is not None:
@@ -667,7 +667,7 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
         if gpus is not None:
             assert len(task.resources) == 1
             copied = copy.deepcopy(list(task.resources)[0])
-            copied.accelerators = _parse_accelerator_options(gpus)
+            copied.set_accelerators(_parse_accelerator_options(gpus))
             task.set_resources({copied})
         if name is not None:
             task.name = name

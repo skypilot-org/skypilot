@@ -3,6 +3,7 @@ from typing import Dict, Optional, Union
 
 from sky import clouds
 from sky import sky_logging
+from sky.clouds import service_catalog
 
 logger = sky_logging.init_logger(__name__)
 
@@ -80,7 +81,7 @@ class Resources:
                                 ' default (2.5.0)')
                     accelerator_args['tf_version'] = '2.5.0'
 
-        self.accelerators = accelerators
+        self.set_accelerators(accelerators)
         self.accelerator_args = accelerator_args
 
         self._use_spot_specified = use_spot is not None
@@ -132,6 +133,31 @@ class Resources:
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
+
+    def set_accelerators(self, accelerators: Union[None, Dict[str, int]]):
+        """Set the accelerators field in a case-sensitive manner.
+
+        GPU names are converted to upper case characters,
+        while TPU names are converted to lower case characters.
+        """
+        if accelerators is None:
+            self.accelerators = None
+            return self
+
+        assert len(accelerators) == 1, accelerators
+        name, cnt = list(accelerators.items())[0]
+
+        # NVIDIA GPU
+        if name.upper() in service_catalog.get_common_gpus():
+            name = name.upper()
+        # GOOGLE TPU
+        elif name.lower() in service_catalog.get_tpus():
+            name = name.lower()
+        else:
+            raise ValueError(f'Invalid accelerator name: {name}')
+
+        self.accelerators = {name: cnt}
+        return self
 
     def get_accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
