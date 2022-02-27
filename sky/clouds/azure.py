@@ -83,7 +83,7 @@ class Azure(clouds.Cloud):
         # due to an NVIDIA driver issue.
         if 'Standard_NC' in instance_type:
             acc = service_catalog.get_accelerators_from_instance_type(
-                instance_type)
+                instance_type, clouds='azure')
             if acc == 'K80':
                 image_config['image_version'] = '21.08.30'
         # ubuntu-2004 does not work on A100
