@@ -81,9 +81,11 @@ class Azure(clouds.Cloud):
 
         # ubuntu-2004 v21.10.21 and v21.11.04 do not work on K80
         # due to an NVIDIA driver issue.
-        acc = service_catalog.get_accelerators_from_instance_type(instance_type)
-        if acc == 'K80':
-            image_config['image_version'] = '21.08.30'
+        if 'Standard_NC' in instance_type:
+            acc = service_catalog.get_accelerators_from_instance_type(
+                instance_type)
+            if acc == 'K80':
+                image_config['image_version'] = '21.08.30'
         # ubuntu-2004 does not work on A100
         elif instance_type in [
                 'Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4'
