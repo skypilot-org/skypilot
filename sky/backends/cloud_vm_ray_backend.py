@@ -112,6 +112,14 @@ def _path_size_megabytes(path: str) -> int:
                                  path]).split()[0].decode('utf-8'))
 
 
+def _exit_handler(returncodes: List[int], step: str) -> None:
+    for r in returncodes:
+        if r != 0:
+            logger.error(f'{colorama.Fore.RED} Sky failed at Step: '
+                         f'{step}{colorama.Style.RESET_ALL}')
+            sys.exit(r)
+
+
 class RayCodeGen:
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -1149,14 +1157,16 @@ class CloudVmRayBackend(backends.Backend):
             if not workdir_symlink:
                 thread_workdir = f'{workdir}/'
 
-            self._rsync_up(handle,
-                           ip=ip,
-                           source=thread_workdir,
-                           target=SKY_REMOTE_WORKDIR,
-                           with_outputs=True)
+            return self._rsync_up(handle,
+                                  ip=ip,
+                                  source=thread_workdir,
+                                  target=SKY_REMOTE_WORKDIR,
+                                  with_outputs=True,
+                                  exit_handler=lambda x: None)
 
         pp = pool.ThreadPool(processes=num_threads)
-        pp.starmap(_sync_workdir_node, ip_enum)
+        returncode_list = pp.starmap(_sync_workdir_node, ip_enum)
+        _exit_handler(returncode_list, 'Workdir Sync')
 
     def sync_file_mounts(
         self,
@@ -1206,22 +1216,28 @@ class CloudVmRayBackend(backends.Backend):
                         ssh_private_key=ssh_private_key,
                         log_path=os.path.join(self.log_dir, 'file_mounts.log'),
                         ssh_control_name=self._ssh_control_name(handle))
-                    backend_utils.handle_returncode(
-                        returncode, command, f'Failed to sync {src} to {dst}.')
+                    return backend_utils.handle_returncode(
+                        returncode,
+                        command,
+                        f'Failed to sync {src} to {dst}.',
+                        exit_handler=lambda x: None)
 
                 if run_rsync:
                     # TODO(zhwu): Logging to 'file_mounts.log'
                     # TODO(zhwu): Optimize for large amount of files.
                     # zip / transfer/ unzip
-                    self._rsync_up(handle,
-                                   ip=ip,
-                                   source=thread_src,
-                                   target=dst,
-                                   with_outputs=True)
+                    return self._rsync_up(handle,
+                                          ip=ip,
+                                          source=thread_src,
+                                          target=dst,
+                                          with_outputs=True,
+                                          exit_handler=lambda x: None)
 
             ip_enum = list(enumerate(ip_list))
             pp = pool.ThreadPool(processes=num_threads)
-            pp.starmap(_sync_node, ip_enum)
+            returncode_list = pp.starmap(_sync_node, ip_enum)
+            _exit_handler(returncode_list,
+                          f'File Mounting: Syncing {src} -> {dst}')
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -1303,11 +1319,14 @@ class CloudVmRayBackend(backends.Backend):
                 ssh_private_key=ssh_private_key,
                 log_path=os.path.join(self.log_dir, 'file_mounts.log'),
                 ssh_control_name=self._ssh_control_name(handle))
-            backend_utils.handle_returncode(returncode, symlink_command,
-                                            'Failed to create symlinks.')
+            return backend_utils.handle_returncode(returncode,
+                                                   symlink_command,
+                                                   'Failed to create symlinks.',
+                                                   exit_handler=lambda x: None)
 
         pp = pool.ThreadPool(processes=num_threads)
-        pp.map(_symlink_node, ip_list)
+        returncode_list = pp.map(_symlink_node, ip_list)
+        _exit_handler(returncode_list, 'File Mounting: Symlink Generation')
 
     def setup(self,
               handle: ResourceHandle,
@@ -1333,7 +1352,7 @@ class CloudVmRayBackend(backends.Backend):
                 handle.cluster_yaml)
             ip_enum = list(enumerate(ip_list))
 
-            def _setup_node(idx, ip):
+            def _setup_node(idx: int, ip: int) -> int:
                 node_name = f' worker{idx}' if idx > 0 else ' head'
                 if handle.launched_nodes == 1:
                     node_name = ''
@@ -1353,12 +1372,15 @@ class CloudVmRayBackend(backends.Backend):
                     ssh_private_key=ssh_private_key,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
                     ssh_control_name=self._ssh_control_name(handle))
-                backend_utils.handle_returncode(
-                    returncode, cmd,
-                    f'Failed to setup with return code {returncode}')
+                return backend_utils.handle_returncode(
+                    returncode=returncode,
+                    command=cmd,
+                    error_msg=f'Failed to setup with return code {returncode}',
+                    exit_handler=lambda x: None)
 
             pp = pool.ThreadPool(processes=num_threads)
-            pp.starmap(_setup_node, ip_enum)
+            returncode_list = pp.starmap(_setup_node, ip_enum)
+            _exit_handler(returncode_list, 'Setup')
 
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
 
@@ -1808,14 +1830,13 @@ class CloudVmRayBackend(backends.Backend):
             os.remove(yaml_handle)
         return head_ip + worker_ips
 
-    def _rsync_up(
-        self,
-        handle: ResourceHandle,
-        source: str,
-        target: str,
-        with_outputs: bool = True,
-        ip: Optional[str] = None,
-    ) -> None:
+    def _rsync_up(self,
+                  handle: ResourceHandle,
+                  source: str,
+                  target: str,
+                  with_outputs: bool = True,
+                  ip: Optional[str] = None,
+                  exit_handler: Callable[[int], None] = sys.exit) -> int:
         """Runs rsync from 'source' to the cluster's node 'target'."""
         # Attempt to use 'rsync user@ip' directly, which is much faster than
         # going through ray (either 'ray rsync_*' or sdk.rsync()).
@@ -1854,7 +1875,8 @@ class CloudVmRayBackend(backends.Backend):
         if proc.returncode != 0:
             logger.error(f'{colorama.Fore.RED}Failed to rsync up {source} '
                          f'-> {target}.{colorama.Style.RESET_ALL}')
-            sys.exit(proc.returncode)
+            exit_handler(proc.returncode)
+        return proc.returncode
 
     def _ssh_control_name(self, handle: ResourceHandle) -> str:
         return f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'
