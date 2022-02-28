@@ -1125,7 +1125,7 @@ class CloudVmRayBackend(backends.Backend):
     def sync_workdir(self,
                      handle: ResourceHandle,
                      workdir: Path,
-                     num_threads: int = 32) -> None:
+                     num_threads: int = None) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
@@ -1173,7 +1173,7 @@ class CloudVmRayBackend(backends.Backend):
         handle: ResourceHandle,
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
-        num_threads: int = 32,
+        num_threads: int = None,
     ) -> None:
         """Mounts all user files to the remote nodes."""
         # File mounts handling for remote paths possibly without write access:
@@ -1331,7 +1331,7 @@ class CloudVmRayBackend(backends.Backend):
     def setup(self,
               handle: ResourceHandle,
               task: Task,
-              num_threads: int = 32) -> None:
+              num_threads: int = None) -> None:
         style = colorama.Style
         fore = colorama.Fore
 
