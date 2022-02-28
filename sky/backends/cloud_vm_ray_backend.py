@@ -1212,7 +1212,7 @@ class CloudVmRayBackend(backends.Backend):
                                        source=src,
                                        target=dst,
                                        log_path=log_path,
-                                       stream_logs=True)
+                                       stream_logs=False)
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
