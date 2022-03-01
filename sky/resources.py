@@ -142,7 +142,6 @@ class Resources:
         """
         if accelerators is None:
             self.accelerators = None
-            return self
 
         assert len(accelerators) == 1, accelerators
         name, cnt = list(accelerators.items())[0]
@@ -157,7 +156,6 @@ class Resources:
             raise ValueError(f'Invalid accelerator name: {name}')
 
         self.accelerators = {name: cnt}
-        return self
 
     def get_accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
