@@ -60,7 +60,7 @@ Interactive nodes can be started and stopped like any other cluster:
 
 .. note::
 
-    If :code:`sky start` is used to restart a stopped cluster, auto-failover provisioning
+    Since :code:`sky start` is used to restart a stopped cluster, auto-failover provisioning
     is not used and the cluster will be started on the same cloud and region that it was
     originally provisioned on.
 

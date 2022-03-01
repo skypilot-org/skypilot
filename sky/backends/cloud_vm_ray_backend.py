@@ -14,7 +14,6 @@ import tempfile
 import textwrap
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import yaml
 
 import colorama
 from rich import console as rich_console
@@ -707,24 +706,15 @@ class RetryingVmProvisioner(object):
                 launched_resources=to_provision,
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
-            cluster_exists = global_user_state.get_cluster_name_from_handle(
-                handle) is not None
+            cluster_exists = global_user_state.get_handle_from_cluster_name(
+                cluster_name) is not None
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
-            region_name = region.name
-            if cluster_exists:
-                with open(cluster_config_file) as f:
-                    cluster_config = yaml.safe_load(f)
-                if to_provision.cloud.is_same_cloud(sky.Azure()):
-                    region_name = cluster_config['provider']['location']
-                else:
-                    region_name = cluster_config['provider']['region']
-
             logging_info = {
-                'restart': cluster_exists,
-                'cloud': to_provision.cloud,
-                'region_name': region_name,
+                'is_restart': cluster_exists,
+                'cluster_name': cluster_name,
+                'region_name': region.name,
                 'zone_str': zone_str,
             }
             gang_failed, rc, stdout, stderr = self._gang_schedule_ray_up(
@@ -827,16 +817,18 @@ class RetryingVmProvisioner(object):
             public_key_path = config['auth']['ssh_public_key']
             file_mounts[public_key_path] = public_key_path
 
-        startup_verb = 'Starting' if logging_info['restart'] else 'Provisioning'
-        cloud_name = logging_info['cloud']
+        startup_verb = 'Starting' if logging_info[
+            'is_restart'] else 'Provisioning'
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
+        cluster_name = logging_info['cluster_name']
 
         # Don't show the zone_str if restarting.
-        zone_str = f'({zone_str})' if not logging_info['restart'] else ''
-        with console.status(f'[bold cyan]{startup_verb} on '
-                            f'{cloud_name} [green]{region_name}[/] '
-                            f'[white]{zone_str}'):
+        zone_str = f'({zone_str})' if not logging_info['is_restart'] else ''
+        with console.status(f'[bold cyan]{startup_verb} cluster '
+                            f'[green]{cluster_name}[/] on '
+                            f'{to_provision_cloud} [green]{region_name}[/] '
+                            f'[default on default][red]{zone_str}'):
             # ray up.
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
@@ -1550,7 +1542,7 @@ class CloudVmRayBackend(backends.Backend):
     def _execute_task_one_node(self, handle: ResourceHandle, task: Task,
                                job_id: int, detach_run: bool) -> None:
         # Launch the command as a Ray task.
-        log_dir = os.path.join(f'{self.log_dir}', 'tasks')
+        log_dir = os.path.join(self.log_dir, 'tasks')
         log_path = os.path.join(log_dir, 'run.log')
 
         accelerator_dict = _get_task_demands_dict(task)
