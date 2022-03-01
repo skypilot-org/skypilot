@@ -93,15 +93,15 @@ def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
     return accelerator_dict
 
 
-def _add_cluster_to_ssh_config(cluster_name: str, cluster_ip: str,
+def _add_cluster_to_ssh_config(cluster_name: str, cluster_ips: List[str],
                                auth_config: Dict[str, str]) -> None:
-    backend_utils.SSHConfigHelper.add_cluster(cluster_name, cluster_ip,
+    backend_utils.SSHConfigHelper.add_cluster(cluster_name, cluster_ips,
                                               auth_config)
 
 
-def _remove_cluster_from_ssh_config(cluster_ip: str,
+def _remove_cluster_from_ssh_config(cluster_ips: List[str],
                                     auth_config: Dict[str, str]) -> None:
-    backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
+    backend_utils.SSHConfigHelper.remove_cluster(cluster_ips, auth_config)
 
 
 def _path_size_megabytes(path: str) -> int:
@@ -1096,11 +1096,12 @@ class CloudVmRayBackend(backends.Backend):
         if tpu_name is not None:
             self._set_tpu_name(cluster_config_file, launched_nodes, tpu_name)
 
+        ip_list = self._get_node_ips(cluster_config_file, launched_nodes)
         handle = self.ResourceHandle(
             cluster_name=cluster_name,
             cluster_yaml=cluster_config_file,
             # Cache head ip in the handle to speed up ssh operations.
-            head_ip=self._get_node_ips(cluster_config_file, launched_nodes)[0],
+            head_ip=ip_list[0],
             launched_nodes=launched_nodes,
             launched_resources=provisioned_resources,
             # TPU.
@@ -1110,7 +1111,7 @@ class CloudVmRayBackend(backends.Backend):
                                                 handle,
                                                 ready=True)
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
+        _add_cluster_to_ssh_config(cluster_name, ip_list, auth_config)
         return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -1633,6 +1634,7 @@ class CloudVmRayBackend(backends.Backend):
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
+        ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         prev_status = global_user_state.get_status_from_cluster_name(
             handle.cluster_name)
         cluster_name = config['cluster_name']
@@ -1735,7 +1737,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'{stderr}{colorama.Style.RESET_ALL}')
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
+        _remove_cluster_from_ssh_config(ip_list, auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name, terminate=terminate)
 
