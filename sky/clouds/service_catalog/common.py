@@ -16,8 +16,8 @@ class InstanceTypeInfo(NamedTuple):
     - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
     - accelerator_count: Number of accelerators offered by this instance type.
     - memory: Instance memory in GiB.
-    - price: Regular instance price per hour.
-    - spot_price: Spot instance price per hour.
+    - price: Regular instance price per hour (cheapest across all regions).
+    - spot_price: Spot instance price per hour (cheapest across all regions).
     """
     cloud: str
     instance_type: str
@@ -132,9 +132,6 @@ def list_accelerators_impl(
 
     Returns a mapping from the canonical names of accelerators to a list of
     instance types offered by this cloud.
-
-    NOTE: This only lists the lowest prices available for both on-demand and
-    spot instances across all regions.
     """
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
