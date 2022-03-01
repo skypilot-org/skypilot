@@ -142,6 +142,7 @@ class Resources:
         """
         if accelerators is None:
             self.accelerators = None
+            return
 
         assert len(accelerators) == 1, accelerators
         name, cnt = list(accelerators.items())[0]
