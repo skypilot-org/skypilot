@@ -42,28 +42,41 @@ provides remote execution without logging in:
   # defined in the task specification.
   $ sky exec dev task.yaml
 
-Syncing code and transferring artifacts
+Syncing local code to cluster
 --------------------------------------
-Use the familiar scp/rsync to transfer files between your local machine and remote VM:
+Sky **simplifies code syncing** by the automatically syncing a local working
+directory to the cluster. Syncing happens on every :code:`sky launch` and
+:code:`sky exec`, so you can edit code locally and transparently upload them to
+the a cluster.
 
-.. code-block::
-
-  $ rsync -Pavz my_code/ dev:/path/to/destination  # copy files to remote VM
-  $ rsync -Pavz dev:/path/to/source my_code/       # copy files from remote VM
-
-Sky **simplifies code syncing** by the automatic transfer of a working directory
-to the cluster.  The working directory can be configured with the
-:code:`workdir` option in a task YAML file, or using the following command line
-option:
+The working directory can be configured either (1) with the :code:`workdir`
+field in a :ref:`task YAML file <yaml-spec>`, or (2) using the command line
+option :code:`--workdir`:
 
 .. code-block::
 
   $ sky launch --workdir=/path/to/code task.yaml
   $ sky exec --workdir=/path/to/code task.yaml
 
-These commands sync the working directory to a location on the remote VM, and
-the task is run under that working directory (e.g., to invoke scripts, access
-checkpoints, etc.).
+These commands sync the working directory to :code:`~/sky_workdir` on the remote
+VMs, and the task is invoked under that working directory (so that it can invoke
+scripts, access checkpoints, etc.).
+
+Transferring artifacts
+--------------------------------------
+Use the familiar scp/rsync to transfer files between your local machine and the
+head node of a cluster:
+
+.. code-block::
+
+  $ rsync -Pavz my_code/ dev:/path/to/destination  # copy files to head node
+  $ rsync -Pavz dev:/path/to/source my_code/       # copy files from head node
+
+.. note::
+    Sky currently does not natively support transfering artifacts from/to
+    **worker machines** of a multi-node cluster.  As temporary workarounds,
+    query the worker IPs from the cloud console, and run :code:`rsync -Pavz -e
+    'ssh -i ~/.ssh/sky-key' <worker_ip>:/path /local_path`.
 
 Ending a development session
 -----------------------------
