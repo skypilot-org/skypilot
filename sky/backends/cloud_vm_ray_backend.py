@@ -821,14 +821,12 @@ class RetryingVmProvisioner(object):
             'is_restart'] else 'Provisioning'
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
-        cluster_name = logging_info['cluster_name']
 
         # Don't show the zone_str if restarting.
         zone_str = f'({zone_str})' if not logging_info['is_restart'] else ''
-        with console.status(f'[bold cyan]{startup_verb} cluster '
-                            f'[green]{cluster_name}[/] on '
-                            f'{to_provision_cloud} [white]{region_name}[/] '
-                            f'[default on default][grey42]{zone_str}'):
+        with console.status(f'[bold cyan]{startup_verb} cluster on '
+                            f'{to_provision_cloud} {region_name}[/] '
+                            f'{zone_str}'):
             # ray up.
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
