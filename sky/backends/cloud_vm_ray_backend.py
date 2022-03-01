@@ -1465,7 +1465,8 @@ class CloudVmRayBackend(backends.Backend):
             code,
             stream_logs=True,
             redirect_stdout_stderr=False,
-            # Allocate a pseudo-terminal to disable output buffering.
+            # Allocate a pseudo-terminal to disable output buffering. Otherwise,
+            # there may be 5 minutes delay in logging.
             ssh_mode=backend_utils.SshMode.INTERACTIVE)
 
         # Due to the interactive mode of ssh, we cannot distinguish the ctrl-c
