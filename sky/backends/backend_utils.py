@@ -566,6 +566,7 @@ class SshMode(enum.Enum):
     # Do not allocating pseudo-tty to avoid user input corrupting the output.
     NON_INTERACTIVE = 0
     # Allocate a pseudo-tty, quit the ssh session after the cmd finishes.
+    # Be careful of this mode, as ctrl-c will be passed to the remote process.
     INTERACTIVE = 1
     # Allocate a pseudo-tty and log into the ssh session.
     LOGIN = 2
