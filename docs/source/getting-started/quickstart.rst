@@ -65,7 +65,7 @@ to be a simple hello world program.
 We can specify the following task attributes with a YAML file:
 
 - :code:`resources` (optional): what cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
-- :code:`workdir` (optional): specifies working directory containing project code that is synced with the provisioned instance(s). Any files or directories included in a .gitignore file at the root of the project working directory will automatically be ignored by Sky.
+- :code:`workdir` (optional): specifies working directory containing project code that is synced with the provisioned instance(s). Any .gitignore files found anywhere in the working directory tree will be used to determine files and directories that will be ignored during upload. The behavior matches git's behavior for finding and using .gitignore files.
 - :code:`setup` (optional): commands that must be run before the task is executed
 - :code:`run` (optional): specifies the commands that must be run as the actual ask
 
