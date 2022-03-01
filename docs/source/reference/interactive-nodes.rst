@@ -45,7 +45,7 @@ To log in to an interactive node:
 
 
 Because Sky exposes SSH access to interactive nodes, this means they can also be
-used with tools such as `VSCode Remote <https://code.visualstudio.com/docs/remote/remote-overview>`_.
+used with tools such as `Visual Studio Code Remote <https://code.visualstudio.com/docs/remote/remote-overview>`_.
 
 
 Interactive nodes can be started and stopped like any other cluster:
