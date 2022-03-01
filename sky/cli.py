@@ -1351,6 +1351,9 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
 
     To show all GPUs, including less common ones and their detailed
     information, use `sky show-gpus --all`.
+
+    NOTE: The price displayed for each instance type is the lowest across all
+    regions for both on-demand and spot instances.
     """
     show_all = all
     if show_all and gpu_name is not None:
@@ -1401,15 +1404,20 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                 'CLOUD',
                 'INSTANCE_TYPE',
                 'HOST_MEMORY',
-                'PRICE',
+                'HOURLY_PRICE',
+                'HOURLY_SPOT_PRICE',
             ])
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(attachable)'
                 mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '-'
+                price_str = f'$ {item.price:.3f}' if not pd.isna(
+                    item.price) else '-'
+                spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
+                    item.spot_price) else '-'
                 accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
-                    instance_type_str, mem_str, item.price
+                    instance_type_str, mem_str, price_str, spot_price_str
                 ])
 
             if i != 0 or gpu_name is None:
