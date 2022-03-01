@@ -7,8 +7,8 @@ import os
 import selectors
 import subprocess
 import sys
-import textwrap
 import time
+import textwrap
 import tempfile
 from typing import Iterator, List, Optional, Tuple, Union
 
@@ -85,22 +85,26 @@ def run_with_log(
     log_path: str,
     stream_logs: bool = False,
     start_streaming_at: str = '',
-    return_none: bool = False,
-    check: bool = False,
+    require_outputs: bool = False,
     shell: bool = False,
     with_ray: bool = False,
+    redirect_stdout_stderr: bool = True,
     **kwargs,
-) -> Union[None, Tuple[subprocess.Popen, str, str]]:
+) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
 
-    Retruns the process, stdout and stderr of the command.
+    Retruns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
+    assert redirect_stdout_stderr or log_path == '/dev/null'
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
-    stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
+    stdout = stderr = None
+    if redirect_stdout_stderr:
+        stdout = subprocess.PIPE
+        stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
     with subprocess.Popen(cmd,
-                          stdout=subprocess.PIPE,
+                          stdout=stdout,
                           stderr=stderr,
                           start_new_session=True,
                           shell=shell,
@@ -125,41 +129,47 @@ def run_with_log(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        # We need this even if the log_path is '/dev/null' to ensure the
-        # progress bar is shown.
-        stdout, stderr = redirect_process_output(
-            proc,
-            log_path,
-            stream_logs,
-            start_streaming_at=start_streaming_at,
-            # Skip these lines caused by `-i` option of bash. Failed to find
-            # other way to turn off these two warning.
-            # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-            skip_lines=[
-                'bash: cannot set terminal process group',
-                'bash: no job control in this shell',
-            ],
-            # Replace CRLF when the output is logged to driver by ray.
-            replace_crlf=with_ray,
-        )
+        stdout = ''
+        stderr = ''
+        if redirect_stdout_stderr:
+            # We need this even if the log_path is '/dev/null' to ensure the
+            # progress bar is shown.
+            stdout, stderr = redirect_process_output(
+                proc,
+                log_path,
+                stream_logs,
+                start_streaming_at=start_streaming_at,
+                # Skip these lines caused by `-i` option of bash. Failed to find
+                # other way to turn off these two warning.
+                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+                # TODO(zongheng,zhwu): ssh -T -i -tt seems to get rid of these.
+                skip_lines=[
+                    'bash: cannot set terminal process group',
+                    'bash: no job control in this shell',
+                ],
+                # Replace CRLF when the output is logged to driver by ray.
+                replace_crlf=with_ray,
+            )
         proc.wait()
-        if proc.returncode and check:
-            if stderr:
-                print(stderr, file=sys.stderr)
-            raise subprocess.CalledProcessError(proc.returncode, cmd)
-        if return_none:
-            return None
-        return proc, stdout, stderr
+        if require_outputs:
+            return proc.returncode, stdout, stderr
+        return proc.returncode
 
 
 def make_task_bash_script(codegen: str) -> str:
+    # set -a is used for exporting all variables functions to the environment
+    # so that bash `user_script` can access `conda activate`. Detail: #436.
+    # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
     script = [
         textwrap.dedent(f"""\
-                #!/bin/bash
-                source ~/.bashrc
-                . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
-                cd {SKY_REMOTE_WORKDIR}"""),
+            #!/bin/bash
+            source ~/.bashrc
+            set -a
+            . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
+            set +a
+            cd {SKY_REMOTE_WORKDIR}"""),
         codegen,
+        '',  # New line at EOF.
     ]
     script = '\n'.join(script)
     return script
@@ -177,7 +187,7 @@ def run_bash_command_with_log(bash_command: str,
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
-        run_with_log(
+        return run_with_log(
             # Need this `-i` option to make sure `source ~/.bashrc` work.
             # Do not use shell=True because it will cause the environment
             # set in this task visible to other tasks. shell=False requires
@@ -185,15 +195,13 @@ def run_bash_command_with_log(bash_command: str,
             ['/bin/bash', '-i', script_path],
             log_path,
             stream_logs=stream_logs,
-            return_none=True,
-            check=True,
             with_ray=with_ray,
         )
 
 
 def _follow_job_logs(file,
                      job_id: int,
-                     sleep_sec: float = 0.5,
+                     sleep_sec: float = 0.2,
                      start_streaming_at: str = '') -> Iterator[str]:
     """Yield each line from a file as they are written.
 
@@ -230,17 +238,17 @@ def _follow_job_logs(file,
             status = job_lib.query_job_status([job_id])[0]
 
 
-def tail_logs(job_id: int, log_dir: Optional[str],
-              status: Optional[job_lib.JobStatus]):
-    # TODO(zhwu): Maybe switch to `ray job logs` according to the performance.
+def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
-
     log_path = os.path.join(job_lib.SKY_REMOTE_LOGS_ROOT, log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
+    status = job_lib.query_job_status([job_id])[0]
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
+            # Not using `ray job logs` because it will put progress bar in
+            # multiple lines.
             with open(log_path, 'r', newline='') as log_file:
                 # Using `_follow` instead of `tail -f` to streaming the whole
                 # log and creating a new process for tail.

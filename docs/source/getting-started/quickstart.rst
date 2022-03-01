@@ -93,17 +93,11 @@ requiring an NVIDIA Tesla K80 GPU on AWS. See more example yaml files in the `re
   # Typical use: pip install -r requirements.txt
   setup: |
     echo "running setup"
-    # If using a `my_setup.sh` script that requires conda,
-    # invoke it as below to ensure `conda activate` works:
-    # bash -i my_setup.sh
 
   # Typical use: make use of resources, such as running training.
   run: |
     echo "hello sky!"
     conda env list
-    # If using a `my_run.sh` script that requires conda,
-    # invoke it as below to ensure `conda activate` works:
-    # `bash -i my_run.sh`
 
 Sky handles selecting an appropriate VM based on user-specified resource
 constraints, launching the cluster on an appropriate cloud provider, and
