@@ -62,7 +62,7 @@ option :code:`--workdir`:
 These commands sync the working directory to :code:`~/sky_workdir` on the remote
 VMs, and the task is invoked under that working directory (so that it can invoke
 scripts, access checkpoints, etc.). Sky ignores files and directories during upload
-the same way git does: any items that are included in a .gitignore contained in the
+the same way git does: any items that are included in a :code:`.gitignore` contained in the
 working directory tree are not uploaded.
 
 Transferring artifacts

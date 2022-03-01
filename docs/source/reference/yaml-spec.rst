@@ -18,7 +18,7 @@ describe all fields available.
     # Storage to transfer large datasets and files. If a .gitignore exists anywhere
     # within the working directory tree, the behavior will match git's behavior
     # for finding and using .gitignore files. Files and directories included in
-    # the .gitignore file will be ignored by Sky.
+    # a .gitignore file will be ignored by Sky.
     workdir: ~/my-task-code
 
     # Number of nodes (optional) to launch including the head node. If not
