@@ -672,6 +672,8 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         self._clear_blocklist()
+        cluster_exists = global_user_state.get_handle_from_cluster_name(
+            cluster_name) is not None
         for region, zones in self._yield_region_zones(to_provision,
                                                       cluster_name):
             if self._in_blocklist(to_provision.cloud, region, zones):
@@ -706,8 +708,6 @@ class RetryingVmProvisioner(object):
                 launched_resources=to_provision,
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
-            cluster_exists = global_user_state.get_handle_from_cluster_name(
-                cluster_name) is not None
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
@@ -827,8 +827,8 @@ class RetryingVmProvisioner(object):
         zone_str = f'({zone_str})' if not logging_info['is_restart'] else ''
         with console.status(f'[bold cyan]{startup_verb} cluster '
                             f'[green]{cluster_name}[/] on '
-                            f'{to_provision_cloud} [green]{region_name}[/] '
-                            f'[default on default][red]{zone_str}'):
+                            f'{to_provision_cloud} [white]{region_name}[/] '
+                            f'[default on default][grey42]{zone_str}'):
             # ray up.
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
