@@ -103,7 +103,6 @@ def run_with_log(
     if redirect_stdout_stderr:
         stdout = subprocess.PIPE
         stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
-
     with subprocess.Popen(cmd,
                           stdout=stdout,
                           stderr=stderr,
@@ -239,14 +238,13 @@ def _follow_job_logs(file,
             status = job_lib.query_job_status([job_id])[0]
 
 
-def tail_logs(job_id: int, log_dir: Optional[str],
-              status: Optional[job_lib.JobStatus]) -> None:
+def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
-
     log_path = os.path.join(job_lib.SKY_REMOTE_LOGS_ROOT, log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
+    status = job_lib.query_job_status([job_id])[0]
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
             # Not using `ray job logs` because it will put progress bar in

@@ -1438,7 +1438,7 @@ class CloudVmRayBackend(backends.Backend):
                 self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
-            logger.info(f'\n{fore.CYAN}Job ID: '
+            logger.info(f'{fore.CYAN}Job ID: '
                         f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                         '\nTo cancel the job:\t'
                         f'{backend_utils.BOLD}sky cancel {name} {job_id}'
@@ -1454,18 +1454,27 @@ class CloudVmRayBackend(backends.Backend):
         codegen = backend_utils.JobLibCodeGen()
         codegen.tail_logs(job_id)
         code = codegen.build()
-        click.secho('Start streaming logs...', fg='yellow')
-        try:
-            self.run_on_head(
-                handle,
-                code,
-                stream_logs=True,
-                redirect_stdout_stderr=False,
-                # Allocate a pseudo-terminal to disable output buffering.
-                ssh_mode=backend_utils.SshMode.INTERACTIVE)
-        except KeyboardInterrupt:
-            # Do nothing. When receiving ctrl-c.
-            pass
+        logger.info(f'{colorama.Fore.YELLOW}Start streaming logs...'
+                    f'{colorama.Style.RESET_ALL}')
+
+        # With interactive mode, the ctrl-c will send directly to the running
+        # program on the remote instance, and the ssh will be disconnected by
+        # sshd, so no error code will appear.
+        self.run_on_head(
+            handle,
+            code,
+            stream_logs=True,
+            redirect_stdout_stderr=False,
+            # Allocate a pseudo-terminal to disable output buffering. Otherwise,
+            # there may be 5 minutes delay in logging.
+            ssh_mode=backend_utils.SshMode.INTERACTIVE)
+
+        # Due to the interactive mode of ssh, we cannot distinguish the ctrl-c
+        # from other success case (e.g. the job is finished) from the returncode
+        # or catch by KeyboardInterrupt exception.
+        # TODO(zhwu): only show this line when ctrl-c is sent.
+        logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                       f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
 
     def _add_job(self, handle: ResourceHandle, job_name: str) -> int:
         codegen = backend_utils.JobLibCodeGen()

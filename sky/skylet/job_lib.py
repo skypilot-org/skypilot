@@ -9,7 +9,7 @@ import re
 import sqlite3
 import subprocess
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import pendulum
 
@@ -290,9 +290,8 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
             set_status(job['job_id'], JobStatus.CANCELLED)
 
 
-def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
-    """Returns the relative path to the log file for a job and the status."""
-    _update_status()
+def log_dir(job_id: int) -> Optional[str]:
+    """Returns the relative path to the log file for a job."""
     _CURSOR.execute(
         """\
             SELECT * FROM jobs
@@ -300,7 +299,5 @@ def log_dir(job_id: int) -> Tuple[Optional[str], Optional[JobStatus]]:
     row = _CURSOR.fetchone()
     if row is None:
         return None, None
-    status = row[JobInfoLoc.STATUS.value]
-    status = JobStatus[status]
     run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-    return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp), status
+    return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
