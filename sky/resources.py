@@ -146,15 +146,13 @@ class Resources:
         assert len(accelerators) == 1, accelerators
         name, cnt = list(accelerators.items())[0]
 
-        # NVIDIA GPU
-        if name.upper() in service_catalog.get_common_gpus():
-            name = name.upper()
-        # GOOGLE TPU
-        elif name.lower() in service_catalog.get_tpus():
-            name = name.lower()
-        else:
-            raise ValueError(f'Invalid accelerator name: {name}')
+        acc_names = list(service_catalog.list_accelerators().keys())
+        try:
+            index = [n.casefold() for n in acc_names].index(name.casefold())
+        except ValueError:
+            raise ValueError(f'Invalid accelerator name: {name}') from None
 
+        name = acc_names[index]
         self.accelerators = {name: cnt}
 
     def get_accelerators(self) -> Optional[Dict[str, int]]:
