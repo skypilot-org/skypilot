@@ -1215,7 +1215,6 @@ class CloudVmRayBackend(backends.Backend):
                         ssh_private_key=ssh_private_key,
                         log_path=os.path.join(os.path.expanduser(self.log_dir),
                                               'file_mounts.log'),
-                        check=True,
                         ssh_control_name=self._ssh_control_name(handle))
                     backend_utils.handle_returncode(
                         returncode, command, f'Failed to sync {src} to {dst}.')
