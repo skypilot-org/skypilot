@@ -1450,15 +1450,13 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
 
 @cli.group(cls=_NaturalOrderGroup)
 def storage():
-    """Handle to run Sky Storage CLI commands.
-    """
+    """Storage related commands."""
     pass
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
 def storage_ls():
-    """Lists storage objects created.
-    """
+    """List storage objects created."""
     storage_stat = global_user_state.get_storage()
     storage_table = util_lib.create_table([
         'NAME',
@@ -1497,7 +1495,7 @@ def storage_ls():
               help='Used with delete; Delete all storages.')
 @click.argument('name', required=False, type=str, nargs=-1)
 def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
-    """Deletes storage objects.
+    """Delete storage objects.
 
     Example:
 
@@ -1512,7 +1510,7 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         sky storage delete -a
     """
     if all:
-        click.echo('Deleting all storage objects')
+        click.echo('Deleting all storage objects...')
         storages = global_user_state.get_storage()
         for row in storages:
             store_object = data.Storage(name=row['name'],
@@ -1522,16 +1520,16 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         for n in name:
             handle = global_user_state.get_handle_from_storage_name(n)
             if handle is None:
-                click.echo(f'Storage Name {n} not found!')
+                click.echo(f'Storage name {n} not found.')
             else:
-                click.echo(f'Deleting storage object {n}')
+                click.echo(f'Deleting storage object {n}...')
                 store_object = data.Storage(name=handle.storage_name,
                                             source=handle.source)
                 store_object.delete()
     else:
         raise click.ClickException(
             'Must pass in \'-a/--all\' or storage names to \'sky '
-            'storage delete\'')
+            'storage delete\'.')
 
 
 def main():
