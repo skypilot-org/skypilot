@@ -83,7 +83,7 @@ class Azure(clouds.Cloud):
         # due to an NVIDIA driver issue.
         acc = service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='azure')
-        if acc:
+        if acc is not None:
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
                 image_config['image_version'] = '21.08.30'
