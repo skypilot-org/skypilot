@@ -1,4 +1,4 @@
-Distributed Jobs on many VMs
+Distributed Jobs on Many VMs
 ================================================
 
 Sky supports multi-node cluster

@@ -106,4 +106,5 @@ run: |
   # ls -lH /data/fake_imagenet | head -n10
 
   # sky.egg-info/ should not exists on remote due to the .gitingore
+  cd ~/sky_workdir
   ! ls sky.egg-info/
