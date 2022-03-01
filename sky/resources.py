@@ -135,11 +135,7 @@ class Resources:
             # specifies to use 1 GPU.
 
     def set_accelerators(self, accelerators: Union[None, Dict[str, int]]):
-        """Set the accelerators field in a case-sensitive manner.
-
-        GPU names are converted to upper case characters,
-        while TPU names are converted to lower case characters.
-        """
+        """Set the accelerators field in a case-sensitive manner."""
         if accelerators is None:
             self.accelerators = None
             return
