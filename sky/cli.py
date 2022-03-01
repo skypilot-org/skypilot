@@ -555,9 +555,9 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
             task.name = name
 
     if not yes:
-        cluster_exists = global_user_state.get_handle_from_cluster_name(
-            cluster) is not None
-        if not cluster_exists:
+        if cluster is None or global_user_state.get_handle_from_cluster_name(
+                cluster) is None:
+            # Prompt if no cluster is provided or the cluster doesn't exist.
             _confirm_before_operation(
                 'You are about to launch a new cluster. Are you sure?')
 
