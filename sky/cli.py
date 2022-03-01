@@ -341,7 +341,8 @@ def _create_and_ssh_into_node(
             task.num_nodes = handle.launched_nodes
             if not no_confirm:
                 _confirm_before_operation(
-                    'You are about to restart a stopped cluster. Are you sure?')
+                    'You are about to restart the stopped cluster '
+                    f'{cluster_name}. Are you sure?')
 
         else:
             dag = sky.optimize(dag)
@@ -1067,9 +1068,10 @@ def start(clusters: Tuple[str], yes: bool):
 
     if not yes:
         cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'
+        cluster_list = ', '.join([r['name'] for r in to_start])
         _confirm_before_operation(
-            f'You are about to restart {len(to_start)} {cluster_str}. '
-            'Are you sure?')
+            f'You are about to restart {len(to_start)} {cluster_str}: '
+            f'{cluster_list}. Are you sure?')
 
     for record in to_start:
         name = record['name']
@@ -1167,9 +1169,10 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
     if not no_confirm:
         teardown_verb = 'terminate' if terminate else 'stop'
         cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
+        cluster_list = ', '.join([r['name'] for r in to_down])
         _confirm_before_operation(
-            f'You are about to {teardown_verb} {len(to_down)} {cluster_str}. '
-            'Are you sure?')
+            f'You are about to {teardown_verb} {len(to_down)} {cluster_str}: '
+            f'{cluster_list}. Are you sure?')
 
     for record in to_down:  # TODO: parallelize.
         name = record['name']
