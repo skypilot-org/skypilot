@@ -14,6 +14,7 @@ import tempfile
 import textwrap
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import yaml
 
 import colorama
 from rich import console as rich_console
@@ -379,7 +380,7 @@ class RetryingVmProvisioner(object):
         self._blocked_zones = set()
         self._blocked_launchable_resources = set()
 
-        self.log_dir = log_dir
+        self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
         self._optimize_target = optimize_target
 
@@ -711,11 +712,19 @@ class RetryingVmProvisioner(object):
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
+            region_name = region.name
+            if cluster_exists:
+                with open(cluster_config_file) as f:
+                    cluster_config = yaml.safe_load(f)
+                if to_provision.cloud.is_same_cloud(sky.Azure()):
+                    region_name = cluster_config['provider']['location']
+                else:
+                    region_name = cluster_config['provider']['region']
 
             logging_info = {
                 'restart': cluster_exists,
                 'cloud': to_provision.cloud,
-                'region_name': region.name,
+                'region_name': region_name,
                 'zone_str': zone_str,
             }
             gang_failed, rc, stdout, stderr = self._gang_schedule_ray_up(
@@ -822,9 +831,12 @@ class RetryingVmProvisioner(object):
         cloud_name = logging_info['cloud']
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
+
+        # Don't show the zone_str if restarting.
+        zone_str = f'({zone_str})' if not logging_info['restart'] else ''
         with console.status(f'[bold cyan]{startup_verb} on '
                             f'{cloud_name} [green]{region_name}[/] '
-                            f'[white]({zone_str})'):
+                            f'[white]{zone_str}'):
             # ray up.
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
@@ -1201,7 +1213,9 @@ class CloudVmRayBackend(backends.Backend):
                         command,
                         ssh_user=ssh_user,
                         ssh_private_key=ssh_private_key,
-                        log_path=os.path.join(self.log_dir, 'file_mounts.log'),
+                        log_path=os.path.join(os.path.expanduser(self.log_dir),
+                                              'file_mounts.log'),
+                        check=True,
                         ssh_control_name=self._ssh_control_name(handle))
                     backend_utils.handle_returncode(
                         returncode, command, f'Failed to sync {src} to {dst}.')
@@ -1356,7 +1370,7 @@ class CloudVmRayBackend(backends.Backend):
                                         'Failed to sync logs.', stderr)
         log_dir = log_dir.strip()
 
-        local_log_dir = log_dir
+        local_log_dir = os.path.expanduser(log_dir)
         remote_log_dir = log_dir
 
         style = colorama.Style
@@ -1418,9 +1432,9 @@ class CloudVmRayBackend(backends.Backend):
                            source=fp.name,
                            target=script_path,
                            with_outputs=False)
-
-        job_log_path = os.path.join(self.log_dir, 'job_submit.log')
         remote_log_dir = self.log_dir
+        local_log_dir = os.path.expanduser(remote_log_dir)
+        job_log_path = os.path.join(local_log_dir, 'job_submit.log')
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         assert executable == 'python3', executable
@@ -1648,7 +1662,8 @@ class CloudVmRayBackend(backends.Backend):
                     storage.delete()
 
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
-        log_path = os.path.join(self.log_dir, 'teardown.log')
+        log_path = os.path.join(os.path.expanduser(self.log_dir),
+                                'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)

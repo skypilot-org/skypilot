@@ -36,7 +36,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
-import colorama
 import pendulum
 from rich import console as rich_console
 
@@ -1019,10 +1018,6 @@ def start(clusters: Tuple[str]):
         with sky.Dag():
             dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
-        click.secho(
-            f'{colorama.Fore.CYAN}Starting cluster '
-            f'{colorama.Fore.GREEN}{name}...',
-            bold=True)
         backend.provision(dummy_task,
                           to_provision=handle.launched_resources,
                           dryrun=False,
