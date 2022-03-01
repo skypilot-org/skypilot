@@ -115,14 +115,10 @@ class GcsCloudStorage(CloudStorage):
         commands = list(self._GET_GSUTIL)
         commands.append(f'{self._GSUTIL} ls -d {url}')
         command = ' && '.join(commands)
-        max_retries = 5
-        for _ in range(max_retries):
-            p = backend_utils.run(command, stdout=subprocess.PIPE)
-            out = p.stdout.decode().strip()
-            # Initial User Bug: Using Gcloud first time will append
-            # Gcloud introdcutory message to process output
-            if 'Welcome to the Google Cloud SDK!' not in out:
-                break
+        p = backend_utils.run(command, stdout=subprocess.PIPE)
+        out = p.stdout.decode().strip()
+        # Edge Case: Gcloud command is run for first time #437
+        out = out.split('\n')[-1]
         # If <url> is a bucket root, then we only need `gsutil` to succeed
         # to make sure the bucket exists. It is already a directory.
         _, key = data_utils.split_gcs_path(url)
