@@ -1454,18 +1454,25 @@ class CloudVmRayBackend(backends.Backend):
         codegen = backend_utils.JobLibCodeGen()
         codegen.tail_logs(job_id)
         code = codegen.build()
-        click.secho('Start streaming logs...', fg='yellow')
-        returncode = self.run_on_head(
+        logger.info(f'{colorama.Fore.YELLOW}Start streaming logs...'
+                    f'{colorama.Style.RESET_ALL}')
+
+        # With interactive mode, the ctrl-c will send directly to the running
+        # program on the remote instance, and the ssh will be disconnected by
+        # sshd, so no error code will appear.
+        self.run_on_head(
             handle,
             code,
             stream_logs=True,
             redirect_stdout_stderr=False,
             # Allocate a pseudo-terminal to disable output buffering.
             ssh_mode=backend_utils.SshMode.INTERACTIVE)
-        if returncode != 0:
-            # TODO (zhwu): find a way to distinguish ctrl-c from other errors.
-            logger.warning(f'\n{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                           f'running after ctrl-c.{colorama.Style.RESET_ALL}')
+
+        # Due to the interactive mode of ssh, we cannot distinguish the ctrl-c
+        # from other success case (e.g. the job is finished) from the returncode
+        # TODO(zhwu): only show this line when ctrl-c is sent.
+        logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                       f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
 
     def _add_job(self, handle: ResourceHandle, job_name: str) -> int:
         codegen = backend_utils.JobLibCodeGen()

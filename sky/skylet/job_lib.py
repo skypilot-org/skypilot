@@ -9,7 +9,7 @@ import re
 import sqlite3
 import subprocess
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import pendulum
 

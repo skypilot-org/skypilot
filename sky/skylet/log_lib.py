@@ -103,7 +103,6 @@ def run_with_log(
     if redirect_stdout_stderr:
         stdout = subprocess.PIPE
         stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
-    print(' '.join(cmd))
     with subprocess.Popen(cmd,
                           stdout=stdout,
                           stderr=stderr,
