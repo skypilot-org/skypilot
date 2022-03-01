@@ -20,13 +20,16 @@ class InstanceTypeInfo(NamedTuple):
     - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
     - accelerator_count: Number of accelerators offered by this instance type.
     - memory: Instance memory in GiB.
-    - price: Regular instance price per hour.
+    - price: Regular instance price per hour (cheapest across all regions).
+    - spot_price: Spot instance price per hour (cheapest across all regions).
     """
     cloud: str
     instance_type: str
     accelerator_name: str
     accelerator_count: int
     memory: float
+    price: float
+    spot_price: float
 
 
 def get_data_path(filename: str) -> str:
@@ -140,7 +143,8 @@ def list_accelerators_impl(
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
     df = df[[
-        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB'
+        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB',
+        'Price', 'SpotPrice'
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter, regex=True)]
@@ -148,6 +152,11 @@ def list_accelerators_impl(
     grouped = df.groupby('AcceleratorName')
 
     def make_list_from_df(rows):
+        # Only keep the lowest prices across regions.
+        rows = rows.groupby([
+            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB'
+        ],
+                            dropna=False).aggregate(min).reset_index()
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
                 cloud,
@@ -155,6 +164,8 @@ def list_accelerators_impl(
                 row['AcceleratorName'],
                 row['AcceleratorCount'],
                 row['MemoryGiB'],
+                row['Price'],
+                row['SpotPrice'],
             ),
             axis='columns',
         ).tolist()
