@@ -84,8 +84,8 @@ class Azure(clouds.Cloud):
         acc = service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='azure')
         if acc:
-            acc = list(acc.keys())[0]
-            if acc == 'K80':
+            acc_name = list(acc.keys())[0]
+            if acc_name == 'K80':
                 image_config['image_version'] = '21.08.30'
 
         # ubuntu-2004 does not work on A100
