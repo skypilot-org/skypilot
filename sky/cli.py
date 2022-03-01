@@ -326,6 +326,8 @@ def _create_and_ssh_into_node(
             backend.register_info(dag=dag)
             to_provision = task.best_resources
 
+        click.confirm('Do you want to relaunch?', default=True, abort=True)
+
         handle = backend.provision(task,
                                    to_provision=to_provision,
                                    dryrun=False,
