@@ -204,7 +204,7 @@ class SSHConfigHelper(object):
         codegens = [None] * len(ips)
         cluster_names = [cluster_name]
         if len(ips) > 1:
-            for idx in len(ips[1:]):
+            for idx in range(len(ips[1:])):
                 cluster_names.append(cluster_name + f'_w{idx}')
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
@@ -236,13 +236,13 @@ class SSHConfigHelper(object):
                     sky_autogen_comment, host_name, ips[idx], username,
                     key_path)
 
-        for idx in len(ips):
+        for idx in range(len(ips)):
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, cluster_names[idx], ips[idx], username,
                     key_path)
 
-        for idx in len(ips):
+        for idx in range(len(ips)):
             # Add (or overwrite) the new config.
             overwrite = overwrites[idx]
             overwrite_begin_idx = overwrite_begin_idxs[idx]
