@@ -70,8 +70,7 @@ class Azure(clouds.Cloud):
         # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
         return 'Standard_D8_v4'
 
-    @classmethod
-    def _get_image_config(cls, gen_version, instance_type):
+    def _get_image_config(self, gen_version, instance_type):
         image_config = {
             'image_publisher': 'microsoft-dsvm',
             'image_offer': 'ubuntu-2004',
@@ -81,8 +80,7 @@ class Azure(clouds.Cloud):
 
         # ubuntu-2004 v21.10.21 and v21.11.04 do not work on K80
         # due to an NVIDIA driver issue.
-        acc = service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='azure')
+        acc = self.get_accelerators_from_instance_type(instance_type)
         if acc is not None:
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
