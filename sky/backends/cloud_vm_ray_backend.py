@@ -352,7 +352,7 @@ class RayCodeGen:
         self._code += [
             textwrap.dedent(f"""\
             returncodes = ray.get(futures)
-            if sum(returncodes) != 0:    
+            if sum(returncodes) != 0:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # This waits for all streaming logs to finish.
                 time.sleep(1)
@@ -1307,11 +1307,11 @@ class CloudVmRayBackend(backends.Backend):
                 handle.cluster_yaml)
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
-                node_name = f' worker{i}' if i > 0 else ' head'
+                node_name = f' on worker{i}' if i > 0 else ' on head'
                 if handle.launched_nodes == 1:
                     node_name = ''
                 logger.info(
-                    f'{fore.CYAN}Running setup{node_name}...{style.RESET_ALL}')
+                    f'{fore.CYAN}Running setup{node_name}.{style.RESET_ALL}')
                 self._rsync_up(handle,
                                ip=ip,
                                source=setup_sh_path,

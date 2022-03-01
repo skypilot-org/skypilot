@@ -143,6 +143,7 @@ def run_with_log(
                 # Skip these lines caused by `-i` option of bash. Failed to find
                 # other way to turn off these two warning.
                 # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+                # TODO(zongheng,zhwu): ssh -T -i -tt seems to get rid of these.
                 skip_lines=[
                     'bash: cannot set terminal process group',
                     'bash: no job control in this shell',
@@ -162,13 +163,14 @@ def make_task_bash_script(codegen: str) -> str:
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
     script = [
         textwrap.dedent(f"""\
-                #!/bin/bash
-                source ~/.bashrc
-                set -a
-                . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
-                set +a
-                cd {SKY_REMOTE_WORKDIR}"""),
+            #!/bin/bash
+            source ~/.bashrc
+            set -a
+            . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
+            set +a
+            cd {SKY_REMOTE_WORKDIR}"""),
         codegen,
+        '',  # New line at EOF.
     ]
     script = '\n'.join(script)
     return script
