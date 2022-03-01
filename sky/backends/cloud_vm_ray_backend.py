@@ -672,8 +672,6 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         self._clear_blocklist()
-        cluster_exists = global_user_state.get_handle_from_cluster_name(
-            cluster_name) is not None
         for region, zones in self._yield_region_zones(to_provision,
                                                       cluster_name):
             if self._in_blocklist(to_provision.cloud, region, zones):
@@ -712,7 +710,6 @@ class RetryingVmProvisioner(object):
                                                     cluster_handle=handle,
                                                     ready=False)
             logging_info = {
-                'is_restart': cluster_exists,
                 'cluster_name': cluster_name,
                 'region_name': region.name,
                 'zone_str': zone_str,
@@ -817,19 +814,19 @@ class RetryingVmProvisioner(object):
             public_key_path = config['auth']['ssh_public_key']
             file_mounts[public_key_path] = public_key_path
 
-        startup_verb = 'Starting' if logging_info[
-            'is_restart'] else 'Provisioning'
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
 
         # Don't show the zone_str if restarting.
-        zone_str = f'({zone_str})' if not logging_info['is_restart'] else ''
-        with console.status(f'[bold cyan]{startup_verb} cluster on '
-                            f'{to_provision_cloud} {region_name}[/] '
-                            f'{zone_str}'):
+        with console.status(f'[bold cyan]Launching on {to_provision_cloud}'
+                            f' {region_name}[/] '
+                            f'({zone_str})'):
             # ray up.
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
+
+        logger.info(f'{colorama.Fore.CYAN}Launching on {to_provision_cloud} '
+                    f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 or returncode != 0:
