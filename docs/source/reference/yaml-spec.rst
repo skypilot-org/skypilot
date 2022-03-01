@@ -15,7 +15,9 @@ describe all fields available.
     # each time launch or exec is run with the yaml file.
     # NOTE: Sky does not currently support large, multi-gigabyte workdirs as the
     # files are synced to the remote VM with `rsync`. Please consider using Sky
-    # Storage to transfer large datasets and files.
+    # Storage to transfer large datasets and files. Any files or directories
+    # included in a .gitignore file in the root of your project's working directory
+    # will automatically be ignored during upload.
     workdir: ~/my-task-code
 
     # Number of nodes (optional) to launch including the head node. If not
