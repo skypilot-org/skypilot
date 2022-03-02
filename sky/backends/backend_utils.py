@@ -10,7 +10,7 @@ import subprocess
 import sys
 import textwrap
 import time
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 
@@ -670,8 +670,7 @@ def run_command_on_ip_via_ssh(
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
-                      stderr: Optional[str] = None,
-                      exit_handler: Callable[[int], None] = sys.exit) -> int:
+                      stderr: Optional[str] = None) -> int:
     """Handle the returncode of a command.
 
     Args:
@@ -679,7 +678,6 @@ def handle_returncode(returncode: int,
         command: The command that was run.
         error_msg: The error message to print.
         stderr: The stderr of the command.
-        exit_handler: Exit function that handles the returncode
     """
     if returncode != 0:
         if stderr is not None:
@@ -687,8 +685,7 @@ def handle_returncode(returncode: int,
         logger.error(f'Command failed with code {returncode}: {command}')
         logger.error(
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
-        if exit_handler:
-            exit_handler(returncode)
+        sys.exit(returncode)
     return returncode
 
 
