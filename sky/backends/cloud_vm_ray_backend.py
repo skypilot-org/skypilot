@@ -817,7 +817,6 @@ class RetryingVmProvisioner(object):
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
 
-        # Don't show the zone_str if restarting.
         with console.status(f'[bold cyan]Launching on {to_provision_cloud}'
                             f' {region_name}[/] '
                             f'({zone_str})'):
@@ -825,6 +824,7 @@ class RetryingVmProvisioner(object):
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
 
+        # Print region attempted for auto-failover history.
         logger.info(f'{colorama.Fore.CYAN}Launching on {to_provision_cloud} '
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
 
