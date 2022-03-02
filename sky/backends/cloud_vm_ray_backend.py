@@ -43,7 +43,6 @@ SKY_DIRSIZE_WARN_THRESHOLD = 100
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
-SKY_REMOTE_LOGS_ROOT = job_lib.SKY_REMOTE_LOGS_ROOT
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
 SKYLET_REMOTE_PATH = backend_utils.SKY_REMOTE_PATH
 
@@ -380,7 +379,7 @@ class RetryingVmProvisioner(object):
         self._blocked_zones = set()
         self._blocked_launchable_resources = set()
 
-        self.log_dir = log_dir
+        self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
         self._optimize_target = optimize_target
 
@@ -679,8 +678,6 @@ class RetryingVmProvisioner(object):
                 continue
             zone_str = ','.join(
                 z.name for z in zones) if zones is not None else 'all zones'
-            logger.info(f'\n{style.BRIGHT}Launching on {to_provision.cloud} '
-                        f'{region.name}{style.RESET_ALL} ({zone_str})')
             config_dict = backend_utils.write_cluster_config(
                 to_provision,
                 num_nodes,
@@ -712,10 +709,14 @@ class RetryingVmProvisioner(object):
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
-
+            logging_info = {
+                'cluster_name': cluster_name,
+                'region_name': region.name,
+                'zone_str': zone_str,
+            }
             gang_failed, rc, stdout, stderr = self._gang_schedule_ray_up(
                 to_provision.cloud, num_nodes, cluster_config_file,
-                log_abs_path, stream_logs)
+                log_abs_path, stream_logs, logging_info)
 
             if gang_failed or rc != 0:
                 if gang_failed:
@@ -761,7 +762,8 @@ class RetryingVmProvisioner(object):
 
     def _gang_schedule_ray_up(self, to_provision_cloud: clouds.Cloud,
                               num_nodes: int, cluster_config_file: str,
-                              log_abs_path: str, stream_logs: bool):
+                              log_abs_path: str, stream_logs: bool,
+                              logging_info: dict):
         """Provisions a cluster via 'ray up' with gang scheduling.
 
         Benefits:
@@ -812,10 +814,19 @@ class RetryingVmProvisioner(object):
             public_key_path = config['auth']['ssh_public_key']
             file_mounts[public_key_path] = public_key_path
 
-        with console.status('[bold cyan]Starting cluster...'):
+        region_name = logging_info['region_name']
+        zone_str = logging_info['zone_str']
+
+        with console.status(f'[bold cyan]Launching on {to_provision_cloud}'
+                            f' {region_name}[/] '
+                            f'({zone_str})'):
             # ray up.
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
+
+        # Print region attempted for auto-failover history.
+        logger.info(f'{colorama.Fore.CYAN}Launching on {to_provision_cloud} '
+                    f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 or returncode != 0:
@@ -1189,7 +1200,8 @@ class CloudVmRayBackend(backends.Backend):
                         command,
                         ssh_user=ssh_user,
                         ssh_private_key=ssh_private_key,
-                        log_path=os.path.join(self.log_dir, 'file_mounts.log'),
+                        log_path=os.path.join(os.path.expanduser(self.log_dir),
+                                              'file_mounts.log'),
                         ssh_control_name=self._ssh_control_name(handle))
                     backend_utils.handle_returncode(
                         returncode, command, f'Failed to sync {src} to {dst}.')
@@ -1344,8 +1356,8 @@ class CloudVmRayBackend(backends.Backend):
                                         'Failed to sync logs.', stderr)
         log_dir = log_dir.strip()
 
-        local_log_dir = log_dir
-        remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, log_dir)
+        local_log_dir = os.path.expanduser(log_dir)
+        remote_log_dir = log_dir
 
         style = colorama.Style
         fore = colorama.Fore
@@ -1406,9 +1418,9 @@ class CloudVmRayBackend(backends.Backend):
                            source=fp.name,
                            target=script_path,
                            with_outputs=False)
-
-        job_log_path = os.path.join(self.log_dir, 'job_submit.log')
-        remote_log_dir = os.path.join(SKY_REMOTE_LOGS_ROOT, self.log_dir)
+        remote_log_dir = self.log_dir
+        local_log_dir = os.path.expanduser(remote_log_dir)
+        job_log_path = os.path.join(local_log_dir, 'job_submit.log')
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         assert executable == 'python3', executable
@@ -1525,8 +1537,7 @@ class CloudVmRayBackend(backends.Backend):
     def _execute_task_one_node(self, handle: ResourceHandle, task: Task,
                                job_id: int, detach_run: bool) -> None:
         # Launch the command as a Ray task.
-        log_dir = os.path.join(f'{SKY_REMOTE_LOGS_ROOT}', f'{self.log_dir}',
-                               'tasks')
+        log_dir = os.path.join(self.log_dir, 'tasks')
         log_path = os.path.join(log_dir, 'run.log')
 
         accelerator_dict = _get_task_demands_dict(task)
@@ -1560,8 +1571,7 @@ class CloudVmRayBackend(backends.Backend):
         #   ray.init(...)
         #   for node:
         #     submit _run_cmd(cmd) with resource {node_i: 1}
-        log_dir_base = os.path.join(f'{SKY_REMOTE_LOGS_ROOT}',
-                                    f'{self.log_dir}')
+        log_dir_base = self.log_dir
         log_dir = os.path.join(log_dir_base, 'tasks')
         accelerator_dict = _get_task_demands_dict(task)
 
@@ -1638,7 +1648,8 @@ class CloudVmRayBackend(backends.Backend):
                     storage.delete()
 
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
-        log_path = os.path.join(self.log_dir, 'teardown.log')
+        log_path = os.path.join(os.path.expanduser(self.log_dir),
+                                'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
