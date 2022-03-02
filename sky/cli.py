@@ -110,6 +110,15 @@ def _parse_accelerator_options(accelerator_options: str) -> Dict[str, float]:
     return accelerators
 
 
+def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
+    """Check if cloud is registered and return cloud object."""
+    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
+        raise click.UsageError(
+            f'Cloud \'{cloud}\' is not supported. '
+            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
+    return clouds.CLOUD_REGISTRY.get(cloud)
+
+
 def _interactive_node_cli_command(cli_func):
     """Click command decorator for interactive node commands."""
     assert cli_func.__name__ in _INTERACTIVE_NODE_TYPES, cli_func.__name__
@@ -502,11 +511,7 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         new_resources = copy.deepcopy(list(task.resources)[0])
 
         if cloud is not None:
-            if cloud not in clouds.CLOUD_REGISTRY:
-                raise click.UsageError(
-                    f'Cloud \'{cloud}\' is not supported. '
-                    f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
-            new_resources.cloud = clouds.CLOUD_REGISTRY[cloud]
+            new_resources.cloud = _get_cloud(cloud)
         if gpus is not None:
             new_resources.accelerators = _parse_accelerator_options(gpus)
         if use_spot is not None:
@@ -1162,11 +1167,7 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     gpus is None and spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    cloud_provider = clouds.CLOUD_REGISTRY.get(cloud, default_resources.cloud)
-    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
-        raise click.UsageError(
-            f'Cloud \'{cloud}\' is not supported. '
-            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
+    cloud_provider = _get_cloud(cloud)
     if gpus is not None:
         gpus = _parse_accelerator_options(gpus)
     elif instance_type is None:
@@ -1242,12 +1243,7 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
-    cloud_provider = clouds.CLOUD_REGISTRY.get(cloud, None)
-    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
-        raise click.UsageError(
-            f'Cloud \'{cloud}\' is not supported. ' + \
-            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}'
-        )
+    cloud_provider = _get_cloud(cloud)
     if instance_type is None:
         instance_type = default_resources.instance_type
     if spot is None:
@@ -1360,7 +1356,11 @@ def check():
               is_flag=True,
               default=False,
               help='Show details of all GPU/TPU/accelerator offerings.')
-def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-builtin
+@click.option('--cloud',
+              default=None,
+              type=str,
+              help='Cloud provider to query.')
+def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pylint: disable=redefined-builtin
     """Show supported GPU/TPU/accelerators.
 
     To show the detailed information of a GPU/TPU type (which clouds offer it,
@@ -1368,6 +1368,9 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
 
     To show all GPUs, including less common ones and their detailed
     information, use `sky show-gpus --all`.
+
+    NOTE: The price displayed for each instance type is the lowest across all
+    regions for both on-demand and spot instances.
     """
     show_all = all
     if show_all and gpu_name is not None:
@@ -1385,17 +1388,20 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         if gpu_name is None:
-            result = service_catalog.list_accelerator_counts(gpus_only=True)
-
+            result = service_catalog.list_accelerator_counts(gpus_only=True,
+                                                             clouds=cloud)
             # NVIDIA GPUs
             for gpu in service_catalog.get_common_gpus():
-                gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+                if gpu in result:
+                    gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             yield from gpu_table.get_string()
-            yield '\n\n'
 
             # Google TPUs
             for tpu in service_catalog.get_tpus():
-                tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+                if tpu in result:
+                    tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
+            if len(tpu_table.get_string()) > 0:
+                yield '\n\n'
             yield from tpu_table.get_string()
 
             # Other GPUs
@@ -1409,7 +1415,12 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
 
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=gpu_name)
+                                                   name_filter=gpu_name,
+                                                   clouds=cloud)
+        if len(result) == 0:
+            yield f'Resources \'{gpu_name}\' not found. '
+            yield 'Try \'sky show-gpus --all\' '
+            yield 'to show available accelerators.'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = util_lib.create_table([
@@ -1418,14 +1429,20 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
                 'CLOUD',
                 'INSTANCE_TYPE',
                 'HOST_MEMORY',
+                'HOURLY_PRICE',
+                'HOURLY_SPOT_PRICE',
             ])
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(attachable)'
                 mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '-'
+                price_str = f'$ {item.price:.3f}' if not pd.isna(
+                    item.price) else '-'
+                spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
+                    item.spot_price) else '-'
                 accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
-                    instance_type_str, mem_str
+                    instance_type_str, mem_str, price_str, spot_price_str
                 ])
 
             if i != 0 or gpu_name is None:
@@ -1442,15 +1459,13 @@ def show_gpus(gpu_name: Optional[str], all: bool):  # pylint: disable=redefined-
 
 @cli.group(cls=_NaturalOrderGroup)
 def storage():
-    """Handle to run Sky Storage CLI commands.
-    """
+    """Storage related commands."""
     pass
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
 def storage_ls():
-    """Lists storage objects created.
-    """
+    """List storage objects created."""
     storage_stat = global_user_state.get_storage()
     storage_table = util_lib.create_table([
         'NAME',
@@ -1489,7 +1504,7 @@ def storage_ls():
               help='Used with delete; Delete all storages.')
 @click.argument('name', required=False, type=str, nargs=-1)
 def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
-    """Deletes storage objects.
+    """Delete storage objects.
 
     Example:
 
@@ -1504,7 +1519,7 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         sky storage delete -a
     """
     if all:
-        click.echo('Deleting all storage objects')
+        click.echo('Deleting all storage objects...')
         storages = global_user_state.get_storage()
         for row in storages:
             store_object = data.Storage(name=row['name'],
@@ -1514,16 +1529,16 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         for n in name:
             handle = global_user_state.get_handle_from_storage_name(n)
             if handle is None:
-                click.echo(f'Storage Name {n} not found!')
+                click.echo(f'Storage name {n} not found.')
             else:
-                click.echo(f'Deleting storage object {n}')
+                click.echo(f'Deleting storage object {n}...')
                 store_object = data.Storage(name=handle.storage_name,
                                             source=handle.source)
                 store_object.delete()
     else:
         raise click.ClickException(
             'Must pass in \'-a/--all\' or storage names to \'sky '
-            'storage delete\'')
+            'storage delete\'.')
 
 
 def main():
