@@ -120,33 +120,49 @@ def _thread_handler(func: Callable[[Any], Any],
     if not num_threads:
         num_threads = mp.cpu_count()
 
-    processes = []
-    for arg in args:
-        p = mp.Process(target=func, args=arg)
-        processes.append(p)
+    processes = {}
+    num_args = len(args)
+    p_size = min(num_threads, num_args)
+    for idx in range(p_size):
+        p = mp.Process(target=func, args=args.pop())
+        processes[idx] = p
         p.start()
 
+    completed = []
     while True:
         failed = []
-        completed = []
-        for process in processes:
-            if process.exitcode is not None:
+        for idx, process in processes.items():
+            if process is not None and process.exitcode is not None:
                 if process.exitcode != 0:
                     failed.append(process)
                 else:
                     completed.append(process)
+                    # Replace complete process with new process
+                    if len(args) > 0:
+                        p = mp.Process(target=func, args=args.pop())
+                        processes[idx] = p
+                        p.start()
+                    else:
+                        processes[idx] = None
 
         if failed:
-            for process in processes:
-                if process not in failed:
+            # If one or more threads fail, kill all running threads
+            for idx, process in processes.items():
+                if process is not None and process not in failed:
                     process.terminate()
             break
 
-        if len(completed) == len(processes):
+        # Exit if the total
+        if len(completed) == num_args:
             break
         time.sleep(0.5)
 
+    for p in completed:
+        p.join()
+
     if failed:
+        for p in failed:
+            p.join()
         logger.error(f'{colorama.Fore.RED} Sky failed at Step: '
                      f'{step}{colorama.Style.RESET_ALL}')
         sys.exit()
@@ -1366,7 +1382,6 @@ class CloudVmRayBackend(backends.Backend):
             f.flush()
             setup_sh_path = f.name
             setup_file = os.path.basename(setup_sh_path)
-
             # Sync the setup script up and run it.
             ip_list = self._get_node_ips(handle.cluster_yaml,
                                          handle.launched_nodes)
@@ -1400,7 +1415,6 @@ class CloudVmRayBackend(backends.Backend):
                     error_msg=f'Failed to setup with return code {returncode}')
 
             _thread_handler(_setup_node, ip_enum, 'Setup', num_threads)
-
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
