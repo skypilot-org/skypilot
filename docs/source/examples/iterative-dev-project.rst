@@ -7,14 +7,14 @@ developing a machine learning project on Sky.
 
 Provisioning a VM
 ------------------
-To provision a virtual machine named dev, run the following command:
+To provision a virtual machine named :code:`dev`, run
 
 .. code-block:: console
 
   $ sky gpunode -c dev
 
 By default, GPU nodes are provisioned on the cheapest cloud with a single K80 GPU.
-If you prefer, you can review our CLI reference for all configuration options.
+To use other GPUs, see the :ref:`CLI reference <cli>` for all configuration options.
 
 Development
 ------------
@@ -25,12 +25,11 @@ To log in to the machine, Sky provides easy password-less SSH access:
   $ ssh dev
 
 This also allows for integration with common tools such as :code:`scp`, :code:`rsync`, and
-VSCode Remote.
+`Visual Studio Code Remote <https://code.visualstudio.com/docs/remote/remote-overview>`_.
 
 Running your code
 --------------------
-You can run your project by directly logging into the VM and running shell commands, but Sky also
-provides remote execution without logging in:
+Run your project on the cluster without logging in, using :code:`sky exec`:
 
 .. code-block:: bash
 
@@ -42,28 +41,45 @@ provides remote execution without logging in:
   # defined in the task specification.
   $ sky exec dev task.yaml
 
-Syncing code and transferring artifacts
+You can also run your project by directly logging into the VM and running commands.
+
+Syncing local code to cluster
 --------------------------------------
-Use the familiar scp/rsync to transfer files between your local machine and remote VM:
+Sky **simplifies code syncing** by automatically syncing a local working
+directory to a cluster. Syncing happens on every :code:`sky launch` and
+:code:`sky exec`, so you can edit code locally and transparently have them
+uploaded to remote clusters.
 
-.. code-block::
+The working directory can be configured either (1) with the :code:`workdir`
+field in a :ref:`task YAML file <yaml-spec>`, or (2) using the command line
+option :code:`--workdir`:
 
-  $ rsync -Pavz my_code/ dev:/path/to/destination  # copy files to remote VM
-  $ rsync -Pavz dev:/path/to/source my_code/       # copy files from remote VM
+.. code-block:: bash
 
-Sky **simplifies code syncing** by the automatic transfer of a working directory
-to the cluster.  The working directory can be configured with the
-:code:`workdir` option in a task YAML file, or using the following command line
-option:
+  $ sky launch -c dev --workdir=/path/to/code task.yaml
+  $ sky exec dev --workdir=/path/to/code task.yaml
 
-.. code-block::
+These commands sync the working directory to :code:`~/sky_workdir` on the remote
+VMs, and the task is invoked under that working directory (so that it can invoke
+scripts, access checkpoints, etc.).
 
-  $ sky launch --workdir=/path/to/code task.yaml
-  $ sky exec --workdir=/path/to/code task.yaml
+Transferring artifacts
+--------------------------------------
+Use the familiar scp/rsync to transfer files between your local machine and the
+head node of a cluster:
 
-These commands sync the working directory to a location on the remote VM, and
-the task is run under that working directory (e.g., to invoke scripts, access
-checkpoints, etc.).
+.. code-block:: bash
+
+  $ rsync -Pavz my_code/ dev:/path/to/destination  # copy files to head node
+  $ rsync -Pavz dev:/path/to/source my_code/       # copy files from head node
+
+.. note::
+    Sky currently does not natively support **downloading artifacts from the
+    worker machines** of a multi-node cluster.  As temporary workarounds, query
+    the worker IPs from the cloud console, and run :code:`rsync -Pavz -e 'ssh -i
+    ~/.ssh/sky-key' <worker_ip>:/path /local_path`. **Uploading files to a
+    multi-node cluster**, both head and workers, is supported via
+    :ref:`file_mounts <yaml-spec>`.
 
 Ending a development session
 -----------------------------
