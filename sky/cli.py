@@ -36,7 +36,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
-import colorama
 import pendulum
 from rich import console as rich_console
 
@@ -935,6 +934,10 @@ def start(clusters: Tuple[str]):
     start the cluster.  (In the second case, any failed setup steps are not
     performed and only a request to start the machines is attempted.)
 
+    Note that auto-failover provisioning is not used when restarting stopped
+    clusters. They will be started on the same cloud and region that was chosen
+    before.
+
     If a cluster is already in an UP status, this command has no effect on it.
 
     Examples:
@@ -1015,10 +1018,6 @@ def start(clusters: Tuple[str]):
         with sky.Dag():
             dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
-        click.secho(
-            f'{colorama.Fore.CYAN}Starting cluster '
-            f'{colorama.Fore.GREEN}{name}...',
-            bold=True)
         backend.provision(dummy_task,
                           to_provision=handle.launched_resources,
                           dryrun=False,
