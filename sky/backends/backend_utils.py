@@ -670,7 +670,8 @@ def run_command_on_ip_via_ssh(
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
-                      stderr: Optional[str] = None) -> int:
+                      stderr: Optional[str] = None,
+                      raise_error: bool = False) -> int:
     """Handle the returncode of a command.
 
     Args:
@@ -685,8 +686,10 @@ def handle_returncode(returncode: int,
         logger.error(f'Command failed with code {returncode}: {command}')
         logger.error(
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
+        if raise_error:
+            raise OSError(returncode, error_msg)
         sys.exit(returncode)
-    return returncode
+
 
 
 def run(cmd, **kwargs):

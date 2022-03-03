@@ -6,6 +6,7 @@ import getpass
 import hashlib
 import inspect
 import json
+from multiprocessing import pool
 import os
 import re
 import sys
@@ -16,7 +17,6 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
-import multiprocessing as mp
 from rich import console as rich_console
 
 import sky
@@ -110,63 +110,22 @@ def _path_size_megabytes(path: str) -> int:
         subprocess.check_output(['du', '-sh', '-m',
                                  path]).split()[0].decode('utf-8'))
 
+def run_in_parallel(func: Callable, args: List[Any]):
+    """Run a function in parallel on a list of arguments.
 
-def _thread_handler(func: Callable[[Any], Any],
-                    args: List[Any],
-                    step: str,
-                    num_threads: int = None) -> None:
-
-    if not num_threads:
-        num_threads = mp.cpu_count()
-
-    processes = {}
-    num_args = len(args)
-    p_size = min(num_threads, num_args)
-    for idx in range(p_size):
-        p = mp.Process(target=func, args=args.pop())
-        processes[idx] = p
-        p.start()
-
-    completed = []
-    while True:
-        failed = []
-        for idx, process in processes.items():
-            if process is not None and process.exitcode is not None:
-                if process.exitcode != 0:
-                    failed.append(process)
-                else:
-                    completed.append(process)
-                    # Replace complete process with new process
-                    if len(args) > 0:
-                        p = mp.Process(target=func, args=args.pop())
-                        processes[idx] = p
-                        p.start()
-                    else:
-                        processes[idx] = None
-
-        if failed:
-            # If one or more threads fail, kill all running threads
-            for idx, process in processes.items():
-                if process is not None and process not in failed:
-                    process.terminate()
-            break
-
-        # Exit if the total
-        if len(completed) == num_args:
-            break
-        time.sleep(0.5)
-
-    for p in completed:
-        p.join()
-
-    if failed:
-        for p in failed:
+    The function should raise an OSError if it fails.
+    """
+    # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
+    with pool.ThreadPool() as p:
+        try:
+            list(p.imap_unordered(func, args))
+        except OSError as e:
+            p.close()
+            p.terminate()
+            sys.exit(e.errno)
+        else:
+            p.close()
             p.join()
-        logger.error(f'{colorama.Fore.RED} Sky failed at Step: '
-                     f'{step}{colorama.Style.RESET_ALL}')
-        sys.exit()
-
-
 class RayCodeGen:
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -1181,10 +1140,7 @@ class CloudVmRayBackend(backends.Backend):
         _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
         return handle
 
-    def sync_workdir(self,
-                     handle: ResourceHandle,
-                     workdir: Path,
-                     num_threads: int = None) -> None:
+    def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
         # e.g., in CLI.  So we should rerun rsync_up.
@@ -1192,9 +1148,11 @@ class CloudVmRayBackend(backends.Backend):
         style = colorama.Style
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
-        ip_enum = list(enumerate(ip_list))
 
         # Raise warning if directory is too large
+        if not os.path.exists(full_workdir):
+            logger.error(f'{fore.RED}Directory "{workdir}" does not exist.{style.RESET_ALL}')
+            sys.exit(1)
         dir_size = _path_size_megabytes(full_workdir)
         if dir_size >= SKY_DIRSIZE_WARN_THRESHOLD:
             logger.warning(f'{fore.YELLOW}The size of workdir {workdir} '
@@ -1207,30 +1165,30 @@ class CloudVmRayBackend(backends.Backend):
                 f'Symlink contents are not uploaded.{style.RESET_ALL}')
             workdir_symlink = True
 
-        def _sync_workdir_node(idx, ip):
-            node_name = f'worker{idx}' if idx > 0 else 'head'
-            with console.status('[bold cyan]Syncing: [bright]workdir '
-                                f'({workdir}) -> {node_name}'):
-                self._rsync_up(handle,
-                               ip=ip,
-                               source=workdir,
-                               target=SKY_REMOTE_WORKDIR,
-                               log_path=os.path.join(self.log_dir,
-                                                     'workdir_sync.log'),
-                               stream_logs=False)
-            logger.info(
-                f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
-                f'{node_name}{style.RESET_ALL}.')
+        def _sync_workdir_node(ip):
+            cur_workdir = workdir
+            if workdir_symlink:
+                cur_workdir = f'{workdir}/'
+            self._rsync_up(handle,
+                            ip=ip,
+                            source=cur_workdir,
+                            target=SKY_REMOTE_WORKDIR,
+                            log_path=os.path.join(self.log_dir,
+                                                    'workdir_sync.log'),
+                            stream_logs=False,
+                            raise_error=True)
 
-        _thread_handler(_sync_workdir_node, ip_enum, 'Workdir Sync',
-                        num_threads)
+        with console.status('[bold cyan]Syncing: [bright]workdir'):
+            run_in_parallel(_sync_workdir_node, ip_list)
+
+            logger.info(
+                f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}){style.RESET_ALL}.')
 
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
         all_file_mounts: Dict[Path, Path],
         cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
-        num_threads: int = None,
     ) -> None:
         """Mounts all user files to the remote nodes."""
         # File mounts handling for remote paths possibly without write access:
@@ -1257,47 +1215,60 @@ class CloudVmRayBackend(backends.Backend):
                               command: Optional[str] = None,
                               run_rsync: Optional[bool] = False):
             full_src = os.path.abspath(os.path.expanduser(src))
+            if not os.path.islink(full_src) and not os.path.isfile(
+                    full_src):
+                src = f'{src}/'
 
-            def _sync_node(idx, ip):
-                node_name = f'worker{idx}' if idx > 0 else 'head'
-                logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
-                            f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
-                thread_src = src
-                if not os.path.islink(full_src) and not os.path.isfile(
-                        full_src):
-                    thread_src = f'{src}/'
+            def _sync_node(ip):
+                if command is not None:
+                    returncode = backend_utils.run_command_on_ip_via_ssh(
+                        ip,
+                        command,
+                        ssh_user=ssh_user,
+                        ssh_private_key=ssh_private_key,
+                        log_path=log_path,
+                        stream_logs=False,
+                        ssh_control_name=self._ssh_control_name(handle))
+                    backend_utils.handle_returncode(
+                        returncode,
+                        command,
+                        f'Failed to sync {src} to {dst}.',
+                        raise_error=True)
 
-                with console.status(f'[bold cyan]Syncing (on {node_name}): '
-                                    f'[bright]{src} -> {dst}'):
-                    if command is not None:
-                        returncode = backend_utils.run_command_on_ip_via_ssh(
-                            ip,
-                            command,
-                            ssh_user=ssh_user,
-                            ssh_private_key=ssh_private_key,
-                            log_path=log_path,
-                            stream_logs=False,
-                            ssh_control_name=self._ssh_control_name(handle))
-                        backend_utils.handle_returncode(
-                            returncode, command,
-                            f'Failed to sync {src} to {dst}.')
+                if run_rsync:
+                    # TODO(zhwu): Optimize for large amount of files.
+                    # zip / transfer/ unzip
+                    self._rsync_up(handle,
+                                    ip=ip,
+                                    source=src,
+                                    target=dst,
+                                    log_path=log_path,
+                                    stream_logs=False,
+                                    raise_error=True)
 
-                    if run_rsync:
-                        # TODO(zhwu): Optimize for large amount of files.
-                        # zip / transfer/ unzip
-                        self._rsync_up(handle,
-                                       ip=ip,
-                                       source=src,
-                                       target=dst,
-                                       log_path=log_path,
-                                       stream_logs=False)
-                logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
-                            f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
+            with console.status(f'[bold cyan]Syncing: [bright]{src} -> {dst}'):
+                run_in_parallel(_sync_node, ip_list)
+            logger.info(f'{fore.CYAN}Syncing: {style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
 
-            ip_enum = list(enumerate(ip_list))
-            _thread_handler(_sync_node, ip_enum,
-                            f'ile Mounting: Syncing {src} -> {dst}',
-                            num_threads)
+        # Pre-check the files and warn
+        for dst, src in mounts.items():
+            if not task_lib.is_cloud_store_url(src):
+                full_src = os.path.abspath(os.path.expanduser(src))
+                if not os.path.exists(full_src):
+                    logger.error(
+                        f'{fore.RED}Directory "{src}" does not exist.{style.RESET_ALL}'
+                    )
+                    sys.exit(1)
+                src_size = _path_size_megabytes(full_src)
+                if src_size >= SKY_DIRSIZE_WARN_THRESHOLD:
+                    logger.warning(
+                        f'{fore.YELLOW}The size of file mount src {src} '
+                        f'is {src_size} MB. Try to keep src small, as '
+                        f'large sizes will slowdown rsync.{style.RESET_ALL}')
+                if os.path.islink(full_src):
+                    logger.warning(
+                        f'{fore.YELLOW}Source path {src} is a symlink. '
+                        f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
@@ -1324,17 +1295,6 @@ class CloudVmRayBackend(backends.Backend):
                         f'mkdir -p {os.path.dirname(wrapped_dst)}'
                 else:
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
-
-                src_size = _path_size_megabytes(full_src)
-                if src_size >= SKY_DIRSIZE_WARN_THRESHOLD:
-                    logger.warning(
-                        f'{fore.YELLOW}The size of file mount src {src} '
-                        f'is {src_size} MB. Try to keep src small, as '
-                        f'large sizes will slowdown rsync.{style.RESET_ALL}')
-                if os.path.islink(full_src):
-                    logger.warning(
-                        f'{fore.YELLOW}Source path {src} is a symlink. '
-                        f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
                 # TODO(mluo): Fix method so that mkdir and rsync run together
                 sync_to_all_nodes(src=src,
@@ -1379,16 +1339,14 @@ class CloudVmRayBackend(backends.Backend):
                 ssh_private_key=ssh_private_key,
                 log_path=log_path,
                 ssh_control_name=self._ssh_control_name(handle))
-            return backend_utils.handle_returncode(
-                returncode, symlink_command, 'Failed to create symlinks.')
+            backend_utils.handle_returncode(returncode,
+                                                   symlink_command,
+                                                   'Failed to create symlinks.',
+                                                   raise_error=True)
 
-        _thread_handler(_symlink_node, [[ip] for ip in ip_list],
-                        'File Mounting: Symlink Generation', num_threads)
+        run_in_parallel(_symlink_node, ip_list)
 
-    def setup(self,
-              handle: ResourceHandle,
-              task: Task,
-              num_threads: int = None) -> None:
+    def setup(self, handle: ResourceHandle, task: Task) -> None:
         style = colorama.Style
         fore = colorama.Fore
 
@@ -1406,14 +1364,8 @@ class CloudVmRayBackend(backends.Backend):
                                          handle.launched_nodes)
             ssh_user, ssh_private_key = self._get_ssh_credential(
                 handle.cluster_yaml)
-            ip_enum = list(enumerate(ip_list))
 
-            def _setup_node(idx: int, ip: int) -> int:
-                node_name = f' on worker{idx}' if idx > 0 else ' on head'
-                if handle.launched_nodes == 1:
-                    node_name = ''
-                logger.info(
-                    f'{fore.CYAN}Running setup{node_name}.{style.RESET_ALL}')
+            def _setup_node(ip: int) -> int:
                 self._rsync_up(handle,
                                ip=ip,
                                source=setup_sh_path,
@@ -1428,12 +1380,16 @@ class CloudVmRayBackend(backends.Backend):
                     ssh_private_key=ssh_private_key,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
                     ssh_control_name=self._ssh_control_name(handle))
-                return backend_utils.handle_returncode(
+                backend_utils.handle_returncode(
                     returncode=returncode,
                     command=cmd,
-                    error_msg=f'Failed to setup with return code {returncode}')
+                    error_msg=f'Failed to setup with return code {returncode}',
+                    raise_error=True)
 
-            _thread_handler(_setup_node, ip_enum, 'Setup', num_threads)
+            with console.status(f'[bold cyan]Running setup.'):
+                backend_utils.run_in_parallel(_setup_node, ip_list)
+            logger.info(
+                f'{fore.CYAN}Running setup.{style.RESET_ALL}')
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
@@ -1898,6 +1854,7 @@ class CloudVmRayBackend(backends.Backend):
         stream_logs: bool = True,
         log_path: str = '/dev/null',
         ip: Optional[str] = None,
+        raise_error: bool = True,
     ) -> None:
         """Runs rsync from 'source' to the cluster's node 'target'."""
         # Attempt to use 'rsync user@ip' directly, which is much faster than
@@ -1933,8 +1890,10 @@ class CloudVmRayBackend(backends.Backend):
                                           stream_logs=stream_logs,
                                           shell=True)
         backend_utils.handle_returncode(
-            returncode, command, f'Failed to rsync up {source} -> {target}, '
-            f'see {log_path} for details.')
+            returncode,
+            command, f'Failed to rsync up {source} -> {target}, '
+            f'see {log_path} for details.',
+            raise_error=raise_error)
 
     def _ssh_control_name(self, handle: ResourceHandle) -> str:
         return f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'
