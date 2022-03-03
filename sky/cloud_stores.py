@@ -19,7 +19,11 @@ class CloudStorage:
     """Interface for a cloud object store."""
 
     def __init__(self) -> None:
-        """Initializes the object store."""
+        self._cli_installed = False
+
+    def _check_cli_installation(self) -> None:
+        """Check the installation of CLI tools."""
+        if self._cli_installed: return
         cli_installation_cmd = self._get_cli_installation_cmd()
         proc = backend_utils.run(cli_installation_cmd,
                                  stdout=subprocess.PIPE,
@@ -28,6 +32,7 @@ class CloudStorage:
         backend_utils.handle_returncode(proc.returncode, cli_installation_cmd,
                                         'Failed to install CLI.',
                                         proc.stderr)
+        self._cli_installed = True
 
     def _get_cli_installation_cmd(self) -> str:
         """Returns the installation command of the CLI."""
@@ -85,6 +90,7 @@ class S3CloudStorage(CloudStorage):
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads using AWS CLI."""
+        self._check_cli_installation()
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
@@ -95,6 +101,7 @@ class S3CloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
+        self._check_cli_installation()
         download_via_awscli = f'mkdir -p {destination} && \
                                 aws s3 cp {source} {destination}'
 
@@ -129,6 +136,7 @@ class GcsCloudStorage(CloudStorage):
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
+        self._check_cli_installation()
         commands = f'{self._GSUTIL} ls -d {url}'
         p = backend_utils.run(commands, stdout=subprocess.PIPE)
         out = p.stdout.decode().strip()
@@ -149,12 +157,14 @@ class GcsCloudStorage(CloudStorage):
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil."""
+        self._check_cli_installation()
         download_via_gsutil = (
             f'{self._GSUTIL} -m rsync -d -r {source} {destination}')
         return download_via_gsutil
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using gsutil."""
+        self._check_cli_installation()
         download_via_gsutil = f'{self._GSUTIL} -m cp {source} {destination}'
         return download_via_gsutil
 
