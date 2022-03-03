@@ -43,24 +43,21 @@ Please refer to our [documentation](https://sky-proj-sky.readthedocs-hosted.com/
 ### Installation
 
 ```bash
-# Clone the sky codebase
+# Sky requires python >= 3.6 and < 3.10.
 git clone ssh://git@github.com/sky-proj/sky.git
 cd sky
-# Sky requires python >= 3.6. 3.10+ is currently NOT supported.
 pip install ".[all]"
 ```
 
-If you only want the dependencies for certain clouds, you can also use
-`".[aws,azure,gcp]"`.
+Sky currently supports three major cloud providers: AWS, GCP, and Azure.  If you
+only have access to certain clouds, use any combination of `".[aws,azure,gcp]"`
+(e.g., `".[aws,gcp]"`) to reduce the dependencies installed.
 
 ### Cloud Account Setup
 
-Sky currently supports three major cloud providers: AWS, GCP, and Azure.  To run
-tasks in the clouds, configure access to at least one cloud:
+To run tasks in the clouds, configure access to at least one cloud:
 
-**AWS**:
-
-To get the **AWS Access Key** required by the `aws configure`, please refer to the [AWS manual](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey). The **Default region name [None]:** and **Default output format [None]:** are optional.
+**AWS**
 
 ```bash
 # Install boto
@@ -70,11 +67,12 @@ pip install boto3
 aws configure
 ```
 
-**GCP**:
+To get the **AWS Access Key** required by `aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** fields are optional.
+
+**GCP**
 
 ```bash
 pip install google-api-python-client
-# Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart
 conda install -c conda-forge google-cloud-sdk
 
 # Init.
@@ -85,12 +83,12 @@ gcloud init
 gcloud auth application-default login
 ```
 
-**Azure**:
+**Azure**
 
 ```bash
 # Install the Azure CLI
 pip install azure-cli==2.30.0
-# Login azure
+# Login
 az login
 # Set the subscription to use
 az account set -s <subscription_id>
@@ -98,15 +96,14 @@ az account set -s <subscription_id>
 
 **Verifying cloud setup**
 
-Sky allows you to verify that cloud credentials are correctly configured using
-the CLI:
+Optionally, you can run `sky check` to verify cloud credentials are correctly configured:
 
 ```bash
 # Verify cloud account setup
 sky check
 ```
 
-This will produce output verifying the correct setup of each supported cloud.
+This will produce outputs verifying the correct setup of each supported cloud.
 
 ```
 Checking credentials to enable clouds for Sky.
@@ -121,21 +118,11 @@ Sky will use only the enabled clouds to run tasks. To change this, configure clo
 ### Setup
 
 ```bash
-# Sky requires python version >= 3.6
-
+# Sky requires python >= 3.6 and < 3.10.
 # You can just install the dependencies for
 # certain clouds, e.g., ".[aws,azure,gcp]"
 pip install -e ".[all]"
 ```
-
-<!-- TODO (gautam): Removed since we have reversed it -->
-<!-- ## SSH Access
-The system currently supports SSH access for launched VMs by modifying your local `~/.ssh/config`. For git credentials to forward seamlessly, users must start their SSH agent and add their GitHub SSH key to it:
-```
-eval "$(ssh-agent -s)"
-ssh-add -K /path/to/key  # e.g. ~/.ssh/id_ed25519
-```
-For more information on GitHub authentication and keys, see their [setup tutorial](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent). -->
 
 ### Some general engineering practice suggestions
 
