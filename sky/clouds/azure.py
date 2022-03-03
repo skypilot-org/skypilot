@@ -162,7 +162,7 @@ class Azure(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
-            resources.set_accelerators(None)
+            resources.accelerators = None
             return [resources]
 
         def _make(instance_type):
@@ -171,7 +171,7 @@ class Azure(clouds.Cloud):
             r.instance_type = instance_type
             # Setting this to None as Azure doesn't separately bill / attach
             # the accelerators.  Billed as part of the VM type.
-            r.set_accelerators(None)
+            r.accelerators = None
             return [r]
 
         # Currently, handle a filter on accelerators only.
