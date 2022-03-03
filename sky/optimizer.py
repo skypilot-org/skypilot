@@ -212,8 +212,8 @@ class Optimizer:
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.')
                 if num_resources == 1 and node.time_estimator_func is None:
-                    logger.info('Defaulting estimated time to 1 hr. '
-                                'Call Task.set_time_estimator() to override.')
+                    logger.info(
+                        'Defaulting the task\'s estimated time to 1 hour.')
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource
