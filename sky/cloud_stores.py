@@ -23,15 +23,15 @@ class CloudStorage:
 
     def _check_cli_installation(self) -> None:
         """Check the installation of CLI tools."""
-        if self._cli_installed: return
+        if self._cli_installed:
+            return
         cli_installation_cmd = self._get_cli_installation_cmd()
         proc = backend_utils.run(cli_installation_cmd,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE,
                                  check=False)
         backend_utils.handle_returncode(proc.returncode, cli_installation_cmd,
-                                        'Failed to install CLI.',
-                                        proc.stderr)
+                                        'Failed to install CLI.', proc.stderr)
         self._cli_installed = True
 
     def _get_cli_installation_cmd(self) -> str:
@@ -58,12 +58,12 @@ class CloudStorage:
 class S3CloudStorage(CloudStorage):
     """AWS Cloud Storage."""
 
+    # TODO(zhwu): Use the same version in setup.py.
     _GET_AWS_CLI = ('aws --version > /dev/null 2>&1 || '
                     'pip3 install awscli==1.22.17')
 
     def _get_cli_installation_cmd(self) -> str:
         """Returns the installation command of AWS CLI."""
-        # TODO(zhwu): Use the version in setup.py.
         return self._GET_AWS_CLI
 
     def is_directory(self, url: str) -> bool:
