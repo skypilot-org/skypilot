@@ -65,13 +65,13 @@ to be a simple hello world program.
 We can specify the following task attributes with a YAML file:
 
 - :code:`resources` (optional): what cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
-- :code:`workdir` (optional): specifies working directory containing project code that is synced with the provisioned instance(s). Any .gitignore files found anywhere in the working directory tree will be used to determine files and directories that will be ignored during upload. The behavior matches git's behavior for finding and using .gitignore files.
+- :code:`workdir` (optional): specifies working directory containing project code that is synced with the provisioned instance(s)
 - :code:`setup` (optional): commands that must be run before the task is executed
 - :code:`run` (optional): specifies the commands that must be run as the actual ask
 
 .. note::
 
-    Sky does not currently support large, multi-gigabyte workdirs (e.g. do not store your large datasets in your working directory) as the files are synced to the remote VM with :code:`rsync`. Please consider adding them to your project's :code:`.gitignore` and using :ref:`Sky Storage <sky-storage>` to transfer large datasets and files.
+    For large, multi-gigabyte workdirs (e.g. large datasets in your working directory), uploading may take time as the files are synced to the remote VM with :code:`rsync`. If you have certain files in your workdir that you would like to have excluded from upload, consider including them in your `.gitignore` file. For large datasets and files, consider using :ref:`Sky Storage <sky-storage>` to speed up transfers.
 
 Below is a minimal task YAML that prints "hello sky!" and shows installed Conda environments,
 requiring an NVIDIA Tesla K80 GPU on AWS. See more example yaml files in the `repo <https://github.com/sky-proj/sky/tree/master/examples>`_, with a fully-complete example documented :ref:`here <yaml-spec>`.
