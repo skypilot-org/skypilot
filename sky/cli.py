@@ -273,9 +273,7 @@ def _check_interactive_node_resources_match(
 
 def _confirm_before_operation(display_text: str):
     """Asks user to confirm before an operation is performed."""
-    style = colorama.Style
-    fore = colorama.Fore
-    click.confirm(f'{style.BRIGHT}{fore.RED}{display_text}{style.RESET_ALL}',
+    click.confirm(display_text,
                   default=True,
                   abort=True,
                   show_default=True)
