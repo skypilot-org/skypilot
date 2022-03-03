@@ -1149,9 +1149,6 @@ class CloudVmRayBackend(backends.Backend):
         # TODO(zhwu): make this in parallel
         for i, ip in enumerate(ip_list):
             node_name = f'worker{i}' if i > 0 else 'head'
-            logger.info(
-                f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
-                f'{node_name}{style.RESET_ALL}.')
             with console.status('[bold cyan]Syncing: [bright]workdir '
                                 f'({workdir}) -> {node_name}'):
                 self._rsync_up(handle,
@@ -1161,6 +1158,9 @@ class CloudVmRayBackend(backends.Backend):
                                log_path=os.path.join(self.log_dir,
                                                      'workdir_sync.log'),
                                stream_logs=False)
+            logger.info(
+                f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
+                f'{node_name}{style.RESET_ALL}.')
 
     def sync_file_mounts(
         self,
@@ -1198,8 +1198,6 @@ class CloudVmRayBackend(backends.Backend):
             # TODO(zhwu): make this in parallel
             for i, ip in enumerate(ip_list):
                 node_name = f'worker{i}' if i > 0 else 'head'
-                logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
-                            f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
                 with console.status(f'[bold cyan]Syncing (on {node_name}): '
                                     f'[bright]{src} -> {dst}'):
                     if command is not None:
@@ -1224,6 +1222,8 @@ class CloudVmRayBackend(backends.Backend):
                                        target=dst,
                                        log_path=log_path,
                                        stream_logs=False)
+                logger.info(f'{fore.CYAN}Syncing (on {node_name}): '
+                            f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
