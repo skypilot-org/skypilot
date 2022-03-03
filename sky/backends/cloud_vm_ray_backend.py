@@ -6,7 +6,6 @@ import getpass
 import hashlib
 import inspect
 import json
-from multiprocessing import pool
 import os
 import re
 import sys
@@ -110,22 +109,7 @@ def _path_size_megabytes(path: str) -> int:
         subprocess.check_output(['du', '-sh', '-m',
                                  path]).split()[0].decode('utf-8'))
 
-def run_in_parallel(func: Callable, args: List[Any]):
-    """Run a function in parallel on a list of arguments.
 
-    The function should raise an OSError if it fails.
-    """
-    # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    with pool.ThreadPool() as p:
-        try:
-            list(p.imap_unordered(func, args))
-        except OSError as e:
-            p.close()
-            p.terminate()
-            sys.exit(e.errno)
-        else:
-            p.close()
-            p.join()
 class RayCodeGen:
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -1179,7 +1163,7 @@ class CloudVmRayBackend(backends.Backend):
                             raise_error=True)
 
         with console.status('[bold cyan]Syncing: [bright]workdir'):
-            run_in_parallel(_sync_workdir_node, ip_list)
+            backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
             logger.info(
                 f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}){style.RESET_ALL}.')
@@ -1247,7 +1231,7 @@ class CloudVmRayBackend(backends.Backend):
                                     raise_error=True)
 
             with console.status(f'[bold cyan]Syncing: [bright]{src} -> {dst}'):
-                run_in_parallel(_sync_node, ip_list)
+                backend_utils.run_in_parallel(_sync_node, ip_list)
             logger.info(f'{fore.CYAN}Syncing: {style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
 
         # Pre-check the files and warn
@@ -1341,10 +1325,10 @@ class CloudVmRayBackend(backends.Backend):
                 ssh_control_name=self._ssh_control_name(handle))
             backend_utils.handle_returncode(returncode,
                                                    symlink_command,
-                                                   'Failed to create symlinks.',
+                                                   'Failed to create symlinks. The target destination may already exist',
                                                    raise_error=True)
 
-        run_in_parallel(_symlink_node, ip_list)
+        backend_utils.run_in_parallel(_symlink_node, ip_list)
 
     def setup(self, handle: ResourceHandle, task: Task) -> None:
         style = colorama.Style

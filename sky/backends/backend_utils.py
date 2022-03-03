@@ -3,6 +3,7 @@ import colorama
 import datetime
 import enum
 import getpass
+from multiprocessing import pool
 import os
 import pathlib
 import shlex
@@ -10,7 +11,7 @@ import subprocess
 import sys
 import textwrap
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 
@@ -691,6 +692,22 @@ def handle_returncode(returncode: int,
         sys.exit(returncode)
 
 
+def run_in_parallel(func: Callable, args: List[Any]):
+    """Run a function in parallel on a list of arguments.
+
+    The function should raise an OSError if it fails.
+    """
+    # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
+    with pool.ThreadPool() as p:
+        try:
+            list(p.imap_unordered(func, args))
+        except OSError as e:
+            p.close()
+            p.terminate()
+            sys.exit(e.errno)
+        else:
+            p.close()
+            p.join()
 
 def run(cmd, **kwargs):
     # Should be careful to use this function, as the child process cmd spawn may
