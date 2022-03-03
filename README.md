@@ -2,7 +2,7 @@
 
 ![pytest](https://github.com/sky-proj/sky/actions/workflows/pytest.yml/badge.svg)
 
-Sky is a tool to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
+Sky is a framework to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
 <!-- TODO: We need a logo here -->
 ## A Quick Example
