@@ -36,7 +36,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
-import colorama
 import pendulum
 from rich import console as rich_console
 
@@ -935,6 +934,10 @@ def start(clusters: Tuple[str]):
     start the cluster.  (In the second case, any failed setup steps are not
     performed and only a request to start the machines is attempted.)
 
+    Note that auto-failover provisioning is not used when restarting stopped
+    clusters. They will be started on the same cloud and region that was chosen
+    before.
+
     If a cluster is already in an UP status, this command has no effect on it.
 
     Examples:
@@ -1015,10 +1018,6 @@ def start(clusters: Tuple[str]):
         with sky.Dag():
             dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
-        click.secho(
-            f'{colorama.Fore.CYAN}Starting cluster '
-            f'{colorama.Fore.GREEN}{name}...',
-            bold=True)
         backend.provision(dummy_task,
                           to_provision=handle.launched_resources,
                           dryrun=False,
@@ -1368,6 +1367,9 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
 
     To show all GPUs, including less common ones and their detailed
     information, use `sky show-gpus --all`.
+
+    NOTE: The price displayed for each instance type is the lowest across all
+    regions for both on-demand and spot instances.
     """
     show_all = all
     if show_all and gpu_name is not None:
@@ -1426,14 +1428,20 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                 'CLOUD',
                 'INSTANCE_TYPE',
                 'HOST_MEMORY',
+                'HOURLY_PRICE',
+                'HOURLY_SPOT_PRICE',
             ])
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(attachable)'
                 mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '-'
+                price_str = f'$ {item.price:.3f}' if not pd.isna(
+                    item.price) else '-'
+                spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
+                    item.spot_price) else '-'
                 accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
-                    instance_type_str, mem_str
+                    instance_type_str, mem_str, price_str, spot_price_str
                 ])
 
             if i != 0 or gpu_name is None:

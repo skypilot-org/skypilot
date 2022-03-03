@@ -566,6 +566,7 @@ class SshMode(enum.Enum):
     # Do not allocating pseudo-tty to avoid user input corrupting the output.
     NON_INTERACTIVE = 0
     # Allocate a pseudo-tty, quit the ssh session after the cmd finishes.
+    # Be careful of this mode, as ctrl-c will be passed to the remote process.
     INTERACTIVE = 1
     # Allocate a pseudo-tty and log into the ssh session.
     LOGIN = 2
@@ -791,13 +792,13 @@ class JobLibCodeGen(object):
 
     def tail_logs(self, job_id: str) -> None:
         self._code += [
-            f'log_dir, status = job_lib.log_dir({job_id})',
-            f'log_lib.tail_logs({job_id}, log_dir, status)',
+            f'log_dir = job_lib.log_dir({job_id})',
+            f'log_lib.tail_logs({job_id}, log_dir)',
         ]
 
     def get_log_path(self, job_id: int) -> None:
         self._code += [
-            f'log_dir, _ = job_lib.log_dir({job_id})',
+            f'log_dir = job_lib.log_dir({job_id})',
             'print(log_dir, flush=True)',
         ]
 
