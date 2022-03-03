@@ -10,13 +10,9 @@ TODO:
 import subprocess
 import urllib.parse
 
-from sky import sky_logging
 from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.adaptors import aws
-
-
-logger = sky_logging.init_logger(__name__)
 
 
 class CloudStorage:
@@ -24,7 +20,6 @@ class CloudStorage:
 
     def __init__(self) -> None:
         """Initializes the object store."""
-        logger.info('Initializing cloud object store tools.')
         cli_installation_cmd = self._get_cli_installation_cmd()
         proc = backend_utils.run(cli_installation_cmd,
                                  stdout=subprocess.PIPE,
@@ -58,7 +53,8 @@ class CloudStorage:
 class S3CloudStorage(CloudStorage):
     """AWS Cloud Storage."""
 
-    _GET_AWS_CLI = 'pip3 install awscli==1.22.17'
+    _GET_AWS_CLI = ('aws --version > /dev/null 2>&1 || '
+                    'pip3 install awscli==1.22.17')
 
     def _get_cli_installation_cmd(self) -> str:
         """Returns the installation command of AWS CLI."""
