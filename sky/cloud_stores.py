@@ -10,13 +10,33 @@ TODO:
 import subprocess
 import urllib.parse
 
+from sky import sky_logging
 from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.adaptors import aws
 
 
+logger = sky_logging.init_logger(__name__)
+
+
 class CloudStorage:
     """Interface for a cloud object store."""
+
+    def __init__(self) -> None:
+        """Initializes the object store."""
+        logger.info('Initializing cloud object store tools.')
+        cli_installation_cmd = self._get_cli_installation_cmd()
+        proc = backend_utils.run(cli_installation_cmd,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE,
+                                 check=False)
+        backend_utils.handle_returncode(proc.returncode, cli_installation_cmd,
+                                        'Failed to install CLI.',
+                                        proc.stderr)
+
+    def _get_cli_installation_cmd(self) -> str:
+        """Returns the installation command of the CLI."""
+        raise NotImplementedError
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
@@ -38,10 +58,12 @@ class CloudStorage:
 class S3CloudStorage(CloudStorage):
     """AWS Cloud Storage."""
 
-    # List of commands to install AWS CLI
-    _GET_AWSCLI = [
-        'pip3 install awscli',
-    ]
+    _GET_AWS_CLI = 'pip3 install awscli==1.22.17'
+
+    def _get_cli_installation_cmd(self) -> str:
+        """Returns the installation command of AWS CLI."""
+        # TODO(zhwu): Use the version in setup.py.
+        return self._GET_AWS_CLI
 
     def is_directory(self, url: str) -> bool:
         """Returns whether S3 'url' is a directory.
@@ -73,18 +95,14 @@ class S3CloudStorage(CloudStorage):
         download_via_awscli = f'mkdir -p {destination} && \
                                 aws s3 sync {source} {destination} --delete'
 
-        all_commands = list(self._GET_AWSCLI)
-        all_commands.append(download_via_awscli)
-        return ' && '.join(all_commands)
+        return download_via_awscli
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
         download_via_awscli = f'mkdir -p {destination} && \
                                 aws s3 cp {source} {destination}'
 
-        all_commands = list(self._GET_AWSCLI)
-        all_commands.append(download_via_awscli)
-        return ' && '.join(all_commands)
+        return download_via_awscli
 
 
 class GcsCloudStorage(CloudStorage):
@@ -107,18 +125,17 @@ class GcsCloudStorage(CloudStorage):
 
     _GSUTIL = '~/google-cloud-sdk/bin/gsutil'
 
+    def _get_cli_installation_cmd(self) -> str:
+        return ' && '.join(self._GET_GSUTIL)
+
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        commands = list(self._GET_GSUTIL)
-        commands.append(f'{self._GSUTIL} ls -d {url}')
-        command = ' && '.join(commands)
-        p = backend_utils.run(command, stdout=subprocess.PIPE)
+        commands = f'{self._GSUTIL} ls -d {url}'
+        p = backend_utils.run(commands, stdout=subprocess.PIPE)
         out = p.stdout.decode().strip()
-        # Edge Case: Gcloud command is run for first time #437
-        out = out.split('\n')[-1]
         # If <url> is a bucket root, then we only need `gsutil` to succeed
         # to make sure the bucket exists. It is already a directory.
         _, key = data_utils.split_gcs_path(url)
@@ -138,16 +155,12 @@ class GcsCloudStorage(CloudStorage):
         """Downloads a directory using gsutil."""
         download_via_gsutil = (
             f'{self._GSUTIL} -m rsync -d -r {source} {destination}')
-        all_commands = list(self._GET_GSUTIL)
-        all_commands.append(download_via_gsutil)
-        return ' && '.join(all_commands)
+        return download_via_gsutil
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using gsutil."""
         download_via_gsutil = f'{self._GSUTIL} -m cp {source} {destination}'
-        all_commands = list(self._GET_GSUTIL)
-        all_commands.append(download_via_gsutil)
-        return ' && '.join(all_commands)
+        return download_via_gsutil
 
 
 def get_storage_from_path(url: str) -> CloudStorage:
