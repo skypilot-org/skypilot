@@ -271,11 +271,6 @@ def _check_interactive_node_resources_match(
             f'Requested: {node_type} with {resources}\n')
 
 
-def _confirm_before_operation(display_text: str):
-    """Asks user to confirm before an operation is performed."""
-    click.confirm(display_text, default=True, abort=True, show_default=True)
-
-
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
     node_type: str,
@@ -335,18 +330,23 @@ def _create_and_ssh_into_node(
             task.set_resources(handle.launched_resources)
             task.num_nodes = handle.launched_nodes
             if not no_confirm:
-                _confirm_before_operation(
+                click.confirm(
                     'You are about to restart the stopped cluster '
-                    f'{cluster_name}. Are you sure?')
-
+                    f'{cluster_name}. Are you sure?',
+                    default=True,
+                    abort=True,
+                    show_default=True)
         else:
             dag = sky.optimize(dag)
             task = dag.tasks[0]
             backend.register_info(dag=dag)
             to_provision = task.best_resources
             if not no_confirm:
-                _confirm_before_operation(
-                    'You are about to launch a new cluster. Are you sure?')
+                click.confirm(
+                    'You are about to launch a new cluster. Are you sure?',
+                    default=True,
+                    abort=True,
+                    show_default=True)
 
         handle = backend.provision(task,
                                    to_provision=to_provision,
@@ -554,8 +554,11 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         if cluster is None or global_user_state.get_handle_from_cluster_name(
                 cluster) is None:
             # Prompt if no cluster is provided or the cluster doesn't exist.
-            _confirm_before_operation(
-                'You are about to launch a new cluster. Are you sure?')
+            click.confirm(
+                'You are about to launch a new cluster. Are you sure?',
+                default=True,
+                abort=True,
+                show_default=True)
 
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
@@ -1064,9 +1067,12 @@ def start(clusters: Tuple[str], yes: bool):
     if not yes:
         cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'
         cluster_list = ', '.join([r['name'] for r in to_start])
-        _confirm_before_operation(
+        click.confirm(
             f'You are about to restart {len(to_start)} {cluster_str}: '
-            f'{cluster_list}. Are you sure?')
+            f'{cluster_list}. Are you sure?',
+            default=True,
+            abort=True,
+            show_default=True)
 
     for record in to_start:
         name = record['name']
@@ -1165,9 +1171,12 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         teardown_verb = 'terminate' if terminate else 'stop'
         cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
         cluster_list = ', '.join([r['name'] for r in to_down])
-        _confirm_before_operation(
+        click.confirm(
             f'You are about to {teardown_verb} {len(to_down)} {cluster_str}: '
-            f'{cluster_list}. Are you sure?')
+            f'{cluster_list}. Are you sure?',
+            default=True,
+            abort=True,
+            show_default=True)
 
     for record in to_down:  # TODO: parallelize.
         name = record['name']
