@@ -63,7 +63,7 @@ file_mounts:
   /train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
   /data/train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
   ~/data/train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
-  
+
   /s3-data-test: s3://fah-public-data-covid19-cryptic-pockets/human/il6/PROJ14534/RUN999/CLONE0/results0
 
   # If a source path points to a "directory", its contents will be recursively
@@ -104,7 +104,7 @@ run: |
   wc -l /train-00001-of-01024
   ls -l /data/train-00001-of-01024
   ls -l ~/data/train-00001-of-01024
-  
+
   ls -l /s3-data-test
 
   # ls -lH /data/fake_imagenet | head -n10
