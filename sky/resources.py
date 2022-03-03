@@ -70,7 +70,7 @@ class Resources:
             assert len(accelerators) == 1, accelerators
 
             acc, _ = list(accelerators.items())[0]
-            if 'tpu' in acc:
+            if 'tpu' in acc.lower():
                 if cloud is None:
                     cloud = clouds.GCP()
                 assert cloud.is_same_cloud(clouds.GCP()), 'Cloud must be GCP.'
