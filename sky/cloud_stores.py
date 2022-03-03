@@ -18,26 +18,6 @@ from sky.adaptors import aws
 class CloudStorage:
     """Interface for a cloud object store."""
 
-    def __init__(self) -> None:
-        self._cli_installed = False
-
-    def _check_cli_installation(self) -> None:
-        """Check the installation of CLI tools."""
-        if self._cli_installed:
-            return
-        cli_installation_cmd = self._get_cli_installation_cmd()
-        proc = backend_utils.run(cli_installation_cmd,
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE,
-                                 check=False)
-        backend_utils.handle_returncode(proc.returncode, cli_installation_cmd,
-                                        'Failed to install CLI.', proc.stderr)
-        self._cli_installed = True
-
-    def _get_cli_installation_cmd(self) -> str:
-        """Returns the installation command of the CLI."""
-        raise NotImplementedError
-
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
 
@@ -58,13 +38,11 @@ class CloudStorage:
 class S3CloudStorage(CloudStorage):
     """AWS Cloud Storage."""
 
-    # TODO(zhwu): Use the same version in setup.py.
-    _GET_AWS_CLI = ('aws --version > /dev/null 2>&1 || '
-                    'pip3 install awscli==1.22.17')
-
-    def _get_cli_installation_cmd(self) -> str:
-        """Returns the installation command of AWS CLI."""
-        return self._GET_AWS_CLI
+    # List of commands to install AWS CLI
+    _GET_AWSCLI = [
+        'aws --version > /dev/null 2>&1 || '
+        'pip3 install awscli==1.22.17',
+    ]
 
     def is_directory(self, url: str) -> bool:
         """Returns whether S3 'url' is a directory.
@@ -90,22 +68,24 @@ class S3CloudStorage(CloudStorage):
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads using AWS CLI."""
-        self._check_cli_installation()
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
         download_via_awscli = f'mkdir -p {destination} && \
                                 aws s3 sync {source} {destination} --delete'
 
-        return download_via_awscli
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        self._check_cli_installation()
         download_via_awscli = f'mkdir -p {destination} && \
                                 aws s3 cp {source} {destination}'
 
-        return download_via_awscli
+        all_commands = list(self._GET_AWSCLI)
+        all_commands.append(download_via_awscli)
+        return ' && '.join(all_commands)
 
 
 class GcsCloudStorage(CloudStorage):
@@ -128,18 +108,18 @@ class GcsCloudStorage(CloudStorage):
 
     _GSUTIL = '~/google-cloud-sdk/bin/gsutil'
 
-    def _get_cli_installation_cmd(self) -> str:
-        return ' && '.join(self._GET_GSUTIL)
-
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        self._check_cli_installation()
-        commands = f'{self._GSUTIL} ls -d {url}'
-        p = backend_utils.run(commands, stdout=subprocess.PIPE)
+        commands = list(self._GET_GSUTIL)
+        commands.append(f'{self._GSUTIL} ls -d {url}')
+        command = ' && '.join(commands)
+        p = backend_utils.run(command, stdout=subprocess.PIPE)
         out = p.stdout.decode().strip()
+        # Edge Case: Gcloud command is run for first time #437
+        out = out.split('\n')[-1]
         # If <url> is a bucket root, then we only need `gsutil` to succeed
         # to make sure the bucket exists. It is already a directory.
         _, key = data_utils.split_gcs_path(url)
@@ -157,16 +137,18 @@ class GcsCloudStorage(CloudStorage):
 
     def make_sync_dir_command(self, source: str, destination: str) -> str:
         """Downloads a directory using gsutil."""
-        self._check_cli_installation()
         download_via_gsutil = (
             f'{self._GSUTIL} -m rsync -d -r {source} {destination}')
-        return download_via_gsutil
+        all_commands = list(self._GET_GSUTIL)
+        all_commands.append(download_via_gsutil)
+        return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using gsutil."""
-        self._check_cli_installation()
         download_via_gsutil = f'{self._GSUTIL} -m cp {source} {destination}'
-        return download_via_gsutil
+        all_commands = list(self._GET_GSUTIL)
+        all_commands.append(download_via_gsutil)
+        return ' && '.join(all_commands)
 
 
 def get_storage_from_path(url: str) -> CloudStorage:
