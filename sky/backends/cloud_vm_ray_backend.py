@@ -1152,8 +1152,8 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(
                 f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}) -> '
                 f'{node_name}{style.RESET_ALL}.')
-            with console.status('[bold cyan]Syncing [bright]workdir '
-                                f'({workdir}) -> {node_name})'):
+            with console.status('[bold cyan]Syncing: [bright]workdir '
+                                f'({workdir}) -> {node_name}'):
                 self._rsync_up(handle,
                                ip=ip,
                                source=workdir,
