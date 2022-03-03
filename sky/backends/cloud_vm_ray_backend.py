@@ -1135,7 +1135,8 @@ class CloudVmRayBackend(backends.Backend):
 
         # Raise warning if directory is too large
         if not os.path.exists(full_workdir):
-            logger.error(f'{fore.RED}Directory "{workdir}" does not exist.{style.RESET_ALL}')
+            logger.error(f'{fore.RED}Directory {workdir} does not exist.'
+                         f'{style.RESET_ALL}')
             sys.exit(1)
         dir_size = _path_size_megabytes(full_workdir)
         if dir_size >= SKY_DIRSIZE_WARN_THRESHOLD:
@@ -1154,19 +1155,19 @@ class CloudVmRayBackend(backends.Backend):
             if workdir_symlink:
                 cur_workdir = f'{workdir}/'
             self._rsync_up(handle,
-                            ip=ip,
-                            source=cur_workdir,
-                            target=SKY_REMOTE_WORKDIR,
-                            log_path=os.path.join(self.log_dir,
-                                                    'workdir_sync.log'),
-                            stream_logs=False,
-                            raise_error=True)
+                           ip=ip,
+                           source=cur_workdir,
+                           target=SKY_REMOTE_WORKDIR,
+                           log_path=os.path.join(self.log_dir,
+                                                 'workdir_sync.log'),
+                           stream_logs=False,
+                           raise_error=True)
 
         with console.status('[bold cyan]Syncing: [bright]workdir'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
-            logger.info(
-                f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir}){style.RESET_ALL}.')
+            logger.info(f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir})'
+                        f'{style.RESET_ALL}.')
 
     def sync_file_mounts(
         self,
@@ -1199,8 +1200,7 @@ class CloudVmRayBackend(backends.Backend):
                               command: Optional[str] = None,
                               run_rsync: Optional[bool] = False):
             full_src = os.path.abspath(os.path.expanduser(src))
-            if not os.path.islink(full_src) and not os.path.isfile(
-                    full_src):
+            if not os.path.islink(full_src) and not os.path.isfile(full_src):
                 src = f'{src}/'
 
             def _sync_node(ip):
@@ -1223,25 +1223,25 @@ class CloudVmRayBackend(backends.Backend):
                     # TODO(zhwu): Optimize for large amount of files.
                     # zip / transfer/ unzip
                     self._rsync_up(handle,
-                                    ip=ip,
-                                    source=src,
-                                    target=dst,
-                                    log_path=log_path,
-                                    stream_logs=False,
-                                    raise_error=True)
+                                   ip=ip,
+                                   source=src,
+                                   target=dst,
+                                   log_path=log_path,
+                                   stream_logs=False,
+                                   raise_error=True)
 
             with console.status(f'[bold cyan]Syncing: [bright]{src} -> {dst}'):
                 backend_utils.run_in_parallel(_sync_node, ip_list)
-            logger.info(f'{fore.CYAN}Syncing: {style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
+            logger.info(f'{fore.CYAN}Syncing: {style.BRIGHT}{src} -> {dst}'
+                        f'{style.RESET_ALL}')
 
         # Pre-check the files and warn
         for dst, src in mounts.items():
             if not task_lib.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
                 if not os.path.exists(full_src):
-                    logger.error(
-                        f'{fore.RED}Directory "{src}" does not exist.{style.RESET_ALL}'
-                    )
+                    logger.error(f'{fore.RED}Directory "{src}" does not exist.'
+                                 f'{style.RESET_ALL}')
                     sys.exit(1)
                 src_size = _path_size_megabytes(full_src)
                 if src_size >= SKY_DIRSIZE_WARN_THRESHOLD:
@@ -1323,10 +1323,12 @@ class CloudVmRayBackend(backends.Backend):
                 ssh_private_key=ssh_private_key,
                 log_path=log_path,
                 ssh_control_name=self._ssh_control_name(handle))
-            backend_utils.handle_returncode(returncode,
-                                                   symlink_command,
-                                                   'Failed to create symlinks. The target destination may already exist',
-                                                   raise_error=True)
+            backend_utils.handle_returncode(
+                returncode,
+                symlink_command,
+                'Failed to create symlinks. The target destination '
+                'may already exist',
+                raise_error=True)
 
         backend_utils.run_in_parallel(_symlink_node, ip_list)
 
@@ -1370,10 +1372,9 @@ class CloudVmRayBackend(backends.Backend):
                     error_msg=f'Failed to setup with return code {returncode}',
                     raise_error=True)
 
-            with console.status(f'[bold cyan]Running setup.'):
+            with console.status('[bold cyan]Running setup.'):
                 backend_utils.run_in_parallel(_setup_node, ip_list)
-            logger.info(
-                f'{fore.CYAN}Running setup.{style.RESET_ALL}')
+            logger.info(f'{fore.CYAN}Running setup.{style.RESET_ALL}')
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
