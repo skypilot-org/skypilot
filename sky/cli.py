@@ -273,10 +273,7 @@ def _check_interactive_node_resources_match(
 
 def _confirm_before_operation(display_text: str):
     """Asks user to confirm before an operation is performed."""
-    click.confirm(display_text,
-                  default=True,
-                  abort=True,
-                  show_default=True)
+    click.confirm(display_text, default=True, abort=True, show_default=True)
 
 
 # TODO: skip installing ray to speed up provisioning.
