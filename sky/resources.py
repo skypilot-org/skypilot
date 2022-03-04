@@ -154,7 +154,9 @@ class Resources:
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
             self.instance_type, self.use_spot)
-        assert np.isnan(hourly_cost) == False, f"Missing price for '{self.instance_type}, Spot: {self.use_spot}' in the catalog."
+        assert not np.isnan(hourly_cost), (
+            f'Missing price for "{self.instance_type}, '
+            f'Spot: {self.use_spot}" in the catalog.')
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
