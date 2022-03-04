@@ -24,6 +24,8 @@ To run tasks in the clouds, configure access to at least one cloud:
 
 **AWS**
 
+To get the **AWS Access Key** required by :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** fields are optional.
+
 .. code-block:: console
 
   $ # Install boto
@@ -31,8 +33,6 @@ To run tasks in the clouds, configure access to at least one cloud:
 
   $ # Configure your AWS credentials
   $ aws configure
-
-To get the **AWS Access Key** required by :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** fields are optional.
 
 **GCP**
 
@@ -63,14 +63,13 @@ If you meet the following error (*RemoveError: 'requests' is a dependency of con
 
 **Verifying cloud setup**
 
-Optionally, you can run :code:`sky check` to verify cloud credentials are correctly configured:
+Optionally, run :code:`sky check` to verify cloud credentials are correctly configured:
 
 .. code-block:: console
 
-  $ # Verify cloud account setup
   $ sky check
 
-This will produce outputs verifying the correct setup of each supported cloud.
+This will produce a summary like:
 
 .. code-block:: text
 

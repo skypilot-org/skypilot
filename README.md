@@ -59,6 +59,8 @@ To run tasks in the clouds, configure access to at least one cloud:
 
 **AWS**
 
+To get the **AWS Access Key** required by `aws configure`, please refer to the [AWS manual](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey). The **Default region name [None]:** and **Default output format [None]:** fields are optional.
+
 ```bash
 # Install boto
 pip install boto3
@@ -66,8 +68,6 @@ pip install boto3
 # Configure your AWS credentials
 aws configure
 ```
-
-To get the **AWS Access Key** required by `aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** fields are optional.
 
 **GCP**
 
@@ -96,14 +96,13 @@ az account set -s <subscription_id>
 
 **Verifying cloud setup**
 
-Optionally, you can run `sky check` to verify cloud credentials are correctly configured:
+Optionally, run `sky check` to verify cloud credentials are correctly configured:
 
 ```bash
-# Verify cloud account setup
 sky check
 ```
 
-This will produce outputs verifying the correct setup of each supported cloud.
+This will produce a summary like:
 
 ```
 Checking credentials to enable clouds for Sky.
