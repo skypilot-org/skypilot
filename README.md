@@ -59,7 +59,7 @@ To run tasks in the clouds, configure access to at least one cloud:
 
 **AWS**
 
-To get the **AWS Access Key** required by `aws configure`, please refer to the [AWS manual](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey). The **Default region name [None]:** and **Default output format [None]:** fields are optional.
+To get the **AWS Access Key** required by `aws configure`, please refer to the [AWS manual](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
 ```bash
 # Install boto
@@ -96,7 +96,7 @@ az account set -s <subscription_id>
 
 **Verifying cloud setup**
 
-Optionally, run `sky check` to verify cloud credentials are correctly configured:
+After configuring the desired clouds, you can optionally run `sky check` to verify that credentials are correctly set up:
 
 ```bash
 sky check

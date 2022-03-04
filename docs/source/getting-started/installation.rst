@@ -24,7 +24,7 @@ To run tasks in the clouds, configure access to at least one cloud:
 
 **AWS**
 
-To get the **AWS Access Key** required by :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** fields are optional.
+To get the **AWS Access Key** required by :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
 .. code-block:: console
 
@@ -47,7 +47,7 @@ To get the **AWS Access Key** required by :code:`aws configure`, please refer to
   $ # This will generate ~/.config/gcloud/application_default_credentials.json.
   $ gcloud auth application-default login
 
-If you meet the following error (*RemoveError: 'requests' is a dependency of conda and cannot be removed from conda's operating environment*) while running :code:`conda install -c conda-forge google-cloud-sdk`, please try :code:`conda update --force conda` and run it again.
+If running :code:`conda install -c conda-forge google-cloud-sdk` produces the error *"RemoveError: 'requests' is a dependency of conda and cannot be removed from conda's operating environment"*, try :code:`conda update --force conda` first and rerun the command.
 
 
 **Azure**
@@ -63,7 +63,7 @@ If you meet the following error (*RemoveError: 'requests' is a dependency of con
 
 **Verifying cloud setup**
 
-Optionally, run :code:`sky check` to verify cloud credentials are correctly configured:
+After configuring the desired clouds, you can optionally run :code:`sky check` to verify that credentials are correctly set up:
 
 .. code-block:: console
 
