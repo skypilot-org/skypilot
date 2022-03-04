@@ -45,8 +45,9 @@ def check(quiet: bool = False) -> None:
 def get_cloud_credential_file_mounts() -> Tuple[Dict[str, str], List[str]]:
     """Returns the files necessary to access all enabled clouds.
 
-    Returns a dictionary that will be added to a task's file mounts
-      and a list that will be excluded from the file mounts."""
+    Returns a dictionary that will be added to a task's file mounts 
+    and a list of patterns that will be excluded (used as rsync_exclude).
+    """
     enabled_clouds = global_user_state.get_enabled_clouds()
     file_mounts, excludes = {}, []
     for cloud in enabled_clouds:
