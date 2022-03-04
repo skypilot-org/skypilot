@@ -16,7 +16,7 @@ class ResourcesMismatchError(Exception):
 
 class CommandError(Exception):
     """Raised when a command fails.
-    
+
       returncode: The returncode of the command.
       command: The command that was run.
       error_message: The error message to print.
