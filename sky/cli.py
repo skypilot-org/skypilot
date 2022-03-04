@@ -541,6 +541,10 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
             new_resources.cloud = _get_cloud(cloud)
         if gpus is not None:
             new_resources.accelerators = _parse_accelerator_options(gpus)
+            if 'tpu' in gpus.lower():
+                logger.info('Missing tf_version in accelerator_args, using'
+                            ' default (2.5.0)')
+                new_resources.accelerator_args = {'tf_version': '2.5.0'}
         if use_spot is not None:
             new_resources.use_spot = use_spot
         if disk_size is not None:
