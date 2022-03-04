@@ -1161,8 +1161,8 @@ class CloudVmRayBackend(backends.Backend):
         with console.status('[bold cyan]Syncing: [bright]workdir'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
-            logger.info(f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir})'
-                        f'{style.RESET_ALL}.')
+        logger.info(f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir})'
+                    f'{style.RESET_ALL}.')
 
     def sync_file_mounts(
         self,
