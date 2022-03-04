@@ -1236,7 +1236,7 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.run_in_parallel(_sync_node, ip_list)
 
         # Pre-check the files and warn
-        logger.info('{fore.CYAN}Pre-checking file mounts.{style.RESET_ALL}')
+        logger.info('{fore.CYAN}Checking file mounts.{style.RESET_ALL}')
         for dst, src in mounts.items():
             if not task_lib.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
