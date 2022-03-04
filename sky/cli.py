@@ -307,7 +307,6 @@ def _create_and_ssh_into_node(
             run='',
         )
         task.set_resources(resources)
-        task.update_file_mounts(sky_check.get_cloud_credential_file_mounts())
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
