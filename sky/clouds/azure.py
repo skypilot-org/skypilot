@@ -222,5 +222,5 @@ class Azure(clouds.Cloud):
             return True, None
         return False, 'Azure credentials not set. Run `az login`.' + help_str
 
-    def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {'~/.azure': '~/.azure'}
+    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
+        return {'~/.azure': '~/.azure'}, []

@@ -69,7 +69,16 @@ head_node_type: ray.head.default
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
   "{{sky_remote_path}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
 }
+
+rsync_exclude: [
+{%- for exclude_file in credential_excludes %}
+  "{{exclude_file}}",
+{%- endfor %}
+]
 
 initialization_commands: []
 
