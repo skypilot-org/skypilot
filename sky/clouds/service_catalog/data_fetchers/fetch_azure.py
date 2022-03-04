@@ -62,7 +62,6 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
     print(f'Done fetching pricing {region}')
     df = pd.DataFrame(all_items)
     return df[(~df['productName'].str.contains(' Windows')) &
-              (~df['skuName'].str.contains(' Low Priority')) &
               (df['unitPrice'] > 0)]
 
 
@@ -75,8 +74,9 @@ def get_all_regions_pricing_df() -> pd.DataFrame:
 @ray.remote
 def get_sku_df() -> pd.DataFrame:
     print(f'Fetching SKU list')
+    # To get a complete list, --all option is necessary.
     proc = subprocess.run(
-        f'az vm list-skus',
+        f'az vm list-skus --all',
         shell=True,
         check=True,
         stdout=subprocess.PIPE,
@@ -120,12 +120,20 @@ def get_all_regions_instance_types_df():
     print(f'Processing dataframes')
 
     def get_price(row):
+        is_promo = True if 'Promo' in row['name'] else False
         sku = row['name']
+        sku = sku.replace('_Promo', '')
         region = row['Region']
         pricing_rows = df[(df['armSkuName'] == sku) &
                           (df['armRegionName'] == region) &
                           (df['unitPrice'] > 0) &
                           (~df['skuName'].str.contains(' Spot'))]
+        if is_promo:
+            pricing_rows = pricing_rows[pricing_rows['skuName'].str.contains(
+                ' Low Priority')]
+        else:
+            pricing_rows = pricing_rows[~pricing_rows['skuName'].str.
+                                        contains(' Low Priority')]
         assert len(pricing_rows) <= 1, (sku, pricing_rows)
         if len(pricing_rows) == 0:
             return np.nan
