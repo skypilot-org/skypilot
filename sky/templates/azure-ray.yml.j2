@@ -74,6 +74,12 @@ file_mounts: {
 {%- endfor %}
 }
 
+rsync_exclude: [
+{%- for exclude_file in credential_excludes %}
+  "{{exclude_file}}",
+{%- endfor %}
+]
+
 initialization_commands: []
 
 # List of shell commands to run to set up nodes.

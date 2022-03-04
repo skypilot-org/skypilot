@@ -373,6 +373,7 @@ def write_cluster_config(to_provision: Resources,
     # TODO(suquark): once we have sky on PYPI, we should directly install sky
     # from PYPI
     local_wheel_path = wheel_utils.build_sky_wheel()
+    credential_file_mounts, credential_excludes = sky_check.get_cloud_credential_file_mounts()
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
@@ -392,7 +393,8 @@ def write_cluster_config(to_provision: Resources,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
-                'credentials': sky_check.get_cloud_credential_file_mounts(),
+                'credentials': credential_file_mounts,
+                'credential_excludes': credential_excludes,
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),

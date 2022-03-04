@@ -1,5 +1,5 @@
 """Sky credential check: check cloud credentials and enable clouds."""
-from typing import Dict
+from typing import Dict, List, Tuple
 
 import click
 
@@ -42,12 +42,15 @@ def check(quiet: bool = False) -> None:
     global_user_state.set_enabled_clouds(enabled_clouds)
 
 
-def get_cloud_credential_file_mounts() -> Dict[str, str]:
+def get_cloud_credential_file_mounts() -> Tuple[Dict[str, str], List[str]]:
     """Returns the files necessary to access all enabled clouds.
 
-    Returns a dictionary that will be added to a task's file mounts."""
+    Returns a dictionary that will be added to a task's file mounts
+      and a list that will be excluded from the file mounts."""
     enabled_clouds = global_user_state.get_enabled_clouds()
-    ret = {}
+    file_mounts, excludes = {}, []
     for cloud in enabled_clouds:
-        ret.update(cloud.get_credential_file_mounts())
-    return ret
+        cloud_file_mounts, cloud_exclude = cloud.get_credential_file_mounts()
+        file_mounts.update(cloud_file_mounts)
+        excludes.extend(cloud_exclude)
+    return file_mounts, excludes

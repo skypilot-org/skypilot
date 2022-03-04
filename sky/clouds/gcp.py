@@ -255,5 +255,5 @@ class GCP(clouds.Cloud):
             )
         return True, None
 
-    def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {'~/.config/gcloud': '~/.config/gcloud'}
+    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
+        return {'~/.config/gcloud': '~/.config/gcloud'}, ['~/.config/gcloud/virtenv']
