@@ -10,6 +10,7 @@ import tempfile
 
 import sky
 
+_SETUP_FILES = ['setup.py', 'MANIFEST.in']
 
 def _cleanup_wheels_dir(wheel_dir: pathlib.Path,
                         latest_wheel: Optional[pathlib.Path]):
@@ -40,10 +41,10 @@ def build_sky_wheel() -> pathlib.Path:
     # prepare files
     (wheel_dir / 'sky').symlink_to(package_root / 'sky',
                                    target_is_directory=True)
-    setup_files_dir = package_root / 'sky' / 'setup_files'
-    for f in setup_files_dir.iterdir():
-        if f.is_file():
-            shutil.copy(str(f), str(wheel_dir))
+    setup_files_dir = package_root
+    for file_name in _SETUP_FILES:
+        file_path = setup_files_dir / file_name
+        shutil.copy(str(file_path), str(wheel_dir))
 
     # It is important to normalize the path, otherwise 'pip wheel' would treat
     # the directory as a file and generate an empty wheel.
