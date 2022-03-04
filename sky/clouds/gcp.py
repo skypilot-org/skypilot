@@ -243,13 +243,13 @@ class GCP(clouds.Cloud):
             return False, (
                 'GCP credentials not set. Run the following commands:\n    '
                 # Install the Google Cloud SDK:
-                'pip install google-api-python-client\n    '
-                'conda install -c conda-forge google-cloud-sdk\n    '
+                '$ pip install google-api-python-client\n    '
+                '$ conda install -c conda-forge google-cloud-sdk\n    '
                 # This authenticates the CLI to make `gsutil` work:
                 '$ gcloud init\n    '
                 # This will generate
                 # ~/.config/gcloud/application_default_credentials.json.
-                'gcloud auth application-default login\n    '
+                '$ gcloud auth application-default login\n    '
                 'For more info: '
                 'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
