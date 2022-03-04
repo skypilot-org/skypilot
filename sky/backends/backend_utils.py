@@ -680,6 +680,7 @@ def handle_returncode(returncode: int,
         command: The command that was run.
         error_msg: The error message to print.
         stderr: The stderr of the command.
+        raise_error: Whether to raise an error instead of sys.exit.
     """
     if returncode != 0:
         if stderr is not None:
@@ -688,7 +689,7 @@ def handle_returncode(returncode: int,
         logger.error(
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
         if raise_error:
-            raise OSError(returncode, error_msg)
+            raise RuntimeError(returncode)
         sys.exit(returncode)
 
 
@@ -701,10 +702,10 @@ def run_in_parallel(func: Callable, args: List[Any]):
     with pool.ThreadPool() as p:
         try:
             list(p.imap_unordered(func, args))
-        except OSError as e:
+        except RuntimeError as e:
             p.close()
             p.terminate()
-            sys.exit(e.errno)
+            sys.exit(e.args[0])
         else:
             p.close()
             p.join()

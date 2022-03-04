@@ -1144,8 +1144,10 @@ class CloudVmRayBackend(backends.Backend):
                            f'is {dir_size} MB. Try to keep workdir small, as '
                            f'large sizes will slowdown rsync.{style.RESET_ALL}')
         if os.path.islink(full_workdir):
-            logger.warning(f'{fore.YELLOW}Workdir {workdir} is a symlink. '
-                           f'Symlink contents are uploaded.{style.RESET_ALL}')
+            logger.warning(
+                f'{fore.YELLOW}Workdir {workdir} is a symlink. '
+                f'Symlink contents are not uploaded.{style.RESET_ALL}')
+        else:
             workdir = f'{workdir}/'
 
         def _sync_workdir_node(ip):
@@ -1158,11 +1160,12 @@ class CloudVmRayBackend(backends.Backend):
                            stream_logs=False,
                            raise_error=True)
 
-        with console.status('[bold cyan]Syncing: [bright]workdir'):
+        num_nodes = handle.launched_nodes
+        plural = 's' if num_nodes > 1 else ''
+        logger.info(f'{fore.CYAN}Syncing (on {num_nodes} node{plural}): '
+                    f'{style.BRIGHT}workdir ({workdir}){style.RESET_ALL}.')
+        with console.status('[bold cyan]Syncing[/]'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
-
-        logger.info(f'{fore.CYAN}Syncing: {style.BRIGHT}workdir ({workdir})'
-                    f'{style.RESET_ALL}.')
 
     def sync_file_mounts(
         self,
@@ -1225,12 +1228,15 @@ class CloudVmRayBackend(backends.Backend):
                                    stream_logs=False,
                                    raise_error=True)
 
-            with console.status(f'[bold cyan]Syncing: [bright]{src} -> {dst}'):
+            num_nodes = handle.launched_nodes
+            plural = 's' if num_nodes > 1 else ''
+            logger.info(f'{fore.CYAN}Syncing (on {num_nodes} node{plural}): '
+                        f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
+            with console.status('[bold cyan]Syncing[/]'):
                 backend_utils.run_in_parallel(_sync_node, ip_list)
-            logger.info(f'{fore.CYAN}Syncing: {style.BRIGHT}{src} -> {dst}'
-                        f'{style.RESET_ALL}')
 
         # Pre-check the files and warn
+        logger.info('{fore.CYAN}Pre-checking file mounts.{style.RESET_ALL}')
         for dst, src in mounts.items():
             if not task_lib.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
@@ -1243,7 +1249,7 @@ class CloudVmRayBackend(backends.Backend):
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src} '
                         f'is {src_size} MB. Try to keep src small, as '
-                        f'large sizes will slowdown rsync.{style.RESET_ALL}')
+                        f'large sizes will slow down rsync.{style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(
                         f'{fore.YELLOW}Source path {src} is a symlink. '
@@ -1367,9 +1373,12 @@ class CloudVmRayBackend(backends.Backend):
                     error_msg=f'Failed to setup with return code {returncode}',
                     raise_error=True)
 
-            with console.status('[bold cyan]Running setup.'):
+            num_nodes = handle.launched_nodes
+            plural = 's' if num_nodes > 1 else ''
+            logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
+                        f'{style.RESET_ALL}')
+            with console.status('[bold cyan]Running setup[/]'):
                 backend_utils.run_in_parallel(_setup_node, ip_list)
-            logger.info(f'{fore.CYAN}Running setup.{style.RESET_ALL}')
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
