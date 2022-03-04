@@ -47,7 +47,7 @@ _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS storage (
     name TEXT PRIMARY KEY,
     lauched_at INTEGER,
-    handle BLOB, 
+    handle BLOB,
     last_use TEXT,
     status TEXT)""")
 
@@ -173,7 +173,8 @@ def get_cluster_name_from_handle(
         return name
 
 
-def get_status_from_cluster_name(cluster_name: str) -> ClusterStatus:
+def get_status_from_cluster_name(
+        cluster_name: Optional[str]) -> Optional[ClusterStatus]:
     rows = _CURSOR.execute('SELECT status FROM clusters WHERE name=(?)',
                            (cluster_name,))
     for (status,) in rows:
