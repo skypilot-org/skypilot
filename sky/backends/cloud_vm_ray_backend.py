@@ -817,16 +817,12 @@ class RetryingVmProvisioner(object):
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
 
-        with console.status(f'[bold cyan]Launching on {to_provision_cloud}'
-                            f' {region_name}[/] '
-                            f'({zone_str})'):
+        logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
+                    f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
+        with console.status('[bold cyan]Launching[/]'):
             # ray up.
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
-
-        # Print region attempted for auto-failover history.
-        logger.info(f'{colorama.Fore.CYAN}Launching on {to_provision_cloud} '
-                    f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 or returncode != 0:
@@ -1035,8 +1031,7 @@ class CloudVmRayBackend(backends.Backend):
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
             'Tip: to reuse an existing cluster, '
-            'specify --cluster-name (-c) in the CLI or use '
-            'sky.launch(.., cluster_name=..) in the Python API. '
+            'specify --cluster (-c). '
             'Run `sky status` to see existing clusters.')
         return cluster_name, to_provision, task.num_nodes
 

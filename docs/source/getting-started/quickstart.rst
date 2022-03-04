@@ -1,56 +1,59 @@
 Quickstart
 ==========
 
-Sky is a tool to run any workload seamlessly across different cloud providers
+Sky is a framework to run any workload seamlessly across different cloud providers
 through a unified interface. No knowledge of cloud offerings is required or
 expected -- you simply define the workload and its resource requirements,
 and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft
 Azure.
 
-Please follow the installation instructions before continuing with this guide.
+Key features
 
-Key Features
-------------
 - **Run your code on the cloud with zero code changes**
-- **Easy provisionioning of VMs** across multiple cloud platforms (AWS, Azure or GCP)
-- **Easy management of multiple clusters** to handle different projects
-- **Fast and iterative development** with quick access to cloud instances for prototyping
-- **Store your datasets on the cloud** and access them like you would on a local filesystem
-- **No cloud lock-in** - transparently run your code across AWS, Google Cloud, and Azure
+- **Easily provision VMs** across multiple cloud platforms (AWS, Azure or GCP)
+- **Easily manage multiple clusters** to handle different projects
+- **Quick access** to cloud instances for prototyping
+- **Store your datasets on the cloud** and access them like you would on a local file system
+- **No cloud lock-in** -- transparently run your code across AWS, Google Cloud, and Azure
 
+Complete the :ref:`installation instructions <installation>` before continuing with this guide.
 
 Provisioning your first cluster
 --------------------------------
 We'll start by launching our first cluster on Sky using an interactive node.
 Interactive nodes are standalone machines that can be used like any other VM instance,
-but are easy to configure without any additional setup. Sky also handles provisioning
-these nodes with your specified resources as cheaply and quickly as possible using an
-:ref:`auto-failover provisioner <auto-failover>`.
+but are easy to configure without any additional setup.
 
 Let's provision an instance with a single K80 GPU.
 
 .. code-block:: bash
 
   # Provisions/reuses an interactive node with a single K80 GPU.
-  # Any of the interactive node commands (gpunode, tpunode, cpunode)
-  # will automatically log in to the cluster.
   sky gpunode -c mygpu --gpus K80
 
+Provisioning takes a few minutes, after which you're automatically logged in:
+
+.. code-block:: bash
+
   Last login: Wed Feb 23 22:35:47 2022 from 136.152.143.101
+
   ubuntu@ip-172-31-86-108:~$ gpustat
   ip-172-31-86-108     Wed Feb 23 22:42:43 2022  450.142.00
   [0] Tesla K80        | 31°C,   0 % |     0 / 11441 MB |
-  ubuntu@ip-172-31-86-108:~$
-  ^D
 
-  # View the machine in the cluster table.
+Press :code:`Ctrl-D` to log out. On your machine, query :code:`sky status` for all provisioned clusters:
+
+.. code-block:: bash
+
   sky status
 
   NAME   LAUNCHED        RESOURCES                     COMMAND                          STATUS
   mygpu  a few secs ago  1x Azure(Standard_NC6_Promo)  sky gpunode -c mygpu --gpus K80  UP
 
-After you are done, run :code:`sky down mygpu` to terminate the cluster. Find more details
-on managing the lifecycle of your cluster :ref:`here <interactive-nodes>`.
+To log back in, simply type :code:`ssh mygpu`.
+
+After you are done, run :code:`sky down mygpu` to terminate the cluster. Find more commands
+on managing the lifecycle of clusters :ref:`here <interactive-nodes>`.
 
 Sky can also provision interactive CPU and TPU nodes with :code:`cpunode` and :code:`tpunode`.
 Please see our :ref:`CLI reference <cli>` for all configuration options. For more information on
@@ -74,7 +77,7 @@ We can specify the following task attributes with a YAML file:
     For large, multi-gigabyte workdirs (e.g. large datasets in your working directory), uploading may take time as the files are synced to the remote VM with :code:`rsync`. If you have certain files in your workdir that you would like to have excluded from upload, consider including them in your `.gitignore` file. For large datasets and files, consider using :ref:`Sky Storage <sky-storage>` to speed up transfers.
 
 Below is a minimal task YAML that prints "hello sky!" and shows installed Conda environments,
-requiring an NVIDIA Tesla K80 GPU on AWS. See more example yaml files in the `repo <https://github.com/sky-proj/sky/tree/master/examples>`_, with a fully-complete example documented :ref:`here <yaml-spec>`.
+requiring an NVIDIA Tesla K80 GPU on AWS. See more example YAML files in the `repo <https://github.com/sky-proj/sky/tree/master/examples>`_, with a fully-complete example documented :ref:`here <yaml-spec>`.
 
 .. code-block:: yaml
 
