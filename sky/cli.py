@@ -218,7 +218,7 @@ def _default_interactive_node_name(node_type: str):
 
 def _infer_interactive_node_type(resources: sky.Resources):
     """Determine interactive node type from resources."""
-    accelerators = resources.get_accelerators()
+    accelerators = resources.accelerators
     cloud = resources.cloud
     if accelerators:
         # We only support homogenous accelerators for now.
@@ -540,7 +540,7 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         if cloud is not None:
             new_resources.cloud = _get_cloud(cloud)
         if gpus is not None:
-            new_resources.set_accelerators(_parse_accelerator_options(gpus))
+            new_resources.accelerators = _parse_accelerator_options(gpus)
             if 'tpu' in gpus.lower():
                 logger.info('Missing tf_version in accelerator_args, using'
                             ' default (2.5.0)')
@@ -708,7 +708,7 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
         if gpus is not None:
             assert len(task.resources) == 1
             copied = copy.deepcopy(list(task.resources)[0])
-            copied.set_accelerators(_parse_accelerator_options(gpus))
+            copied.accelerators = _parse_accelerator_options(gpus)
             task.set_resources({copied})
         if name is not None:
             task.name = name
