@@ -12,6 +12,7 @@ import sky
 
 _SETUP_FILES = ['setup.py', 'MANIFEST.in']
 
+
 def _cleanup_wheels_dir(wheel_dir: pathlib.Path,
                         latest_wheel: Optional[pathlib.Path]):
     # cleanup older wheels
