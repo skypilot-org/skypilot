@@ -713,6 +713,8 @@ def run_in_parallel(func: Callable, args: List[Any]):
         try:
             list(p.imap_unordered(func, args))
         except exceptions.CommandError as e:
+            # Print the error message here, to avoid the other processes'
+            # error messages mixed with the current one.
             logger.error(f'Command failed with code {e.returncode}: {e.command}')
             logger.error(e.error_msg)
             sys.exit(e.returncode)
