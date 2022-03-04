@@ -7,24 +7,24 @@ Install Sky using pip:
 
 .. code-block:: console
 
-  $ # Clone the sky codebase
+  $ # Sky requires python >= 3.6 and < 3.10.
   $ git clone ssh://git@github.com/sky-proj/sky.git
   $ cd sky
-  $ # Sky requires python >= 3.6. 3.10+ is currently NOT supported.
   $ pip install ".[all]"
 
-If you only want the dependencies for certain clouds, you can also use
-:code:`".[aws,azure,gcp]"`.
+Sky currently supports three major cloud providers: AWS, GCP, and Azure.  If you
+only have access to certain clouds, use any combination of
+:code:`".[aws,azure,gcp]"` (e.g., :code:`".[aws,gcp]"`) to reduce the
+dependencies installed.
 
 Cloud account setup
 -------------------
 
-Sky currently supports three major cloud providers: AWS, GCP, and Azure.  To run
-tasks in the clouds, configure access to at least one cloud:
+To run tasks in the clouds, configure access to at least one cloud:
 
-**AWS**:
+**AWS**
 
-To get the **AWS Access Key** required by the :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** are optional.
+To get the **AWS Access Key** required by :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
 .. code-block:: console
 
@@ -34,47 +34,42 @@ To get the **AWS Access Key** required by the :code:`aws configure`, please refe
   $ # Configure your AWS credentials
   $ aws configure
 
-
-**GCP**:
+**GCP**
 
 .. code-block:: console
 
   $ pip install google-api-python-client
-  $ # Install `gcloud`; see https://cloud.google.com/sdk/docs/quickstart
   $ conda install -c conda-forge google-cloud-sdk
 
-  $ # Init.
   $ gcloud init
 
   $ # Run this if you don't have a credentials file.
   $ # This will generate ~/.config/gcloud/application_default_credentials.json.
   $ gcloud auth application-default login
 
-If you meet the following error (*RemoveError: 'requests' is a dependency of conda and cannot be removed from conda's operating environment*) while running :code:`conda install -c conda-forge google-cloud-sdk`, please try :code:`conda update --force conda` and run it again.
+If running :code:`conda install -c conda-forge google-cloud-sdk` produces the error *"RemoveError: 'requests' is a dependency of conda and cannot be removed from conda's operating environment"*, try :code:`conda update --force conda` first and rerun the command.
 
 
-**Azure**:
+**Azure**
 
 .. code-block:: console
 
   $ # Install the Azure CLI
   $ pip install azure-cli==2.30.0
-  $ # Login azure
+  $ # Login
   $ az login
   $ # Set the subscription to use
   $ az account set -s <subscription_id>
 
 **Verifying cloud setup**
 
-Sky allows you to verify that cloud credentials are correctly configured using
-the CLI:
+After configuring the desired clouds, you can optionally run :code:`sky check` to verify that credentials are correctly set up:
 
 .. code-block:: console
 
-  $ # Verify cloud account setup
   $ sky check
 
-This will produce output verifying the correct setup of each supported cloud.
+This will produce a summary like:
 
 .. code-block:: text
 
