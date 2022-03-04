@@ -2,78 +2,101 @@
 Interactive Nodes
 =================
 
-During development, it may be preferable to have direct access to a VM without
-specifying a task YAML. Sky provides this functionality by providing interactive nodes
-nodes for development sessions. These are by default single node VMs, customizable
-with resources of your choice.
+Sky provides **interactive nodes**, the user's *personal work servers* in the
+clouds.  These are single-node VMs that can be quickly accessed by convenient
+CLI commands:
 
-Interactive nodes act like other clusters launched with YAML, except they are
-easily accessed with command line aliases that automatically log in to the node.
+- :code:`sky gpunode`
+- :code:`sky cpunode`
+- :code:`sky tpunode`
 
-Launching a development machine
+Interactive nodes are normal Sky clusters.  They allow fast access to instances
+without requiring a task YAML specification.
+
+Workflow
 -------------------------------
-To acquire and log in to an interative node with no accelerators:
+
+Use :code:`sky gpunode` to get a node with GPU(s):
 
 .. code-block:: console
 
-   $ sky cpunode -c my-cpu
+   $ # Create and log in to a cluster with the
+   $ # default name, "sky-gpunode-<username>".
+   $ sky gpunode
 
-We can also force a cloud and instance type if required:
+   $ # Or, use -c to set a custom name to manage multiple clusters:
+   $ # sky gpunode -c node0
+
+Use :code:`--gpus` to change the type and the number of GPUs:
 
 .. code-block:: console
 
-   $ sky cpunode -c my-cpu --cloud gcp --instance-type n1-standard-8
+   $ sky gpunode  # By default, use 1 K80 GPU.
+   $ sky gpunode --gpus V100
+   $ sky gpunode --gpus V100:8
 
-All available configuration options can be viewed with:
+   $ # To see available GPU names:
+   $ # sky show-gpus
+
+Directly set a cloud and instance type, if required:
 
 .. code-block:: console
 
-   $ sky cpunode --help
+   $ sky gpunode --cloud aws --instance-type p2.16xlarge
 
-To get an interactive node with an accelerator, we have
-:code:`sky gpunode` and :code:`sky tpunode` as well with similar usage patterns.
+See all available configuration options:
 
-To log in to an interactive node:
+.. code-block:: console
 
-.. code-block:: bash
+   $ sky gpunode --help
 
-    # automatically logs in after provisioning
-    sky cpunode -c my-cpu
+Sky also provides :code:`sky cpunode` for CPU-only instances and :code:`sky
+tpunode` for TPU instances (only available on Google Cloud Platform).
 
-    # directly logs in
-    ssh my-cpu
+To log in to an interactive node, retype the CLI command or use :code:`ssh`:
 
+.. code-block:: console
 
-Because Sky exposes SSH access to interactive nodes, this means they can also be
-used with tools such as `Visual Studio Code Remote <https://code.visualstudio.com/docs/remote/remote-overview>`_.
+    $ # If the cluster with the default name exists, this will directly log in.
+    $ sky gpunode
 
+    $ # Use -c to refer to different interactive nodes.
+    $ # sky gpunode -c node0
 
-Interactive nodes can be started and stopped like any other cluster:
+    $ # Alternative:
+    $ ssh sky-gpunode-<username>
 
-.. code-block:: bash
+Because Sky exposes SSH access to clusters, this means clusters can be easily added into
+tools such as `Visual Studio Code Remote <https://code.visualstudio.com/docs/remote/remote-overview>`_.
 
-    # stop the cluster
-    $ sky stop my-cpu
+Since interactive nodes are just normal Sky clusters, :code:`sky exec` can be used to submit jobs to them.
 
-    # restart the cluster
-    $ sky start my-cpu
+Interactive nodes can be stopped and restarted, like any other cluster:
+
+.. code-block:: console
+
+    $ # Stop at the end of the work day:
+    $ sky stop sky-gpunode-<username>
+
+    $ # Restart it the next morning:
+    $ sky start sky-gpunode-<username>
 
 .. note::
 
-    Since :code:`sky start` is used to restart a stopped cluster, auto-failover provisioning
-    is not used and the cluster will be started on the same cloud and region that it was
-    originally provisioned on.
+    Since :code:`sky start` restarts a stopped cluster, :ref:`auto-failover
+    provisioning <auto-failover>` is disabled---the cluster will be restarted on
+    the same cloud and region where it was originally provisioned.
 
 
-Advanced configuration
+Acquring multiple nodes
 ----------------------
-By default, interactive clusters are a single node. If you require a cluster with multiple nodes
-(e.g. for distributed training, etc.), you can launch a cluster using YAML:
+By default, interactive clusters are a single node. If you require a cluster
+with multiple nodes (e.g., for hyperparameter tuning or distributed training),
+use :code:`num_nodes` in a YAML spec:
 
 .. code-block:: yaml
 
     # multi_node.yaml
-
     num_nodes: 16
     resources:
       accelerators: V100:8
