@@ -58,6 +58,9 @@ head_node_type: ray.head.default
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
   "{{sky_remote_path}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
 }
 
 # List of shell commands to run to set up nodes.

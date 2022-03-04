@@ -242,18 +242,20 @@ class GCP(clouds.Cloud):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
                 'GCP credentials not set. Run the following commands:\n    '
+                # Install the Google Cloud SDK:
+                'pip install google-api-python-client\n    '
+                'conda install -c conda-forge google-cloud-sdk\n    '
                 # This authenticates the CLI to make `gsutil` work:
-                '$ gcloud auth login\n    '
-                '$ gcloud config set project <proj>\n    '
-                # These two commands setup the client library to make
-                # Ray Autoscaler work:
-                '$ gcloud auth application-default login\n    '
-                '$ gcloud auth application-default set-quota-project '
-                '<proj>\n    '
+                '$ gcloud init\n    '
+                # This will generate ~/.config/gcloud/application_default_credentials.json.
+                'gcloud auth application-default login\n    '
                 'For more info: '
-                'https://googleapis.dev/python/google-api-core/latest/auth.html'
+                'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'
             )
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {'~/.config/gcloud': '~/.config/gcloud'}
+        return {
+            '~/.config/gcloud/access_tokens.db': '~/.config/gcloud/access_tokens.db',
+            '~/.config/gcloud/credentials.db': '~/.config/gcloud/credentials.db',
+        }
