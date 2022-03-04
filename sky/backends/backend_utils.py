@@ -699,16 +699,16 @@ def run_in_parallel(func: Callable, args: List[Any]):
     The function should raise an OSError if it fails.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    with pool.ThreadPool() as p:
-        try:
-            list(p.imap_unordered(func, args))
-        except RuntimeError as e:
-            p.close()
-            p.terminate()
-            sys.exit(e.args[0])
-        else:
-            p.close()
-            p.join()
+    p = pool.ThreadPool()
+    try:
+        list(p.imap_unordered(func, args))
+    except RuntimeError as e:
+        p.close()
+        p.terminate()
+        sys.exit(e.args[0])
+    else:
+        p.close()
+        p.join()
 
 
 def run(cmd, **kwargs):
