@@ -144,8 +144,8 @@ class Resources:
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
 
-    def _set_accelerators(
-        self, accelerators: Union[None, Dict[str, int]]) -> None:
+    def _set_accelerators(self, accelerators: Union[None, Dict[str,
+                                                               int]]) -> None:
         """Sets the accelerators field in a case-sensitive manner."""
         if accelerators is not None:
             self._accelerators = {_get_name_from_catalog(name): cnt \
