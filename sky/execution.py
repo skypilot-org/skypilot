@@ -19,7 +19,6 @@ from typing import Any, List, Optional
 
 import sky
 from sky import backends
-from sky import check
 from sky import global_user_state
 from sky import sky_logging
 from sky import optimizer
@@ -109,17 +108,11 @@ def _execute(dag: sky.Dag,
     try:
         if stages is None or Stage.PROVISION in stages:
             if handle is None:
-                prev_file_mounts = task.file_mounts
-                if prev_file_mounts is not None:
-                    prev_file_mounts = dict(task.file_mounts)
-                task.update_file_mounts(
-                    check.get_cloud_credential_file_mounts())
                 handle = backend.provision(task,
                                            task.best_resources,
                                            dryrun=dryrun,
                                            stream_logs=stream_logs,
                                            cluster_name=cluster_name)
-                task.set_file_mounts(prev_file_mounts)
 
         if dryrun:
             logger.info('Dry run finished.')
