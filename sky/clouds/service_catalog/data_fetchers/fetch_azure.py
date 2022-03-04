@@ -121,8 +121,7 @@ def get_all_regions_instance_types_df():
 
     def get_price(row):
         is_promo = row['name'].endswith('_Promo')
-        sku = row['name']
-        sku = sku.replace('_Promo', '')
+        sku = row['name'].replace('_Promo', '')
         region = row['Region']
         pricing_rows = df[(df['armSkuName'] == sku) &
                           (df['armRegionName'] == region) &
