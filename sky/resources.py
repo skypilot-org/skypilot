@@ -91,7 +91,7 @@ class Resources:
                                 ' default (2.5.0)')
                     accelerator_args['tf_version'] = '2.5.0'
 
-        self._set_accelerators(accelerators)
+        self._accelerators = self._rename_accelerators(accelerators)
         self.accelerator_args = accelerator_args
 
         self._use_spot_specified = use_spot is not None
@@ -144,14 +144,16 @@ class Resources:
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
 
-    def _set_accelerators(self, accelerators: Union[None, Dict[str,
-                                                               int]]) -> None:
-        """Sets the accelerators field in a case-sensitive manner."""
+    def _rename_accelerators(
+        self,
+        accelerators: Union[None, Dict[str, int]],
+    ) -> Optional[Dict[str, int]]:
+        """Renames the accelerators in a case-sensitive manner."""
         if accelerators is not None:
-            self._accelerators = {_get_name_from_catalog(name): cnt \
-                                  for name, cnt in accelerators.items()}
+            return {_get_name_from_catalog(name): cnt \
+                    for name, cnt in accelerators.items()}
         else:
-            self._accelerators = None
+            return None
 
     @property
     def accelerators(self) -> Optional[Dict[str, int]]:
@@ -170,7 +172,7 @@ class Resources:
 
     @accelerators.setter
     def accelerators(self, accelerators: Union[None, Dict[str, int]]) -> None:
-        self._set_accelerators(accelerators)
+        self._accelerators = self._rename_accelerators(accelerators)
 
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
