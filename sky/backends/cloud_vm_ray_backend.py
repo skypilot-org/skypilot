@@ -1135,7 +1135,7 @@ class CloudVmRayBackend(backends.Backend):
 
         # Raise warning if directory is too large
         if not os.path.exists(full_workdir):
-            logger.error(f'{fore.RED}Directory {workdir} does not exist.'
+            logger.error(f'{fore.RED}Workdir {workdir} does not exist.'
                          f'{style.RESET_ALL}')
             sys.exit(1)
         dir_size = _path_size_megabytes(full_workdir)
