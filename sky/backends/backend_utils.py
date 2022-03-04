@@ -696,7 +696,7 @@ def handle_returncode(returncode: int,
 def run_in_parallel(func: Callable, args: List[Any]):
     """Run a function in parallel on a list of arguments.
 
-    The function should raise an OSError if it fails.
+    The function should raise an RuntimeError if it fails.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     p = pool.ThreadPool()
