@@ -12,15 +12,15 @@ DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 python "$DIR"/example_app.py
 
 # Simple apps.
-time sky launch -c min "$DIR"/minimal.yaml
-sky down min &
-time sky launch -c env "$DIR"/env_check.yaml
-sky down env &
+time sky launch -y -c min "$DIR"/minimal.yaml
+sky down -y min &
+time sky launch -y -c env "$DIR"/env_check.yaml
+sky down -y env &
 
 mkdir -p ~/tmp-workdir
 touch ~/tmp-workdir/foo
-time sky launch -c fm "$DIR"/using_file_mounts.yaml
-sky down fm &
+time sky launch -y -c fm "$DIR"/using_file_mounts.yaml
+sky down -y fm &
 
 # Task(), 1 node.
 # 17:25.60 total
@@ -34,49 +34,49 @@ sky down fm &
 
 # Task(), 1 node.
 # 6:47.90 total
-time sky launch -c huggingface "$DIR"/huggingface_glue_imdb_app.yaml
+time sky launch -y -c huggingface "$DIR"/huggingface_glue_imdb_app.yaml
 # real    1m49.532s
 time sky exec huggingface "$DIR"/huggingface_glue_imdb_app.yaml
 # time python "$DIR"/huggingface_glue_imdb_app.py
-sky down huggingface &
+sky down -y huggingface &
 
 # Task(), 1 node, TPU.
 # real    10m9.219s
-time sky launch -c tpu "$DIR"/tpu_app.yaml
+time sky launch -y -c tpu "$DIR"/tpu_app.yaml
 # real    3m26.997s
 # time sky exec tpu "$DIR"/tpu_app.yaml
 # python "$DIR"/tpu_app.py
-sky down tpu &
+sky down -y tpu &
 
 # Task(), n nodes.
 # real    4m17.406s
-time sky launch -c mh "$DIR"/multi_hostname.yaml
+time sky launch -y -c mh "$DIR"/multi_hostname.yaml
 # real    0m50.811s
 time sky exec mh "$DIR"/multi_hostname.yaml
-sky down mh &
+sky down -y mh &
 
 # Task(), n nodes with setups.
 time python "$DIR"/resnet_distributed_tf_app.py
 time python "$DIR"/resnet_distributed_tf_app.py
-sky down dtf &
+sky down -y dtf &
 
 # Submitting multiple tasks to the same cluster.
 # 6:23.58 total
 time python "$DIR"/multi_echo.py
 # python "$DIR"/huggingface_glue_imdb_grid_search_app.py
-sky down multi-echo &
+sky down -y multi-echo &
 
 # Job Queue.
-time sky launch -c jq "$DIR"/job_queue/cluster.yaml
+time sky launch -y -c jq "$DIR"/job_queue/cluster.yaml
 time sky exec jq -d "$DIR"/job_queue/job.yaml
 time sky exec jq -d "$DIR"/job_queue/job.yaml
 time sky exec jq -d "$DIR"/job_queue/job.yaml
 sky logs jq 2
 sky queue jq
 # Testing the functionality of the job queue, no need to wait for it.
-sky down jq &
+sky down -y jq &
 
-time sky launch -c mjq "$DIR"/job_queue/cluster_multinode.yaml
+time sky launch -y -c mjq "$DIR"/job_queue/cluster_multinode.yaml
 time sky exec mjq -d "$DIR"/job_queue/job_multinode.yaml
 time sky exec mjq -d "$DIR"/job_queue/job_multinode.yaml
 time sky exec mjq -d "$DIR"/job_queue/job_multinode.yaml
@@ -85,22 +85,22 @@ sky cancel mjq 1
 sky logs mjq 2
 sky queue mjq
 # Testing the functionality of the job queue, no need to wait for it.
-sky down mjq &
+sky down -y mjq &
 
 wait
 
 ## ---------- Testing GCP start and stop instances ----------
-sky launch -c gcp-start-stop "$DIR"/gcp_start_stop.yaml
+sky launch -y -c gcp-start-stop "$DIR"/gcp_start_stop.yaml
 sky exec gcp-start-stop "$DIR"/gcp_start_stop.yaml
-sky stop gcp-start-stop
-sky start gcp-start-stop
+sky stop -y gcp-start-stop
+sky start -y gcp-start-stop
 sky exec gcp-start-stop "$DIR"/gcp_start_stop.yaml
-sky down gcp-start-stop
+sky down -y gcp-start-stop
 
 ## ---------- Testing Azure start and stop instances ----------
-sky launch -c azure-start-stop "$DIR"/azure_start_stop.yaml
+sky launch -y -c azure-start-stop "$DIR"/azure_start_stop.yaml
 sky exec azure-start-stop "$DIR"/azure_start_stop.yaml
-sky stop azure-start-stop
-sky start azure-start-stop
+sky stop -y azure-start-stop
+sky start -y azure-start-stop
 sky exec azure-start-stop "$DIR"/azure_start_stop.yaml
-sky down azure-start-stop
+sky down -y azure-start-stop

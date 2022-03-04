@@ -98,7 +98,7 @@ def get_instance_type_for_accelerator_impl(
     if len(result) == 0:
         fuzzy_result = df[(df['AcceleratorName'].str.contains(acc_name)) &
                           (df['AcceleratorCount'] >= acc_count)]
-        fuzzy_result.sort_values('Price', ascending=True, inplace=True)
+        fuzzy_result = fuzzy_result.sort_values('Price', ascending=True)
         fuzzy_result = fuzzy_result[['AcceleratorName',
                                      'AcceleratorCount']].drop_duplicates()
         if len(fuzzy_result) > 0:
@@ -113,10 +113,10 @@ def get_instance_type_for_accelerator_impl(
                         f'{colorama.Style.RESET_ALL}')
         return None
     # Current strategy: choose the cheapest instance
-    result.sort_values('Price', ascending=True, inplace=True)
+    result = result.sort_values('Price', ascending=True)
     best_candidate = result.iloc[0]['InstanceType']
     instance_types = list(result['InstanceType'].drop_duplicates())
-    if len(result) > 1:
+    if len(instance_types) > 1:
         logger.info(f'Multiple {cloud.upper()} instances satisfy '
                     f'{acc_name}:{int(acc_count)}. '
                     f'Choosing the cheapest {best_candidate} among: '
