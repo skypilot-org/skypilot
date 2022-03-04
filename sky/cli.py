@@ -330,8 +330,8 @@ def _create_and_ssh_into_node(
             task.num_nodes = handle.launched_nodes
             if not no_confirm:
                 click.confirm(
-                    'You are about to restart the stopped cluster '
-                    f'{cluster_name}. Are you sure?',
+                    f'Restarting the stopped cluster {cluster_name!r}. '
+                    'Proceed?',
                     default=True,
                     abort=True,
                     show_default=True)
@@ -341,11 +341,10 @@ def _create_and_ssh_into_node(
             backend.register_info(dag=dag)
             to_provision = task.best_resources
             if not no_confirm:
-                click.confirm(
-                    'You are about to launch a new cluster. Are you sure?',
-                    default=True,
-                    abort=True,
-                    show_default=True)
+                click.confirm('Launching a new cluster. Proceed?',
+                              default=True,
+                              abort=True,
+                              show_default=True)
 
         handle = backend.provision(task,
                                    to_provision=to_provision,
@@ -554,14 +553,16 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
             task.name = name
 
     if not yes:
-        if cluster is None or global_user_state.get_handle_from_cluster_name(
-                cluster) is None:
-            # Prompt if no cluster is provided or the cluster doesn't exist.
-            click.confirm(
-                'You are about to launch a new cluster. Are you sure?',
-                default=True,
-                abort=True,
-                show_default=True)
+        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
+        # it exists but is STOPPED.
+        maybe_status = global_user_state.get_status_from_cluster_name(cluster)
+        prompt = None
+        if maybe_status is None:
+            prompt = 'Launching a new cluster. Proceed?'
+        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
+            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
 
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
@@ -1075,8 +1076,8 @@ def start(clusters: Tuple[str], yes: bool):
         cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'
         cluster_list = ', '.join([r['name'] for r in to_start])
         click.confirm(
-            f'You are about to restart {len(to_start)} {cluster_str}: '
-            f'{cluster_list}. Are you sure?',
+            f'Restarting {len(to_start)} {cluster_str}: '
+            f'{cluster_list}. Proceed?',
             default=True,
             abort=True,
             show_default=True)
@@ -1171,12 +1172,12 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         print('No existing clusters found (see `sky status`).')
 
     if not no_confirm:
-        teardown_verb = 'terminate' if terminate else 'stop'
+        teardown_verb = 'Terminating' if terminate else 'Stopping'
         cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
         cluster_list = ', '.join([r['name'] for r in to_down])
         click.confirm(
-            f'You are about to {teardown_verb} {len(to_down)} {cluster_str}: '
-            f'{cluster_list}. Are you sure?',
+            f'{teardown_verb} {len(to_down)} {cluster_str}: '
+            f'{cluster_list}. Proceed?',
             default=True,
             abort=True,
             show_default=True)
