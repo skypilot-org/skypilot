@@ -38,13 +38,13 @@ Use :code:`--gpus` to change the type and the number of GPUs:
    $ # To see available GPU names:
    $ # sky show-gpus
 
-Directly set a cloud and instance type, if required:
+Directly set a cloud and an instance type, if required:
 
 .. code-block:: console
 
    $ sky gpunode --cloud aws --instance-type p2.16xlarge
 
-See all available configuration options:
+See all available options and short keys:
 
 .. code-block:: console
 
@@ -53,25 +53,26 @@ See all available configuration options:
 Sky also provides :code:`sky cpunode` for CPU-only instances and :code:`sky
 tpunode` for TPU instances (only available on Google Cloud Platform).
 
-To log in to an interactive node, retype the CLI command or use :code:`ssh`:
+To log in to an interactive node, either re-type the CLI command or use :code:`ssh`:
 
 .. code-block:: console
 
     $ # If the cluster with the default name exists, this will directly log in.
     $ sky gpunode
 
+    $ # Equivalently:
+    $ ssh sky-gpunode-<username>
+
     $ # Use -c to refer to different interactive nodes.
     $ # sky gpunode -c node0
-
-    $ # Alternative:
-    $ ssh sky-gpunode-<username>
+    $ # ssh node0
 
 Because Sky exposes SSH access to clusters, this means clusters can be easily added into
 tools such as `Visual Studio Code Remote <https://code.visualstudio.com/docs/remote/remote-overview>`_.
 
 Since interactive nodes are just normal Sky clusters, :code:`sky exec` can be used to submit jobs to them.
 
-Interactive nodes can be stopped and restarted, like any other cluster:
+Interactive nodes can be stopped, restarted, and terminated, like any other cluster:
 
 .. code-block:: console
 
@@ -81,6 +82,9 @@ Interactive nodes can be stopped and restarted, like any other cluster:
     $ # Restart it the next morning:
     $ sky start sky-gpunode-<username>
 
+    $ # Terminate entirely:
+    $ sky down sky-gpunode-<username>
+
 .. note::
 
     Since :code:`sky start` restarts a stopped cluster, :ref:`auto-failover
@@ -88,7 +92,7 @@ Interactive nodes can be stopped and restarted, like any other cluster:
     the same cloud and region where it was originally provisioned.
 
 
-Acquring multiple nodes
+Getting multiple nodes
 ----------------------
 By default, interactive clusters are a single node. If you require a cluster
 with multiple nodes (e.g., for hyperparameter tuning or distributed training),
