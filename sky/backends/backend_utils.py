@@ -692,7 +692,8 @@ def handle_returncode(returncode: int,
     if returncode != 0:
         if stderr is not None:
             logger.error(stderr)
-        format_err_msg = f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}'
+        format_err_msg = (
+            f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
         if raise_error:
             raise exceptions.CommandError(returncode, command, format_err_msg)
         logger.error(f'Command failed with code {returncode}: {command}')
@@ -704,9 +705,6 @@ def run_in_parallel(func: Callable, args: List[Any]):
     """Run a function in parallel on a list of arguments.
 
     The function should raise a CommandError if the command fails.
-      returncode: The returncode of the command.
-      command: The command that was run.
-      error_message: The error message to print. 
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     with pool.ThreadPool() as p:
@@ -715,7 +713,8 @@ def run_in_parallel(func: Callable, args: List[Any]):
         except exceptions.CommandError as e:
             # Print the error message here, to avoid the other processes'
             # error messages mixed with the current one.
-            logger.error(f'Command failed with code {e.returncode}: {e.command}')
+            logger.error(
+                f'Command failed with code {e.returncode}: {e.command}')
             logger.error(e.error_msg)
             sys.exit(e.returncode)
 
