@@ -19,7 +19,7 @@ import jinja2
 import sky
 from sky import authentication as auth
 from sky import backends
-from sky import check
+from sky import check as sky_check
 from sky import clouds
 from sky import sky_logging
 from sky import resources
@@ -392,7 +392,7 @@ def write_cluster_config(to_provision: Resources,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
-                'credentials': check.get_cloud_credential_file_mounts(),
+                'credentials': sky_check.get_cloud_credential_file_mounts(),
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),

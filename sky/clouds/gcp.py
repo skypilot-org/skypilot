@@ -247,15 +247,16 @@ class GCP(clouds.Cloud):
                 'conda install -c conda-forge google-cloud-sdk\n    '
                 # This authenticates the CLI to make `gsutil` work:
                 '$ gcloud init\n    '
-                # This will generate ~/.config/gcloud/application_default_credentials.json.
+                # This will generate
+                # ~/.config/gcloud/application_default_credentials.json.
                 'gcloud auth application-default login\n    '
                 'For more info: '
-                'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'
+                'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
-            '~/.config/gcloud/access_tokens.db': '~/.config/gcloud/access_tokens.db',
-            '~/.config/gcloud/credentials.db': '~/.config/gcloud/credentials.db',
+            '~/.config/gcloud/access_tokens.db': '~/.config/gcloud/access_tokens.db',  # pylint: disable=line-too-long
+            '~/.config/gcloud/credentials.db': '~/.config/gcloud/credentials.db',  # pylint: disable=line-too-long
         }
