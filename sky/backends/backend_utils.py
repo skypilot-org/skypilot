@@ -22,10 +22,11 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import exceptions
 from sky import sky_logging
 from sky import resources
-from sky.backends import wheel_utils
 from sky.adaptors import azure
+from sky.backends import wheel_utils
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -691,30 +692,30 @@ def handle_returncode(returncode: int,
     if returncode != 0:
         if stderr is not None:
             logger.error(stderr)
-        logger.error(f'Command failed with code {returncode}: {command}')
-        logger.error(
-            f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
+        format_err_msg = f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}'
         if raise_error:
-            raise RuntimeError(returncode)
+            raise exceptions.CommandError(returncode, command, format_err_msg)
+        logger.error(f'Command failed with code {returncode}: {command}')
+        logger.error(format_err_msg)
         sys.exit(returncode)
 
 
 def run_in_parallel(func: Callable, args: List[Any]):
     """Run a function in parallel on a list of arguments.
 
-    The function should raise an RuntimeError if it fails.
+    The function should raise a CommandError if the command fails.
+      returncode: The returncode of the command.
+      command: The command that was run.
+      error_message: The error message to print. 
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    p = pool.ThreadPool()
-    try:
-        list(p.imap_unordered(func, args))
-    except RuntimeError as e:
-        p.close()
-        p.terminate()
-        sys.exit(e.args[0])
-    else:
-        p.close()
-        p.join()
+    with pool.ThreadPool(1) as p:
+        try:
+            list(p.imap_unordered(func, args))
+        except exceptions.CommandError as e:
+            logger.error(f'Command failed with code {e.returncode}: {e.command}')
+            logger.error(e.error_msg)
+            sys.exit(e.returncode)
 
 
 def run(cmd, **kwargs):
