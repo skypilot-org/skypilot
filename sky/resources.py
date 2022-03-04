@@ -10,6 +10,16 @@ logger = sky_logging.init_logger(__name__)
 DEFAULT_DISK_SIZE = 256
 
 
+def _get_name_from_catalog(accelerator: str) -> str:
+    """Returns the matched accelerator name in the catalog."""
+    acc_names = list(service_catalog.list_accelerators().keys())
+    try:
+        index = [n.casefold() for n in acc_names].index(accelerator.casefold())
+    except ValueError:
+        raise ValueError(f'Invalid accelerator name: {accelerator}') from None
+    return acc_names[index]
+
+
 class Resources:
     """A cloud resource bundle.
 
@@ -81,7 +91,7 @@ class Resources:
                                 ' default (2.5.0)')
                     accelerator_args['tf_version'] = '2.5.0'
 
-        self.set_accelerators(accelerators)
+        self._set_accelerators(accelerators)
         self.accelerator_args = accelerator_args
 
         self._use_spot_specified = use_spot is not None
@@ -134,37 +144,33 @@ class Resources:
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
 
-    def set_accelerators(self, accelerators: Union[None, Dict[str, int]]):
-        """Set the accelerators field in a case-sensitive manner."""
-        if accelerators is None:
-            self.accelerators = None
-            return
+    def _set_accelerators(
+        self, accelerators: Union[None, Dict[str, int]]) -> None:
+        """Sets the accelerators field in a case-sensitive manner."""
+        if accelerators is not None:
+            self._accelerators = {_get_name_from_catalog(name): cnt \
+                                  for name, cnt in accelerators.items()}
+        else:
+            self._accelerators = None
 
-        assert len(accelerators) == 1, accelerators
-        name, cnt = list(accelerators.items())[0]
-
-        acc_names = list(service_catalog.list_accelerators().keys())
-        try:
-            index = [n.casefold() for n in acc_names].index(name.casefold())
-        except ValueError:
-            raise ValueError(f'Invalid accelerator name: {name}') from None
-
-        name = acc_names[index]
-        self.accelerators = {name: cnt}
-
-    def get_accelerators(self) -> Optional[Dict[str, int]]:
+    @property
+    def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
 
         For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
         set to None, but this function will infer {'V100': 1} from the instance
         type.
         """
-        if self.accelerators is not None:
-            return self.accelerators
+        if self._accelerators is not None:
+            return self._accelerators
         if self.cloud is not None and self.instance_type is not None:
             return self.cloud.get_accelerators_from_instance_type(
                 self.instance_type)
         return None
+
+    @accelerators.setter
+    def accelerators(self, accelerators: Union[None, Dict[str, int]]) -> None:
+        self._set_accelerators(accelerators)
 
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
@@ -196,8 +202,8 @@ class Resources:
             return False
         # self.instance_type == other.instance_type
 
-        other_accelerators = other.get_accelerators()
-        accelerators = self.get_accelerators()
+        other_accelerators = other.accelerators
+        accelerators = self.accelerators
         if accelerators != other_accelerators:
             return False
         # self.accelerators == other.accelerators
@@ -223,7 +229,7 @@ class Resources:
             return False
         # self.instance_type <= other.instance_type
 
-        other_accelerators = other.get_accelerators()
+        other_accelerators = other.accelerators
         if self.accelerators is not None and other_accelerators is None:
             return False
 
