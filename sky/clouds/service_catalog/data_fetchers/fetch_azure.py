@@ -120,7 +120,7 @@ def get_all_regions_instance_types_df():
     print(f'Processing dataframes')
 
     def get_price(row):
-        is_promo = True if 'Promo' in row['name'] else False
+        is_promo = row['name'].endswith('_Promo')
         sku = row['name']
         sku = sku.replace('_Promo', '')
         region = row['Region']
