@@ -672,7 +672,7 @@ def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
                       stderr: Optional[str] = None,
-                      raise_error: bool = False) -> int:
+                      raise_error: bool = False) -> None:
     """Handle the returncode of a command.
 
     Args:

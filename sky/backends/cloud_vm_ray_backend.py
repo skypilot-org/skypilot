@@ -1143,20 +1143,16 @@ class CloudVmRayBackend(backends.Backend):
             logger.warning(f'{fore.YELLOW}The size of workdir {workdir} '
                            f'is {dir_size} MB. Try to keep workdir small, as '
                            f'large sizes will slowdown rsync.{style.RESET_ALL}')
-        workdir_symlink = False
         if os.path.islink(full_workdir):
             logger.warning(
                 f'{fore.YELLOW}Workdir {workdir} is a symlink. '
-                f'Symlink contents are not uploaded.{style.RESET_ALL}')
-            workdir_symlink = True
+                f'Symlink contents are uploaded.{style.RESET_ALL}')
+            workdir = f'{workdir}/'
 
         def _sync_workdir_node(ip):
-            cur_workdir = workdir
-            if workdir_symlink:
-                cur_workdir = f'{workdir}/'
             self._rsync_up(handle,
                            ip=ip,
-                           source=cur_workdir,
+                           source=workdir,
                            target=SKY_REMOTE_WORKDIR,
                            log_path=os.path.join(self.log_dir,
                                                  'workdir_sync.log'),
