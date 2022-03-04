@@ -709,7 +709,7 @@ def run_in_parallel(func: Callable, args: List[Any]):
       error_message: The error message to print. 
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    with pool.ThreadPool(1) as p:
+    with pool.ThreadPool() as p:
         try:
             list(p.imap_unordered(func, args))
         except exceptions.CommandError as e:
