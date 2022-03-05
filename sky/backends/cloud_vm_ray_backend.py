@@ -1172,7 +1172,7 @@ class CloudVmRayBackend(backends.Backend):
         # File mounts handling for remote paths possibly without write access:
         #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
         #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
-
+        start = time.time()
         del cloud_to_remote_file_mounts  # Unused.
         mounts = all_file_mounts
         symlink_commands = []
@@ -1326,8 +1326,12 @@ class CloudVmRayBackend(backends.Backend):
                 raise_error=True)
 
         backend_utils.run_in_parallel(_symlink_node, ip_list)
+        
+        end = time.time()
+        logger.debug(f'File mount sync took {end - start} seconds.')
 
     def setup(self, handle: ResourceHandle, task: Task) -> None:
+        start = time.time()
         style = colorama.Style
         fore = colorama.Fore
 
@@ -1374,6 +1378,8 @@ class CloudVmRayBackend(backends.Backend):
             with console.status('[bold cyan]Running setup[/]'):
                 backend_utils.run_in_parallel(_setup_node, ip_list)
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
+        end = time.time()
+        logger.debug(f'Setup took {end - start} seconds.')
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()
