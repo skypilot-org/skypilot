@@ -3,6 +3,7 @@ import colorama
 import datetime
 import enum
 import getpass
+from multiprocessing import pool
 import os
 import pathlib
 import shlex
@@ -10,7 +11,7 @@ import subprocess
 import sys
 import textwrap
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 
@@ -21,10 +22,11 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import exceptions
 from sky import sky_logging
 from sky import resources
-from sky.backends import wheel_utils
 from sky.adaptors import azure
+from sky.backends import wheel_utils
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -676,7 +678,8 @@ def run_command_on_ip_via_ssh(
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
-                      stderr: Optional[str] = None) -> None:
+                      stderr: Optional[str] = None,
+                      raise_error: bool = False) -> None:
     """Handle the returncode of a command.
 
     Args:
@@ -684,14 +687,36 @@ def handle_returncode(returncode: int,
         command: The command that was run.
         error_msg: The error message to print.
         stderr: The stderr of the command.
+        raise_error: Whether to raise an error instead of sys.exit.
     """
     if returncode != 0:
         if stderr is not None:
             logger.error(stderr)
-        logger.error(f'Command failed with code {returncode}: {command}')
-        logger.error(
+        format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
+        if raise_error:
+            raise exceptions.CommandError(returncode, command, format_err_msg)
+        logger.error(f'Command failed with code {returncode}: {command}')
+        logger.error(format_err_msg)
         sys.exit(returncode)
+
+
+def run_in_parallel(func: Callable, args: List[Any]):
+    """Run a function in parallel on a list of arguments.
+
+    The function should raise a CommandError if the command fails.
+    """
+    # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
+    with pool.ThreadPool() as p:
+        try:
+            list(p.imap_unordered(func, args))
+        except exceptions.CommandError as e:
+            # Print the error message here, to avoid the other processes'
+            # error messages mixed with the current one.
+            logger.error(
+                f'Command failed with code {e.returncode}: {e.command}')
+            logger.error(e.error_msg)
+            sys.exit(e.returncode)
 
 
 def run(cmd, **kwargs):
