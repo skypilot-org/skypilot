@@ -61,6 +61,9 @@ def get_hourly_cost_impl(
     """Returns the cost, or the cheapest cost among all zones for spot."""
     df = _get_instance_type(df, instance_type, region)
     assert len(set(df['Price'])) == 1, df
+    assert pd.isnull(
+        df['Price'].iloc[0]) is False, (f'Missing price for "{instance_type}, '
+                                        f'Spot: {use_spot}" in the catalog.')
     if not use_spot:
         return df['Price'].iloc[0]
 
