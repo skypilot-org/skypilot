@@ -36,7 +36,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
-import colorama
 import pendulum
 from rich import console as rich_console
 
@@ -177,10 +176,17 @@ def _interactive_node_cli_command(cli_func):
                              type=int,
                              required=False,
                              help=('OS disk size in GBs.'))
+    no_confirm = click.option('--yes',
+                              '-y',
+                              is_flag=True,
+                              default=False,
+                              required=False,
+                              help='Skip confirmation prompt.')
 
     click_decorators = [
         cli.command(cls=_DocumentedCodeCommand),
         cluster_option,
+        no_confirm,
         port_forward_option,
 
         # Resource options
@@ -273,6 +279,7 @@ def _create_and_ssh_into_node(
     port_forward: Optional[List[int]] = None,
     session_manager: Optional[str] = None,
     user_requested_resources: Optional[bool] = False,
+    no_confirm: bool = False,
 ):
     """Creates and attaches to an interactive node.
 
@@ -284,6 +291,7 @@ def _create_and_ssh_into_node(
         port_forward: List of ports to forward.
         session_manager: Attach session manager: { 'screen', 'tmux' }.
         user_requested_resources: If true, user requested resources explicitly.
+        no_confirm: If true, skips confirmation prompt presented to user.
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
@@ -299,7 +307,6 @@ def _create_and_ssh_into_node(
             run='',
         )
         task.set_resources(resources)
-        task.update_file_mounts(sky_check.get_cloud_credential_file_mounts())
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -320,11 +327,23 @@ def _create_and_ssh_into_node(
             to_provision = None
             task.set_resources(handle.launched_resources)
             task.num_nodes = handle.launched_nodes
+            if not no_confirm:
+                click.confirm(
+                    f'Restarting the stopped cluster {cluster_name!r}. '
+                    'Proceed?',
+                    default=True,
+                    abort=True,
+                    show_default=True)
         else:
             dag = sky.optimize(dag)
             task = dag.tasks[0]
             backend.register_info(dag=dag)
             to_provision = task.best_resources
+            if not no_confirm:
+                click.confirm('Launching a new cluster. Proceed?',
+                              default=True,
+                              abort=True,
+                              show_default=True)
 
         handle = backend.provision(task,
                                    to_provision=to_provision,
@@ -478,10 +497,16 @@ def cli():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
 def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
            detach_run: bool, backend_name: str, workdir: Optional[str],
            cloud: Optional[str], gpus: Optional[str], use_spot: Optional[bool],
-           name: Optional[str], disk_size: Optional[int]):
+           name: Optional[str], disk_size: Optional[int], yes: bool):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If entrypoint points to a valid YAML file, it is read in as the task
@@ -514,6 +539,10 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
             new_resources.cloud = _get_cloud(cloud)
         if gpus is not None:
             new_resources.accelerators = _parse_accelerator_options(gpus)
+            if 'tpu' in gpus.lower():
+                logger.info('Missing tf_version in accelerator_args, using'
+                            ' default (2.5.0)')
+                new_resources.accelerator_args = {'tf_version': '2.5.0'}
         if use_spot is not None:
             new_resources.use_spot = use_spot
         if disk_size is not None:
@@ -521,6 +550,18 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         task.set_resources({new_resources})
         if name is not None:
             task.name = name
+
+    if not yes:
+        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
+        # it exists but is STOPPED.
+        maybe_status = global_user_state.get_status_from_cluster_name(cluster)
+        prompt = None
+        if maybe_status is None:
+            prompt = 'Launching a new cluster. Proceed?'
+        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
+            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
 
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
@@ -893,9 +934,16 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
 def stop(
-        clusters: Tuple[str],
-        all: Optional[bool],  # pylint: disable=redefined-builtin
+    clusters: Tuple[str],
+    all: Optional[bool],  # pylint: disable=redefined-builtin
+    yes: bool,
 ):
     """Stop cluster(s).
 
@@ -922,18 +970,31 @@ def stop(
         sky stop -a
 
     """
-    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=False)
+    _terminate_or_stop_clusters(clusters,
+                                apply_to_all=all,
+                                terminate=False,
+                                no_confirm=yes)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clusters', nargs=-1, required=True)
-def start(clusters: Tuple[str]):
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def start(clusters: Tuple[str], yes: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status == STOPPED) or failed in
     provisioning/a task's setup (status == INIT), this command will attempt to
     start the cluster.  (In the second case, any failed setup steps are not
     performed and only a request to start the machines is attempted.)
+
+    Note that auto-failover provisioning is not used when restarting stopped
+    clusters. They will be started on the same cloud and region that was chosen
+    before.
 
     If a cluster is already in an UP status, this command has no effect on it.
 
@@ -1009,16 +1070,23 @@ def start(clusters: Tuple[str]):
         return
     # FIXME: Assumes a specific backend.
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+    if not yes:
+        cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'
+        cluster_list = ', '.join([r['name'] for r in to_start])
+        click.confirm(
+            f'Restarting {len(to_start)} {cluster_str}: '
+            f'{cluster_list}. Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
+
     for record in to_start:
         name = record['name']
         handle = record['handle']
         with sky.Dag():
             dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
-        click.secho(
-            f'{colorama.Fore.CYAN}Starting cluster '
-            f'{colorama.Fore.GREEN}{name}...',
-            bold=True)
         backend.provision(dummy_task,
                           to_provision=handle.launched_resources,
                           dryrun=False,
@@ -1034,9 +1102,16 @@ def start(clusters: Tuple[str]):
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
 def down(
-        clusters: Tuple[str],
-        all: Optional[bool],  # pylint: disable=redefined-builtin
+    clusters: Tuple[str],
+    all: Optional[bool],  # pylint: disable=redefined-builtin
+    yes: bool,
 ):
     """Tear down cluster(s).
 
@@ -1063,11 +1138,14 @@ def down(
         sky down -a
 
     """
-    _terminate_or_stop_clusters(clusters, apply_to_all=all, terminate=True)
+    _terminate_or_stop_clusters(clusters,
+                                apply_to_all=all,
+                                terminate=True,
+                                no_confirm=yes)
 
 
 def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
-                                terminate: bool) -> None:
+                                terminate: bool, no_confirm: bool) -> None:
     """Terminates or stops a cluster (or all clusters)."""
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
@@ -1091,6 +1169,17 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             names = []
     if not to_down and not names:
         print('No existing clusters found (see `sky status`).')
+
+    if not no_confirm:
+        teardown_verb = 'Terminating' if terminate else 'Stopping'
+        cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
+        cluster_list = ', '.join([r['name'] for r in to_down])
+        click.confirm(
+            f'{teardown_verb} {len(to_down)} {cluster_str}: '
+            f'{cluster_list}. Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
 
     for record in to_down:  # TODO: parallelize.
         name = record['name']
@@ -1116,7 +1205,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
 
 
 @_interactive_node_cli_command
-def gpunode(cluster: str, port_forward: Optional[List[int]],
+def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
             gpus: Optional[str], spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int]):
@@ -1189,11 +1278,12 @@ def gpunode(cluster: str, port_forward: Optional[List[int]],
         port_forward=port_forward,
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
+        no_confirm=yes,
     )
 
 
 @_interactive_node_cli_command
-def cpunode(cluster: str, port_forward: Optional[List[int]],
+def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
             spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int]):
@@ -1260,11 +1350,12 @@ def cpunode(cluster: str, port_forward: Optional[List[int]],
         port_forward=port_forward,
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
+        no_confirm=yes,
     )
 
 
 @_interactive_node_cli_command
-def tpunode(cluster: str, port_forward: Optional[List[int]],
+def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
             spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int]):
@@ -1335,6 +1426,7 @@ def tpunode(cluster: str, port_forward: Optional[List[int]],
         port_forward=port_forward,
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
+        no_confirm=yes,
     )
 
 
@@ -1368,6 +1460,9 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
 
     To show all GPUs, including less common ones and their detailed
     information, use `sky show-gpus --all`.
+
+    NOTE: The price displayed for each instance type is the lowest across all
+    regions for both on-demand and spot instances.
     """
     show_all = all
     if show_all and gpu_name is not None:
@@ -1426,14 +1521,20 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                 'CLOUD',
                 'INSTANCE_TYPE',
                 'HOST_MEMORY',
+                'HOURLY_PRICE',
+                'HOURLY_SPOT_PRICE',
             ])
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(attachable)'
                 mem_str = f'{item.memory:.0f}GB' if item.memory > 0 else '-'
+                price_str = f'$ {item.price:.3f}' if not pd.isna(
+                    item.price) else '-'
+                spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
+                    item.spot_price) else '-'
                 accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
-                    instance_type_str, mem_str
+                    instance_type_str, mem_str, price_str, spot_price_str
                 ])
 
             if i != 0 or gpu_name is None:
@@ -1450,15 +1551,13 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
 
 @cli.group(cls=_NaturalOrderGroup)
 def storage():
-    """Handle to run Sky Storage CLI commands.
-    """
+    """Storage related commands."""
     pass
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
 def storage_ls():
-    """Lists storage objects created.
-    """
+    """List storage objects created."""
     storage_stat = global_user_state.get_storage()
     storage_table = util_lib.create_table([
         'NAME',
@@ -1497,7 +1596,7 @@ def storage_ls():
               help='Used with delete; Delete all storages.')
 @click.argument('name', required=False, type=str, nargs=-1)
 def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
-    """Deletes storage objects.
+    """Delete storage objects.
 
     Example:
 
@@ -1512,7 +1611,7 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         sky storage delete -a
     """
     if all:
-        click.echo('Deleting all storage objects')
+        click.echo('Deleting all storage objects...')
         storages = global_user_state.get_storage()
         for row in storages:
             store_object = data.Storage(name=row['name'],
@@ -1522,16 +1621,16 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         for n in name:
             handle = global_user_state.get_handle_from_storage_name(n)
             if handle is None:
-                click.echo(f'Storage Name {n} not found!')
+                click.echo(f'Storage name {n} not found.')
             else:
-                click.echo(f'Deleting storage object {n}')
+                click.echo(f'Deleting storage object {n}...')
                 store_object = data.Storage(name=handle.storage_name,
                                             source=handle.source)
                 store_object.delete()
     else:
         raise click.ClickException(
             'Must pass in \'-a/--all\' or storage names to \'sky '
-            'storage delete\'')
+            'storage delete\'.')
 
 
 def main():

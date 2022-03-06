@@ -40,7 +40,8 @@ class S3CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'pip3 install awscli',
+        'aws --version > /dev/null 2>&1 || '
+        'pip3 install awscli==1.22.17',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -117,6 +118,8 @@ class GcsCloudStorage(CloudStorage):
         command = ' && '.join(commands)
         p = backend_utils.run(command, stdout=subprocess.PIPE)
         out = p.stdout.decode().strip()
+        # Edge Case: Gcloud command is run for first time #437
+        out = out.split('\n')[-1]
         # If <url> is a bucket root, then we only need `gsutil` to succeed
         # to make sure the bucket exists. It is already a directory.
         _, key = data_utils.split_gcs_path(url)
