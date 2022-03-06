@@ -402,6 +402,7 @@ def _fill_in_launchable_resources(
         return _fill_in_launchable_resources(task, blocked_launchable_resources,
                                              False)
     launchable = collections.defaultdict(list)
+    cloud_candidates = collections.defaultdict(Resources)
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
     for resources in task.get_resources():
@@ -432,7 +433,6 @@ def _fill_in_launchable_resources(
                             f'{fuzzy_candidate_list}'
                             f'{colorama.Style.RESET_ALL}')
         else:
-            cloud_candidates = collections.defaultdict(Resources)
             all_fuzzy_candidates = set()
             for cloud in enabled_clouds:
                 (feasible_resources, fuzzy_candidate_list
