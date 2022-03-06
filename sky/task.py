@@ -132,6 +132,7 @@ class Task:
         dag.add(self)
 
     def _validate(self):
+        """Checks if the Task fields are valid."""
         if not _is_valid_name(self.name):
             raise ValueError(f'Invalid task name {self.name}. Valid name: '
                              f'{_VALID_NAME_DESCR}')
@@ -168,6 +169,13 @@ class Task:
             raise ValueError('run must be either a shell script (str) or '
                              f'a command generator ({CommandGen}). '
                              f'Got {type(self.run)}')
+
+        # Workdir.
+        if self.workdir is not None and not os.path.isdir(self.workdir):
+            # Symlink to a dir is legal (isdir() follows symlinks).
+            raise ValueError(
+                'Workdir must exist and must be a directory (or '
+                f'a symlink to a directory). Found: {self.workdir}')
 
     @staticmethod
     def from_yaml(yaml_path):
