@@ -208,13 +208,13 @@ class GCP(clouds.Cloud):
                 if acc not in available_accelerators or not any(
                         acc_count == info.accelerator_count
                         for info in available_accelerators[acc]):
-                    return []
+                    return (None, [])
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
         r = copy.deepcopy(resources)
         r.cloud = GCP()
         r.instance_type = GCP.get_default_instance_type()
-        return [r]
+        return ([r], [])
 
     def get_accelerators_from_instance_type(
         self,

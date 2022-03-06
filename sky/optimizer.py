@@ -2,10 +2,11 @@
 import collections
 import enum
 import pprint
-from typing import Dict, List, Optional
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import tabulate
+import colorama
 
 from sky import check
 from sky import clouds
@@ -179,6 +180,7 @@ class Optimizer:
         # d[node][resources][parent] = (best parent resources, best parent cost)
         dp_point_backs = collections.defaultdict(
             lambda: collections.defaultdict(dict))
+        node_to_candidates = collections.defaultdict(dict)
 
         for node_i, node in enumerate(topo_order):
             # Base case: a special source node.
@@ -191,11 +193,12 @@ class Optimizer:
                 logger.debug('#### {} ####'.format(node))
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
-                launchable_resources = \
+                launchable_resources, cloud_candidates = \
                     _fill_in_launchable_resources(
                         node,
                         blocked_launchable_resources
                     )
+                node_to_candidates[node_i] = cloud_candidates
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
@@ -293,6 +296,19 @@ class Optimizer:
                 logger.info('%s\n',
                             pprint.pformat(list(dp_best_cost.values())[0]))
 
+            for node_i, candidate_set in node_to_candidates.items():
+                node = topo_order[node_i]
+                res = list(node.get_resources())[0]
+                acc_name, acc_count = list(res.get_accelerators().items())[0]
+                for cloud, candidate_list in candidate_set.items():
+                    if len(candidate_list) > 1:
+                        logger.info(
+                            f'Multiple {cloud} instances satisfy '
+                            f'{acc_name}:{int(acc_count)}. '
+                            f'The cheapest {candidate_list[0]} is selected '
+                            f'among:\n{candidate_list}.\n')
+                logger.info(
+                    f'To list more details, run \'sky show-gpus {acc_name}\'.')
         return dag, best_plan
 
     @staticmethod
@@ -379,7 +395,7 @@ def _fill_in_launchable_resources(
     task: Task,
     blocked_launchable_resources: Optional[List[Resources]],
     try_fix_with_sky_check: bool = True,
-) -> Dict[Resources, List[Resources]]:
+) -> Tuple[Dict[Resources, List[Resources]], Optional[Dict[str, set]]]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_check:
         check.check(quiet=True)
@@ -402,15 +418,42 @@ def _fill_in_launchable_resources(
         elif resources.is_launchable():
             launchable[resources] = [resources]
         elif resources.cloud is not None:
-            launchable[
-                resources] = resources.cloud.get_feasible_launchable_resources(
-                    resources)
+            (feasible_resources, fuzzy_candidate_list
+            ) = resources.cloud.get_feasible_launchable_resources(resources)
+            if feasible_resources is not None:
+                feasible_resources = sorted(feasible_resources,
+                                            key=lambda r: r.get_cost(3600))
+                launchable[resources].append(feasible_resources[0])
+            else:
+                accelerators = resources.get_accelerators()
+                logger.info(f'No resource satisfying {accelerators}'
+                            f' on {resources.cloud}. Did you mean:'
+                            f'{colorama.Fore.CYAN}'
+                            f'{fuzzy_candidate_list}'
+                            f'{colorama.Style.RESET_ALL}')
         else:
+            cloud_candidates = collections.defaultdict(Resources)
+            all_fuzzy_candidates = set()
             for cloud in enabled_clouds:
-                feasible_resources = cloud.get_feasible_launchable_resources(
-                    resources)
-                launchable[resources].extend(feasible_resources)
+                (feasible_resources, fuzzy_candidate_list
+                ) = cloud.get_feasible_launchable_resources(resources)
+                if feasible_resources is not None:
+                    feasible_resources = sorted(feasible_resources,
+                                                key=lambda r: r.get_cost(3600))
+                    # Only append the cheapest option for each cloud
+                    launchable[resources].append(feasible_resources[0])
+                    cloud_candidates[cloud] = feasible_resources
+                else:
+                    all_fuzzy_candidates.update(fuzzy_candidate_list)
+            if len(launchable[resources]) == 0:
+                accelerators = resources.get_accelerators()
+                logger.info(f'No resource satisfying {accelerators}'
+                            f' on all clouds. Did you mean: '
+                            f'{colorama.Fore.CYAN}'
+                            f'{sorted(all_fuzzy_candidates)}'
+                            f'{colorama.Style.RESET_ALL}')
+
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_launchable_resources)
 
-    return launchable
+    return launchable, cloud_candidates
