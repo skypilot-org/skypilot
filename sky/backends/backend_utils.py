@@ -206,9 +206,6 @@ class SSHConfigHelper(object):
         overwrite_begin_idxs = [None] * len(ips)
         codegens = [None] * len(ips)
         cluster_names = [cluster_name]
-        if len(ips) > 1:
-            for idx in range(len(ips[1:])):
-                cluster_names.append(cluster_name + f'_w{idx}')
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if not os.path.exists(config_path):
@@ -219,25 +216,64 @@ class SSHConfigHelper(object):
         with open(config_path) as f:
             config = f.readlines()
 
+        extra_config_path = None
+        if len(ips) > 1:
+            for idx in range(len(ips[1:])):
+                cluster_names.append(cluster_name + f'-worker{idx+1}')
+
+            extra_path_name = f'~/.sky/ssh/{cluster_name}'
+            extra_config_path = os.path.expanduser(extra_path_name)
+            os.makedirs(os.path.dirname(extra_config_path), exist_ok=True)
+            if not os.path.exists(extra_config_path):
+                config = ['\n']
+                with open(extra_config_path, 'w') as f:
+                    f.writelines(config)
+            with open(extra_config_path) as f:
+                extra_config = f.readlines()
+
+        # All workers go to ~/.sky/ssh/{cluster_name}
         # If an existing config with `cluster_name` exists, raise a warning.
         host_lines = [f'Host {c_name}' for c_name in cluster_names]
         for i, line in enumerate(config):
-            if line.strip() in host_lines:
-                idx = host_lines.index(line.strip())
-                prev_line = config[i - 1] if i - 1 > 0 else ''
-                if prev_line.strip().startswith(sky_autogen_comment):
-                    host_name = cluster_names[idx]
-                    overwrites[idx] = True
-                    overwrite_begin_idxs[idx] = i - 1
+            config_str = line.strip()
+            if config_str in host_lines:
+                if config_str == f'Host {cluster_name}':
+                    prev_line = config[i - 1] if i - 1 > 0 else ''
+                    if prev_line.strip().startswith(sky_autogen_comment):
+                        host_name = cluster_name
+                        overwrites[0] = True
+                        overwrite_begin_idxs[0] = i - 1
                 else:
                     logger.warning(f'{cls.ssh_conf_path} contains '
                                    f'host named {cluster_names[idx]}.')
                     host_name = ips[idx]
                     logger.warning(
                         f'Using {host_name} to identify host instead.')
-                codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, ips[idx], username,
-                    key_path)
+                codegens[0] = cls._get_generated_config(sky_autogen_comment,
+                                                        host_name, ips[0],
+                                                        username, key_path)
+                break
+
+        if len(ips) > 1:
+            for i, line in enumerate(extra_config):
+                if line.strip() in host_lines:
+                    idx = host_lines.index(line.strip())
+                    if idx == 0:
+                        continue
+                    prev_line = extra_config[i - 1] if i - 1 > 0 else ''
+                    if prev_line.strip().startswith(sky_autogen_comment):
+                        host_name = cluster_names[idx]
+                        overwrites[idx] = True
+                        overwrite_begin_idxs[idx] = i - 1
+                    else:
+                        logger.warning(f'{extra_path_name} contains '
+                                       f'host named {cluster_names[idx]}.')
+                        host_name = ips[idx]
+                        logger.warning(
+                            f'Using {host_name} to identify host instead.')
+                    codegens[idx] = cls._get_generated_config(
+                        sky_autogen_comment, host_name, ips[idx], username,
+                        key_path)
 
         for idx in range(len(ips)):
             if not codegens[idx]:
@@ -245,29 +281,36 @@ class SSHConfigHelper(object):
                     sky_autogen_comment, cluster_names[idx], ips[idx], username,
                     key_path)
 
+        path = config_path
+        config_txt = config
         for idx in range(len(ips)):
             # Add (or overwrite) the new config.
             overwrite = overwrites[idx]
             overwrite_begin_idx = overwrite_begin_idxs[idx]
             codegen = codegens[idx]
+            if idx > 0:
+                path = extra_config_path
+                config_txt = extra_config
             if overwrite:
                 assert overwrite_begin_idx is not None
                 updated_lines = codegen.splitlines(keepends=True) + ['\n']
-                config[overwrite_begin_idx:overwrite_begin_idx +
-                       len(updated_lines)] = updated_lines
-                with open(config_path, 'w') as f:
-                    f.write(''.join(config).strip())
+                config_txt[overwrite_begin_idx:overwrite_begin_idx +
+                           len(updated_lines)] = updated_lines
+                with open(path, 'w') as f:
+                    f.write(''.join(config_txt).strip())
                     f.write('\n')
             else:
-                with open(config_path, 'a') as f:
-                    if len(config) > 0 and not config[-1].endswith('\n'):
+                with open(path, 'a') as f:
+                    if len(config_txt) > 0 and not config_txt[-1].endswith(
+                            '\n'):
                         # Add trailing newline if it doesn't exist.
                         f.write('\n')
                     f.write('\n')
                     f.write(codegen)
 
     @classmethod
-    def remove_cluster(cls, ips: List[str], auth_config: Dict[str, str]):
+    def remove_cluster(cls, cluster_name: str, ips: List[str],
+                       auth_config: Dict[str, str]):
         """Remove authentication information for cluster from local SSH config.
 
         If no existing host matching the provided specification is found, then
@@ -280,50 +323,56 @@ class SSHConfigHelper(object):
         """
         username = auth_config['ssh_user']
 
+        if len(ips) > 1:
+            extra_path_name = f'~/.sky/ssh/{cluster_name}'
+            extra_config_path = os.path.expanduser(extra_path_name)
+            if os.path.exists(extra_config_path):
+                os.remove(extra_config_path)
+
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if not os.path.exists(config_path):
             return
 
-        for ip in ips:
-            with open(config_path) as f:
-                config = f.readlines()
+        ip = ips[0]
+        with open(config_path) as f:
+            config = f.readlines()
 
-            start_line_idx = None
-            # Scan the config for the cluster name.
-            for i, line in enumerate(config):
-                next_line = config[i + 1] if i + 1 < len(config) else ''
-                if line.strip() == f'HostName {ip}' and next_line.strip(
-                ) == f'User {username}':
-                    start_line_idx = i - 1
-                    break
+        start_line_idx = None
+        # Scan the config for the cluster name.
+        for i, line in enumerate(config):
+            next_line = config[i + 1] if i + 1 < len(config) else ''
+            if line.strip() == f'HostName {ip}' and next_line.strip(
+            ) == f'User {username}':
+                start_line_idx = i - 1
+                break
 
-            if not start_line_idx:  # No config to remove.
-                continue
+        if start_line_idx is None:  # No config to remove.
+            return
 
-            # Scan for end of previous config.
-            cursor = start_line_idx
-            while cursor > 0 and len(config[cursor].strip()) > 0:
-                cursor -= 1
-            prev_end_line_idx = cursor
+        # Scan for end of previous config.
+        cursor = start_line_idx
+        while cursor > 0 and len(config[cursor].strip()) > 0:
+            cursor -= 1
+        prev_end_line_idx = cursor
 
-            # Scan for end of the cluster config.
-            end_line_idx = None
-            cursor = start_line_idx + 1
-            start_line_idx -= 1  # remove auto-generated comment
-            while cursor < len(config):
-                if config[cursor].strip().startswith(
-                        '# ') or config[cursor].strip().startswith('Host '):
-                    end_line_idx = cursor
-                    break
-                cursor += 1
+        # Scan for end of the cluster config.
+        end_line_idx = None
+        cursor = start_line_idx + 1
+        start_line_idx -= 1  # remove auto-generated comment
+        while cursor < len(config):
+            if config[cursor].strip().startswith(
+                    '# ') or config[cursor].strip().startswith('Host '):
+                end_line_idx = cursor
+                break
+            cursor += 1
 
-            # Remove sky-generated config and update the file.
-            config[prev_end_line_idx:end_line_idx] = [
-                '\n'
-            ] if end_line_idx is not None else []
-            with open(config_path, 'w') as f:
-                f.write(''.join(config).strip())
-                f.write('\n')
+        # Remove sky-generated config and update the file.
+        config[prev_end_line_idx:end_line_idx] = [
+            '\n'
+        ] if end_line_idx is not None else []
+        with open(config_path, 'w') as f:
+            f.write(''.join(config).strip())
+            f.write('\n')
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
