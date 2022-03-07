@@ -217,18 +217,19 @@ class SSHConfigHelper(object):
         if len(ips) > 1:
             for idx in range(len(ips[1:])):
                 cluster_names.append(cluster_name + f'-worker{idx+1}')
-
             extra_path_name = f'~/.sky/ssh/{cluster_name}'
             extra_config_path = os.path.expanduser(extra_path_name)
             os.makedirs(os.path.dirname(extra_config_path), exist_ok=True)
             if not os.path.exists(extra_config_path):
-                config = ['\n']
+                lines = ['\n']
                 with open(extra_config_path, 'w') as f:
-                    f.writelines(config)
+                    f.writelines(lines)
+
             with open(config_path) as f:
                 config = f.readlines()
             with open(extra_config_path) as f:
                 extra_config = f.readlines()
+
             # Handle Include on top of Config file
             include_str = f'Include {extra_config_path}'
             for i, line in enumerate(config):
@@ -240,7 +241,6 @@ class SSHConfigHelper(object):
                     with open(config_path, 'w') as f:
                         config.insert(0, include_str + '\n')
                         f.write(''.join(config).strip())
-                        f.write('\n')
                     break
 
         with open(config_path) as f:
@@ -272,6 +272,7 @@ class SSHConfigHelper(object):
             for i, line in enumerate(extra_config):
                 if line.strip() in host_lines:
                     idx = host_lines.index(line.strip())
+                    # This is idx of head node, skip.
                     if idx == 0:
                         continue
                     prev_line = extra_config[i - 1] if i > 0 else ''
