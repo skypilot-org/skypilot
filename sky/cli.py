@@ -1169,6 +1169,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             names = []
     if not to_down and not names:
         print('No existing clusters found (see `sky status`).')
+        return
 
     if not no_confirm:
         teardown_verb = 'Terminating' if terminate else 'Stopping'
