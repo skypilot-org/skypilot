@@ -198,9 +198,10 @@ class GCP(clouds.Cloud):
         return resources_vars
 
     def get_feasible_launchable_resources(self, resources):
+        fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            return [resources]
+            return ([resources], fuzzy_candidate_list)
         if resources.accelerators is not None:
             available_accelerators = service_catalog.list_accelerators(
                 gpus_only=False, clouds='gcp')
@@ -208,13 +209,13 @@ class GCP(clouds.Cloud):
                 if acc not in available_accelerators or not any(
                         acc_count == info.accelerator_count
                         for info in available_accelerators[acc]):
-                    return (None, [])
+                    return (None, fuzzy_candidate_list)
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
         r = copy.deepcopy(resources)
         r.cloud = GCP()
         r.instance_type = GCP.get_default_instance_type()
-        return ([r], [])
+        return ([r], fuzzy_candidate_list)
 
     def get_accelerators_from_instance_type(
         self,

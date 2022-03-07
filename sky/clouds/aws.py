@@ -174,11 +174,12 @@ class AWS(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
+        fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources.accelerators = None
-            return [resources]
+            return ([resources], fuzzy_candidate_list)
 
         def _make(instance_list):
             resource_list = []
@@ -196,7 +197,8 @@ class AWS(clouds.Cloud):
         accelerators = resources.get_accelerators()
         if accelerators is None:
             # No requirements to filter, so just return a default VM type.
-            return _make(AWS.get_default_instance_type())
+            return (_make([AWS.get_default_instance_type()]),
+                    fuzzy_candidate_list)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]

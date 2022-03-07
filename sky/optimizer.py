@@ -298,16 +298,18 @@ class Optimizer:
 
         for node_i, candidate_set in node_to_candidates.items():
             node = topo_order[node_i]
-            res = list(node.get_resources())[0]
-            acc_name, acc_count = list(res.get_accelerators().items())[0]
+            accelerator = list(node.get_resources())[0].get_accelerators()
             is_multi_instances = False
-            for cloud, candidate_list in candidate_set.items():
-                if len(candidate_list) > 1:
-                    is_multi_instances = True
-                    logger.info(f'Multiple {cloud} instances satisfy '
-                                f'{acc_name}:{int(acc_count)}. '
-                                f'The cheapest {candidate_list[0]} is selected '
-                                f'among:\n{candidate_list}.\n')
+            if accelerator:
+                acc_name, acc_count = list(accelerator.items())[0]
+                for cloud, candidate_list in candidate_set.items():
+                    if len(candidate_list) > 1:
+                        is_multi_instances = True
+                        logger.info(
+                            f'Multiple {cloud} instances satisfy '
+                            f'{acc_name}:{int(acc_count)}. '
+                            f'The cheapest {candidate_list[0]} is selected '
+                            f'among:\n{candidate_list}.\n')
             if is_multi_instances:
                 logger.info(
                     f'To list more details, run \'sky show-gpus {acc_name}\'.')
