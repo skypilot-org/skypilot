@@ -30,12 +30,12 @@ CONDA_SETUP_PREFIX = '. $(conda info --base)/etc/profile.d/conda.sh 2> ' \
 
 SKY_DOCKER_SETUP_SCRIPT = 'sky_setup.sh'
 SKY_DOCKER_RUN_SCRIPT = 'sky_run.sh'
+SKY_DOCKER_WORKDIR = 'sky_workdir'
 
 
 def create_dockerfile(
     base_image: str,
     setup_command: str,
-    copy_path: str,
     build_dir: str,
     run_command: str = None,
 ) -> str:
@@ -52,8 +52,6 @@ def create_dockerfile(
         base_image: base image to inherit from
         setup_command: commands to run for setup. eg. "pip install numpy && apt
             install htop"
-        copy_path: local path to copy into the image. these are placed in the
-            root of the container.
         build_dir: Where to write the dockerfile and setup scripts
         run_command: cmd argument to the dockerfile. optional - can also be
             specified at runtime.
@@ -66,14 +64,9 @@ def create_dockerfile(
     img_metadata = {}
     dockerfile_contents = DOCKERFILE_TEMPLATE.format(base_image=base_image)
 
-    # Copy workdir to image
-    workdir_name = ''
-    if copy_path:
-        workdir_name = os.path.basename(os.path.dirname(copy_path))
-        # NOTE: This relies on copy_path being copied to build context.
-        copy_docker_cmd = f'{workdir_name} /{workdir_name}/'
-        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
-            copy_command=copy_docker_cmd)
+    copy_docker_cmd = f'{SKY_DOCKER_WORKDIR} /{SKY_DOCKER_WORKDIR}/'
+    dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
+        copy_command=copy_docker_cmd)
 
     def add_script_to_dockerfile(dockerfile_contents: str, multiline_cmds: str,
                                  out_filename: str):
@@ -81,7 +74,7 @@ def create_dockerfile(
         # dockerfile. You still need to add the docker command to run the
         # script (either as CMD or RUN).
         script_path = os.path.join(build_dir, out_filename)
-        bash_codegen(workdir_name, multiline_cmds, script_path)
+        bash_codegen(SKY_DOCKER_WORKDIR, multiline_cmds, script_path)
 
         # Add CMD to run setup
         copy_cmd = f'{out_filename} /sky/{out_filename}'
@@ -111,7 +104,7 @@ def create_dockerfile(
     with open(os.path.join(build_dir, 'Dockerfile'), 'w') as f:
         f.write(dockerfile_contents)
 
-    img_metadata['workdir_name'] = workdir_name
+    img_metadata['workdir_name'] = SKY_DOCKER_WORKDIR
     return dockerfile_contents, img_metadata
 
 
@@ -153,21 +146,20 @@ def build_dockerimage(task, tag):
     # Get tempdir
     temp_dir = tempfile.mkdtemp(prefix='sky_local_')
 
-    # Add trailing slash to workdir if missing
-    copy_path = os.path.join(task.workdir, '') if task.workdir else task.workdir
-
     # Create dockerfile
     _, img_metadata = create_dockerfile(base_image=task.docker_image,
                                         setup_command=task.setup,
-                                        copy_path=copy_path,
                                         run_command=task.run,
                                         build_dir=temp_dir)
 
-    # Copy copy_path contents to tempdir
-    if copy_path:
-        copy_dir_name = os.path.basename(os.path.dirname(copy_path))
-        dst = os.path.join(temp_dir, copy_dir_name)
-        shutil.copytree(os.path.expanduser(copy_path), dst)
+    dst = os.path.join(temp_dir, SKY_DOCKER_WORKDIR)
+    if task.workdir is not None:
+        # Copy workdir contents to tempdir
+        shutil.copytree(os.path.expanduser(task.workdir), dst)
+    else:
+        # Create an empty dir
+        os.makedirs(dst)
+
     logger.info(f'Using tempdir {temp_dir} for docker build.')
 
     # Run docker image build
