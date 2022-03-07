@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import textwrap
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
 from rich import console as rich_console
@@ -34,12 +34,10 @@ from sky.skylet import job_lib, log_lib
 
 Dag = dag_lib.Dag
 OptimizeTarget = optimizer.OptimizeTarget
+Path = str
 Resources = resources_lib.Resources
 Task = task_lib.Task
 
-Path = str
-PostSetupFn = Callable[[str], Any]
-SKY_DIRSIZE_WARN_THRESHOLD = 100
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
@@ -48,6 +46,8 @@ SKYLET_REMOTE_PATH = backend_utils.SKY_REMOTE_PATH
 
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
+
+_PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -105,7 +105,7 @@ def _remove_cluster_from_ssh_config(cluster_name: str, cluster_ips: List[str],
 
 
 def _path_size_megabytes(path: str) -> int:
-    # Returns the size of files occupied in path in megabytes
+    """Returns the size of 'path' (directory or file) in megabytes."""
     return int(
         subprocess.check_output(['du', '-sh', '-m',
                                  path]).split()[0].decode('utf-8'))
@@ -1130,22 +1130,24 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
-        # Raise warning if directory is too large
-        if not os.path.exists(full_workdir):
-            logger.error(f'{fore.RED}Workdir {workdir} does not exist.'
-                         f'{style.RESET_ALL}')
-            sys.exit(1)
-        dir_size = _path_size_megabytes(full_workdir)
-        if dir_size >= SKY_DIRSIZE_WARN_THRESHOLD:
-            logger.warning(f'{fore.YELLOW}The size of workdir {workdir} '
-                           f'is {dir_size} MB. Try to keep workdir small, as '
-                           f'large sizes will slowdown rsync.{style.RESET_ALL}')
+        # These asserts have been validated at Task construction time.
+        assert os.path.exists(full_workdir), f'{full_workdir} does not exist'
         if os.path.islink(full_workdir):
             logger.warning(
-                f'{fore.YELLOW}Workdir {workdir} is a symlink. '
+                f'{fore.YELLOW}Workdir {workdir!r} is a symlink. '
                 f'Symlink contents are not uploaded.{style.RESET_ALL}')
         else:
-            workdir = f'{workdir}/'
+            assert os.path.isdir(
+                full_workdir), f'{full_workdir} should be a directory.'
+            workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
+
+        # Raise warning if directory is too large
+        dir_size = _path_size_megabytes(full_workdir)
+        if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
+            logger.warning(
+                f'{fore.YELLOW}The size of workdir {workdir!r} '
+                f'is {dir_size} MB. Try to keep workdir small, as '
+                f'large sizes will slow down rsync.{style.RESET_ALL}')
 
         def _sync_workdir_node(ip):
             self._rsync_up(handle,
@@ -1159,8 +1161,11 @@ class CloudVmRayBackend(backends.Backend):
 
         num_nodes = handle.launched_nodes
         plural = 's' if num_nodes > 1 else ''
-        logger.info(f'{fore.CYAN}Syncing (on {num_nodes} node{plural}): '
-                    f'{style.BRIGHT}workdir ({workdir}){style.RESET_ALL}.')
+        logger.info(
+            f'{fore.CYAN}Syncing workdir (to {num_nodes} node{plural}): '
+            f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
+            f' -> '
+            f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
         with console.status('[bold cyan]Syncing[/]'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
@@ -1194,9 +1199,13 @@ class CloudVmRayBackend(backends.Backend):
                               dst: str,
                               command: Optional[str] = None,
                               run_rsync: Optional[bool] = False):
-            full_src = os.path.abspath(os.path.expanduser(src))
-            if not os.path.islink(full_src) and not os.path.isfile(full_src):
-                src = f'{src}/'
+            if run_rsync:
+                # Do this for local src paths, not for cloud store URIs
+                # (otherwise we have '<abs path to cwd>/gs://.../object/').
+                full_src = os.path.abspath(os.path.expanduser(src))
+                if not os.path.islink(full_src) and not os.path.isfile(
+                        full_src):
+                    src = os.path.join(src, '')  # Adds trailing / if needed.
 
             def _sync_node(ip):
                 if command is not None:
@@ -1227,8 +1236,9 @@ class CloudVmRayBackend(backends.Backend):
 
             num_nodes = handle.launched_nodes
             plural = 's' if num_nodes > 1 else ''
-            logger.info(f'{fore.CYAN}Syncing (on {num_nodes} node{plural}): '
-                        f'{style.BRIGHT}{src} -> {dst}{style.RESET_ALL}')
+            logger.info(f'{fore.CYAN}Syncing (to {num_nodes} node{plural}): '
+                        f'{style.BRIGHT}{src}{style.RESET_ALL} -> '
+                        f'{style.BRIGHT}{dst}{style.RESET_ALL}')
             with console.status('[bold cyan]Syncing[/]'):
                 backend_utils.run_in_parallel(_sync_node, ip_list)
 
@@ -1236,19 +1246,17 @@ class CloudVmRayBackend(backends.Backend):
         for dst, src in mounts.items():
             if not task_lib.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
-                if not os.path.exists(full_src):
-                    logger.error(f'{fore.RED}Directory "{src}" does not exist.'
-                                 f'{style.RESET_ALL}')
-                    sys.exit(1)
+                # Checked during Task.set_file_mounts().
+                assert os.path.exists(full_src), f'{full_src} does not exist.'
                 src_size = _path_size_megabytes(full_src)
-                if src_size >= SKY_DIRSIZE_WARN_THRESHOLD:
+                if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(
-                        f'{fore.YELLOW}The size of file mount src {src} '
+                        f'{fore.YELLOW}The size of file mount src {src!r} '
                         f'is {src_size} MB. Try to keep src small, as '
                         f'large sizes will slow down rsync.{style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(
-                        f'{fore.YELLOW}Source path {src} is a symlink. '
+                        f'{fore.YELLOW}Source path {src!r} is a symlink. '
                         f'Symlink contents are not uploaded.{style.RESET_ALL}')
 
         for dst, src in mounts.items():

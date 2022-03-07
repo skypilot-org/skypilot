@@ -1,7 +1,7 @@
 """Local docker backend for sky"""
 import subprocess
 import tempfile
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Dict, Optional, Union
 
 import colorama
 
@@ -17,7 +17,6 @@ from sky.backends import docker_utils
 Task = task_lib.Task
 Resources = resources.Resources
 Path = str
-PostSetupFn = Callable[[str], Any]
 
 logger = sky_logging.init_logger(__name__)
 
