@@ -256,6 +256,8 @@ class GCP(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
+        # Excluding the symlink to the python executable created by the gcp credential.
+        # rsync_exclude only supports relative paths.
         return {
             '~/.config/gcloud': '~/.config/gcloud'
-        }, ['~/.config/gcloud/virtenv']
+        }, ['/virtenv/bin/python*']
