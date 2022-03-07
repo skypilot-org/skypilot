@@ -213,9 +213,6 @@ class SSHConfigHelper(object):
             with open(config_path, 'w') as f:
                 f.writelines(config)
 
-        with open(config_path) as f:
-            config = f.readlines()
-
         extra_config_path = None
         if len(ips) > 1:
             for idx in range(len(ips[1:])):
@@ -228,21 +225,37 @@ class SSHConfigHelper(object):
                 config = ['\n']
                 with open(extra_config_path, 'w') as f:
                     f.writelines(config)
+            with open(config_path) as f:
+                config = f.readlines()
             with open(extra_config_path) as f:
                 extra_config = f.readlines()
+            # Handle Include on top of Config file
+            include_str = f'Include {extra_config_path}'
+            for i, line in enumerate(config):
+                config_str = line.strip()
+                if config_str == include_str:
+                    break
+                # Add Include
+                if 'Include' not in config_str:
+                    with open(config_path, 'w') as f:
+                        config.insert(0, include_str + '\n')
+                        f.write(''.join(config).strip())
+                        f.write('\n')
+                    break
 
-        # All workers go to ~/.sky/ssh/{cluster_name}
+        with open(config_path) as f:
+            config = f.readlines()
+
         # If an existing config with `cluster_name` exists, raise a warning.
         host_lines = [f'Host {c_name}' for c_name in cluster_names]
         for i, line in enumerate(config):
             config_str = line.strip()
-            if config_str in host_lines:
-                if config_str == f'Host {cluster_name}':
-                    prev_line = config[i - 1] if i - 1 > 0 else ''
-                    if prev_line.strip().startswith(sky_autogen_comment):
-                        host_name = cluster_name
-                        overwrites[0] = True
-                        overwrite_begin_idxs[0] = i - 1
+            if config_str == f'Host {cluster_name}':
+                prev_line = config[i - 1] if i - 1 > 0 else ''
+                if prev_line.strip().startswith(sky_autogen_comment):
+                    host_name = cluster_name
+                    overwrites[0] = True
+                    overwrite_begin_idxs[0] = i - 1
                 else:
                     logger.warning(f'{cls.ssh_conf_path} contains '
                                    f'host named {cluster_names[idx]}.')
@@ -254,13 +267,14 @@ class SSHConfigHelper(object):
                                                         username, key_path)
                 break
 
+        # All workers go to ~/.sky/ssh/{cluster_name}
         if len(ips) > 1:
             for i, line in enumerate(extra_config):
                 if line.strip() in host_lines:
                     idx = host_lines.index(line.strip())
                     if idx == 0:
                         continue
-                    prev_line = extra_config[i - 1] if i - 1 > 0 else ''
+                    prev_line = extra_config[i - 1] if i > 0 else ''
                     if prev_line.strip().startswith(sky_autogen_comment):
                         host_name = cluster_names[idx]
                         overwrites[idx] = True
@@ -322,6 +336,9 @@ class SSHConfigHelper(object):
             auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
         username = auth_config['ssh_user']
+        config_path = os.path.expanduser(cls.ssh_conf_path)
+        if not os.path.exists(config_path):
+            return
 
         if len(ips) > 1:
             extra_path_name = f'~/.sky/ssh/{cluster_name}'
@@ -329,9 +346,18 @@ class SSHConfigHelper(object):
             if os.path.exists(extra_config_path):
                 os.remove(extra_config_path)
 
-        config_path = os.path.expanduser(cls.ssh_conf_path)
-        if not os.path.exists(config_path):
-            return
+            # Delete include statement
+            with open(config_path) as f:
+                config = f.readlines()
+            for i, line in enumerate(config):
+                config_str = line.strip()
+                if f'Include {extra_config_path}' in config_str:
+                    with open(config_path, 'w') as f:
+                        del config[i]
+                        f.write(''.join(config).strip())
+                    break
+                if 'Include' not in config_str:
+                    break
 
         ip = ips[0]
         with open(config_path) as f:
