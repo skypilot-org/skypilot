@@ -1161,7 +1161,9 @@ class CloudVmRayBackend(backends.Backend):
         plural = 's' if num_nodes > 1 else ''
         logger.info(
             f'{fore.CYAN}Syncing workdir (to {num_nodes} node{plural}): '
-            f'{style.BRIGHT}{workdir!r}{style.RESET_ALL}')
+            f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
+            f' -> '
+            f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
         with console.status('[bold cyan]Syncing[/]'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
@@ -1242,10 +1244,8 @@ class CloudVmRayBackend(backends.Backend):
         for dst, src in mounts.items():
             if not task_lib.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
-                if not os.path.exists(full_src):
-                    logger.error(f'{fore.RED}Directory "{src}" does not exist.'
-                                 f'{style.RESET_ALL}')
-                    sys.exit(1)
+                # Checked during Task.set_file_mounts().
+                assert os.path.exists(full_src), f'{full_src} does not exist.'
                 src_size = _path_size_megabytes(full_src)
                 if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(

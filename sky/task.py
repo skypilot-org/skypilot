@@ -486,6 +486,13 @@ class Task:
             if is_cloud_store_url(target):
                 raise ValueError(
                     'File mount destination paths cannot be cloud storage')
+            if not is_cloud_store_url(source):
+                if not os.path.exists(
+                        os.path.abspath(os.path.expanduser(source))):
+                    raise ValueError(
+                        f'File mount source {source!r} does not exist locally. '
+                        'To fix: check if it exists, and correct the path.')
+
         self.file_mounts = file_mounts
         return self
 
