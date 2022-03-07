@@ -950,6 +950,10 @@ def stop(
     CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
     supplied, the latter takes precedence.
 
+    Stopping a cluster does not lose data on the attached disks (billing for
+    the instances will stop while the disks will still be charged).  Those
+    disks will be reattached when restarting the cluster.
+
     Currently, spot-instance clusters cannot be stopped.
 
     Examples:
@@ -1117,6 +1121,9 @@ def down(
 
     CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
     are supplied, the latter takes precedence.
+
+    Terminating a cluster will delete all associated resources (all billing
+    stops), and any data on the attached disks will be lost.
 
     Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
 
