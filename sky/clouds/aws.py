@@ -243,5 +243,5 @@ class AWS(clouds.Cloud):
             return True, None
         return False, 'AWS credentials not set. Run `aws configure`.' + help_str
 
-    def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {'~/.aws': '~/.aws'}
+    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
+        return {'~/.aws': '~/.aws'}, []
