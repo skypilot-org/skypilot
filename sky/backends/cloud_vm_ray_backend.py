@@ -1143,7 +1143,7 @@ class CloudVmRayBackend(backends.Backend):
         dir_size = _path_size_megabytes(full_workdir)
         if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
             logger.warning(
-                f'{fore.YELLOW}The size of workdir {workdir} '
+                f'{fore.YELLOW}The size of workdir {workdir!r} '
                 f'is {dir_size} MB. Try to keep workdir small, as '
                 f'large sizes will slow down rsync.{style.RESET_ALL}')
 
