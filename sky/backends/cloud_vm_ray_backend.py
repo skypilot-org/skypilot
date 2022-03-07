@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import textwrap
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
 from rich import console as rich_console
@@ -35,7 +35,6 @@ from sky.skylet import job_lib, log_lib
 Dag = dag_lib.Dag
 OptimizeTarget = optimizer.OptimizeTarget
 Path = str
-PostSetupFn = Callable[[str], Any]
 Resources = resources_lib.Resources
 Task = task_lib.Task
 
@@ -1162,7 +1161,7 @@ class CloudVmRayBackend(backends.Backend):
         plural = 's' if num_nodes > 1 else ''
         logger.info(
             f'{fore.CYAN}Syncing workdir (to {num_nodes} node{plural}): '
-            f'{style.BRIGHT}{workdir!r}{style.RESET_ALL}.')
+            f'{style.BRIGHT}{workdir!r}{style.RESET_ALL}')
         with console.status('[bold cyan]Syncing[/]'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
@@ -1196,9 +1195,13 @@ class CloudVmRayBackend(backends.Backend):
                               dst: str,
                               command: Optional[str] = None,
                               run_rsync: Optional[bool] = False):
-            full_src = os.path.abspath(os.path.expanduser(src))
-            if not os.path.islink(full_src) and not os.path.isfile(full_src):
-                src = os.path.join(src, '')  # Adds trailing / if needed.
+            if run_rsync:
+                # Do this for local src paths, not for cloud store URIs
+                # (otherwise we have '<abs path to cwd>/gs://.../object/').
+                full_src = os.path.abspath(os.path.expanduser(src))
+                if not os.path.islink(full_src) and not os.path.isfile(
+                        full_src):
+                    src = os.path.join(src, '')  # Adds trailing / if needed.
 
             def _sync_node(ip):
                 if command is not None:

@@ -1,5 +1,5 @@
 """Sky backend interface."""
-from typing import Any, Callable, Dict, Optional
+from typing import Dict, Optional
 
 from sky import resources
 from sky import task as task_lib
@@ -7,7 +7,6 @@ from sky import task as task_lib
 Task = task_lib.Task
 Resources = resources.Resources
 Path = str
-PostSetupFn = Callable[[str], Any]
 
 
 class Backend:
