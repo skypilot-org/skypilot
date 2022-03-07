@@ -260,6 +260,6 @@ class GCP(clouds.Cloud):
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
         # rsync_exclude only supports relative paths.
-        return {
-            '~/.config/gcloud': '~/.config/gcloud'
-        }, ['/virtenv/bin/python*']
+        # TODO(zhwu): rsync_exclude here is unsafe as it may exclude the folder
+        # from other file_mounts as well in ray yaml.
+        return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
