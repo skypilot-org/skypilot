@@ -12,7 +12,7 @@ DEFAULT_DISK_SIZE = 256
 
 def _get_name_from_catalog(accelerator: str) -> str:
     """Returns the matched accelerator name in the catalog."""
-    acc_names = list(service_catalog.list_accelerators().keys())
+    acc_names = list(service_catalog.list_accelerators(gpus_only=False).keys())
     try:
         index = [n.casefold() for n in acc_names].index(accelerator.casefold())
     except ValueError:
