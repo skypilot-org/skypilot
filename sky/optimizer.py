@@ -296,17 +296,19 @@ class Optimizer:
                 logger.info('%s\n',
                             pprint.pformat(list(dp_best_cost.values())[0]))
 
-            for node_i, candidate_set in node_to_candidates.items():
-                node = topo_order[node_i]
-                res = list(node.get_resources())[0]
-                acc_name, acc_count = list(res.get_accelerators().items())[0]
-                for cloud, candidate_list in candidate_set.items():
-                    if len(candidate_list) > 1:
-                        logger.info(
-                            f'Multiple {cloud} instances satisfy '
-                            f'{acc_name}:{int(acc_count)}. '
-                            f'The cheapest {candidate_list[0]} is selected '
-                            f'among:\n{candidate_list}.\n')
+        for node_i, candidate_set in node_to_candidates.items():
+            node = topo_order[node_i]
+            res = list(node.get_resources())[0]
+            acc_name, acc_count = list(res.get_accelerators().items())[0]
+            is_multi_instances = False
+            for cloud, candidate_list in candidate_set.items():
+                if len(candidate_list) > 1:
+                    is_multi_instances = True
+                    logger.info(f'Multiple {cloud} instances satisfy '
+                                f'{acc_name}:{int(acc_count)}. '
+                                f'The cheapest {candidate_list[0]} is selected '
+                                f'among:\n{candidate_list}.\n')
+            if is_multi_instances:
                 logger.info(
                     f'To list more details, run \'sky show-gpus {acc_name}\'.')
         return dag, best_plan
@@ -425,6 +427,7 @@ def _fill_in_launchable_resources(
                 feasible_resources = sorted(feasible_resources,
                                             key=lambda r: r.get_cost(3600))
                 launchable[resources].append(feasible_resources[0])
+                cloud_candidates[resources.cloud] = feasible_resources
             else:
                 accelerators = resources.get_accelerators()
                 logger.info(f'No resource satisfying {accelerators}'
