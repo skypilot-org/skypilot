@@ -1693,7 +1693,20 @@ class CloudVmRayBackend(backends.Backend):
         prev_status = global_user_state.get_status_from_cluster_name(
             handle.cluster_name)
         cluster_name = config['cluster_name']
-        if (terminate and
+        if terminate and isinstance(cloud, clouds.Azure):
+            # Here we handle termination of Azure by ourselves instead of Ray
+            # autoscaler.
+            resource_group = config['provider']['resource_group']
+            terminate_cmd = f'az group delete --name {resource_group}'
+            with console.status(f'[bold cyan]Terminating '
+                                f'[green]{cluster_name}'):
+                returncode, stdout, stderr = log_lib.run_with_log(
+                    terminate_cmd,
+                    log_abs_path,
+                    shell=True,
+                    stream_logs=False,
+                    require_outputs=True)
+        elif (terminate and
                 prev_status == global_user_state.ClusterStatus.STOPPED):
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
@@ -1727,19 +1740,6 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = (
                     f'gcloud compute instances delete --zone={zone} --quiet '
                     f'$({query_cmd})')
-                with console.status(f'[bold cyan]Terminating '
-                                    f'[green]{cluster_name}'):
-                    returncode, stdout, stderr = log_lib.run_with_log(
-                        terminate_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
-            elif isinstance(cloud, clouds.Azure):
-                resource_group = config['provider']['resource_group']
-                query_cmd = (f'az vm list -g {resource_group} '
-                             '--query "[].id" -o tsv')
-                terminate_cmd = f'az vm delete --yes --ids $({query_cmd})'
                 with console.status(f'[bold cyan]Terminating '
                                     f'[green]{cluster_name}'):
                     returncode, stdout, stderr = log_lib.run_with_log(
