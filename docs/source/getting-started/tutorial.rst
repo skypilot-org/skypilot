@@ -47,7 +47,7 @@ commands, then execute the run commands.
 
 After the training job starts running, you can safely :code:`Ctrl-C` to detach
 from logging and the job will continue to run remotely on the cluster.  To stop
-the job, use the :code:`sky cancel` command.
+the job, use the :code:`sky cancel <cluster_name> <job_id>` command (refer to :ref:`CLI reference <cli>`). 
 
 After training, :ref:`transfer artifacts <sync-code-artifacts>` such
 as logs and checkpoints using familiar tools.
