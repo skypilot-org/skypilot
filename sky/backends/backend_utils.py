@@ -46,7 +46,6 @@ RESET_BOLD = '\033[0m'
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
-# Keep the following two fields in sync with the cluster template:
 
 
 def _fill_template(template_name: str,
@@ -479,8 +478,10 @@ def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
-def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
-                                 num_nodes: int) -> bool:
+def wait_until_ray_cluster_ready(cloud: clouds.Cloud,
+                                 cluster_config_file: str,
+                                 num_nodes: int,
+                                 timeout: Optional[int] = None) -> bool:
     """Returns whether the entire ray cluster is ready."""
     # FIXME: It may takes a while for the cluster to be available for ray,
     # especially for Azure, causing `ray exec` to fail.
@@ -493,6 +494,7 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
         worker_str = 'ray_worker_default'
     else:
         assert False, f'No support for distributed clusters for {cloud}.'
+    start = time.time()
     while True:
         proc = subprocess.run(f'ray exec {cluster_config_file} "ray status"',
                               shell=True,
@@ -508,6 +510,14 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
             # GCP can satisfy only by half, the worker node would be forgotten.
             # The correct behavior should be for it to error out.
             return False  # failed
+        if timeout is not None:
+            time_elapsed = time.time() - start
+            if time_elapsed > timeout:
+                logger.error(
+                    f'{colorama.Fore.RED}Got Timed out in waiting for cluster '
+                    f'to be ready.{colorama.Style.RESET_ALL}'
+                )
+                return False  # failed
         time.sleep(10)
     return True  # success
 

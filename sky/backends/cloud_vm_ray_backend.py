@@ -49,6 +49,9 @@ console = rich_console.Console()
 
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
+# Timeout for provision a cluster and wait for it to be ready in seconds.
+_CLUSTER_PER_NODE_PROVISION_TIMEOUT = 300
+
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
     """Errors out on invalid cluster names not supported by cloud providers.
@@ -834,10 +837,11 @@ class RetryingVmProvisioner(object):
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
         # stop, then launch again.
-        # TODO: if requesting a large amount (say 32) of expensive VMs, this
-        # may loop for a long time.  Use timeouts and treat as gang_failed.
         cluster_ready = backend_utils.wait_until_ray_cluster_ready(
-            to_provision_cloud, cluster_config_file, num_nodes)
+            to_provision_cloud,
+            cluster_config_file,
+            num_nodes,
+            timeout=_CLUSTER_PER_NODE_PROVISION_TIMEOUT * num_nodes)
         gang_failed = not cluster_ready
         if gang_failed:
             # Head OK; gang scheduling failure.
