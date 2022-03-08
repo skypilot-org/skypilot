@@ -290,6 +290,7 @@ class SSHConfigHelper(object):
                         sky_autogen_comment, host_name, ips[idx], username,
                         key_path)
 
+        # This checks if all codegens have been created.
         for idx in range(len(ips)):
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(

@@ -92,12 +92,10 @@ def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
     return accelerator_dict
 
 
-def _add_cluster_to_ssh_config(cluster_name: str, task: Task,
-                               cluster_ips: List[str],
+def _add_cluster_to_ssh_config(cluster_name: str, cluster_ips: List[str],
                                auth_config: Dict[str, str]) -> None:
     backend_utils.SSHConfigHelper.add_cluster(cluster_name, cluster_ips,
                                               auth_config)
-    task.update_file_mounts({'~/.ssh/config': f'~/.sky/ssh/{cluster_name}'})
 
 
 def _remove_cluster_from_ssh_config(cluster_name: str, cluster_ips: List[str],
@@ -1120,7 +1118,7 @@ class CloudVmRayBackend(backends.Backend):
                                                 handle,
                                                 ready=True)
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        _add_cluster_to_ssh_config(cluster_name, task, ip_list, auth_config)
+        _add_cluster_to_ssh_config(cluster_name, ip_list, auth_config)
         return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
