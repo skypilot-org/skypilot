@@ -32,7 +32,7 @@ To cancel a job, we can follow a similar pattern:
    sky queue mycluster
 
    # Pick a JOB_ID to view
-   sky cancel mycluster JOB_ID
+   sky logs mycluster JOB_ID
 
    # Cancel all jobs
    sky cancel mycluster --all
