@@ -2,15 +2,26 @@
 Auto-provisioning GPUs
 ==========================
 
-Provisioning an instance on a cloud can be difficult due to a variety of
-reasons: lack of quota, insufficient capacity in the clouds, or certain
-regions/clouds not providing the required resources.  These issues are
-especially true for scarce resources such as GPUs and other accelerators, which
-are required by many machine learning projects.
+Sky comes with an *auto-failover provisioner*, which
+**automatically retries provisioning a cluster on different regions (or
+clouds)** if the requested resources cannot be provisioned.
+Such provisioning failures can happen for a variety of reasons:
 
-Sky solves this issue with an **auto-failover provisioner**, which automatically
-retries provisioning for the user on a different region (or cloud) if the
-requested resources cannot be provisioned.
+- insufficient capacity (in a region or a cloud)
+- insufficient quotas (in a region or a cloud)
+
+Auto-failover is especially useful for requesting scarce resources such as GPUs
+and other accelerators.  The user is **freed from manually searching for regions
+(or clouds) that can provide the requested resources**.
+
+.. note::
+
+  Auto-failover is automatically enabled whenever a new cluster is to be
+  provisioned, such as during :code:`sky launch` or the interactive node
+  commands :code:`sky {gpunode,cpunode,tpunode}`.
+
+Cross-region failover
+----------------
 
 A common high-end GPU to use in deep learning is a NVIDIA V100 GPU.  These GPUs
 are often in high demand and hard to get.  Let's see how Sky's auto-failover
@@ -47,18 +58,16 @@ provisioner handles such a request:
   I 02-11 21:18:38 cloud_vm_ray_backend.py:624] Launching on GCP us-west1 (us-west1-a)
   Successfully connected to 35.230.120.87.
 
-There was no capacity in any of the regions in Central US, so the Sky auto-failover provisioner moved to West US instead, allowing for our instance to be successfully provisioned.
-
-This feature is automatically enabled in all commands that provision new
-resources, such as :code:`sky launch` or the interactive node commands
-:code:`sky {gpunode,tpunode,cpunode}`.
+GCP was chosen as the best cloud to run the task. There was no capacity in any of the regions in Central US, so the auto-failover provisioner moved to West US instead, allowing for our instance to be successfully provisioned.
 
 Cross-cloud failover
 ----------------
+If all regions within the chosen cloud failed, the provisioner retries on
+different clouds (typically, the next cheapest).
 
-The provisioner first retries in different regions of the chosen cloud, and then (if all those regions failed) retries on different clouds (typically, the next cheapest).
-
-Here is an example of cross-cloud failover when requesting 8x V100 GPUs.  All regions in GCP failed to provide the resource, so the provisioner fell back to AWS, where it succeeded after two regions:
+Here is an example of cross-cloud failover when requesting 8x V100 GPUs.  All
+regions in GCP failed to provide the resource, so the provisioner fell back to
+AWS, where it succeeded after two regions:
 
 .. code-block::
 
