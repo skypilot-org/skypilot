@@ -6,10 +6,12 @@ import getpass
 from multiprocessing import pool
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
 import textwrap
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
@@ -26,6 +28,7 @@ from sky import sky_logging
 from sky import resources
 from sky.adaptors import azure
 from sky.backends import wheel_utils
+from sky.backends.backend import Backend
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -745,6 +748,66 @@ def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+
+
+def get_node_ips_from_yaml(cluster_yaml: str,
+                           expected_num_nodes: int,
+                           return_private_ips: bool = False) -> List[str]:
+    """Returns the IPs of all nodes in the cluster."""
+    yaml_handle = cluster_yaml
+    if return_private_ips:
+        config = read_yaml(yaml_handle)
+        # Add this field to a temp file to get private ips.
+        config['provider']['use_internal_ips'] = True
+        yaml_handle = cluster_yaml + '.tmp'
+        dump_yaml(yaml_handle, config)
+
+    out = run(f'ray get-head-ip {yaml_handle}',
+              stdout=subprocess.PIPE).stdout.decode().strip()
+    head_ip = re.findall(IP_ADDR_REGEX, out)
+    assert 1 == len(head_ip), out
+
+    out = run(f'ray get-worker-ips {yaml_handle}',
+              stdout=subprocess.PIPE).stdout.decode()
+    worker_ips = re.findall(IP_ADDR_REGEX, out)
+    assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes - 1,
+                                                       out)
+    if return_private_ips:
+        os.remove(yaml_handle)
+    return head_ip + worker_ips
+
+
+def get_head_ip(
+    handle: Backend.ResourceHandle,
+    use_cached_head_ip: bool = True,
+    retry_count: int = 1,
+) -> str:
+    """Returns the ip of the head node"""
+    assert not use_cached_head_ip or retry_count == 1, (
+        'Cannot use cached_head_ip when retry_count is not 1')
+    if use_cached_head_ip:
+        if handle.head_ip is None:
+            # This happens for INIT clusters (e.g., exit 1 in setup).
+            raise ValueError(
+                'Cluster\'s head IP not found; is it up? To fix: '
+                'run a successful launch first (`sky launch`) to ensure'
+                ' the cluster status is UP (`sky status`).')
+        head_ip = handle.head_ip
+    else:
+        for i in range(retry_count):
+            try:
+                out = run(f'ray get-head-ip {handle}',
+                          stdout=subprocess.PIPE).stdout.decode().strip()
+                head_ip = re.findall(IP_ADDR_REGEX, out)
+                assert 1 == len(head_ip), out
+                head_ip = head_ip[0]
+                break
+            except subprocess.CalledProcessError as e:
+                if i == retry_count - 1:
+                    raise e
+                # Retry if the cluster is not up yet.
+                time.sleep(5)
+    return head_ip
 
 
 def get_backend_from_handle(

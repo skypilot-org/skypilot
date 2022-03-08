@@ -53,6 +53,7 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 _CLUSTER_PER_NODE_PROVISION_TIMEOUT = 30
 
 _LAUNCHING_NUMBER_PATTERN = re.compile(r'ray.worker.default, (\d+) launching')
+_WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -865,10 +866,10 @@ class RetryingVmProvisioner(object):
         # Manually fetch head ip instead of using `ray exec` to avoid the bug
         # that `ray exec` fails to connect to the head node after some workers
         # launched especially for Azure.
-        out = backend_utils.run(f'ray get-head-ip {cluster_config_file}',
-                                stdout=subprocess.PIPE,
-                                check=True).stdout.decode().strip()
-        head_ip = re.findall(backend_utils.IP_ADDR_REGEX, out)
+        head_ip = backend_utils.get_head_ip(
+            cluster_config_file,
+            use_cached_head_ip=False,
+            retry_count=_WAIT_HEAD_NODE_IP_RETRY_COUNT)
 
         expected_worker_count = num_nodes - 1
         if isinstance(cloud, (clouds.AWS, clouds.Azure)):
@@ -1122,7 +1123,7 @@ class CloudVmRayBackend(backends.Backend):
     def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
                       tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
-        ip_list = self._get_node_ips(cluster_config_file, num_nodes)
+        ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes)
         ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
             cluster_config_file)
 
@@ -1190,7 +1191,8 @@ class CloudVmRayBackend(backends.Backend):
             cluster_name=cluster_name,
             cluster_yaml=cluster_config_file,
             # Cache head ip in the handle to speed up ssh operations.
-            head_ip=self._get_node_ips(cluster_config_file, launched_nodes)[0],
+            head_ip=backend_utils.get_node_ips(cluster_config_file,
+                                               launched_nodes)[0],
             launched_nodes=launched_nodes,
             launched_resources=provisioned_resources,
             # TPU.
@@ -1209,7 +1211,8 @@ class CloudVmRayBackend(backends.Backend):
         # e.g., in CLI.  So we should rerun rsync_up.
         fore = colorama.Fore
         style = colorama.Style
-        ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
+                                             handle.launched_nodes)
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
         # These asserts have been validated at Task construction time.
@@ -1271,7 +1274,8 @@ class CloudVmRayBackend(backends.Backend):
         style = colorama.Style
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
 
-        ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
+                                             handle.launched_nodes)
         ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
 
@@ -1437,8 +1441,8 @@ class CloudVmRayBackend(backends.Backend):
             setup_sh_path = f.name
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
-            ip_list = self._get_node_ips(handle.cluster_yaml,
-                                         handle.launched_nodes)
+            ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
+                                                 handle.launched_nodes)
             ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
 
@@ -1493,7 +1497,8 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}Logs Directory: '
                     f'{style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
 
-        ips = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        ips = backend_utils.get_node_ips(handle.cluster_yaml,
+                                         handle.launched_nodes)
 
         def rsync_down(ip: str) -> None:
             from ray.autoscaler import sdk  # pylint: disable=import-outside-toplevel
@@ -1900,33 +1905,6 @@ class CloudVmRayBackend(backends.Backend):
                 os.remove(handle.tpu_create_script)
                 os.remove(handle.tpu_delete_script)
 
-    def _get_node_ips(self,
-                      cluster_yaml: str,
-                      expected_num_nodes: int,
-                      return_private_ips: bool = False) -> List[str]:
-        """Returns the IPs of all nodes in the cluster."""
-        yaml_handle = cluster_yaml
-        if return_private_ips:
-            config = backend_utils.read_yaml(yaml_handle)
-            # Add this field to a temp file to get private ips.
-            config['provider']['use_internal_ips'] = True
-            yaml_handle = cluster_yaml + '.tmp'
-            backend_utils.dump_yaml(yaml_handle, config)
-
-        out = backend_utils.run(f'ray get-head-ip {yaml_handle}',
-                                stdout=subprocess.PIPE).stdout.decode().strip()
-        head_ip = re.findall(backend_utils.IP_ADDR_REGEX, out)
-        assert 1 == len(head_ip), out
-
-        out = backend_utils.run(f'ray get-worker-ips {yaml_handle}',
-                                stdout=subprocess.PIPE).stdout.decode()
-        worker_ips = re.findall(backend_utils.IP_ADDR_REGEX, out)
-        assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes -
-                                                           1, out)
-        if return_private_ips:
-            os.remove(yaml_handle)
-        return head_ip + worker_ips
-
     def _rsync_up(
         self,
         handle: ResourceHandle,
@@ -1979,25 +1957,6 @@ class CloudVmRayBackend(backends.Backend):
     def _ssh_control_name(self, handle: ResourceHandle) -> str:
         return f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'
 
-    def _get_head_ip(
-        self,
-        handle: ResourceHandle,
-        use_cached_head_ip: bool = True,
-    ) -> str:
-        """Returns the ip of the head node"""
-        if use_cached_head_ip:
-            if handle.head_ip is None:
-                # This happens for INIT clusters (e.g., exit 1 in setup).
-                raise ValueError(
-                    'Cluster\'s head IP not found; is it up? To fix: '
-                    'run a successful launch first (`sky launch`) to ensure'
-                    ' the cluster status is UP (`sky status`).')
-            head_ip = handle.head_ip
-        else:
-            head_ip = self._get_node_ips(handle.cluster_yaml,
-                                         handle.launched_nodes)[0]
-        return head_ip
-
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
     def run_on_head(
@@ -2015,7 +1974,7 @@ class CloudVmRayBackend(backends.Backend):
         require_outputs: bool = False,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
-        head_ip = self._get_head_ip(handle, use_cached_head_ip)
+        head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip)
         ssh_user, ssh_private_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         if under_remote_workdir:
