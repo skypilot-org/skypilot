@@ -50,7 +50,7 @@ console = rich_console.Console()
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout for provision a cluster and wait for it to be ready in seconds.
-_CLUSTER_PER_NODE_PROVISION_TIMEOUT = 300
+_CLUSTER_PER_NODE_PROVISION_TIMEOUT = 90
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -841,7 +841,7 @@ class RetryingVmProvisioner(object):
             to_provision_cloud,
             cluster_config_file,
             num_nodes,
-            timeout=_CLUSTER_PER_NODE_PROVISION_TIMEOUT * num_nodes)
+            per_node_timeout=_CLUSTER_PER_NODE_PROVISION_TIMEOUT)
         gang_failed = not cluster_ready
         if gang_failed:
             # Head OK; gang scheduling failure.

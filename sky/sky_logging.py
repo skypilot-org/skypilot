@@ -29,5 +29,5 @@ def init_logger(name: str):
 
     logger = logging.getLogger(name)
     logger.addHandler(h)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
     return logger

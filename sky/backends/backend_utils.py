@@ -6,6 +6,7 @@ import getpass
 from multiprocessing import pool
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -43,6 +44,8 @@ SKY_USER_FILE_PATH = '~/.sky/generated'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
+
+_LAUNCHING_NUMBER_PATTERN = re.compile(r'ray.worker.default, (\d+) launching')
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
@@ -478,10 +481,11 @@ def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
-def wait_until_ray_cluster_ready(cloud: clouds.Cloud,
-                                 cluster_config_file: str,
-                                 num_nodes: int,
-                                 timeout: Optional[int] = None) -> bool:
+def wait_until_ray_cluster_ready(
+        cloud: clouds.Cloud,
+        cluster_config_file: str,
+        num_nodes: int,
+        per_node_timeout: Optional[int] = None) -> bool:
     """Returns whether the entire ray cluster is ready."""
     # FIXME: It may takes a while for the cluster to be available for ray,
     # especially for Azure, causing `ray exec` to fail.
@@ -494,7 +498,7 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud,
         worker_str = 'ray_worker_default'
     else:
         assert False, f'No support for distributed clusters for {cloud}.'
-    start = time.time()
+    last_num_launching = 0
     while True:
         proc = subprocess.run(f'ray exec {cluster_config_file} "ray status"',
                               shell=True,
@@ -505,19 +509,31 @@ def wait_until_ray_cluster_ready(cloud: clouds.Cloud,
         logger.info(output)
         if f'{expected_worker_count} {worker_str}' in output:
             break
+
+        # Check the number of nodes that are launching. Timeout if no new nodes
+        # finish launching in a while (per_node_timeout).
+        result = _LAUNCHING_NUMBER_PATTERN.search(output)
+        if result is not None:
+            num_launching = result.group(1)
+            if num_launching != last_num_launching:
+                # Reset the start time if the number of launching nodes changes,
+                # i.e. new nodes are launched.
+                start = time.time()
+                last_num_launching = num_launching
+                logger.debug('Reset start time, as new nodes are launched. '
+                             f'({last_num_launching} -> {num_launching})')
+            elif (per_node_timeout is not None and
+                  time.time() - start > per_node_timeout):
+                logger.error(
+                    f'{colorama.Fore.RED}Got Timed out in waiting for cluster '
+                    f'to be ready.{colorama.Style.RESET_ALL}')
+                return False  # failed
+
         if '(no pending nodes)' in output and '(no failures)' in output:
             # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
             # GCP can satisfy only by half, the worker node would be forgotten.
             # The correct behavior should be for it to error out.
             return False  # failed
-        if timeout is not None:
-            time_elapsed = time.time() - start
-            if time_elapsed > timeout:
-                logger.error(
-                    f'{colorama.Fore.RED}Got Timed out in waiting for cluster '
-                    f'to be ready.{colorama.Style.RESET_ALL}'
-                )
-                return False  # failed
         time.sleep(10)
     return True  # success
 
