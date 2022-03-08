@@ -177,7 +177,7 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
         }
-        accelerators = r.accelerators
+        accelerators = r.get_accelerators()
         if accelerators is not None:
             assert len(accelerators) == 1, r
             acc, acc_count = list(accelerators.items())[0]

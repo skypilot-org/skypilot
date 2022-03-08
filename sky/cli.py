@@ -218,7 +218,7 @@ def _default_interactive_node_name(node_type: str):
 
 def _infer_interactive_node_type(resources: sky.Resources):
     """Determine interactive node type from resources."""
-    accelerators = resources.accelerators
+    accelerators = resources.get_accelerators()
     cloud = resources.cloud
     if accelerators:
         # We only support homogenous accelerators for now.

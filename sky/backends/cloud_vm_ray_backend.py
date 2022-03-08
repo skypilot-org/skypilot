@@ -88,7 +88,7 @@ def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
     if resources is not None:
-        accelerator_dict = resources.accelerators
+        accelerator_dict = resources.get_accelerators()
     return accelerator_dict
 
 

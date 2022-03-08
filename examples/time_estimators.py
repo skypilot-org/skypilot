@@ -49,7 +49,7 @@ def resnet50_estimate_runtime(resources):
         return _v100(num_v100s)
 
     elif isinstance(resources.cloud, sky.GCP):
-        accelerators = resources.accelerators
+        accelerators = resources.get_accelerators()
         if accelerators is None:
             assert False, 'not supported'
 
@@ -131,8 +131,8 @@ def resnet50_infer_estimate_runtime(resources):
         # TODO: this ignores offline vs. online.  It's a huge batch.
         estimated_run_time_seconds = \
             flops_for_one_image * num_images / utilized_flops
-    elif resources.accelerators is not None:
-        accs = resources.accelerators
+    elif resources.get_accelerators() is not None:
+        accs = resources.get_accelerators()
         for acc, acc_count in accs.items():
             break
         assert acc == 'T4' and acc_count == 1, resources
