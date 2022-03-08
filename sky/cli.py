@@ -218,7 +218,7 @@ def _default_interactive_node_name(node_type: str):
 
 def _infer_interactive_node_type(resources: sky.Resources):
     """Determine interactive node type from resources."""
-    accelerators = resources.get_accelerators()
+    accelerators = resources.accelerators
     cloud = resources.cloud
     if accelerators:
         # We only support homogenous accelerators for now.
@@ -1176,6 +1176,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             names = []
     if not to_down and not names:
         print('No existing clusters found (see `sky status`).')
+        return
 
     if not no_confirm:
         teardown_verb = 'Terminating' if terminate else 'Stopping'
