@@ -42,9 +42,23 @@ To cancel a job:
 Scheduling behavior
 --------------------------------
 
-Sky schedules jobs on a cluster using their resource requirements---either
-specified in a task YAML's :code:`resources` field, or via the :code:`--gpus`
-option of the :code:`sky exec` CLI command.
+The sky job-queue scheduler is designed to serve two key goals: preventing
+resource oversubscription and work-conservation.
+
+1. **Preventing resource oversubscription**: Sky schedules jobs on a cluster
+using their resource requirements---either specified in a task YAML's
+:code:`resources` field, or via the :code:`--gpus` option of the
+:code:`sky exec` CLI command. While honoring these resource requirements, Sky
+also ensures that no resource in the cluster is over subscribed. I.e., if a
+node has 4 GPUs, it cannot host a combination of tasks whose sum of GPU
+requirements exceeds 4.
+
+2. **Work-conservation**: Sky is designed to minimize resource idling. If a
+resource is idle, sky will schedule a queued job in which can utilize that
+resource.
+Resource requirements for tasks are either specified in a task YAML's
+:code:`resources` field, or via the :code:`--gpus` option of the
+:code:`sky exec` CLI command.
 
 We illustrate the scheduling behavior by revisiting :ref:`Tutorial: DNN Training <huggingface>`.
 In that tutorial, we have a task YAML that specifies these resource requirements:
@@ -57,9 +71,14 @@ In that tutorial, we have a task YAML that specifies these resource requirements
     accelerators: V100:4
   ...
 
-Since we then ran :code:`sky launch -c lm-cluster dnn.yaml` to create a new
-cluster to run this task, the created cluster has exactly these resources as
-well---4 V100 GPUs.
+And we had run the task with:
+
+.. code-block:: console
+  sky launch -c lm-cluster dnn.yaml
+
+Since the cluster was created when we ran :code:`sky launch`, sky provisioned
+the cluster with exactly the same resources as those required for the task.
+Thus, `lm-cluster` has 4 V100 GPUs.
 
 While this initial job is running, let us submit more tasks:
 

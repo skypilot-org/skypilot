@@ -18,7 +18,9 @@ and other accelerators.  The user is **freed from manually searching for regions
 
   Auto-failover is automatically enabled whenever a new cluster is to be
   provisioned, such as during :code:`sky launch` or the interactive node
-  commands :code:`sky {gpunode,cpunode,tpunode}`.
+  commands :code:`sky {gpunode,cpunode,tpunode}`. If the :code:`cloud`
+  field is specified in resources, then auto-failover retries only within
+  the specified cloud.
 
 Cross-region failover
 ----------------

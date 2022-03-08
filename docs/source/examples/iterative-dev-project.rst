@@ -18,7 +18,9 @@ To use other GPUs, see the :ref:`CLI reference <cli>` for all configuration opti
 
 Development
 ------------
-To log in to the machine, Sky provides easy password-less SSH access:
+To log in to the machine, Sky provides easy password-less SSH access. It
+automatically creates an alias in the `~/.ssh/config` file, so you can
+directly ssh using the cluster name:
 
 .. code-block:: console
 
@@ -30,19 +32,28 @@ such as :code:`scp`, :code:`rsync`, and `Visual Studio Code Remote
 
 Running code
 --------------------
+
 To run a project on the cluster without logging in, use :code:`sky exec`:
 
 .. code-block:: bash
 
   # Run a bash command without logging in.
-  $ sky exec dev -- python train.py
   $ sky exec dev -- gpustat -i
+
+  # Run a python script. train.py must be available on remote.
+  $ sky exec dev -- python train.py
 
   # If the user has written a task.yaml, this directly executes the
   # `run` section defined in the task specification:
   $ sky exec dev task.yaml
 
 Alternatively, the user can also run commands after logging into the VM via :code:`ssh`.
+
+
+.. note::
+
+  Refer to :ref:`syncing code and artifacts <sync-code-artifacts>` for more details
+  on how to upload code and download outputs from the cluster.
 
 Ending a development session
 -----------------------------
