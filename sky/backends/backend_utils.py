@@ -485,6 +485,7 @@ def wait_until_ray_cluster_ready(
         cloud: clouds.Cloud,
         cluster_config_file: str,
         num_nodes: int,
+        log_path: str,
         per_node_timeout: Optional[int] = None) -> bool:
     """Returns whether the entire ray cluster is ready."""
     # FIXME: It may takes a while for the cluster to be available for ray,
@@ -499,13 +500,15 @@ def wait_until_ray_cluster_ready(
     else:
         assert False, f'No support for distributed clusters for {cloud}.'
     last_num_launching = 0
+    ray_status_cmd = f'ray exec {cluster_config_file} "ray status"'
     while True:
-        proc = subprocess.run(f'ray exec {cluster_config_file} "ray status"',
+        rc, output, stderr = log_lib.run_with_log(ray_status_cmd,
                               shell=True,
-                              check=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
-        output = proc.stdout.decode('ascii')
+                              log_path=log_path,
+                              stream_logs=False,
+                              require_outputs=True,
+        )
+        handle_returncode(rc, ray_status_cmd, 'Failed to run ray status on head node.', stderr)
         logger.info(output)
         if f'{expected_worker_count} {worker_str}' in output:
             break

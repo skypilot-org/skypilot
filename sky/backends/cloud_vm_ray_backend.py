@@ -841,6 +841,7 @@ class RetryingVmProvisioner(object):
             to_provision_cloud,
             cluster_config_file,
             num_nodes,
+            log_path=log_abs_path,
             per_node_timeout=_CLUSTER_PER_NODE_PROVISION_TIMEOUT)
         # Do not need rc/stdout/stderr if gang scheduling failed.
         # gang_succeeded = False, if head OK, but workers failed.
