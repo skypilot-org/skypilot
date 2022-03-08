@@ -3,10 +3,21 @@ from typing import Dict, Optional, Union
 
 from sky import clouds
 from sky import sky_logging
+from sky.clouds import service_catalog
 
 logger = sky_logging.init_logger(__name__)
 
 DEFAULT_DISK_SIZE = 256
+
+
+def _get_name_from_catalog(accelerator: str) -> str:
+    """Returns the matched accelerator name in the catalog."""
+    acc_names = list(service_catalog.list_accelerators(gpus_only=False).keys())
+    try:
+        index = [n.casefold() for n in acc_names].index(accelerator.casefold())
+    except ValueError:
+        raise ValueError(f'Invalid accelerator name: {accelerator}') from None
+    return acc_names[index]
 
 
 class Resources:
@@ -69,7 +80,7 @@ class Resources:
             assert len(accelerators) == 1, accelerators
 
             acc, _ = list(accelerators.items())[0]
-            if 'tpu' in acc:
+            if 'tpu' in acc.lower():
                 if cloud is None:
                     cloud = clouds.GCP()
                 assert cloud.is_same_cloud(clouds.GCP()), 'Cloud must be GCP.'
@@ -80,7 +91,7 @@ class Resources:
                                 ' default (2.5.0)')
                     accelerator_args['tf_version'] = '2.5.0'
 
-        self.accelerators = accelerators
+        self._accelerators = self._rename_accelerators(accelerators)
         self.accelerator_args = accelerator_args
 
         self._use_spot_specified = use_spot is not None
@@ -133,19 +144,35 @@ class Resources:
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
 
-    def get_accelerators(self) -> Optional[Dict[str, int]]:
+    def _rename_accelerators(
+        self,
+        accelerators: Union[None, Dict[str, int]],
+    ) -> Optional[Dict[str, int]]:
+        """Renames the accelerators in a case-sensitive manner."""
+        if accelerators is not None:
+            return {_get_name_from_catalog(name): cnt \
+                    for name, cnt in accelerators.items()}
+        else:
+            return None
+
+    @property
+    def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
 
         For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
         set to None, but this function will infer {'V100': 1} from the instance
         type.
         """
-        if self.accelerators is not None:
-            return self.accelerators
+        if self._accelerators is not None:
+            return self._accelerators
         if self.cloud is not None and self.instance_type is not None:
             return self.cloud.get_accelerators_from_instance_type(
                 self.instance_type)
         return None
+
+    @accelerators.setter
+    def accelerators(self, accelerators: Union[None, Dict[str, int]]) -> None:
+        self._accelerators = self._rename_accelerators(accelerators)
 
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
@@ -177,8 +204,8 @@ class Resources:
             return False
         # self.instance_type == other.instance_type
 
-        other_accelerators = other.get_accelerators()
-        accelerators = self.get_accelerators()
+        other_accelerators = other.accelerators
+        accelerators = self.accelerators
         if accelerators != other_accelerators:
             return False
         # self.accelerators == other.accelerators
@@ -204,7 +231,7 @@ class Resources:
             return False
         # self.instance_type <= other.instance_type
 
-        other_accelerators = other.get_accelerators()
+        other_accelerators = other.accelerators
         if self.accelerators is not None and other_accelerators is None:
             return False
 
