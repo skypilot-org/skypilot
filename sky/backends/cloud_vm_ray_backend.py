@@ -777,7 +777,7 @@ class RetryingVmProvisioner(object):
             would fail.)
 
         Returns:
-          (did gang scheduling success; returncode; stdout; stderr).
+          (did gang scheduling succeeded; returncode; stdout; stderr).
         """
         # FIXME(zhwu,zongheng): ray up on multiple nodes ups the head node then
         # waits for all workers; turn it into real gang scheduling.
