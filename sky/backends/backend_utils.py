@@ -534,6 +534,15 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
+def ssh_credential_from_yaml(cluster_yaml: str) -> str:
+    """Returns ssh_user and ssh_private_key."""
+    config = read_yaml(cluster_yaml)
+    auth_section = config['auth']
+    ssh_user = auth_section['ssh_user'].strip()
+    ssh_private_key = auth_section.get('ssh_private_key')
+    return ssh_user, ssh_private_key
+
+
 class SshMode(enum.Enum):
     """Enum for SSH mode."""
     # Do not allocating pseudo-tty to avoid user input corrupting the output.
