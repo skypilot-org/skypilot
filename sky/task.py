@@ -171,11 +171,13 @@ class Task:
                              f'Got {type(self.run)}')
 
         # Workdir.
-        if self.workdir is not None and not os.path.isdir(self.workdir):
-            # Symlink to a dir is legal (isdir() follows symlinks).
-            raise ValueError(
-                'Workdir must exist and must be a directory (or '
-                f'a symlink to a directory). Found: {self.workdir}')
+        if self.workdir is not None:
+            full_workdir = os.path.abspath(os.path.expanduser(self.workdir))
+            if not os.path.isdir(full_workdir):
+                # Symlink to a dir is legal (isdir() follows symlinks).
+                raise ValueError(
+                    'Workdir must exist and must be a directory (or '
+                    f'a symlink to a directory). Found: {self.workdir}')
 
     @staticmethod
     def from_yaml(yaml_path):
