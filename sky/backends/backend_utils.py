@@ -502,13 +502,15 @@ def wait_until_ray_cluster_ready(
     last_num_launching = 0
     ray_status_cmd = f'ray exec {cluster_config_file} "ray status"'
     while True:
-        rc, output, stderr = log_lib.run_with_log(ray_status_cmd,
-                              shell=True,
-                              log_path=log_path,
-                              stream_logs=False,
-                              require_outputs=True,
+        rc, output, stderr = log_lib.run_with_log(
+            ray_status_cmd,
+            shell=True,
+            log_path=log_path,
+            stream_logs=False,
+            require_outputs=True,
         )
-        handle_returncode(rc, ray_status_cmd, 'Failed to run ray status on head node.', stderr)
+        handle_returncode(rc, ray_status_cmd,
+                          'Failed to run ray status on head node.', stderr)
         logger.info(output)
         if f'{expected_worker_count} {worker_str}' in output:
             break
