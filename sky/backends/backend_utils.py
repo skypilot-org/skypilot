@@ -525,7 +525,7 @@ def wait_until_ray_cluster_ready(
             elif (per_node_timeout is not None and
                   time.time() - start > per_node_timeout):
                 logger.error(
-                    f'{colorama.Fore.RED}Got Timed out in waiting for cluster '
+                    f'{colorama.Fore.RED}Got Timedout in waiting for cluster '
                     f'to be ready.{colorama.Style.RESET_ALL}')
                 return False  # failed
 
