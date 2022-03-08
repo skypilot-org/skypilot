@@ -861,6 +861,10 @@ class RetryingVmProvisioner(object):
         # especially for Azure, causing `ray exec` to fail.
         if num_nodes <= 1:
             return
+        
+        # Manually fetch head ip instead of using `ray exec` to avoid the bug
+        # that `ray exec` fails to connect to the head node after some workers
+        # launched especially for Azure.
         out = backend_utils.run(f'ray get-head-ip {cluster_config_file}',
                                 stdout=subprocess.PIPE,
                                 check=True).stdout.decode().strip()
