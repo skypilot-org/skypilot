@@ -45,20 +45,8 @@ Scheduling behavior
 The sky job-queue scheduler is designed to serve two key goals: preventing
 resource oversubscription and work-conservation.
 
-1. **Preventing resource oversubscription**: Sky schedules jobs on a cluster
-using their resource requirements---either specified in a task YAML's
-:code:`resources` field, or via the :code:`--gpus` option of the
-:code:`sky exec` CLI command. While honoring these resource requirements, Sky
-also ensures that no resource in the cluster is over subscribed. I.e., if a
-node has 4 GPUs, it cannot host a combination of tasks whose sum of GPU
-requirements exceeds 4.
-
-2. **Work-conservation**: Sky is designed to minimize resource idling. If a
-resource is idle, sky will schedule a queued job in which can utilize that
-resource.
-Resource requirements for tasks are either specified in a task YAML's
-:code:`resources` field, or via the :code:`--gpus` option of the
-:code:`sky exec` CLI command.
+1. **Preventing resource oversubscription**: Sky schedules jobs on a cluster using their resource requirements---either specified in a task YAML's :code:`resources` field, or via the :code:`--gpus` option of the :code:`sky exec` CLI command. While honoring these resource requirements, Sky also ensures that no resource in the cluster is over subscribed. I.e., if a node has 4 GPUs, it cannot host a combination of tasks whose sum of GPU requirements exceeds 4.
+2. **Work-conservation**: Sky is designed to minimize resource idling. If a resource is idle, sky will schedule a queued job in which can utilize that resource. Resource requirements for tasks are either specified in a task YAML's :code:`resources` field, or via the :code:`--gpus` option of the :code:`sky exec` CLI command.
 
 We illustrate the scheduling behavior by revisiting :ref:`Tutorial: DNN Training <huggingface>`.
 In that tutorial, we have a task YAML that specifies these resource requirements:

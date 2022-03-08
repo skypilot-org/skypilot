@@ -19,7 +19,7 @@ To use other GPUs, see the :ref:`CLI reference <cli>` for all configuration opti
 Development
 ------------
 To log in to the machine, Sky provides easy password-less SSH access. It
-automatically creates an alias in the `~/.ssh/config` file, so you can
+automatically creates an alias in the :code:`~/.ssh/config` file, so you can
 directly ssh using the cluster name:
 
 .. code-block:: console
@@ -32,7 +32,6 @@ such as :code:`scp`, :code:`rsync`, and `Visual Studio Code Remote
 
 Running code
 --------------------
-
 To run a project on the cluster without logging in, use :code:`sky exec`:
 
 .. code-block:: bash
