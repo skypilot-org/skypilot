@@ -19,9 +19,10 @@ transparent manner.
    :maxdepth: 1
    :caption: Use Cases
 
-   examples/auto-failover
    examples/iterative-dev-project
-   examples/launch-many-tasks-vm
+   examples/syncing-code-artifacts
+   examples/auto-failover
+   reference/job-queue
    examples/grid-search
    examples/distributed-jobs
 .. Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
@@ -42,6 +43,7 @@ transparent manner.
 
    reference/yaml-spec
    reference/interactive-nodes
+   reference/storage
    reference/iterative-development
    .. reference/production-workflow
 
@@ -50,8 +52,6 @@ transparent manner.
    .. reference/provisioner
    .. reference/optimizer
    .. reference/service-catalog
-   reference/storage
-   reference/job-queue
 
 
 .. .. toctree::
