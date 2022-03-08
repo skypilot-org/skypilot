@@ -60,15 +60,15 @@ provisioner handles such a request:
   I 02-11 21:18:38 cloud_vm_ray_backend.py:624] Launching on GCP us-west1 (us-west1-a)
   Successfully connected to 35.230.120.87.
 
-GCP was chosen as the best cloud to run the task. There was no capacity in any of the regions in Central US, so the auto-failover provisioner moved to West US instead, allowing for our instance to be successfully provisioned.
+GCP was chosen as the best cloud to run the task. There was no capacity in any of the regions in US Central, so the auto-failover provisioner moved to US West instead, allowing for our instance to be successfully provisioned.
 
 Cross-cloud failover
 ----------------
-If all regions within the chosen cloud failed, the provisioner retries on
-different clouds (typically, the next cheapest).
+If all regions within the chosen cloud failed, the provisioner retries on the next
+cheapest cloud.
 
 Here is an example of cross-cloud failover when requesting 8x V100 GPUs.  All
-regions in GCP failed to provide the resource, so the provisioner fell back to
+regions in GCP failed to provide the resource, so the provisioner switches to
 AWS, where it succeeded after two regions:
 
 .. code-block::
