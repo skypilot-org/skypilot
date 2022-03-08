@@ -727,7 +727,7 @@ class RetryingVmProvisioner(object):
                                                 zones, stdout, stderr)
             elif not gang_succeeded:
                 # gang scheduling failed.
-                
+
                 # There exist partial nodes (e.g., head node) so we must
                 # down before moving on to other regions.
                 # FIXME(zongheng): terminating a potentially live cluster

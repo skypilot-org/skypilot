@@ -533,9 +533,10 @@ def wait_until_ray_cluster_ready(
             # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
             # GCP can satisfy only by half, the worker node would be forgotten.
             # The correct behavior should be for it to error out.
-            logger.error(f'{colorama.Fore.RED}Failed to launch multiple nodes on GCP '
-                         'due to a nondeterministic bug in ray autoscaler.'
-                         f'{colorama.Style.RESET_ALL}')
+            logger.error(
+                f'{colorama.Fore.RED}Failed to launch multiple nodes on GCP '
+                'due to a nondeterministic bug in ray autoscaler.'
+                f'{colorama.Style.RESET_ALL}')
             return False  # failed
         time.sleep(10)
     return True  # success
