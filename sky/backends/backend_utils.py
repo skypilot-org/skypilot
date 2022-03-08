@@ -518,10 +518,10 @@ def wait_until_ray_cluster_ready(
             if num_launching != last_num_launching:
                 # Reset the start time if the number of launching nodes changes,
                 # i.e. new nodes are launched.
-                start = time.time()
-                last_num_launching = num_launching
                 logger.debug('Reset start time, as new nodes are launched. '
                              f'({last_num_launching} -> {num_launching})')
+                start = time.time()
+                last_num_launching = num_launching
             elif (per_node_timeout is not None and
                   time.time() - start > per_node_timeout):
                 logger.error(
@@ -533,6 +533,9 @@ def wait_until_ray_cluster_ready(
             # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
             # GCP can satisfy only by half, the worker node would be forgotten.
             # The correct behavior should be for it to error out.
+            logger.error(f'{colorama.Fore.RED}Failed to launch multiple nodes on GCP '
+                         'due to a nondeterministic bug in ray autoscaler.'
+                         f'{colorama.Style.RESET_ALL}')
             return False  # failed
         time.sleep(10)
     return True  # success

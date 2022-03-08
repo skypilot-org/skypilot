@@ -50,7 +50,7 @@ console = rich_console.Console()
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout for provision a cluster and wait for it to be ready in seconds.
-_CLUSTER_PER_NODE_PROVISION_TIMEOUT = 90
+_CLUSTER_PER_NODE_PROVISION_TIMEOUT = 30
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -717,34 +717,34 @@ class RetryingVmProvisioner(object):
                 'region_name': region.name,
                 'zone_str': zone_str,
             }
-            gang_failed, rc, stdout, stderr = self._gang_schedule_ray_up(
+            gang_succeeded, rc, stdout, stderr = self._gang_schedule_ray_up(
                 to_provision.cloud, num_nodes, cluster_config_file,
                 log_abs_path, stream_logs, logging_info)
 
-            if gang_failed or rc != 0:
-                if gang_failed:
-                    # There exist partial nodes (e.g., head node) so we must
-                    # down before moving on to other regions.
-                    # FIXME(zongheng): terminating a potentially live cluster
-                    # is scary.  Say: users have an existing cluster, do sky
-                    # launch, gang failed, then we are terminating it here.
-                    logger.error('*** Failed provisioning the cluster. ***')
-                    logger.error('====== stdout ======')
-                    logger.error(stdout)
-                    logger.error('====== stderr ======')
-                    logger.error(stderr)
-                    logger.error('*** Tearing down the failed cluster. ***')
-                    CloudVmRayBackend().teardown(handle, terminate=True)
-                    self._update_blocklist_on_error(
-                        to_provision.cloud,
-                        region,
-                        # Ignored and block region:
-                        zones=None,
-                        stdout=None,
-                        stderr=None)
-                else:
-                    self._update_blocklist_on_error(to_provision.cloud, region,
-                                                    zones, stdout, stderr)
+            if rc != 0:
+                # ray up failed.
+                self._update_blocklist_on_error(to_provision.cloud, region,
+                                                zones, stdout, stderr)
+            elif not gang_succeeded:
+                # gang scheduling failed.
+                
+                # There exist partial nodes (e.g., head node) so we must
+                # down before moving on to other regions.
+                # FIXME(zongheng): terminating a potentially live cluster
+                # is scary.  Say: users have an existing cluster, do sky
+                # launch, gang failed, then we are terminating it here.
+                logger.error('*** Failed provisioning the cluster. ***')
+                # The stdout/stderr of ray up is not useful here, since
+                # head node is successfully provisioned.
+                logger.error('*** Tearing down the failed cluster. ***')
+                CloudVmRayBackend().teardown(handle, terminate=True)
+                self._update_blocklist_on_error(
+                    to_provision.cloud,
+                    region,
+                    # Ignored and block region:
+                    zones=None,
+                    stdout=None,
+                    stderr=None)
             else:
                 # Success.
 
@@ -775,7 +775,7 @@ class RetryingVmProvisioner(object):
             would fail.)
 
         Returns:
-          (did gang scheduling failed; proc; stdout; stderr).
+          (did gang scheduling success; returncode; stdout; stderr).
         """
         # FIXME(zhwu,zongheng): ray up on multiple nodes ups the head node then
         # waits for all workers; turn it into real gang scheduling.
@@ -829,7 +829,7 @@ class RetryingVmProvisioner(object):
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 or returncode != 0:
-            return False, returncode, stdout, stderr
+            return True, returncode, stdout, stderr
 
         logger.info(f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing head VM. Waiting for workers.{style.RESET_ALL}')
@@ -842,12 +842,9 @@ class RetryingVmProvisioner(object):
             cluster_config_file,
             num_nodes,
             per_node_timeout=_CLUSTER_PER_NODE_PROVISION_TIMEOUT)
-        gang_failed = not cluster_ready
-        if gang_failed:
-            # Head OK; gang scheduling failure.
-            return gang_failed, returncode, stdout, stderr
-
-        return False, returncode, stdout, stderr
+        # Do not need rc/stdout/stderr if gang scheduling failed.
+        # gang_succeeded = False, if head OK, but workers failed.
+        return cluster_ready, returncode, None, None
 
     def _ensure_cluster_ray_started(self,
                                     handle: 'CloudVmRayBackend.ResourceHandle',
