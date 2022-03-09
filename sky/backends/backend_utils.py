@@ -54,7 +54,7 @@ _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[.|_]worker[.|_]default')
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[.|_]worker[.|_]default'.format(IP_ADDR_REGEX))
-_WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
+WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 
 
 def _fill_template(template_name: str,
@@ -503,7 +503,7 @@ def wait_until_ray_cluster_ready(
     # launched especially for Azure.
     head_ip = get_head_ip(cluster_config_file,
                           use_cached_head_ip=False,
-                          retry_count=_WAIT_HEAD_NODE_IP_RETRY_COUNT)
+                          retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
 
     expected_worker_count = num_nodes - 1
 
@@ -868,13 +868,15 @@ def get_node_ips(cluster_yaml: str,
 
 
 def get_head_ip(
-    handle: backends.Backend.ResourceHandle,
+    handle: Union[backends.Backend.ResourceHandle, str],
     use_cached_head_ip: bool = True,
     retry_count: int = 1,
 ) -> str:
     """Returns the ip of the head node"""
     assert not use_cached_head_ip or retry_count == 1, (
         'Cannot use cached_head_ip when retry_count is not 1')
+    assert not use_cached_head_ip or isinstance(
+        handle, str), ('Cannot use cached_head_ip when handle is None')
     if use_cached_head_ip:
         if handle.head_ip is None:
             # This happens for INIT clusters (e.g., exit 1 in setup).

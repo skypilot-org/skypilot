@@ -1103,12 +1103,15 @@ class CloudVmRayBackend(backends.Backend):
         if tpu_name is not None:
             self._set_tpu_name(cluster_config_file, launched_nodes, tpu_name)
 
+        head_ip = backend_utils.get_head_ip(
+            cluster_config_file,
+            use_cached_head_ip=False,
+            retry_count=backend_utils.WAIT_HEAD_NODE_IP_RETRY_COUNT)
         handle = self.ResourceHandle(
             cluster_name=cluster_name,
             cluster_yaml=cluster_config_file,
             # Cache head ip in the handle to speed up ssh operations.
-            head_ip=backend_utils.get_node_ips(cluster_config_file,
-                                               launched_nodes)[0],
+            head_ip=head_ip,
             launched_nodes=launched_nodes,
             launched_resources=provisioned_resources,
             # TPU.
