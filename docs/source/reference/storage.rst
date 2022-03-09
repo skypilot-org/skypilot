@@ -1,5 +1,5 @@
 .. _sky-storage:
-Storage
+Sky Storage
 =======
 
 A Sky Storage object represents an abstract data store containing large data

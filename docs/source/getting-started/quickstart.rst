@@ -152,7 +152,7 @@ This may show multiple clusters, if you have created several:
 
   $ ssh mycluster
 
-**To transfer files to and from the cluster** after a task's execution, use :code:`rsync` (or :code:`scp`) :
+**To transfer files to and from the cluster** after a task's execution, use :code:`rsync` (or :code:`scp`):
 
 .. code-block:: console
 
