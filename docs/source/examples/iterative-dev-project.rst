@@ -46,7 +46,7 @@ To run a project on the cluster without logging in, use :code:`sky exec`:
   # `run` section defined in the task specification:
   $ sky exec dev task.yaml
 
-Alternatively, the user can also run commands after logging into the VM via :code:`ssh`.
+Alternatively, the user can directly log into the head node of the cluster via :code:`ssh`, then run commands.
 
 
 .. note::

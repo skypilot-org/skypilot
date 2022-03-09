@@ -27,7 +27,7 @@ scripts, access checkpoints, etc.).
 
 .. note::
 
-  Note that keeping code in sync across multiple clusters is simplified:
+  Keeping code in sync across multiple clusters is simplified:
 
   .. code-block:: console
 

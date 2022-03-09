@@ -26,7 +26,7 @@ Refer to :ref:`Job Queue <job-queue>` for more details on Sky's scheduling behav
 Multiple trials per GPU
 -----------
 
-Use **fractional counts** to run multiple trials per GPU.
+To run multiple trials per GPU, use *fractional counts* in the resource requirement.
 For example, use :code:`--gpus V100:0.5` to make 2 trials share 1 GPU:
 
 .. code-block:: bash
