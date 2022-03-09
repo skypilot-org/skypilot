@@ -498,7 +498,7 @@ def wait_until_ray_cluster_ready(
     if num_nodes <= 1:
         return
 
-    # Manually fetch head ip instead of using `ray exec` to avoid the bug
+    # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
     head_ip = get_head_ip(cluster_config_file,
