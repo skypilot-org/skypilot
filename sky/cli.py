@@ -218,7 +218,7 @@ def _default_interactive_node_name(node_type: str):
 
 def _infer_interactive_node_type(resources: sky.Resources):
     """Determine interactive node type from resources."""
-    accelerators = resources.get_accelerators()
+    accelerators = resources.accelerators
     cloud = resources.cloud
     if accelerators:
         # We only support homogenous accelerators for now.
@@ -950,6 +950,10 @@ def stop(
     CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
     supplied, the latter takes precedence.
 
+    Stopping a cluster does not lose data on the attached disks (billing for
+    the instances will stop while the disks will still be charged).  Those
+    disks will be reattached when restarting the cluster.
+
     Currently, spot-instance clusters cannot be stopped.
 
     Examples:
@@ -1118,6 +1122,9 @@ def down(
     CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
     are supplied, the latter takes precedence.
 
+    Terminating a cluster will delete all associated resources (all billing
+    stops), and any data on the attached disks will be lost.
+
     Accelerators (e.g., TPU) that are part of the cluster will be deleted too.
 
     Examples:
@@ -1169,6 +1176,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             names = []
     if not to_down and not names:
         print('No existing clusters found (see `sky status`).')
+        return
 
     if not no_confirm:
         teardown_verb = 'Terminating' if terminate else 'Stopping'
