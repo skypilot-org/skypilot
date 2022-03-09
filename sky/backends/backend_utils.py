@@ -750,9 +750,9 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def get_node_ips_from_yaml(cluster_yaml: str,
-                           expected_num_nodes: int,
-                           return_private_ips: bool = False) -> List[str]:
+def get_node_ips(cluster_yaml: str,
+                 expected_num_nodes: int,
+                 return_private_ips: bool = False) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
     yaml_handle = cluster_yaml
     if return_private_ips:
