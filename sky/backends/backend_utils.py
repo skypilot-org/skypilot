@@ -500,29 +500,26 @@ def wait_until_ray_cluster_ready(
     # Manually fetch head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
-    head_ip = get_head_ip(
-        cluster_config_file,
-        use_cached_head_ip=False,
-        retry_count=_WAIT_HEAD_NODE_IP_RETRY_COUNT)
+    head_ip = get_head_ip(cluster_config_file,
+                          use_cached_head_ip=False,
+                          retry_count=_WAIT_HEAD_NODE_IP_RETRY_COUNT)
 
     expected_worker_count = num_nodes - 1
 
-    ssh_user, ssh_key = ssh_credential_from_yaml(
-        cluster_config_file)
+    ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
     last_fetched_workers = 0
     start = time.time()
     while True:
-        rc, output, stderr = run_command_on_ip_via_ssh(
-            head_ip,
-            'ray status',
-            ssh_user=ssh_user,
-            ssh_private_key=ssh_key,
-            log_path=log_path,
-            stream_logs=False,
-            require_outputs=True)
+        rc, output, stderr = run_command_on_ip_via_ssh(head_ip,
+                                                       'ray status',
+                                                       ssh_user=ssh_user,
+                                                       ssh_private_key=ssh_key,
+                                                       log_path=log_path,
+                                                       stream_logs=False,
+                                                       require_outputs=True)
 
-        handle_returncode(
-            rc, 'ray status', 'Failed to run ray status on head node.', stderr)
+        handle_returncode(rc, 'ray status',
+                          'Failed to run ray status on head node.', stderr)
         logger.info(output)
 
         # Healthy workers
@@ -560,9 +557,9 @@ def wait_until_ray_cluster_ready(
             return False  # failed
 
         if '(no pending nodes)' in output and '(no failures)' in output:
-            # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
-            # that GCP can satisfy only by half, the worker node would be
-            # forgotten. The correct behavior should be for it to error out.
+            # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
+            # GCP can satisfy only by half, the worker node would be forgotten.
+            # The correct behavior should be for it to error out.
             logger.error(
                 f'{colorama.Fore.RED}Failed to launch multiple nodes on '
                 'GCP due to a nondeterministic bug in ray autoscaler.'

@@ -846,7 +846,6 @@ class RetryingVmProvisioner(object):
         # gang_succeeded = False, if head OK, but workers failed.
         return cluster_ready, returncode, None, None
 
-    
     def _ensure_cluster_ray_started(self,
                                     handle: 'CloudVmRayBackend.ResourceHandle',
                                     log_abs_path) -> None:
