@@ -487,7 +487,6 @@ def get_run_timestamp() -> str:
 
 
 def wait_until_ray_cluster_ready(
-        self,
         cluster_config_file: str,
         num_nodes: int,
         log_path: str,
