@@ -28,7 +28,6 @@ from sky import sky_logging
 from sky import resources
 from sky.adaptors import azure
 from sky.backends import wheel_utils
-from sky.backends.backend import Backend
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -869,7 +868,7 @@ def get_node_ips(cluster_yaml: str,
 
 
 def get_head_ip(
-    handle: Backend.ResourceHandle,
+    handle: backends.Backend.ResourceHandle,
     use_cached_head_ip: bool = True,
     retry_count: int = 1,
 ) -> str:
