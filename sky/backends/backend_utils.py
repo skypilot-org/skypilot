@@ -52,7 +52,7 @@ _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[.|_]worker[.|_]default')
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
-    rf'({IP_ADDR_REGEX}): ray[.|_]worker[.|_]default')
+    r'({}): ray[.|_]worker[.|_]default'.format(IP_ADDR_REGEX))
 _WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 
 
