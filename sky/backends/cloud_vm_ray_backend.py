@@ -1077,8 +1077,8 @@ class CloudVmRayBackend(backends.Backend):
         if not dryrun:  # dry run doesn't need to check existing cluster.
             cluster_name, to_provision, launched_nodes = (
                 self._check_existing_cluster(task, to_provision, cluster_name))
-        
-        lock_path = os.path.expanduser(f"~/.sky/{cluster_name}.lock")
+
+        lock_path = os.path.expanduser(f'~/.sky/{cluster_name}.lock')
         lock = PathlibPath(lock_path)
         lock.touch(exist_ok=True)
         with FileLock(lock_path):
@@ -1107,13 +1107,15 @@ class CloudVmRayBackend(backends.Backend):
             # Set TPU environment variables
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
-                self._set_tpu_name(cluster_config_file, launched_nodes, tpu_name)
+                self._set_tpu_name(cluster_config_file, launched_nodes,
+                                   tpu_name)
 
             handle = self.ResourceHandle(
                 cluster_name=cluster_name,
                 cluster_yaml=cluster_config_file,
                 # Cache head ip in the handle to speed up ssh operations.
-                head_ip=self._get_node_ips(cluster_config_file, launched_nodes)[0],
+                head_ip=self._get_node_ips(cluster_config_file,
+                                           launched_nodes)[0],
                 launched_nodes=launched_nodes,
                 launched_resources=provisioned_resources,
                 # TPU.
@@ -1123,7 +1125,8 @@ class CloudVmRayBackend(backends.Backend):
                                                     handle,
                                                     ready=True)
             auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-            _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
+            _add_cluster_to_ssh_config(cluster_name, handle.head_ip,
+                                       auth_config)
             return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -1709,7 +1712,7 @@ class CloudVmRayBackend(backends.Backend):
             handle.cluster_name)
         cluster_name = config['cluster_name']
 
-        lock_path = os.path.expanduser(f"~/.sky/{cluster_name}.lock")
+        lock_path = os.path.expanduser(f'~/.sky/{cluster_name}.lock')
         try:
             with FileLock(lock_path, 10):
                 if (terminate and
@@ -1757,7 +1760,7 @@ class CloudVmRayBackend(backends.Backend):
                     elif isinstance(cloud, clouds.Azure):
                         resource_group = config['provider']['resource_group']
                         query_cmd = (f'az vm list -g {resource_group} '
-                                    '--query "[].id" -o tsv')
+                                     '--query "[].id" -o tsv')
                         terminate_cmd = f'az vm delete --yes --ids $({query_cmd})'
                         with console.status(f'[bold cyan]Terminating '
                                             f'[green]{cluster_name}'):
@@ -1768,14 +1771,15 @@ class CloudVmRayBackend(backends.Backend):
                                 stream_logs=False,
                                 require_outputs=True)
                     else:
-                        raise ValueError(f'Unsupported cloud {cloud} for stopped '
-                                        f'cluster {cluster_name!r}.')
+                        raise ValueError(
+                            f'Unsupported cloud {cloud} for stopped '
+                            f'cluster {cluster_name!r}.')
                 else:
                     config['provider']['cache_stopped_nodes'] = not terminate
                     with tempfile.NamedTemporaryFile('w',
-                                                    prefix='sky_',
-                                                    delete=False,
-                                                    suffix='.yml') as f:
+                                                     prefix='sky_',
+                                                     delete=False,
+                                                     suffix='.yml') as f:
                         backend_utils.dump_yaml(f.name, config)
                         f.flush()
 
@@ -1796,11 +1800,12 @@ class CloudVmRayBackend(backends.Backend):
                                 stream_logs=False,
                                 require_outputs=True)
                         if tpu_rc != 0:
-                            logger.error(f'{colorama.Fore.RED}Failed to delete TPU.\n'
-                                        f'**** STDOUT ****\n'
-                                        f'{tpu_stdout}\n'
-                                        f'**** STDERR ****\n'
-                                        f'{tpu_stderr}{colorama.Style.RESET_ALL}')
+                            logger.error(
+                                f'{colorama.Fore.RED}Failed to delete TPU.\n'
+                                f'**** STDOUT ****\n'
+                                f'{tpu_stdout}\n'
+                                f'**** STDERR ****\n'
+                                f'{tpu_stderr}{colorama.Style.RESET_ALL}')
 
                 if returncode != 0:
                     logger.error(
@@ -1810,7 +1815,8 @@ class CloudVmRayBackend(backends.Backend):
                         f'**** STDERR ****\n'
                         f'{stderr}{colorama.Style.RESET_ALL}')
 
-                auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+                auth_config = backend_utils.read_yaml(
+                    handle.cluster_yaml)['auth']
                 _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
                 name = global_user_state.get_cluster_name_from_handle(handle)
                 global_user_state.remove_cluster(name, terminate=terminate)
@@ -1826,11 +1832,13 @@ class CloudVmRayBackend(backends.Backend):
                         assert handle.tpu_create_script is not None
                         os.remove(handle.tpu_create_script)
                         os.remove(handle.tpu_delete_script)
-                    
+
                     os.remove(lock_path)
         except Timeout:
-            logger.error("Cluster is locked. Check to see if it is still being launched.")
-        
+            logger.error(
+                'Cluster is locked. Check to see if it is still being launched.'
+            )
+
     def _get_node_ips(self,
                       cluster_yaml: str,
                       expected_num_nodes: int,
