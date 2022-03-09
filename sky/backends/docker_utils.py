@@ -36,6 +36,7 @@ SKY_DOCKER_WORKDIR = 'sky_workdir'
 def create_dockerfile(
     base_image: str,
     setup_command: str,
+    copy_path: str,
     build_dir: str,
     run_command: str = None,
 ) -> str:
@@ -52,6 +53,8 @@ def create_dockerfile(
         base_image: base image to inherit from
         setup_command: commands to run for setup. eg. "pip install numpy && apt
             install htop"
+        copy_path: local path to copy into the image. these are placed in the
+            root of the container.
         build_dir: Where to write the dockerfile and setup scripts
         run_command: cmd argument to the dockerfile. optional - can also be
             specified at runtime.
@@ -64,9 +67,14 @@ def create_dockerfile(
     img_metadata = {}
     dockerfile_contents = DOCKERFILE_TEMPLATE.format(base_image=base_image)
 
-    copy_docker_cmd = f'{SKY_DOCKER_WORKDIR} /{SKY_DOCKER_WORKDIR}/'
-    dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
-        copy_command=copy_docker_cmd)
+    # Copy workdir to image
+    workdir_name = ''
+    if copy_path:
+        workdir_name = os.path.basename(os.path.dirname(copy_path))
+        # NOTE: This relies on copy_path being copied to build context.
+        copy_docker_cmd = f'{workdir_name} /{workdir_name}/'
+        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
+            copy_command=copy_docker_cmd)
 
     def add_script_to_dockerfile(dockerfile_contents: str, multiline_cmds: str,
                                  out_filename: str):
@@ -74,7 +82,7 @@ def create_dockerfile(
         # dockerfile. You still need to add the docker command to run the
         # script (either as CMD or RUN).
         script_path = os.path.join(build_dir, out_filename)
-        bash_codegen(SKY_DOCKER_WORKDIR, multiline_cmds, script_path)
+        bash_codegen(copy_path, multiline_cmds, script_path)
 
         # Add CMD to run setup
         copy_cmd = f'{out_filename} /sky/{out_filename}'
@@ -104,7 +112,7 @@ def create_dockerfile(
     with open(os.path.join(build_dir, 'Dockerfile'), 'w') as f:
         f.write(dockerfile_contents)
 
-    img_metadata['workdir_name'] = SKY_DOCKER_WORKDIR
+    img_metadata['workdir_name'] = workdir_name
     return dockerfile_contents, img_metadata
 
 
@@ -149,6 +157,7 @@ def build_dockerimage(task, tag):
     # Create dockerfile
     _, img_metadata = create_dockerfile(base_image=task.docker_image,
                                         setup_command=task.setup,
+                                        copy_path=f'{SKY_DOCKER_WORKDIR}/',
                                         run_command=task.run,
                                         build_dir=temp_dir)
 
