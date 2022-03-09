@@ -633,6 +633,7 @@ def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str]:
     ssh_private_key = auth_section.get('ssh_private_key')
     return ssh_user, ssh_private_key
 
+
 class SshMode(enum.Enum):
     """Enum for SSH mode."""
     # Do not allocating pseudo-tty to avoid user input corrupting the output.

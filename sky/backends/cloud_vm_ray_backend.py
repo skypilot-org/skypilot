@@ -718,15 +718,15 @@ class RetryingVmProvisioner(object):
                 'region_name': region.name,
                 'zone_str': zone_str,
             }
-            gang_scheduling_status, stdout, stderr = self._gang_schedule_ray_up(
+            status, stdout, stderr = self._gang_schedule_ray_up(
                 to_provision.cloud, num_nodes, cluster_config_file,
                 log_abs_path, stream_logs, logging_info)
 
-            if gang_scheduling_status == self.GangSchedulingStatus.HEAD_FAILED:
+            if status == self.GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
                                                 zones, stdout, stderr)
-            elif gang_scheduling_status == self.GangSchedulingStatus.GANG_FAILED:
+            elif status == self.GangSchedulingStatus.GANG_FAILED:
                 # gang scheduling failed.
 
                 # There exist partial nodes (e.g., head node) so we must
@@ -763,16 +763,17 @@ class RetryingVmProvisioner(object):
                    ' Try changing resource requirements or use another cloud.')
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
+
     class GangSchedulingStatus(enum.Enum):
         """Enum for gang scheduling status."""
         CLUSTER_READY = 0
         GANG_FAILED = 1
         HEAD_FAILED = 2
 
-    def _gang_schedule_ray_up(self, to_provision_cloud: clouds.Cloud,
-                              num_nodes: int, cluster_config_file: str,
-                              log_abs_path: str, stream_logs: bool,
-                              logging_info: dict) -> Tuple[GangSchedulingStatus, str, str]:
+    def _gang_schedule_ray_up(
+            self, to_provision_cloud: clouds.Cloud, num_nodes: int,
+            cluster_config_file: str, log_abs_path: str, stream_logs: bool,
+            logging_info: dict) -> Tuple[GangSchedulingStatus, str, str]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
         Returns:
@@ -845,7 +846,10 @@ class RetryingVmProvisioner(object):
             num_nodes,
             log_path=log_abs_path,
             nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT)
-        cluster_status = self.GangSchedulingStatus.CLUSTER_READY if cluster_ready else self.GangSchedulingStatus.GANG_FAILED
+        if cluster_ready:
+            cluster_status = self.GangSchedulingStatus.CLUSTER_READY
+        else:
+            cluster_status = self.GangSchedulingStatus.GANG_FAILED
         # Do not need stdout/stderr if gang scheduling failed.
         # gang_succeeded = False, if head OK, but workers failed.
         return cluster_status, '', ''
