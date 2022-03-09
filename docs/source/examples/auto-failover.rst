@@ -68,7 +68,7 @@ If all regions within the chosen cloud failed, the provisioner retries on the ne
 cheapest cloud.
 
 Here is an example of cross-cloud failover when requesting 8x V100 GPUs.  All
-regions in GCP failed to provide the resource, so the provisioner switches to
+regions in GCP failed to provide the resource, so the provisioner switched to
 AWS, where it succeeded after two regions:
 
 .. code-block::

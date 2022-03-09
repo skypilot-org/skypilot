@@ -3,7 +3,7 @@ Job Queue
 =========
 
 Sky's **job queue** feature allows multiple jobs to be scheduled on a cluster.
-This enables parallel experiments or hyperparameter tuning.
+This enables parallel experiments or :ref:`hyperparameter tuning <grid-search>`.
 
 Each task submitted by :code:`sky exec` is automatically queued and scheduled
 for execution on the cluster. Use the :code:`-d / --detach` flag to detach
