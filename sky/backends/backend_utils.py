@@ -50,6 +50,8 @@ RESET_BOLD = '\033[0m'
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[.|_]worker[.|_]default')
+# Intentionally not using prefix 'rf' for the string format because yapf have a
+# bug with python=3.6.
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[.|_]worker[.|_]default'.format(IP_ADDR_REGEX))
