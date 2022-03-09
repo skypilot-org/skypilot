@@ -52,12 +52,6 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 # Timeout for provision a cluster and wait for it to be ready in seconds.
 _CLUSTER_PER_NODE_PROVISION_TIMEOUT = 30
 
-# 10.133.0.5: ray.worker.default,
-_LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[.|_]worker[.|_]default')
-_LAUNCHING_IP_PATTERN = re.compile(
-    rf'({backend_utils.IP_ADDR_REGEX}): ray[.|_]worker[.|_]default')
-_WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
-
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
     """Errors out on invalid cluster names not supported by cloud providers.
@@ -843,7 +837,7 @@ class RetryingVmProvisioner(object):
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
         # stop, then launch again.
-        cluster_ready = self._wait_until_ray_cluster_ready(
+        cluster_ready = backend_utils.wait_until_ray_cluster_ready(
             cluster_config_file,
             num_nodes,
             log_path=log_abs_path,
@@ -852,93 +846,7 @@ class RetryingVmProvisioner(object):
         # gang_succeeded = False, if head OK, but workers failed.
         return cluster_ready, returncode, None, None
 
-    def _wait_until_ray_cluster_ready(
-            self,
-            cluster_config_file: str,
-            num_nodes: int,
-            log_path: str,
-            per_node_timeout: Optional[int] = None) -> bool:
-        """Returns whether the entire ray cluster is ready."""
-        # FIXME: It may takes a while for the cluster to be available for ray,
-        # especially for Azure, causing `ray exec` to fail.
-        if num_nodes <= 1:
-            return
-
-        # Manually fetch head ip instead of using `ray exec` to avoid the bug
-        # that `ray exec` fails to connect to the head node after some workers
-        # launched especially for Azure.
-        head_ip = backend_utils.get_head_ip(
-            cluster_config_file,
-            use_cached_head_ip=False,
-            retry_count=_WAIT_HEAD_NODE_IP_RETRY_COUNT)
-
-        expected_worker_count = num_nodes - 1
-
-        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
-            cluster_config_file)
-        last_fetched_workers = 0
-        start = time.time()
-        while True:
-            rc, output, stderr = backend_utils.run_command_on_ip_via_ssh(
-                head_ip,
-                'ray status',
-                ssh_user=ssh_user,
-                ssh_private_key=ssh_key,
-                log_path=log_path,
-                stream_logs=False,
-                require_outputs=True)
-
-            backend_utils.handle_returncode(
-                rc, 'ray status', 'Failed to run ray status on head node.',
-                stderr)
-            logger.info(output)
-
-            # Healthy workers
-            result = _LAUNCHED_WORKER_PATTERN.findall(output)
-            healthy_workers = 0
-            if result:
-                assert len(result) == 1, result
-                healthy_workers = int(result[0])
-
-            if healthy_workers == expected_worker_count:
-                # All workers are up.
-                break
-
-            # Pending workers that have been launched by ray up.
-            found_ips = _LAUNCHING_IP_PATTERN.findall(output)
-            pending_workers = len(found_ips) if found_ips else 0
-
-            fetched_workers = healthy_workers + pending_workers
-
-            # Check the number of nodes that are fetched. Timeout if no new
-            # nodes fetched in a while (per_node_timeout), though number of
-            # fetched_workers is still not as expected.
-            if fetched_workers != last_fetched_workers:
-                # Reset the start time if the number of launching nodes
-                # changes, i.e. new nodes are launched.
-                logger.debug('Reset start time, as new nodes are launched. '
-                             f'({last_fetched_workers} -> {fetched_workers})')
-                start = time.time()
-                last_fetched_workers = fetched_workers
-            elif (per_node_timeout is not None and
-                  time.time() - start > per_node_timeout and
-                  fetched_workers != expected_worker_count):
-                logger.error(f'{colorama.Fore.RED}Got Timedout in waiting for '
-                             f'cluster to be ready.{colorama.Style.RESET_ALL}')
-                return False  # failed
-
-            if '(no pending nodes)' in output and '(no failures)' in output:
-                # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
-                # that GCP can satisfy only by half, the worker node would be
-                # forgotten. The correct behavior should be for it to error out.
-                logger.error(
-                    f'{colorama.Fore.RED}Failed to launch multiple nodes on '
-                    'GCP due to a nondeterministic bug in ray autoscaler.'
-                    f'{colorama.Style.RESET_ALL}')
-                return False  # failed
-            time.sleep(10)
-        return True  # success
-
+    
     def _ensure_cluster_ray_started(self,
                                     handle: 'CloudVmRayBackend.ResourceHandle',
                                     log_abs_path) -> None:

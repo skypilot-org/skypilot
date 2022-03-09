@@ -49,6 +49,12 @@ RESET_BOLD = '\033[0m'
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
+_LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[.|_]worker[.|_]default')
+# 10.133.0.5: ray.worker.default,
+_LAUNCHING_IP_PATTERN = re.compile(
+    rf'({IP_ADDR_REGEX}): ray[.|_]worker[.|_]default')
+_WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
+
 
 def _fill_template(template_name: str,
                    variables: Dict,
@@ -478,6 +484,93 @@ def dump_yaml(path, config):
 
 def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+
+
+def wait_until_ray_cluster_ready(
+        self,
+        cluster_config_file: str,
+        num_nodes: int,
+        log_path: str,
+        per_node_timeout: Optional[int] = None) -> bool:
+    """Returns whether the entire ray cluster is ready."""
+    # FIXME: It may takes a while for the cluster to be available for ray,
+    # especially for Azure, causing `ray exec` to fail.
+    if num_nodes <= 1:
+        return
+
+    # Manually fetch head ip instead of using `ray exec` to avoid the bug
+    # that `ray exec` fails to connect to the head node after some workers
+    # launched especially for Azure.
+    head_ip = get_head_ip(
+        cluster_config_file,
+        use_cached_head_ip=False,
+        retry_count=_WAIT_HEAD_NODE_IP_RETRY_COUNT)
+
+    expected_worker_count = num_nodes - 1
+
+    ssh_user, ssh_key = ssh_credential_from_yaml(
+        cluster_config_file)
+    last_fetched_workers = 0
+    start = time.time()
+    while True:
+        rc, output, stderr = run_command_on_ip_via_ssh(
+            head_ip,
+            'ray status',
+            ssh_user=ssh_user,
+            ssh_private_key=ssh_key,
+            log_path=log_path,
+            stream_logs=False,
+            require_outputs=True)
+
+        handle_returncode(
+            rc, 'ray status', 'Failed to run ray status on head node.', stderr)
+        logger.info(output)
+
+        # Healthy workers
+        result = _LAUNCHED_WORKER_PATTERN.findall(output)
+        healthy_workers = 0
+        if result:
+            assert len(result) == 1, result
+            healthy_workers = int(result[0])
+
+        if healthy_workers == expected_worker_count:
+            # All workers are up.
+            break
+
+        # Pending workers that have been launched by ray up.
+        found_ips = _LAUNCHING_IP_PATTERN.findall(output)
+        pending_workers = len(found_ips) if found_ips else 0
+
+        fetched_workers = healthy_workers + pending_workers
+
+        # Check the number of nodes that are fetched. Timeout if no new
+        # nodes fetched in a while (per_node_timeout), though number of
+        # fetched_workers is still not as expected.
+        if fetched_workers != last_fetched_workers:
+            # Reset the start time if the number of launching nodes
+            # changes, i.e. new nodes are launched.
+            logger.debug('Reset start time, as new nodes are launched. '
+                         f'({last_fetched_workers} -> {fetched_workers})')
+            start = time.time()
+            last_fetched_workers = fetched_workers
+        elif (per_node_timeout is not None and
+              time.time() - start > per_node_timeout and
+              fetched_workers != expected_worker_count):
+            logger.error(f'{colorama.Fore.RED}Got Timedout in waiting for '
+                         f'cluster to be ready.{colorama.Style.RESET_ALL}')
+            return False  # failed
+
+        if '(no pending nodes)' in output and '(no failures)' in output:
+            # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
+            # that GCP can satisfy only by half, the worker node would be
+            # forgotten. The correct behavior should be for it to error out.
+            logger.error(
+                f'{colorama.Fore.RED}Failed to launch multiple nodes on '
+                'GCP due to a nondeterministic bug in ray autoscaler.'
+                f'{colorama.Style.RESET_ALL}')
+            return False  # failed
+        time.sleep(10)
+    return True  # success
 
 
 def ssh_options_list(ssh_private_key: Optional[str],
