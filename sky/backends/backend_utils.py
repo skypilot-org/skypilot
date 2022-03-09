@@ -871,11 +871,9 @@ def get_head_ip(
     use_cached_head_ip: bool = True,
     retry_count: int = 1,
 ) -> str:
-    """Returns the ip of the head node"""
+    """Returns the ip of the head node."""
     assert not use_cached_head_ip or retry_count == 1, (
         'Cannot use cached_head_ip when retry_count is not 1')
-    assert not use_cached_head_ip or isinstance(
-        handle, str), ('Cannot use cached_head_ip when handle is None')
     if use_cached_head_ip:
         if handle.head_ip is None:
             # This happens for INIT clusters (e.g., exit 1 in setup).
@@ -890,7 +888,7 @@ def get_head_ip(
 
 
 def get_head_ip_from_yaml(cluster_yaml: str, retry_count: int = 1) -> str:
-    """Returns the ip of the head node"""
+    """Returns the ip of the head node from yaml file."""
     for i in range(retry_count):
         try:
             out = run(f'ray get-head-ip {cluster_yaml}',
