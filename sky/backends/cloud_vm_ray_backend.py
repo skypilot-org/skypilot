@@ -378,6 +378,12 @@ class RayCodeGen:
 class RetryingVmProvisioner(object):
     """A provisioner that retries different cloud/regions/zones."""
 
+    class GangSchedulingStatus(enum.Enum):
+        """Enum for gang scheduling status."""
+        CLUSTER_READY = 0
+        GANG_FAILED = 1
+        HEAD_FAILED = 2
+
     def __init__(self, log_dir: str, dag: Dag, optimize_target: OptimizeTarget):
         self._blocked_regions = set()
         self._blocked_zones = set()
@@ -748,6 +754,7 @@ class RetryingVmProvisioner(object):
                     stderr=None)
             else:
                 # Success.
+                assert status == self.GangSchedulingStatus.CLUSTER_READY, status
 
                 # However, ray processes may not be up due to 'ray up
                 # --no-restart' flag.  Ensure so.
@@ -763,12 +770,6 @@ class RetryingVmProvisioner(object):
                    ' Try changing resource requirements or use another cloud.')
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
-
-    class GangSchedulingStatus(enum.Enum):
-        """Enum for gang scheduling status."""
-        CLUSTER_READY = 0
-        GANG_FAILED = 1
-        HEAD_FAILED = 2
 
     def _gang_schedule_ray_up(
             self, to_provision_cloud: clouds.Cloud, num_nodes: int,
@@ -1111,8 +1112,10 @@ class CloudVmRayBackend(backends.Backend):
         if tpu_name is not None:
             self._set_tpu_name(cluster_config_file, launched_nodes, tpu_name)
 
-        head_ip = backend_utils.get_head_ip_from_yaml(
+        head_ip = backend_utils.query_head_ip_with_retries(
             cluster_config_file,
+            # Retry is useful for azure, as sometimes it will need some time for
+            # ray get-head-ip to be able to fetch the head ip.
             retry_count=backend_utils.WAIT_HEAD_NODE_IP_RETRY_COUNT)
         handle = self.ResourceHandle(
             cluster_name=cluster_name,
