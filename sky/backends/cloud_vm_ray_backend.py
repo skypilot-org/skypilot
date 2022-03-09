@@ -1103,9 +1103,8 @@ class CloudVmRayBackend(backends.Backend):
         if tpu_name is not None:
             self._set_tpu_name(cluster_config_file, launched_nodes, tpu_name)
 
-        head_ip = backend_utils.get_head_ip(
+        head_ip = backend_utils.get_head_ip_from_yaml(
             cluster_config_file,
-            use_cached_head_ip=False,
             retry_count=backend_utils.WAIT_HEAD_NODE_IP_RETRY_COUNT)
         handle = self.ResourceHandle(
             cluster_name=cluster_name,

@@ -501,8 +501,7 @@ def wait_until_ray_cluster_ready(
     # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
-    head_ip = get_head_ip(cluster_config_file,
-                          use_cached_head_ip=False,
+    head_ip = get_head_ip_from_yaml(cluster_config_file,
                           retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
 
     expected_worker_count = num_nodes - 1
@@ -868,7 +867,7 @@ def get_node_ips(cluster_yaml: str,
 
 
 def get_head_ip(
-    handle: Union[backends.Backend.ResourceHandle, str],
+    handle: backends.Backend.ResourceHandle,
     use_cached_head_ip: bool = True,
     retry_count: int = 1,
 ) -> str:
@@ -886,21 +885,25 @@ def get_head_ip(
                 ' the cluster status is UP (`sky status`).')
         head_ip = handle.head_ip
     else:
-        for i in range(retry_count):
-            try:
-                out = run(f'ray get-head-ip {handle}',
-                          stdout=subprocess.PIPE).stdout.decode().strip()
-                head_ip = re.findall(IP_ADDR_REGEX, out)
-                assert 1 == len(head_ip), out
-                head_ip = head_ip[0]
-                break
-            except subprocess.CalledProcessError as e:
-                if i == retry_count - 1:
-                    raise e
-                # Retry if the cluster is not up yet.
-                time.sleep(5)
+        get_head_ip_from_yaml(handle.cluster_yaml, retry_count)
     return head_ip
 
+def get_head_ip_from_yaml(cluster_yaml: str, retry_count: int = 1) -> str:
+    """Returns the ip of the head node"""
+    for i in range(retry_count):
+        try:
+            out = run(f'ray get-head-ip {cluster_yaml}',
+                    stdout=subprocess.PIPE).stdout.decode().strip()
+            head_ip = re.findall(IP_ADDR_REGEX, out)
+            assert 1 == len(head_ip), out
+            head_ip = head_ip[0]
+            break
+        except subprocess.CalledProcessError as e:
+            if i == retry_count - 1:
+                raise e
+            # Retry if the cluster is not up yet.
+            time.sleep(5)
+    retrun head_ip
 
 def get_backend_from_handle(
         handle: backends.Backend.ResourceHandle) -> backends.Backend:
