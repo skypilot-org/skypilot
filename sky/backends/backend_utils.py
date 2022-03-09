@@ -551,18 +551,15 @@ def wait_until_ray_cluster_ready(
               time.time() - start > nodes_launching_progress_timeout and
               workers_so_far != expected_worker_count):
             logger.error(
-                f'{colorama.Fore.RED}Timed out when waiting for '
-                f'workers to be provisioned.{colorama.Style.RESET_ALL}')
+                'Timed out when waiting for workers to be provisioned.')
             return False  # failed
 
         if '(no pending nodes)' in output and '(no failures)' in output:
             # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
             # GCP can satisfy only by half, the worker node would be forgotten.
             # The correct behavior should be for it to error out.
-            logger.error(
-                f'{colorama.Fore.RED}Failed to launch multiple nodes on '
-                'GCP due to a nondeterministic bug in ray autoscaler.'
-                f'{colorama.Style.RESET_ALL}')
+            logger.error('Failed to launch multiple nodes on '
+                         'GCP due to a nondeterministic bug in ray autoscaler.')
             return False  # failed
         time.sleep(10)
     return True  # success
