@@ -56,6 +56,9 @@ class AzureNodeProvider(NodeProvider):
 
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
+        # TODO(suquark): This is a temporary patch for creating the non-existing resource group.
+        from sky.skylet.providers.azure.config import _configure_resource_group
+        _configure_resource_group({"provider": provider_config})
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         # AWS provides managed identity for Azure, but it is not setup properly by

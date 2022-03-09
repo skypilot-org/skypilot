@@ -1697,7 +1697,7 @@ class CloudVmRayBackend(backends.Backend):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
             resource_group = config['provider']['resource_group']
-            terminate_cmd = f'az group delete --name {resource_group}'
+            terminate_cmd = f'az group delete -y --name {resource_group}'
             with console.status(f'[bold cyan]Terminating '
                                 f'[green]{cluster_name}'):
                 returncode, stdout, stderr = log_lib.run_with_log(
