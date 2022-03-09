@@ -885,7 +885,7 @@ def get_head_ip(
                 ' the cluster status is UP (`sky status`).')
         head_ip = handle.head_ip
     else:
-        get_head_ip_from_yaml(handle.cluster_yaml, retry_count)
+        head_ip = get_head_ip_from_yaml(handle.cluster_yaml, retry_count)
     return head_ip
 
 
