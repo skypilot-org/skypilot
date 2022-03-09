@@ -502,7 +502,7 @@ def wait_until_ray_cluster_ready(
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
     head_ip = get_head_ip_from_yaml(cluster_config_file,
-                          retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
+                                    retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
 
     expected_worker_count = num_nodes - 1
 
@@ -888,12 +888,13 @@ def get_head_ip(
         get_head_ip_from_yaml(handle.cluster_yaml, retry_count)
     return head_ip
 
+
 def get_head_ip_from_yaml(cluster_yaml: str, retry_count: int = 1) -> str:
     """Returns the ip of the head node"""
     for i in range(retry_count):
         try:
             out = run(f'ray get-head-ip {cluster_yaml}',
-                    stdout=subprocess.PIPE).stdout.decode().strip()
+                      stdout=subprocess.PIPE).stdout.decode().strip()
             head_ip = re.findall(IP_ADDR_REGEX, out)
             assert 1 == len(head_ip), out
             head_ip = head_ip[0]
@@ -903,7 +904,8 @@ def get_head_ip_from_yaml(cluster_yaml: str, retry_count: int = 1) -> str:
                 raise e
             # Retry if the cluster is not up yet.
             time.sleep(5)
-    retrun head_ip
+    return head_ip
+
 
 def get_backend_from_handle(
         handle: backends.Backend.ResourceHandle) -> backends.Backend:
