@@ -48,12 +48,12 @@ RESET_BOLD = '\033[0m'
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
-_LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[.|_]worker[.|_]default')
+_LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
-    r'({}): ray[.|_]worker[.|_]default'.format(IP_ADDR_REGEX))
+    r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
 WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 
 
@@ -491,10 +491,8 @@ def wait_until_ray_cluster_ready(
         cluster_config_file: str,
         num_nodes: int,
         log_path: str,
-        per_node_timeout: Optional[int] = None) -> bool:
+        nodes_launching_progress_timeout: Optional[int] = None) -> bool:
     """Returns whether the entire ray cluster is ready."""
-    # FIXME: It may takes a while for the cluster to be available for ray,
-    # especially for Azure, causing `ray exec` to fail.
     if num_nodes <= 1:
         return
 
@@ -507,7 +505,7 @@ def wait_until_ray_cluster_ready(
     expected_worker_count = num_nodes - 1
 
     ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
-    last_fetched_workers = 0
+    last_workers_so_far = 0
     start = time.time()
     while True:
         rc, output, stderr = run_command_on_ip_via_ssh(head_ip,
@@ -522,38 +520,39 @@ def wait_until_ray_cluster_ready(
                           'Failed to run ray status on head node.', stderr)
         logger.info(output)
 
-        # Healthy workers
+        # Workers that are ready
         result = _LAUNCHED_WORKER_PATTERN.findall(output)
-        healthy_workers = 0
+        ready_workers = 0
         if result:
             assert len(result) == 1, result
-            healthy_workers = int(result[0])
+            ready_workers = int(result[0])
 
-        if healthy_workers == expected_worker_count:
+        if ready_workers == expected_worker_count:
             # All workers are up.
             break
 
         # Pending workers that have been launched by ray up.
         found_ips = _LAUNCHING_IP_PATTERN.findall(output)
-        pending_workers = len(found_ips) if found_ips else 0
+        pending_workers = len(found_ips)
 
-        fetched_workers = healthy_workers + pending_workers
+        workers_so_far = ready_workers + pending_workers
 
         # Check the number of nodes that are fetched. Timeout if no new
-        # nodes fetched in a while (per_node_timeout), though number of
-        # fetched_workers is still not as expected.
-        if fetched_workers != last_fetched_workers:
+        # nodes fetched in a while (nodes_launching_progress_timeout), though
+        # number of workers_so_far is still not as expected.
+        if workers_so_far != last_workers_so_far:
             # Reset the start time if the number of launching nodes
             # changes, i.e. new nodes are launched.
             logger.debug('Reset start time, as new nodes are launched. '
-                         f'({last_fetched_workers} -> {fetched_workers})')
+                         f'({last_workers_so_far} -> {workers_so_far})')
             start = time.time()
-            last_fetched_workers = fetched_workers
-        elif (per_node_timeout is not None and
-              time.time() - start > per_node_timeout and
-              fetched_workers != expected_worker_count):
-            logger.error(f'{colorama.Fore.RED}Got Timedout in waiting for '
-                         f'cluster to be ready.{colorama.Style.RESET_ALL}')
+            last_workers_so_far = workers_so_far
+        elif (nodes_launching_progress_timeout is not None and
+              time.time() - start > nodes_launching_progress_timeout and
+              workers_so_far != expected_worker_count):
+            logger.error(
+                f'{colorama.Fore.RED}Timed out when waiting for '
+                f'workers to be provisioned.{colorama.Style.RESET_ALL}')
             return False  # failed
 
         if '(no pending nodes)' in output and '(no failures)' in output:
@@ -626,14 +625,13 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
-def ssh_credential_from_yaml(cluster_yaml: str) -> str:
+def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str]:
     """Returns ssh_user and ssh_private_key."""
     config = read_yaml(cluster_yaml)
     auth_section = config['auth']
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
     return ssh_user, ssh_private_key
-
 
 class SshMode(enum.Enum):
     """Enum for SSH mode."""
@@ -901,6 +899,7 @@ def get_head_ip_from_yaml(cluster_yaml: str, retry_count: int = 1) -> str:
             if i == retry_count - 1:
                 raise e
             # Retry if the cluster is not up yet.
+            logger.debug('Retrying to get head ip.')
             time.sleep(5)
     return head_ip
 

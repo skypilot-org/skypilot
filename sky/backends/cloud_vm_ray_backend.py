@@ -2,6 +2,7 @@
 import ast
 import click
 import contextlib
+import enum
 import getpass
 import hashlib
 import inspect
@@ -50,7 +51,7 @@ console = rich_console.Console()
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout for provision a cluster and wait for it to be ready in seconds.
-_CLUSTER_PER_NODE_PROVISION_TIMEOUT = 30
+_NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -717,15 +718,15 @@ class RetryingVmProvisioner(object):
                 'region_name': region.name,
                 'zone_str': zone_str,
             }
-            gang_succeeded, rc, stdout, stderr = self._gang_schedule_ray_up(
+            gang_scheduling_status, stdout, stderr = self._gang_schedule_ray_up(
                 to_provision.cloud, num_nodes, cluster_config_file,
                 log_abs_path, stream_logs, logging_info)
 
-            if rc != 0:
-                # ray up failed.
+            if gang_scheduling_status == self.GangSchedulingStatus.HEAD_FAILED:
+                # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
                                                 zones, stdout, stderr)
-            elif not gang_succeeded:
+            elif gang_scheduling_status == self.GangSchedulingStatus.GANG_FAILED:
                 # gang scheduling failed.
 
                 # There exist partial nodes (e.g., head node) so we must
@@ -762,20 +763,20 @@ class RetryingVmProvisioner(object):
                    ' Try changing resource requirements or use another cloud.')
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
+    class GangSchedulingStatus(enum.Enum):
+        """Enum for gang scheduling status."""
+        CLUSTER_READY = 0
+        GANG_FAILED = 1
+        HEAD_FAILED = 2
 
     def _gang_schedule_ray_up(self, to_provision_cloud: clouds.Cloud,
                               num_nodes: int, cluster_config_file: str,
                               log_abs_path: str, stream_logs: bool,
-                              logging_info: dict):
-        """Provisions a cluster via 'ray up' with gang scheduling.
-
-        Benefits:
-          - Ensures all nodes are allocated first before potentially expensive
-            file_mounts/setup.  (If not all nodes aren't allocated, step 1
-            would fail.)
+                              logging_info: dict) -> Tuple[GangSchedulingStatus, str, str]:
+        """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
         Returns:
-          (did gang scheduling succeeded; returncode; stdout; stderr).
+          (GangSchedulingStatus; stdout; stderr).
         """
         # FIXME(zhwu,zongheng): ray up on multiple nodes ups the head node then
         # waits for all workers; turn it into real gang scheduling.
@@ -828,8 +829,10 @@ class RetryingVmProvisioner(object):
                 start_streaming_at='Shared connection to')
 
         # Only 1 node or head node provisioning failure.
-        if num_nodes == 1 or returncode != 0:
-            return True, returncode, stdout, stderr
+        if num_nodes == 1 and returncode == 0:
+            return self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr
+        if returncode != 0:
+            return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr
 
         logger.info(f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing head VM. Waiting for workers.{style.RESET_ALL}')
@@ -841,10 +844,11 @@ class RetryingVmProvisioner(object):
             cluster_config_file,
             num_nodes,
             log_path=log_abs_path,
-            per_node_timeout=_CLUSTER_PER_NODE_PROVISION_TIMEOUT)
-        # Do not need rc/stdout/stderr if gang scheduling failed.
+            nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT)
+        cluster_status = self.GangSchedulingStatus.CLUSTER_READY if cluster_ready else self.GangSchedulingStatus.GANG_FAILED
+        # Do not need stdout/stderr if gang scheduling failed.
         # gang_succeeded = False, if head OK, but workers failed.
-        return cluster_ready, returncode, None, None
+        return cluster_status, '', ''
 
     def _ensure_cluster_ray_started(self,
                                     handle: 'CloudVmRayBackend.ResourceHandle',
