@@ -82,7 +82,7 @@ def create_dockerfile(
         # dockerfile. You still need to add the docker command to run the
         # script (either as CMD or RUN).
         script_path = os.path.join(build_dir, out_filename)
-        bash_codegen(copy_path, multiline_cmds, script_path)
+        bash_codegen(workdir_name, multiline_cmds, script_path)
 
         # Add CMD to run setup
         copy_cmd = f'{out_filename} /sky/{out_filename}'
