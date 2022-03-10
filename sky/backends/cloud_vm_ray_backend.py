@@ -621,8 +621,7 @@ class RetryingVmProvisioner(object):
             yield (region, zones)
 
     def _try_provision_tpu(self, to_provision: Resources,
-                           config_dict: Dict[str, str],
-                           zone_str: str) -> bool:
+                           config_dict: Dict[str, str]) -> bool:
         """Returns whether the provision is successful."""
         tpu_name = config_dict['tpu_name']
         assert 'tpu-create-script' in config_dict, \
@@ -652,11 +651,11 @@ class RetryingVmProvisioner(object):
                 raise exceptions.ResourcesUnavailableError()
 
             if 'PERMISSION_DENIED' in stderr:
-                logger.info(f'TPUs are not available in {zone_str}.')
+                logger.info('TPUs are not available in this zone.')
                 return False
 
             if 'no more capacity in the zone' in stderr:
-                logger.info(f'TPUs have no more capacity in {zone_str}.')
+                logger.info('No more capacity in this zone.')
                 return False
 
             if 'CloudTpu received an invalid AcceleratorType' in stderr:
@@ -664,8 +663,8 @@ class RetryingVmProvisioner(object):
                 # AcceleratorType, "v3-8" for zone "us-central1-c". Valid
                 # values are "v2-8, ".
                 tpu_type = list(to_provision.accelerators.keys())[0]
-                logger.info(f'TPU type {tpu_type} is not available in '
-                            f'{zone_str}.')
+                logger.info(
+                    f'TPU type {tpu_type} is not available in this zone.')
                 return False
 
             logger.error(stderr)
@@ -707,8 +706,9 @@ class RetryingVmProvisioner(object):
                 return
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
-                logger.info(f'{colorama.Style.BRIGHT}Launching TPU on '
-                            f'{to_provision.cloud} '
+                logger.info(
+                    f'{colorama.Style.BRIGHT}Launching TPU on '
+                    f'{to_provision.cloud} '
                     f'{region.name}{colorama.Style.RESET_ALL} ({zone_str})')
                 with console.status('[bold cyan]Launching[/]'):
                     success = self._try_provision_tpu(to_provision, config_dict)
