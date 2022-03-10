@@ -27,6 +27,7 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.intersphinx',
     'sphinx_click',
+    'sphinx_copybutton',
     'sphinx_autodoc_typehints',
     'sphinx.ext.autosectionlabel',
 ]
