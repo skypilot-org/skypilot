@@ -29,7 +29,7 @@ pip install -e ".[all]"
 
 ### Some general engineering practice suggestions
 
-These are suggestions, not strict rules to follow. For general coding style, follow [Google style guide](https://google.github.io/styleguide/pyguide.html).
+These are suggestions, not strict rules to follow. When in doubt, follow the [style guide](https://google.github.io/styleguide/pyguide.html).
 
 * Use `TODO(author_name)`/`FIXME(author_name)` instead of blank `TODO/FIXME`. This is critical for tracking down issues. You can write TODOs with your name and assign it to others (on github) if it is someone else's issue.
 * Delete your branch after merging it. This keeps the repo clean and faster to sync.
