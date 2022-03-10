@@ -198,7 +198,7 @@ class Azure(clouds.Cloud):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         help_str = (
-            '\n    Run the following commands:'
+            ' Run the following commands:'
             '\n    $ az login'
             '\n    $ az account set -s <subscription_id>'
             '\n    For more info: '

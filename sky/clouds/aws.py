@@ -206,6 +206,7 @@ class AWS(clouds.Cloud):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         help_str = (
+            ' Run the following commands:'
             '\n    $ pip install boto3'
             '\n    $ aws configure'
             '\n    For more info: '
@@ -216,7 +217,7 @@ class AWS(clouds.Cloud):
         # `aws configure list` does not guarantee this file exists.
         if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
             return (False,
-                    '~/.aws/credentials does not exist. Run `aws configure`.' +
+                    '~/.aws/credentials does not exist.' +
                     help_str)
         try:
             output = _run_output('aws configure list')
@@ -243,7 +244,7 @@ class AWS(clouds.Cloud):
                     secret_key_ok = True
         if access_key_ok and secret_key_ok:
             return True, None
-        return False, 'AWS credentials not set. Run the following commands:' + help_str
+        return False, 'AWS credentials not set.' + help_str
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
         return {'~/.aws': '~/.aws'}, []
