@@ -54,8 +54,6 @@ If running :code:`conda install -c conda-forge google-cloud-sdk` produces the er
 
 .. code-block:: console
 
-  $ # Install the Azure CLI
-  $ pip install azure-cli==2.30.0
   $ # Login
   $ az login
   $ # Set the subscription to use
