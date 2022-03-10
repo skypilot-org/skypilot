@@ -825,10 +825,12 @@ class RetryingVmProvisioner(object):
 
         logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
+        start = time.time()
         with console.status('[bold cyan]Launching[/]'):
             # ray up.
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
+        logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
