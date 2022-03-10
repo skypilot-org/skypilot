@@ -28,6 +28,7 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx_click',
     'sphinx_autodoc_typehints',
+    'sphinx.ext.autosectionlabel',
 ]
 
 intersphinx_mapping = {

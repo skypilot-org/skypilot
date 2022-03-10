@@ -3,7 +3,7 @@ Auto-provisioning GPUs
 ==========================
 
 Sky comes with an *auto-failover provisioner*, which
-**automatically retries provisioning a cluster on different regions (or
+**automatically retries provisioning a cluster in different regions (or
 clouds)** if the requested resources cannot be provisioned.
 Such provisioning failures can happen for a variety of reasons:
 
@@ -17,13 +17,15 @@ and other accelerators.  The user is **freed from manually searching for regions
 .. note::
 
   Auto-failover is automatically enabled whenever a new cluster is to be
-  provisioned, such as during :code:`sky launch` or the interactive node
-  commands :code:`sky {gpunode,cpunode,tpunode}`. If the :code:`cloud`
-  field is specified in resources, then auto-failover retries only within
-  the specified cloud.
+  provisioned, such as during :code:`sky launch` or the :ref:`interactive node
+  commands <interactive-nodes>` :code:`sky {gpunode,cpunode,tpunode}`. If the
+  :code:`cloud` field is specified in resources, then auto-failover retries only
+  within the specified cloud.
 
 Cross-region failover
 ----------------
+
+The provisioner first retries across all regions within a task's chosen cloud.
 
 A common high-end GPU to use in deep learning is a NVIDIA V100 GPU.  These GPUs
 are often in high demand and hard to get.  Let's see how Sky's auto-failover
@@ -68,7 +70,7 @@ If all regions within the chosen cloud failed, the provisioner retries on the ne
 cheapest cloud.
 
 Here is an example of cross-cloud failover when requesting 8x V100 GPUs.  All
-regions in GCP failed to provide the resource, so the provisioner switches to
+regions in GCP failed to provide the resource, so the provisioner switched to
 AWS, where it succeeded after two regions:
 
 .. code-block::
