@@ -689,11 +689,6 @@ class RetryingVmProvisioner(object):
                 continue
             zone_str = ','.join(
                 z.name for z in zones) if zones is not None else 'all zones'
-            logging_info = {
-                'cluster_name': cluster_name,
-                'region_name': region.name,
-                'zone_str': zone_str,
-            }
             config_dict = backend_utils.write_cluster_config(
                 to_provision,
                 num_nodes,
@@ -730,6 +725,11 @@ class RetryingVmProvisioner(object):
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
+            logging_info = {
+                'cluster_name': cluster_name,
+                'region_name': region.name,
+                'zone_str': zone_str,
+            }
             status, stdout, stderr = self._gang_schedule_ray_up(
                 to_provision.cloud, num_nodes, cluster_config_file,
                 log_abs_path, stream_logs, logging_info)
