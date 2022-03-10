@@ -707,8 +707,11 @@ class RetryingVmProvisioner(object):
                 return
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
-                success = self._try_provision_tpu(to_provision, config_dict,
-                                                  zone_str)
+                logger.info(f'{colorama.Style.BRIGHT}Launching TPU on '
+                            f'{to_provision.cloud} '
+                    f'{region.name}{colorama.Style.RESET_ALL} ({zone_str})')
+                with console.status('[bold cyan]Launching[/]'):
+                    success = self._try_provision_tpu(to_provision, config_dict)
                 if not success:
                     continue
             cluster_config_file = config_dict['ray']
