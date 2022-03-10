@@ -13,7 +13,7 @@ To provision a virtual machine named :code:`dev`, run
 
   $ sky gpunode -c dev
 
-By default, :ref:`GPU nodes <interactive-nodes>` are provisioned on the cheapest cloud with a single K80 GPU.
+By default, :ref:`GPU nodes <sky-gpunode>` are provisioned on the cheapest cloud with a single K80 GPU.
 To use other GPUs, see the :ref:`CLI reference <cli>` for all configuration options.
 
 Development
@@ -46,7 +46,7 @@ To run a project on the cluster without logging in, use :code:`sky exec`:
   # `run` section defined in the task specification:
   $ sky exec dev task.yaml
 
-Alternatively, the user can also run commands after logging into the VM via :code:`ssh`.
+Alternatively, the user can directly log into the head node of the cluster via :code:`ssh`, then run commands.
 
 
 .. note::
