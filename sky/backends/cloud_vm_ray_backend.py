@@ -627,9 +627,11 @@ class RetryingVmProvisioner(object):
         assert 'tpu-create-script' in config_dict, \
             'Expect TPU provisioning with gcloud.'
         try:
-            backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+            with console.status('[bold cyan]Provisioning TPU '
+                                f'[green]{tpu_name}[/]'):
+                backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
             return True
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
@@ -708,9 +710,8 @@ class RetryingVmProvisioner(object):
                     f'{colorama.Style.BRIGHT}Provisioning TPU on '
                     f'{to_provision.cloud} '
                     f'{region.name}{colorama.Style.RESET_ALL} ({zone_str})')
-                with console.status('[bold cyan]Provisioning TPU '
-                                f'[green]{tpu_name}[/]'):
-                    success = self._try_provision_tpu(to_provision, config_dict)
+                
+                success = self._try_provision_tpu(to_provision, config_dict)
                 if not success:
                     continue
             cluster_config_file = config_dict['ray']
