@@ -39,6 +39,40 @@ To cancel a job:
    # Cancel all jobs on a cluster.
    sky cancel mycluster --all
 
+Multi-node jobs
+--------------------------------
+
+Jobs that run on multiple nodes are also supported by the job queue.
+
+First, create a YAML to specify the desired cluster:
+
+.. code-block:: yaml
+
+  # cluster.yaml
+  resources:
+    accelerators: V100:8
+  num_nodes: 4
+  ...
+
+Use :code:`sky launch -c mycluster cluster.yaml` to provision a 4-node (each having 8 V100 GPUs) cluster.
+The :code:`num_nodes` field is used to specify how many nodes are required.
+
+Next, use a YAML to specify each task:
+
+.. code-block:: yaml
+
+  # task.yaml
+  resources:
+    accelerators: V100:8
+  num_nodes: 2
+  ...
+
+This specifies a task that needs to be run on 2 nodes, each of which must have 8 V100 GPUs.
+
+Use :code:`sky exec mycluster task.yaml` to submit this task, which will be scheduled correctly by the job queue.
+
+See :ref:`Distributed Jobs on Many VMs` for more details.
+
 Scheduling behavior
 --------------------------------
 

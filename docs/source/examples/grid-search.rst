@@ -26,7 +26,7 @@ Refer to :ref:`Job Queue <job-queue>` for more details on Sky's scheduling behav
 Multiple trials per GPU
 -----------
 
-To run multiple trials per GPU, use *fractional counts* in the resource requirement.
+To run multiple trials per GPU, use *fractional GPUs* in the resource requirement.
 For example, use :code:`--gpus V100:0.5` to make 2 trials share 1 GPU:
 
 .. code-block:: bash
@@ -34,3 +34,6 @@ For example, use :code:`--gpus V100:0.5` to make 2 trials share 1 GPU:
   $ sky exec mycluster --gpus V100:0.5 -d -- python train.py --lr 1e-3
   $ sky exec mycluster --gpus V100:0.5 -d -- python train.py --lr 3e-3
   ...
+
+When sharing a GPU, ensure that the GPU's memory is not oversubscribed
+(otherwise, out-of-memory errors could occur).
