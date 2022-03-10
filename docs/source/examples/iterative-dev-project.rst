@@ -13,7 +13,7 @@ To provision a virtual machine named :code:`dev`, run
 
   $ sky gpunode -c dev
 
-By default, :ref:`GPU nodes <interactive-nodes>` are provisioned on the cheapest cloud with a single K80 GPU.
+By default, :ref:`GPU nodes <sky-gpunode>` are provisioned on the cheapest cloud with a single K80 GPU.
 To use other GPUs, see the :ref:`CLI reference <cli>` for all configuration options.
 
 Development
