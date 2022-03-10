@@ -620,41 +620,43 @@ class RetryingVmProvisioner(object):
         ):
             yield (region, zones)
 
-    def _try_provision_tpu(self, to_provision: Resources, config_dict) -> bool:
+    def _try_provision_tpu(self, to_provision: Resources,
+                           config_dict: Dict[str, str]) -> bool:
         """Returns whether the provision is successful."""
         tpu_name = config_dict['tpu_name']
         assert 'tpu-create-script' in config_dict, \
             'Expect TPU provisioning with gcloud.'
         try:
             with console.status('[bold cyan]Provisioning TPU '
-                                f'[green]{tpu_name}'):
+                                f'[green]{tpu_name}[/]'):
                 backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
                                   stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE)
-                return True
+            return True
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
             if 'ALREADY_EXISTS' in stderr:
                 # FIXME: should use 'start' on stopped TPUs, replacing
                 # 'create'. Or it can be in a "deleting" state. Investigate the
                 # right thing to do (force kill + re-provision?).
-                logger.info(f'TPU {tpu_name} already exists; skipped creation.')
+                logger.info(
+                    f'  TPU {tpu_name} already exists; skipped creation.')
                 return True
 
             if 'RESOURCE_EXHAUSTED' in stderr:
                 logger.warning(
-                    f'TPU {tpu_name} creation failed due to quota exhaustion. '
-                    'Please visit '
-                    'https://console.cloud.google.com/iam-admin/quotas for more'
-                    ' information.')
-                return False
+                    f'  TPU {tpu_name} creation failed due to quota '
+                    'exhaustion. Please visit '
+                    'https://console.cloud.google.com/iam-admin/quotas '
+                    'for more  information.')
+                raise exceptions.ResourcesUnavailableError()
 
             if 'PERMISSION_DENIED' in stderr:
-                logger.info('TPUs are not available in this zone.')
+                logger.info('  TPUs are not available in this zone.')
                 return False
 
             if 'no more capacity in the zone' in stderr:
-                logger.info('No more capacity in this zone.')
+                logger.info('  No more capacity in this zone.')
                 return False
 
             if 'CloudTpu received an invalid AcceleratorType' in stderr:
@@ -663,7 +665,7 @@ class RetryingVmProvisioner(object):
                 # values are "v2-8, ".
                 tpu_type = list(to_provision.accelerators.keys())[0]
                 logger.info(
-                    f'TPU type {tpu_type} is not available in this zone.')
+                    f'  TPU type {tpu_type} is not available in this zone.')
                 return False
 
             logger.error(stderr)
@@ -700,6 +702,11 @@ class RetryingVmProvisioner(object):
                 return
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
+                logger.info(
+                    f'{colorama.Style.BRIGHT}Provisioning TPU on '
+                    f'{to_provision.cloud} '
+                    f'{region.name}{colorama.Style.RESET_ALL} ({zone_str})')
+
                 success = self._try_provision_tpu(to_provision, config_dict)
                 if not success:
                     continue
