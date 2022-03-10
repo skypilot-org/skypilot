@@ -19,9 +19,6 @@ version = '0.1.0'
 # -- General configuration
 
 extensions = [
-    'sphinx_autodoc_typehints',
-    'sphinx_click',
-    'sphinx_copybutton',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosectionlabel',
     'sphinx.ext.autosummary',
@@ -30,6 +27,9 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
+    'sphinx_autodoc_typehints',
+    'sphinx_click',
+    'sphinx_copybutton',
 ]
 
 intersphinx_mapping = {
