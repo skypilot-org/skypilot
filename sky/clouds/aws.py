@@ -216,9 +216,7 @@ class AWS(clouds.Cloud):
         # `aws` to access private storage buckets.
         # `aws configure list` does not guarantee this file exists.
         if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
-            return (False,
-                    '~/.aws/credentials does not exist.' +
-                    help_str)
+            return (False, '~/.aws/credentials does not exist.' + help_str)
         try:
             output = _run_output('aws configure list')
         except subprocess.CalledProcessError:

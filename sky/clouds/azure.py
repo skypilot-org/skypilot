@@ -209,10 +209,8 @@ class Azure(clouds.Cloud):
         # `az account show` does not guarantee this file exists.
         azure_token_cache_file = '~/.azure/msal_token_cache.json'
         if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
-            return (
-                False,
-                f'{azure_token_cache_file} does not exist.' +
-                help_str)
+            return (False,
+                    f'{azure_token_cache_file} does not exist.' + help_str)
         try:
             output = _run_output('az account show --output=json')
         except subprocess.CalledProcessError:
