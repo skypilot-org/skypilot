@@ -658,7 +658,7 @@ class RetryingVmProvisioner(object):
                 return False
 
             if 'no more capacity in the zone' in stderr:
-                logger.info(f'No more capacity in {region_zone_str}.')
+                logger.info(f'TPUs have no more capacity in {region_zone_str}.')
                 return False
 
             if 'CloudTpu received an invalid AcceleratorType' in stderr:
