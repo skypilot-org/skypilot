@@ -30,6 +30,7 @@ CONDA_SETUP_PREFIX = '. $(conda info --base)/etc/profile.d/conda.sh 2> ' \
 
 SKY_DOCKER_SETUP_SCRIPT = 'sky_setup.sh'
 SKY_DOCKER_RUN_SCRIPT = 'sky_run.sh'
+SKY_DOCKER_WORKDIR = 'sky_workdir'
 
 
 def create_dockerfile(
@@ -153,21 +154,21 @@ def build_dockerimage(task, tag):
     # Get tempdir
     temp_dir = tempfile.mkdtemp(prefix='sky_local_')
 
-    # Add trailing slash to workdir if missing
-    copy_path = os.path.join(task.workdir, '') if task.workdir else task.workdir
-
     # Create dockerfile
     _, img_metadata = create_dockerfile(base_image=task.docker_image,
                                         setup_command=task.setup,
-                                        copy_path=copy_path,
+                                        copy_path=f'{SKY_DOCKER_WORKDIR}/',
                                         run_command=task.run,
                                         build_dir=temp_dir)
 
-    # Copy copy_path contents to tempdir
-    if copy_path:
-        copy_dir_name = os.path.basename(os.path.dirname(copy_path))
-        dst = os.path.join(temp_dir, copy_dir_name)
-        shutil.copytree(os.path.expanduser(copy_path), dst)
+    dst = os.path.join(temp_dir, SKY_DOCKER_WORKDIR)
+    if task.workdir is not None:
+        # Copy workdir contents to tempdir
+        shutil.copytree(os.path.expanduser(task.workdir), dst)
+    else:
+        # Create an empty dir
+        os.makedirs(dst)
+
     logger.info(f'Using tempdir {temp_dir} for docker build.')
 
     # Run docker image build
