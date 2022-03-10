@@ -25,6 +25,11 @@ class StorageType(enum.Enum):
     AZURE = 'AZURE'
 
 
+class StorageMode(enum.Enum):
+    MOUNT = 'MOUNT'
+    COPY = 'COPY'
+
+
 class AbstractStore:
     """AbstractStore abstracts away the different storage types exposed by
     different clouds.
@@ -148,7 +153,8 @@ class Storage(object):
                  name: str,
                  source: Path,
                  stores: Optional[Dict[StorageType, AbstractStore]] = None,
-                 persistent: bool = True):
+                 persistent: bool = True,
+                 mode: StorageMode = StorageMode.MOUNT):
         """Initializes a Storage object.
 
         Three fields are required: the name of the storage, the source
@@ -163,10 +169,13 @@ class Storage(object):
             need to be absolute.
           stores: Optional; Specify pre-initialized stores (S3Store, GcsStore).
           persistent: bool; Whether to persist across sky launches.
+          mode: StorageMode; Specify how the storage object is manifested on
+            the remote VM. Can be either MOUNT or COPY.
         """
         self.name = name
         self.source = source
         self.persistent = persistent
+        self.mode = mode
 
         scheme = urllib.parse.urlsplit(self.source).scheme
         is_bucket_url = False
@@ -368,7 +377,7 @@ class S3Store(AbstractStore):
         increase parallelism, modify max_concurrent_requests in your aws config
         file (Default path: ~/.aws/config).
         """
-        sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'
+        sync_command = f'aws s3 sync {self.source} s3://{self.name}/ --delete'  # TODO(romilb): Delete is problematic if task writes to s3 and the user runs this again...
         logger.info(f'Executing: {sync_command}')
         with subprocess.Popen(sync_command.split(' '),
                               stderr=subprocess.PIPE) as process:

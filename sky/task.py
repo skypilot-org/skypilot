@@ -10,6 +10,7 @@ import sky
 from sky import clouds
 from sky import resources as resources_lib
 from sky.data import storage as storage_lib
+from sky.data.storage import StorageMode
 
 Resources = resources_lib.Resources
 # A lambda generating commands (node rank_i, node addrs -> cmd_i).
@@ -247,13 +248,15 @@ class Task:
             name = storage.get('name')
             source = storage.get('source')
             force_stores = storage.get('force_stores')
+            mode = storage.get('mode')
             assert name and source, \
                    'Storage Object needs name and source path specified.'
             persistent = True if storage.get(
                 'persistent') is None else storage['persistent']
             storage_obj = storage_lib.Storage(name=name,
                                               source=source,
-                                              persistent=persistent)
+                                              persistent=persistent,
+                                              mode=StorageMode(mode))
             if force_stores is not None:
                 assert set(force_stores) <= {'s3', 'gcs', 'azure_blob'}
                 for cloud_type in force_stores:
@@ -432,9 +435,16 @@ class Task:
             storage_type = storage_plans[store]
             if storage_type is storage_lib.StorageType.S3:
                 # TODO: allow for Storage mounting of different clouds
-                self.update_file_mounts({
-                    mnt_path: 's3://' + store.name,
-                })
+                if store.mode == StorageMode.MOUNT:
+                    self.setup = (
+                        '(sudo wget https://github.com/kahing/goofys/releases/latest/download/goofys'
+                        ' -O /usr/local/bin/goofys && sudo chmod +x /usr/local/bin/goofys && '
+                        f' sudo mkdir -p {mnt_path} && sudo chmod 777 {mnt_path} && goofys --stat-cache-ttl 10s --type-cache-ttl 10s {store.name} {mnt_path}'
+                        f'); {self.setup or "true"}')
+                else:
+                    self.update_file_mounts({
+                        mnt_path: 's3://' + store.name,
+                    })
             elif storage_type is storage_lib.StorageType.GCS:
                 # Remember to run `gcloud auth application-default login`
                 self.setup = (
