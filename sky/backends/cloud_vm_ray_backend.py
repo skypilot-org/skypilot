@@ -630,8 +630,8 @@ class RetryingVmProvisioner(object):
             with console.status('[bold cyan]Provisioning TPU '
                                 f'[green]{tpu_name}[/]'):
                 backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE)
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
             return True
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
@@ -639,15 +639,16 @@ class RetryingVmProvisioner(object):
                 # FIXME: should use 'start' on stopped TPUs, replacing
                 # 'create'. Or it can be in a "deleting" state. Investigate the
                 # right thing to do (force kill + re-provision?).
-                logger.info(f'  TPU {tpu_name} already exists; skipped creation.')
+                logger.info(
+                    f'  TPU {tpu_name} already exists; skipped creation.')
                 return True
 
             if 'RESOURCE_EXHAUSTED' in stderr:
                 logger.warning(
-                    f'  TPU {tpu_name} creation failed due to quota exhaustion. '
-                    'Please visit '
-                    'https://console.cloud.google.com/iam-admin/quotas for more '
-                    'information.')
+                    f'  TPU {tpu_name} creation failed due to quota '
+                    'exhaustion. Please visit '
+                    'https://console.cloud.google.com/iam-admin/quotas '
+                    'for more  information.')
                 raise exceptions.ResourcesUnavailableError()
 
             if 'PERMISSION_DENIED' in stderr:
@@ -705,7 +706,7 @@ class RetryingVmProvisioner(object):
                     f'{colorama.Style.BRIGHT}Provisioning TPU on '
                     f'{to_provision.cloud} '
                     f'{region.name}{colorama.Style.RESET_ALL} ({zone_str})')
-                
+
                 success = self._try_provision_tpu(to_provision, config_dict)
                 if not success:
                     continue
