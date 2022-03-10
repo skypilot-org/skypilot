@@ -1707,7 +1707,7 @@ class CloudVmRayBackend(backends.Backend):
                     stream_logs=False,
                     require_outputs=True)
         elif (terminate and
-                prev_status == global_user_state.ClusterStatus.STOPPED):
+              prev_status == global_user_state.ClusterStatus.STOPPED):
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
