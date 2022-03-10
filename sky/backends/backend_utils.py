@@ -592,6 +592,8 @@ def ssh_options_list(ssh_private_key: Optional[str],
         'ServerAliveCountMax': 3,
         # ConnectTimeout.
         'ConnectTimeout': f'{timeout}s',
+        # Agent forwarding for git.
+        'ForwardAgent': 'yes',
     }
     if ssh_control_name is not None:
         arg_dict.update({

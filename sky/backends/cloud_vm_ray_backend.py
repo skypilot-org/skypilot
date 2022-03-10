@@ -1381,6 +1381,19 @@ class CloudVmRayBackend(backends.Backend):
                                source=setup_sh_path,
                                target=f'/tmp/{setup_file}',
                                stream_logs=False)
+                # Set up remote ~/.ssh/config for non-interactive SSH.
+                with tempfile.NamedTemporaryFile('w', prefix='sky_ssh_') as cf:
+                    cf.write(
+                        textwrap.dedent("""
+                        Host *
+                          StrictHostKeyChecking no
+                        """))
+                    cf.flush()
+                    self._rsync_up(handle,
+                                   ip=ip,
+                                   source=cf.name,
+                                   target='~/.ssh/config',
+                                   stream_logs=False)
                 # Need this `-i` option to make sure `source ~/.bashrc` work
                 cmd = f'/bin/bash -i /tmp/{setup_file}'
                 returncode = backend_utils.run_command_on_ip_via_ssh(
