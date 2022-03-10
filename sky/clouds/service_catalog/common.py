@@ -37,7 +37,10 @@ def get_data_path(filename: str) -> str:
 
 
 def read_catalog(filename: str) -> pd.DataFrame:
-    return pd.read_csv(get_data_path(filename))
+    df = pd.read_csv(get_data_path(filename))
+    # Convert accelerator names to uppercase for case-insensitive.
+    df['AcceleratorName'] = df['AcceleratorName'].str.upper()
+    return df
 
 
 def _get_instance_type(

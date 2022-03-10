@@ -306,7 +306,7 @@ class Optimizer:
 
         for node_i, candidate_set in node_to_candidates.items():
             node = topo_order[node_i]
-            accelerator = list(node.get_resources())[0].get_accelerators()
+            accelerator = list(node.get_resources())[0].accelerators
             is_multi_instances = False
             if accelerator:
                 acc_name, acc_count = list(accelerator.items())[0]
@@ -439,7 +439,7 @@ def _fill_in_launchable_resources(
                 launchable[resources].append(feasible_resources[0])
                 cloud_candidates[resources.cloud] = feasible_resources
             else:
-                accelerators = resources.get_accelerators()
+                accelerators = resources.accelerators
                 logger.info(f'No resource satisfying {accelerators}'
                             f' on {resources.cloud}. Did you mean:'
                             f'{colorama.Fore.CYAN}'
@@ -459,7 +459,7 @@ def _fill_in_launchable_resources(
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
             if len(launchable[resources]) == 0:
-                accelerators = resources.get_accelerators()
+                accelerators = resources.accelerators
                 logger.info(f'No resource satisfying {accelerators}'
                             f' on all clouds. Did you mean: '
                             f'{colorama.Fore.CYAN}'
