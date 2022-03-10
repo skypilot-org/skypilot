@@ -622,7 +622,7 @@ class RetryingVmProvisioner(object):
 
     def _try_provision_tpu(self, to_provision: Resources,
                            config_dict: Dict[str, str],
-                           logging_info: Dict[str, str]) -> bool:
+                           zone_str: str) -> bool:
         """Returns whether the provision is successful."""
         tpu_name = config_dict['tpu_name']
         assert 'tpu-create-script' in config_dict, \
@@ -636,8 +636,6 @@ class RetryingVmProvisioner(object):
                 return True
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
-            region_zone_str = (f'{logging_info["region_name"]} '
-                               f'({logging_info["zone_str"]})')
             if 'ALREADY_EXISTS' in stderr:
                 # FIXME: should use 'start' on stopped TPUs, replacing
                 # 'create'. Or it can be in a "deleting" state. Investigate the
@@ -654,11 +652,11 @@ class RetryingVmProvisioner(object):
                 raise exceptions.ResourcesUnavailableError()
 
             if 'PERMISSION_DENIED' in stderr:
-                logger.info(f'TPUs are not available in {region_zone_str}.')
+                logger.info(f'TPUs are not available in {zone_str}.')
                 return False
 
             if 'no more capacity in the zone' in stderr:
-                logger.info(f'TPUs have no more capacity in {region_zone_str}.')
+                logger.info(f'TPUs have no more capacity in {zone_str}.')
                 return False
 
             if 'CloudTpu received an invalid AcceleratorType' in stderr:
@@ -667,7 +665,7 @@ class RetryingVmProvisioner(object):
                 # values are "v2-8, ".
                 tpu_type = list(to_provision.accelerators.keys())[0]
                 logger.info(f'TPU type {tpu_type} is not available in '
-                            f'{region_zone_str}.')
+                            f'{zone_str}.')
                 return False
 
             logger.error(stderr)
@@ -710,7 +708,7 @@ class RetryingVmProvisioner(object):
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
                 success = self._try_provision_tpu(to_provision, config_dict,
-                                                  logging_info)
+                                                  zone_str)
                 if not success:
                     continue
             cluster_config_file = config_dict['ray']
