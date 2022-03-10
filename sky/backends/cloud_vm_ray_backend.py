@@ -636,7 +636,7 @@ class RetryingVmProvisioner(object):
                 return True
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
-            region_zone_str = (f'{logging_info["region"]} '
+            region_zone_str = (f'{logging_info["region_name"]} '
                                f'({logging_info["zone_str"]})')
             if 'ALREADY_EXISTS' in stderr:
                 # FIXME: should use 'start' on stopped TPUs, replacing
