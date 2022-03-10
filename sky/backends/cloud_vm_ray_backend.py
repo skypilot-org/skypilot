@@ -639,23 +639,23 @@ class RetryingVmProvisioner(object):
                 # FIXME: should use 'start' on stopped TPUs, replacing
                 # 'create'. Or it can be in a "deleting" state. Investigate the
                 # right thing to do (force kill + re-provision?).
-                logger.info(f'TPU {tpu_name} already exists; skipped creation.')
+                logger.info(f'  TPU {tpu_name} already exists; skipped creation.')
                 return True
 
             if 'RESOURCE_EXHAUSTED' in stderr:
                 logger.warning(
-                    f'TPU {tpu_name} creation failed due to quota exhaustion. '
+                    f'  TPU {tpu_name} creation failed due to quota exhaustion. '
                     'Please visit '
-                    'https://console.cloud.google.com/iam-admin/quotas for more'
-                    ' information.')
+                    'https://console.cloud.google.com/iam-admin/quotas for more '
+                    'information.')
                 raise exceptions.ResourcesUnavailableError()
 
             if 'PERMISSION_DENIED' in stderr:
-                logger.info('TPUs are not available in this zone.')
+                logger.info('  TPUs are not available in this zone.')
                 return False
 
             if 'no more capacity in the zone' in stderr:
-                logger.info('No more capacity in this zone.')
+                logger.info('  No more capacity in this zone.')
                 return False
 
             if 'CloudTpu received an invalid AcceleratorType' in stderr:
@@ -664,7 +664,7 @@ class RetryingVmProvisioner(object):
                 # values are "v2-8, ".
                 tpu_type = list(to_provision.accelerators.keys())[0]
                 logger.info(
-                    f'TPU type {tpu_type} is not available in this zone.')
+                    f'  TPU type {tpu_type} is not available in this zone.')
                 return False
 
             logger.error(stderr)
