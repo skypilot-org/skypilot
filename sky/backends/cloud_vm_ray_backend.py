@@ -709,7 +709,7 @@ class RetryingVmProvisioner(object):
                     f'{to_provision.cloud} '
                     f'{region.name}{colorama.Style.RESET_ALL} ({zone_str})')
                 with console.status('[bold cyan]Provisioning TPU '
-                                f'[green]{tpu_name}'):
+                                f'[green]{tpu_name}[/]'):
                     success = self._try_provision_tpu(to_provision, config_dict)
                 if not success:
                     continue
