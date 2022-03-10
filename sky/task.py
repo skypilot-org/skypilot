@@ -132,6 +132,7 @@ class Task:
         dag.add(self)
 
     def _validate(self):
+        """Checks if the Task fields are valid."""
         if not _is_valid_name(self.name):
             raise ValueError(f'Invalid task name {self.name}. Valid name: '
                              f'{_VALID_NAME_DESCR}')
@@ -168,6 +169,15 @@ class Task:
             raise ValueError('run must be either a shell script (str) or '
                              f'a command generator ({CommandGen}). '
                              f'Got {type(self.run)}')
+
+        # Workdir.
+        if self.workdir is not None:
+            full_workdir = os.path.abspath(os.path.expanduser(self.workdir))
+            if not os.path.isdir(full_workdir):
+                # Symlink to a dir is legal (isdir() follows symlinks).
+                raise ValueError(
+                    'Workdir must exist and must be a directory (or '
+                    f'a symlink to a directory). Found: {self.workdir}')
 
     @staticmethod
     def from_yaml(yaml_path):
@@ -478,6 +488,13 @@ class Task:
             if is_cloud_store_url(target):
                 raise ValueError(
                     'File mount destination paths cannot be cloud storage')
+            if not is_cloud_store_url(source):
+                if not os.path.exists(
+                        os.path.abspath(os.path.expanduser(source))):
+                    raise ValueError(
+                        f'File mount source {source!r} does not exist locally. '
+                        'To fix: check if it exists, and correct the path.')
+
         self.file_mounts = file_mounts
         return self
 

@@ -186,7 +186,7 @@ class Azure(clouds.Cloud):
             return resource_list
 
         # Currently, handle a filter on accelerators only.
-        accelerators = resources.get_accelerators()
+        accelerators = resources.accelerators
         if accelerators is None:
             # No requirements to filter, so just return a default VM type.
             return (_make([Azure.get_default_instance_type()]),

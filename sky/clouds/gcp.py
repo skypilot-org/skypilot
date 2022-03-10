@@ -177,7 +177,7 @@ class GCP(clouds.Cloud):
             'custom_resources': None,
             'use_spot': r.use_spot,
         }
-        accelerators = r.get_accelerators()
+        accelerators = r.accelerators
         if accelerators is not None:
             assert len(accelerators) == 1, r
             acc, acc_count = list(accelerators.items())[0]
@@ -257,6 +257,10 @@ class GCP(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
-        return {
-            '~/.config/gcloud': '~/.config/gcloud'
-        }, ['~/.config/gcloud/virtenv']
+        # Excluding the symlink to the python executable created by the gcp
+        # credential, which causes problem for ray up multiple nodes, tracked
+        # in #494, #496, #483.
+        # rsync_exclude only supports relative paths.
+        # TODO(zhwu): rsync_exclude here is unsafe as it may exclude the folder
+        # from other file_mounts as well in ray yaml.
+        return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']

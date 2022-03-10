@@ -56,6 +56,13 @@ class AzureNodeProvider(NodeProvider):
 
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
+        # TODO(suquark): This is a temporary patch for resource group.
+        # By default, Ray autoscaler assumes the resource group is still here even
+        # after the whole cluster is destroyed. However, now we deletes the resource
+        # group after tearing down the cluster. To comfort the autoscaler, we need
+        # to create/update it here, so the resource group always exists.
+        from sky.skylet.providers.azure.config import _configure_resource_group
+        _configure_resource_group({"provider": provider_config})
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         # AWS provides managed identity for Azure, but it is not setup properly by
