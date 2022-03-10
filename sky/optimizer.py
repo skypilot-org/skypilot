@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 import tabulate
 import colorama
+import sys
 
 from sky import check
 from sky import clouds
@@ -73,17 +74,18 @@ class Optimizer:
         return egress_time
 
     @staticmethod
-    def optimize(
-            dag: Dag,
-            minimize=OptimizeTarget.COST,
-            blocked_launchable_resources: Optional[List[Resources]] = None):
+    def optimize(dag: Dag,
+                 minimize=OptimizeTarget.COST,
+                 blocked_launchable_resources: Optional[List[Resources]] = None,
+                 raise_error: bool = False):
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
         optimized_dag, unused_best_plan = Optimizer._optimize_cost(
             dag,
             minimize_cost=minimize == OptimizeTarget.COST,
-            blocked_launchable_resources=blocked_launchable_resources)
+            blocked_launchable_resources=blocked_launchable_resources,
+            raise_error=raise_error)
         optimized_dag = Optimizer._remove_dummy_source_sink_nodes(optimized_dag)
         return optimized_dag
 
@@ -167,6 +169,7 @@ class Optimizer:
         dag: Dag,
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
+        raise_error: bool = False,
     ):
         import networkx as nx  # pylint: disable=import-outside-toplevel
         # TODO: The output of this function is useful. Should generate a
@@ -209,11 +212,16 @@ class Optimizer:
             parents = list(graph.predecessors(node))
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
-                    raise exceptions.ResourcesUnavailableError(
+                    error_msg = (
                         f'No launchable resource found for task {node}. '
                         'To fix: relax its resource requirements.\n'
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.')
+                    if raise_error:
+                        raise exceptions.ResourcesUnavailableError(error_msg)
+                    else:
+                        logger.error(error_msg)
+                        sys.exit(1)
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')

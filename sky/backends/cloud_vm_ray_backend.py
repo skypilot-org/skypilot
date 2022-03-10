@@ -921,7 +921,8 @@ class RetryingVmProvisioner(object):
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.
-                                         _blocked_launchable_resources)
+                                         _blocked_launchable_resources,
+                                         raise_error=True)
                 to_provision = task.best_resources
                 assert task in self._dag.tasks, 'Internal logic error.'
                 assert to_provision is not None, task
