@@ -73,7 +73,12 @@ rsync_exclude: [
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.
-  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
+  # This also kills the process that is holding the lock on the dpkg on aws. See https://docs.ray.io/en/latest/cluster/aws-tips.html#using-amazon-efs
+  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1`;
+    sudo pkill -9 apt-get;
+    sudo pkill -9 dpkg;
+    sudo dpkg --configure -a;
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
 
 # Command to start ray on the head node. You don't need to change this.
