@@ -206,6 +206,8 @@ class AWS(clouds.Cloud):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         help_str = (
+            '\n    $ pip install boto3'
+            '\n    $ aws configure'
             '\n    For more info: '
             'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
         )
@@ -241,7 +243,7 @@ class AWS(clouds.Cloud):
                     secret_key_ok = True
         if access_key_ok and secret_key_ok:
             return True, None
-        return False, 'AWS credentials not set. Run `aws configure`.' + help_str
+        return False, 'AWS credentials not set. Run the following commands:' + help_str
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
         return {'~/.aws': '~/.aws'}, []
