@@ -4,12 +4,13 @@ import os
 import re
 import typing
 from typing import Callable, Dict, List, Optional, Set, Union
-from urllib import parse
 import yaml
 
 import sky
 from sky import clouds
 from sky.data import storage as storage_lib
+from sky.data import data_transfer as data_transfer_lib
+from sky.data import data_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -27,12 +28,6 @@ _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
 _RUN_FN_CHECK_FAIL_MSG = (
     'run command generator must take exactly 2 arguments: node_rank (int) and'
     'a list of node ip addresses (List[str]). Got {run_sig}')
-
-
-def is_cloud_store_url(url):
-    result = parse.urlsplit(url)
-    # '' means non-cloud URLs.
-    return result.netloc
 
 
 def _is_valid_name(name: str) -> bool:
@@ -206,7 +201,6 @@ class Task:
         # These are retained in dicts in the YAML schema and later parsed to
         # storage objects with the storage/storage_mount objects.
         fm_storages = []
-        fm_storage_mounts = []
         file_mounts = config.get('file_mounts')
         if file_mounts is not None:
             copy_mounts = dict()
@@ -218,77 +212,46 @@ class Task:
                 # parse storage object.
                 elif isinstance(src, dict):
                     name = src.get('name')
-                    source = src.get('source')
-                    if not name or not source:
-                        raise ValueError('Inline storage objects need both name'
-                                         ' and source path to be specified.')
+                    # Add mount_path as a field for later parsing
+                    src['mount_path'] = dst_path
                     fm_storages.append(src)
-                    fm_storage_mounts.append({
-                        'storage': name,
-                        'mount_path': dst_path
-                    })
                 else:
                     raise ValueError(f'Unable to parse file_mount '
                                      f'{dst_path}:{src}')
             task.set_file_mounts(copy_mounts)
 
-        # Process storage objects - both from file_mounts and from YAML
-        yaml_storages = config.get('storage')
-        if yaml_storages is not None:
-            if isinstance(yaml_storages, dict):
-                yaml_storages = [yaml_storages]
-            if not isinstance(yaml_storages, list):
-                raise ValueError(f'Invalid storage specification.'
-                                 f' Expected list, got {yaml_storages}')
-        else:
-            yaml_storages = []
-
-        task_storages = {}
-        all_storages = yaml_storages + fm_storages
+        task_storage_mounts = {}  # type: Dict[str, Storage]
+        all_storages = fm_storages
         for storage in all_storages:
             name = storage.get('name')
             source = storage.get('source')
-            force_stores = storage.get('force_stores')
-            assert name and source, \
-                   'Storage Object needs name and source path specified.'
+            store = storage.get('store')
+            mode_str = storage.get('mode')
+            if isinstance(mode_str, str):
+                # Make mode case insensitive, if specified
+                mode = storage_lib.StorageMode(mode_str.upper())
+            else:
+                mode = None
             persistent = True if storage.get(
                 'persistent') is None else storage['persistent']
+            mount_path = storage.get('mount_path')
+            assert mount_path, \
+                'Storage mount path cannot be empty.'
+            # Validation of the storage object happens on instantiation.
             storage_obj = storage_lib.Storage(name=name,
                                               source=source,
-                                              persistent=persistent)
-            if force_stores is not None:
-                assert set(force_stores) <= {'s3', 'gcs', 'azure_blob'}
-                for cloud_type in force_stores:
-                    if cloud_type == 's3':
-                        storage_obj.get_or_copy_to_s3()
-                    elif cloud_type == 'gcs':
-                        storage_obj.get_or_copy_to_gcs()
-                    elif cloud_type == 'azure_blob':
-                        storage_obj.get_or_copy_to_azure_blob()
-            task_storages[name] = storage_obj
-
-        # Process storage mount objects - both from file_mounts and from YAML
-        yaml_storage_mounts = config.get('storage_mounts')
-        if yaml_storage_mounts is not None:
-            if isinstance(yaml_storage_mounts, dict):
-                yaml_storage_mounts = [yaml_storage_mounts]
-            if not isinstance(yaml_storage_mounts, list):
-                raise ValueError(f'Invalid storage mount specification.'
-                                 f' Expected list, got {yaml_storage_mounts}')
-        else:
-            yaml_storage_mounts = []
-
-        all_storage_mounts = yaml_storage_mounts + fm_storage_mounts
-        task_storage_mounts = {}
-        for storage_mount in all_storage_mounts:
-            name = storage_mount.get('storage')
-            storage_mount_path = storage_mount.get('mount_path')
-            assert name, \
-                'Storage mount must have name reference to Storage object.'
-            assert storage_mount_path, \
-                'Storage mount path cannot be empty.'
-            storage = task_storages[name]
-            task_storage_mounts[storage_mount_path] = storage
+                                              persistent=persistent,
+                                              mode=mode)
+            if store is not None:
+                if store == 's3':
+                    storage_obj.add_store(storage_lib.StoreType.S3)
+                elif store == 'gcs':
+                    storage_obj.add_store(storage_lib.StoreType.GCS)
+                elif store == 'azure_blob':
+                    storage_obj.add_store(storage_lib.StoreType.AZURE)
+                else:
+                    raise ValueError(f'store type {store} is not supported.')
+            task_storage_mounts[mount_path] = storage_obj
         task.set_storage_mounts(task_storage_mounts)
 
         if config.get('inputs') is not None:
@@ -403,7 +366,7 @@ class Task:
 
     def set_storage_mounts(
         self,
-        storage_mounts: Dict[str, storage_lib.Storage],
+        storage_mounts: Optional[Dict[str, storage_lib.Storage]],
     ):
         """Sets the storage mounts for this Task
 
@@ -422,47 +385,57 @@ class Task:
             is the path on the Cloud VM where the Storage object will be
             mounted on
         """
+        if storage_mounts is None:
+            self.storage_mounts = None
+            return self
+        for target, _ in storage_mounts.items():
+            if data_utils.is_cloud_store_url(target):
+                raise ValueError(
+                    'Storage mount destination path cannot be cloud storage')
+        # Storage source validation is done in Storage object
+
         self.storage_mounts = storage_mounts
         return self
 
     def add_storage_mounts(self) -> None:
         """Adds storage mounts to the Task."""
-        # Hack: Hardcode storage_plans to AWS for optimal plan
-        # Optimizer is supposed to choose storage plan but we
-        # move this here temporarily
-        for store in self.storage_mounts.values():
-            if len(store.stores) == 0:
-                self.storage_plans[store] = storage_lib.StorageType.S3
-                store.get_or_copy_to_s3()
+        # TODO(romilb): The optimizer should look at the source and destination
+        #  to figure out the right stores to use. For now, we hardcode
+        #  storage_plans to AWS as the optimal plan.
+        for storage in self.storage_mounts.values():
+            if len(storage.stores) == 0:
+                self.storage_plans[storage] = storage_lib.StoreType.S3
+                storage.add_store(storage_lib.StoreType.S3)
             else:
                 # Sky will download the first store that is added to remote
-                self.storage_plans[store] = list(store.stores.keys())[0]
+                self.storage_plans[storage] = list(storage.stores.keys())[0]
 
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
-        for mnt_path, store in storage_mounts.items():
-            storage_type = storage_plans[store]
-            if storage_type is storage_lib.StorageType.S3:
-                # TODO: allow for Storage mounting of different clouds
-                self.update_file_mounts({
-                    mnt_path: 's3://' + store.name,
-                })
-            elif storage_type is storage_lib.StorageType.GCS:
-                # Remember to run `gcloud auth application-default login`
-                self.setup = (
-                    '([[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && '
-                    'echo GOOGLE_APPLICATION_CREDENTIALS='
-                    '~/.config/gcloud/application_default_credentials.json >> '
-                    f'~/.bashrc || true); {self.setup or "true"}')
-                self.update_file_mounts({
-                    mnt_path: 'gs://' + store.name,
-                })
-            elif storage_type is storage_lib.StorageType.AZURE:
-                # TODO when Azure Blob is done: sync ~/.azure
-                assert False, 'TODO: Azure Blob not mountable yet'
-            else:
-                raise ValueError(f'Storage Type {storage_type} \
-                    does not exist!')
+        for mnt_path, storage in storage_mounts.items():
+            if storage.mode == storage_lib.StorageMode.COPY:
+                store_type = storage_plans[storage]
+                if store_type is storage_lib.StoreType.S3:
+                    # TODO: allow for Storage mounting of different clouds
+                    self.update_file_mounts({
+                        mnt_path: 's3://' + storage.name,
+                    })
+                elif store_type is storage_lib.StoreType.GCS:
+                    # Remember to run `gcloud auth application-default login`
+                    self.setup = (
+                        '([[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && '
+                        'echo GOOGLE_APPLICATION_CREDENTIALS='
+                        f'{data_transfer_lib.DEFAULT_GCS_CREDENTIALS_PATH} '
+                        f'>> ~/.bashrc || true); {self.setup or "true"}')
+                    self.update_file_mounts({
+                        mnt_path: 'gs://' + storage.name,
+                    })
+                elif store_type is storage_lib.StoreType.AZURE:
+                    # TODO when Azure Blob is done: sync ~/.azure
+                    assert False, 'TODO: Azure Blob not mountable yet'
+                else:
+                    raise ValueError(f'Storage Type {store_type} \
+                        does not exist!')
 
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> None:
         """Sets the file mounts for this Task.
@@ -497,10 +470,10 @@ class Task:
                     'File mount paths cannot end with a slash '
                     '(try "/mydir: /mydir" or "/myfile: /myfile"). '
                     f'Found: target={target} source={source}')
-            if is_cloud_store_url(target):
+            if data_utils.is_cloud_store_url(target):
                 raise ValueError(
                     'File mount destination paths cannot be cloud storage')
-            if not is_cloud_store_url(source):
+            if not data_utils.is_cloud_store_url(source):
                 if not os.path.exists(
                         os.path.abspath(os.path.expanduser(source))):
                     raise ValueError(
@@ -543,7 +516,8 @@ class Task:
             return None
         d = {}
         for k, v in self.file_mounts.items():
-            if not is_cloud_store_url(k) and not is_cloud_store_url(v):
+            if not data_utils.is_cloud_store_url(
+                    k) and not data_utils.is_cloud_store_url(v):
                 d[k] = v
         return d
 
@@ -557,7 +531,8 @@ class Task:
             return None
         d = {}
         for k, v in self.file_mounts.items():
-            if not is_cloud_store_url(k) and is_cloud_store_url(v):
+            if not data_utils.is_cloud_store_url(
+                    k) and data_utils.is_cloud_store_url(v):
                 d[k] = v
         return d
 

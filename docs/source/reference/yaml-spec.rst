@@ -67,10 +67,11 @@ describe all fields available.
       #
       # Mounts the bucket at /datasets-storage on every node of the cluster.
       /datasets-storage:
-        name: sky-dataset
-        source: /local/path/datasets
-        force_stores: [s3]  # Could be [s3, gcs], [gcs]; default: None
-        persistent: True  # Defaults to True; can be set to false
+        name: sky-dataset  # Name of storage, optional when source is bucket URI
+        source: /local/path/datasets  # Source path, can be local or s3/gcs URL. Optional, do not specify to create an empty bucket.
+        store: s3  # Could be either 's3' or 'gcs'; default: 's3'. Optional.
+        persistent: True  # Defaults to True; can be set to false. Optional.
+        mode: MOUNT  # Either MOUNT or COPY. Optional.
 
       # Copies a cloud object store URI to the cluster. Can be private buckets.
       /datasets-s3: s3://my-awesome-dataset

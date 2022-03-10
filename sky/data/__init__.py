@@ -1,4 +1,4 @@
 """Sky Data."""
-from sky.data.storage import Storage, StorageType
+from sky.data.storage import Storage, StoreType
 
-__all__ = ['Storage', 'StorageType']
+__all__ = ['Storage', 'StoreType']
