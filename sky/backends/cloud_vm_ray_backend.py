@@ -620,7 +620,9 @@ class RetryingVmProvisioner(object):
         ):
             yield (region, zones)
 
-    def _try_provision_tpu(self, to_provision: Resources, config_dict: Dict[str, str], logging_info: Dict[str, str]) -> bool:
+    def _try_provision_tpu(self, to_provision: Resources,
+                           config_dict: Dict[str, str],
+                           logging_info: Dict[str, str]) -> bool:
         """Returns whether the provision is successful."""
         tpu_name = config_dict['tpu_name']
         assert 'tpu-create-script' in config_dict, \
@@ -634,7 +636,8 @@ class RetryingVmProvisioner(object):
                 return True
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
-            region_zone_str = f'{logging_info["region"]} ({logging_info["zone_str"]})'
+            region_zone_str = (f'{logging_info["region"]} '
+                               f'({logging_info["zone_str"]})')
             if 'ALREADY_EXISTS' in stderr:
                 # FIXME: should use 'start' on stopped TPUs, replacing
                 # 'create'. Or it can be in a "deleting" state. Investigate the
@@ -663,8 +666,8 @@ class RetryingVmProvisioner(object):
                 # AcceleratorType, "v3-8" for zone "us-central1-c". Valid
                 # values are "v2-8, ".
                 tpu_type = list(to_provision.accelerators.keys())[0]
-                logger.info(
-                    f'TPU type {tpu_type} is not available in {region_zone_str}.')
+                logger.info(f'TPU type {tpu_type} is not available in '
+                            f'{region_zone_str}.')
                 return False
 
             logger.error(stderr)
@@ -706,7 +709,8 @@ class RetryingVmProvisioner(object):
                 return
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
-                success = self._try_provision_tpu(to_provision, config_dict, logging_info)
+                success = self._try_provision_tpu(to_provision, config_dict,
+                                                  logging_info)
                 if not success:
                     continue
             cluster_config_file = config_dict['ray']
