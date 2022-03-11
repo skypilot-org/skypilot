@@ -18,7 +18,6 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
 import filelock
-import pathlib
 from rich import console as rich_console
 
 import sky
@@ -1097,8 +1096,6 @@ class CloudVmRayBackend(backends.Backend):
         launched_nodes = task.num_nodes
 
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
-        lock = pathlib.Path(lock_path)
-        lock.touch(exist_ok=True)
         with filelock.FileLock(lock_path):
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 cluster_name, to_provision, launched_nodes = (
