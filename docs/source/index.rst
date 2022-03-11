@@ -51,7 +51,6 @@ Key features:
    reference/yaml-spec
    reference/interactive-nodes
    reference/storage
-   reference/iterative-development
    .. reference/production-workflow
 
    .. reference/tasks
