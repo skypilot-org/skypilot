@@ -313,11 +313,14 @@ class Optimizer:
                 for cloud, candidate_list in candidate_set.items():
                     if len(candidate_list) > 1:
                         is_multi_instances = True
+                        instance_list = [
+                            res.instance_type for res in candidate_list
+                        ]
                         logger.info(
                             f'Multiple {cloud} instances satisfy '
                             f'{acc_name}:{int(acc_count)}. '
                             f'The cheapest {candidate_list[0]} is selected '
-                            f'among:\n{candidate_list}.\n')
+                            f'among:\n{instance_list}.\n')
             if is_multi_instances:
                 logger.info(
                     f'To list more details, run \'sky show-gpus {acc_name}\'.')
@@ -461,10 +464,12 @@ def _fill_in_launchable_resources(
             if len(launchable[resources]) == 0:
                 accelerators = resources.accelerators
                 logger.info(f'No resource satisfying {accelerators}'
-                            f' on all clouds. Did you mean: '
-                            f'{colorama.Fore.CYAN}'
-                            f'{sorted(all_fuzzy_candidates)}'
-                            f'{colorama.Style.RESET_ALL}')
+                            f' on all clouds.')
+                if len(all_fuzzy_candidates) > 0:
+                    logger.info('Did you mean: '
+                                f'{colorama.Fore.CYAN}'
+                                f'{sorted(all_fuzzy_candidates)}'
+                                f'{colorama.Style.RESET_ALL}')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_launchable_resources)
