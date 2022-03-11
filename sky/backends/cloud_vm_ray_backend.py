@@ -1735,7 +1735,8 @@ class CloudVmRayBackend(backends.Backend):
         cluster_name = config['cluster_name']
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
         try:
-            # TODO(mraheja): remove pylint disabling when filelock version updated
+            # TODO(mraheja): remove pylint disabling when filelock
+            # version updated
             with filelock.FileLock(lock_path, 10):  # pylint: disable=abstract-method
                 self._teardown(handle, terminate)
             if terminate:
