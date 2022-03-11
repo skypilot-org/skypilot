@@ -209,7 +209,9 @@ class GCP(clouds.Cloud):
             for acc, acc_count in resources.accelerators.items():
                 for acc_avail, infos in available_accelerators.items():
                     # case-insenstive matching
-                    if acc.upper() == acc_avail.upper() and any(acc_count == info.accelerator_count for info in infos):
+                    if acc.upper() == acc_avail.upper() and any(
+                            acc_count == info.accelerator_count
+                            for info in infos):
                         accelerator_match = {acc_avail: acc_count}
                         break
                 if accelerator_match is None:

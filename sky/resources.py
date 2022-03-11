@@ -133,7 +133,6 @@ class Resources:
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
 
-
     @property
     def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.

@@ -97,8 +97,9 @@ def get_instance_type_for_accelerator_impl(
     result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
                 (df['AcceleratorCount'] == acc_count)]
     if len(result) == 0:
-        fuzzy_result = df[(df['AcceleratorName'].str.contains(acc_name, case=False)) &
-                          (df['AcceleratorCount'] >= acc_count)]
+        fuzzy_result = df[
+            (df['AcceleratorName'].str.contains(acc_name, case=False)) &
+            (df['AcceleratorCount'] >= acc_count)]
         fuzzy_result = fuzzy_result.sort_values('Price', ascending=True)
         fuzzy_result = fuzzy_result[['AcceleratorName',
                                      'AcceleratorCount']].drop_duplicates()
