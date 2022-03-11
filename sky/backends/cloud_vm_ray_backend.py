@@ -1122,7 +1122,8 @@ class CloudVmRayBackend(backends.Backend):
         if tpu_name is not None:
             self._set_tpu_name(cluster_config_file, launched_nodes, tpu_name)
 
-        ip_list = self._get_node_ips(cluster_config_file, launched_nodes)
+        ip_list = backend_utils.get_node_ips(cluster_config_file,
+                                             launched_nodes)
 
         handle = self.ResourceHandle(
             cluster_name=cluster_name,
@@ -1723,7 +1724,8 @@ class CloudVmRayBackend(backends.Backend):
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
-        ip_list = self._get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
+                                             handle.launched_nodes)
         prev_status = global_user_state.get_status_from_cluster_name(
             handle.cluster_name)
         cluster_name = config['cluster_name']
