@@ -149,7 +149,7 @@ def get_common_gpus() -> List[str]:
 
 def get_tpus() -> List[str]:
     """Returns a list of TPU names."""
-    return ['TPU-V2-8', 'TPU-V2-32', 'TPU-V2-128', 'TPU-V3-8']
+    return ['tpu-v2-8', 'tpu-v2-32', 'tpu-v2-128', 'tpu-v3-8']
 
 
 __all__ = [

@@ -37,10 +37,7 @@ def get_data_path(filename: str) -> str:
 
 
 def read_catalog(filename: str) -> pd.DataFrame:
-    df = pd.read_csv(get_data_path(filename))
-    # Convert accelerator names to uppercase for case-insensitive.
-    df['AcceleratorName'] = df['AcceleratorName'].str.upper()
-    return df
+    return pd.read_csv(get_data_path(filename))
 
 
 def _get_instance_type(
@@ -97,10 +94,10 @@ def get_instance_type_for_accelerator_impl(
     acc_count: int,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """Returns the instance type with the required count of accelerators."""
-    result = df[(df['AcceleratorName'] == acc_name) &
+    result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
                 (df['AcceleratorCount'] == acc_count)]
     if len(result) == 0:
-        fuzzy_result = df[(df['AcceleratorName'].str.contains(acc_name)) &
+        fuzzy_result = df[(df['AcceleratorName'].str.contains(acc_name, case=False)) &
                           (df['AcceleratorCount'] >= acc_count)]
         fuzzy_result = fuzzy_result.sort_values('Price', ascending=True)
         fuzzy_result = fuzzy_result[['AcceleratorName',

@@ -41,7 +41,7 @@ def _get_accelerator(
     count: int,
     region: Optional[str],
 ) -> pd.DataFrame:
-    idx = (df['AcceleratorName'] == accelerator) & (df['AcceleratorCount']
+    idx = (df['AcceleratorName'].str.fullmatch(accelerator, case=False)) & (df['AcceleratorCount']
                                                     == count)
     if region is not None:
         idx &= df['Region'] == region

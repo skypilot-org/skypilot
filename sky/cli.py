@@ -225,7 +225,7 @@ def _infer_interactive_node_type(resources: sky.Resources):
         assert len(accelerators) == 1, resources
         acc, _ = list(accelerators.items())[0]
         is_gcp = cloud is not None and cloud.is_same_cloud(sky.GCP())
-        if is_gcp and 'TPU' in acc:
+        if is_gcp and 'tpu' in acc:
             return 'tpunode'
         return 'gpunode'
     return 'cpunode'
