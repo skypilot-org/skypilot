@@ -1,83 +1,21 @@
+==========
 Quickstart
 ==========
 
-Sky is a framework to run any workload seamlessly across different cloud providers
-through a unified interface. No knowledge of cloud offerings is required or
-expected -- you simply define the workload and its resource requirements,
-and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft
-Azure.
+This guide will walk you through:
 
-Key features
+- defining a task in a simple YAML format
+- provisioning a cluster and running a task
+- using the core Sky CLI commands
 
-- **Run your code on the cloud with zero code changes**
-- **Easily provision VMs** across multiple cloud platforms (AWS, Azure or GCP)
-- **Easily manage multiple clusters** to handle different projects
-- **Quick access** to cloud instances for prototyping
-- **Store your datasets on the cloud** and access them like you would on a local file system
-- **No cloud lock-in** -- transparently run your code across AWS, Google Cloud, and Azure
-
-Complete the :ref:`installation instructions <installation>` before continuing with this guide.
-
-Provisioning your first cluster
---------------------------------
-We'll start by launching our first cluster on Sky using an :ref:`interactive
-node <interactive-nodes>`. Interactive nodes are easy-to-spin-up VMs that allow
-for fast development and interactive debugging.
-
-Let's provision an instance with a single K80 GPU.
-
-.. code-block:: console
-
-  $ # Provisions/reuses an interactive node with a single K80 GPU.
-  $ sky gpunode -c mygpu --gpus K80
-
-Provisioning should take a few minutes, after which you're automatically logged in:
-
-.. code-block:: console
-
-  Last login: Wed Feb 23 22:35:47 2022 from 136.152.143.101
-
-  ubuntu@ip-172-31-86-108:~$ gpustat
-
-  ip-172-31-86-108     Wed Feb 23 22:42:43 2022  450.142.00
-  [0] Tesla K80        | 31°C,   0 % |     0 / 11441 MB |
-
-Press :code:`Ctrl-D` to log out. On your machine, use :code:`sky status` to query all provisioned clusters:
-
-.. code-block:: console
-
-  $ sky status
-
-  NAME   LAUNCHED        RESOURCES                     COMMAND                          STATUS
-  mygpu  a few secs ago  1x Azure(Standard_NC6_Promo)  sky gpunode -c mygpu --gpus K80  UP
-
-To log back in, simply type :code:`ssh mygpu`.
-
-After you are done, run :code:`sky down mygpu` to terminate the cluster. See
-:ref:`here <interactive-nodes>` for other types of interactive nodes and
-commands that manage the lifecycle of clusters.
-
+Be sure to complete the :ref:`installation instructions <installation>` first before continuing with this guide.
 
 Hello, Sky!
------------
-Next, let's define our very first task, a simple hello world program, to be
-executed by Sky.  We can specify the following task attributes with a YAML file:
+------
 
-- :code:`resources` (optional): cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
-- :code:`workdir` (optional): the working directory containing project code that will be synced to the provisioned instance(s)
-- :code:`setup` (optional): commands that must be run before the task is executed
-- :code:`run` (optional): commands that run the actual task
+Let's define our very first task, a simple Hello, Sky! program.
 
-.. note::
-
-    For large, multi-gigabyte workdirs (e.g., large datasets in your working
-    directory), uploading may be slow the files are synced to the remote VM(s)
-    with :code:`rsync`. To exclude large files in your workdir from being uploaded,
-    add them to your :code:`.gitignore` file. To upload large datasets and files, consider using :ref:`Sky
-    Storage <sky-storage>` to speed up transfers.
-
-Below is a minimal task YAML that prints "hello sky!" and shows installed Conda environments,
-requiring an NVIDIA Tesla K80 GPU on AWS. See more example YAML files in the `repository <https://github.com/sky-proj/sky/tree/master/examples>`_ and a fully-complete YAML example :ref:`here <yaml-spec>`.
+Copy the following YAML into a ``hello_sky.yaml`` file (place it anywhere on your machine):
 
 .. code-block:: yaml
 
@@ -90,49 +28,77 @@ requiring an NVIDIA Tesla K80 GPU on AWS. See more example YAML files in the `re
     accelerators: V100:1
 
   # Working directory (optional) containing the project codebase.
-  # This directory will be synced to ~/sky_workdir on the provisioned cluster.
+  # Its contents are synced to ~/sky_workdir/ on the cluster.
   workdir: .
 
   # Typical use: pip install -r requirements.txt
+  # Invoked under the workdir (i.e., can use its files).
   setup: |
-    echo "running setup"
+    echo "Running setup."
 
   # Typical use: make use of resources, such as running training.
+  # Invoked under the workdir (i.e., can use its files).
   run: |
-    echo "hello sky!"
+    echo "Hello, Sky!"
     conda env list
 
+This specifies the following components of a task:
 
-**To launch a task** based on a YAML spec, use :code:`sky launch`.  This command
-performs many heavy-lifting: (1) selects an appropriate cloud and VM based on
-the specified resource constraints, (2) provisions (or reuses) a cluster on that
-cloud,
-(3) uploads the :code:`workdir`, (4) executes the :code:`setup` commands,
-and (5) executes the :code:`run` commands.
+- :code:`resources`: cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
+- :code:`workdir`: the working directory containing project code that will be synced to the provisioned instance(s)
+- :code:`setup`: commands that must be run before the task is executed (invoked under workdir)
+- :code:`run`: commands that run the actual task (invoked under workdir)
+
+All these fields are optional.
+
+**To launch a cluster and run a task**, use :code:`sky launch`:
 
 .. code-block:: console
 
   $ sky launch -c mycluster hello_sky.yaml
 
-The :code:`-c` option allows us to specify a cluster name. If a cluster with the
-same name already exists, Sky will reuse that cluster. If no such cluster
-exists, a new cluster with that name will be provisioned. If no cluster name is
-provided, (e.g., :code:`sky launch hello_sky.yaml`), a cluster name will be
-autogenerated.
+.. tip::
 
-**To execute a task on an existing cluster**, use :code:`sky exec`:
+  This may take a few minutes for the first run.  Feel free to read ahead on this guide.
+
+.. tip::
+
+  You can use the ``-c`` flag to give the cluster an easy-to-remember name. If not specified, a name is autogenerated.
+
+The ``sky launch`` command performs much heavy-lifting:
+
+- selects an appropriate cloud and VM based on the specified resource constraints;
+- provisions (or reuses) a cluster on that cloud;
+- uploads the :code:`workdir`;
+- executes the :code:`setup` commands; and
+- executes the :code:`run` commands.
+
+In a few minutes, the cluster will finish provisioning and the task will be executed.
+The outputs will show ``Hello, Sky!`` and the list of installed Conda environments.
+
+Execute a task on an existing cluster
+=====
+
+Use :code:`sky exec` to execute a task on an existing cluster:
 
 .. code-block:: console
 
   $ sky exec mycluster hello_sky.yaml
 
-This command is more lightweight: it simply executes the task's :code:`run`
-commands.  :code:`workdir` is also synced every time :code:`sky exec` is run, so
-that the task may use updated code.  Bash commands are also supported, such as
+The ``sky exec`` command simply executes the task's :code:`run`
+commands. :code:`workdir` is also synced every time :code:`sky exec` is run, so
+that the task may use updated code.
+
+Bash commands are also supported, such as
 :code:`sky exec mycluster htop`.
 
 
-**To view existing clusters**, use :code:`sky status`:
+View all clusters
+=====
+..
+   **To view existing clusters**, use :code:`sky status`:
+
+Use :code:`sky status` to view existing clusters:
 
 .. code-block:: console
 
@@ -146,25 +112,37 @@ This may show multiple clusters, if you have created several:
   gcp        1 day ago    1x GCP(n1-highmem-8)  sky cpunode -c gcp --cloud gcp          STOPPED
   mycluster  12 mins ago  1x AWS(p3.2xlarge)    sky launch -c mycluster hello_sky.yaml  UP
 
-**To log into the a cluster**, Sky provides convenient SSH access via :code:`ssh <cluster_name>`:
+To log into the a cluster, Sky provides convenient SSH access via :code:`ssh <cluster_name>`:
 
 .. code-block:: console
 
   $ ssh mycluster
 
-**To transfer files to and from the cluster** after a task's execution, use :code:`rsync` (or :code:`scp`):
+Transfer files
+=====
+
+After a task's execution,  use :code:`rsync` (or :code:`scp`) to transfer files (e.g., checkpoints):
 
 .. code-block:: console
 
-    $ rsync -Pavz /local/path/source mycluster:/remote/dest  # copy to remote VM
     $ rsync -Pavz mycluster:/remote/source /local/dest       # copy from remote VM
+    $ rsync -Pavz /local/path/source mycluster:/remote/dest  # copy to remote VM
 
-**To terminate (or stop) the cluster**, run :code:`sky down mycluster` (for
-stopping, run :code:`sky stop mycluster`).  Find more commands that manage the
-lifecycle of clusters :ref:`here <interactive-nodes>`.
+Terminate/stop a cluster
+=====
 
-Sky is more than a tool for easily provisioning and managing multiple clusters
-on different clouds.  It also comes with features for :ref:`storing and moving
-data <sky-storage>`, :ref:`queueing multiple jobs <job-queue>`, :ref:`iterative
-development <iter-dev>`, and :ref:`interactive nodes <interactive-nodes>`.
-Refer to the :ref:`CLI Reference <cli>` for details of the :code:`sky` CLI.
+When you are done, run :code:`sky stop mycluster` to stop the cluster. To
+terminate a cluster instead, run :code:`sky down mycluster`.  Find more commands that
+manage the lifecycle of clusters :ref:`here <interactive-nodes>`.
+
+Next steps
+------
+
+Congratulations!  In this quickstart, you have launched a cluster, run a task, and interacted with Sky's CLI.
+
+To learn more:
+
+- Adapt :ref:`Tutorial: DNN Training` to run your own project on Sky
+- Try :ref:`Interactive Nodes` -- VMs that can be launched in one command without a YAML file
+- See a fully complete YAML example :ref:`here <yaml-spec>` and more examples in the `repository <https://github.com/sky-proj/sky/tree/master/examples>`_
+- Explore the rest of the documentation

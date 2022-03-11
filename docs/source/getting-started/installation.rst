@@ -20,7 +20,7 @@ dependencies installed.
 Cloud account setup
 -------------------
 
-To run tasks in the clouds, configure access to at least one cloud:
+Configure access to at least one cloud:
 
 **AWS**
 

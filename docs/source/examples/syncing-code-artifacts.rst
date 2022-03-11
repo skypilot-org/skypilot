@@ -2,14 +2,14 @@
 Syncing Code and Artifacts
 ====================================
 
-Sky simplifies transferring code (the working directory) and artifacts to and
+Sky simplifies transferring code, data, and artifacts to and
 from cloud clusters:
 
 - To :ref:`upload code and project files<Uploading code and project files>` - use :code:`workdir`
 
 - To :ref:`upload files outside of workdir<Uploading files outside of workdir>` (e.g., dotfiles) - use :code:`file_mounts`
 
-- To :ref:`upload/reuse large files<Uploading or reusing large files>` - use :ref:`Sky Storage <sky-storage>`
+- To :ref:`upload/reuse large files<Uploading or reusing large files>` (e.g., datasets) - use :ref:`Sky Storage <sky-storage>`
 
 - To :ref:`download files and artifacts from a cluster<Downloading files and artifacts>` - use :code:`rsync`
 
@@ -44,6 +44,13 @@ scripts, access checkpoints, etc.).
 
 .. note::
 
+    For large, multi-gigabyte workdirs (e.g., large datasets/checkpoints in the working
+    directory), uploading may be slow because the they are synced to the remote VM(s)
+    with :code:`rsync`. To exclude large files in your workdir from being uploaded,
+    add them to the :code:`.gitignore` file under the workdir.
+
+.. note::
+
   You can keep and edit code in one central place---the local machine where
   :code:`sky` is used---and have them transparently synced to multiple remote
   clusters for execution:
@@ -56,12 +63,6 @@ scripts, access checkpoints, etc.).
     $ # cluster1 will get the updated code.
     $ sky exec cluster1 task.yaml
 
-.. note::
-
-  Sky ignores files and directories during upload the same way Git does: any
-  items that are included in a :code:`.gitignore` contained in the working
-  directory tree are not uploaded.
-
 
 Uploading files outside of workdir
 --------------------------------------
@@ -71,7 +72,7 @@ Use the :code:`file_mounts` field in a :ref:`task YAML <yaml-spec>` to upload to
 - local files outside of the working directory (e.g., dotfiles)
 - cloud object store URIs (currently, Sky supports AWS S3 and GCP GCS)
 
-Every :code:`sky launch` invocation syncs up these files.
+Every :code:`sky launch` invocation reruns the sync up of these files.
 
 Example file mounts:
 
@@ -81,9 +82,9 @@ Example file mounts:
     # Format: <cluster path>: <local path/cloud object URI>
 
     # Upload from local machine to the cluster via rsync.
+    /remote/datasets: ~/local/datasets
     ~/.vimrc: ~/.vimrc
     ~/.ssh/id_rsa.pub: ~/.ssh/id_rsa.pub
-    /datasets: ~/datasets
 
     # Download from S3 to the cluster.
     /s3-data-test: s3://fah-public-data-covid19-cryptic-pockets/human/il6/PROJ14534/RUN999/CLONE0/results0
@@ -95,8 +96,10 @@ For more details, see `this example <https://github.com/sky-proj/sky/blob/master
 Uploading or reusing large files
 --------------------------------------
 
-For large files (e.g., 10s or 100s of GBs), using an rsync-based file_mount may be too slow.
-Refer to :ref:`Sky Storage <sky-storage>` for details on efficiently handling large files.
+For large files (e.g., 10s or 100s of GBs), putting them into the workdir or a
+file_mount may be too slow, because they are processed by ``rsync``.  Use
+:ref:`Sky Storage <sky-storage>` (cloud object stores) to efficiently handling
+large files.
 
 
 Downloading files and artifacts
