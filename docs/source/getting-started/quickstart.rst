@@ -51,7 +51,7 @@ This specifies the following components of a task:
 
 All these fields are optional.
 
-**To launch a cluster and run a task**, use :code:`sky launch`:
+To launch a cluster and run a task, use :code:`sky launch`:
 
 .. code-block:: console
 
@@ -69,7 +69,7 @@ The ``sky launch`` command performs much heavy-lifting:
 
 - selects an appropriate cloud and VM based on the specified resource constraints;
 - provisions (or reuses) a cluster on that cloud;
-- uploads the :code:`workdir`;
+- syncs up the :code:`workdir`;
 - executes the :code:`setup` commands; and
 - executes the :code:`run` commands.
 
@@ -79,18 +79,20 @@ The outputs will show ``Hello, Sky!`` and the list of installed Conda environmen
 Execute a task on an existing cluster
 =====
 
-Use :code:`sky exec` to execute a task on an existing cluster:
+Once you have an existing cluster, use :code:`sky exec` to execute a task on it:
 
 .. code-block:: console
 
   $ sky exec mycluster hello_sky.yaml
 
-The ``sky exec`` command simply executes the task's :code:`run`
-commands. :code:`workdir` is also synced every time :code:`sky exec` is run, so
-that the task may use updated code.
+The ``sky exec`` command is more lightweight; it
 
-Bash commands are also supported, such as
-:code:`sky exec mycluster htop`.
+- syncs up the :code:`workdir` (so that the task may use updated code); and
+- executes the :code:`run` commands.
+
+Provisioning and ``setup`` commands are skipped.
+
+Bash commands are also supported, such as :code:`sky exec mycluster htop`.
 
 
 View all clusters
@@ -121,14 +123,15 @@ To log into the a cluster, Sky provides convenient SSH access via :code:`ssh <cl
 Transfer files
 =====
 
-After a task's execution,  use :code:`rsync` (or :code:`scp`) to transfer files (e.g., checkpoints):
+After a task's execution,  use :code:`rsync` (or :code:`scp`) to download files (e.g., checkpoints):
 
 .. code-block:: console
 
     $ rsync -Pavz mycluster:/remote/source /local/dest       # copy from remote VM
-    $ rsync -Pavz /local/path/source mycluster:/remote/dest  # copy to remote VM
 
-Terminate/stop a cluster
+For uploading files to the cluster, see :ref:`Syncing Code and Artifacts`.
+
+Stop/terminate a cluster
 =====
 
 When you are done, run :code:`sky stop mycluster` to stop the cluster. To
@@ -144,5 +147,5 @@ To learn more:
 
 - Adapt :ref:`Tutorial: DNN Training` to run your own project on Sky
 - Try :ref:`Interactive Nodes` -- VMs that can be launched in one command without a YAML file
-- See a fully complete YAML example :ref:`here <yaml-spec>` and more examples in the `repository <https://github.com/sky-proj/sky/tree/master/examples>`_
+- See a fully complete :ref:`YAML example <yaml-spec>` and more examples in the `repository <https://github.com/sky-proj/sky/tree/master/examples>`_
 - Explore the rest of the documentation
