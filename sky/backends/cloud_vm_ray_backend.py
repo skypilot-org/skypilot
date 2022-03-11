@@ -1098,7 +1098,8 @@ class CloudVmRayBackend(backends.Backend):
 
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
         # TODO(mraheja): remove pylint disabling when filelock version updated
-        with filelock.FileLock(lock_path):  # pylint: disable=abstract-method
+        # pylint: disable=abstract-method
+        with filelock.FileLock(lock_path):
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 cluster_name, to_provision, launched_nodes = (
                     self._check_existing_cluster(task, to_provision,
@@ -1737,7 +1738,8 @@ class CloudVmRayBackend(backends.Backend):
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
-            with filelock.FileLock(lock_path, 10):  # pylint: disable=abstract-method
+            # pylint: disable=abstract-method
+            with filelock.FileLock(lock_path, 10):
                 self._teardown(handle, terminate)
             if terminate:
                 os.remove(lock_path)
