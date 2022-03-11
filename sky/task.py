@@ -439,7 +439,7 @@ class Task:
                     self.setup = (
                         '(sudo wget https://github.com/kahing/goofys/releases/latest/download/goofys'
                         ' -O /usr/local/bin/goofys && sudo chmod +x /usr/local/bin/goofys && '
-                        f' sudo mkdir -p {mnt_path} && sudo chmod 777 {mnt_path} && goofys --stat-cache-ttl 10s --type-cache-ttl 10s {store.name} {mnt_path}'
+                        f' sudo mkdir -p {mnt_path} && sudo chmod 777 {mnt_path} && goofys --stat-cache-ttl 3s --type-cache-ttl 3s {store.name} {mnt_path}'
                         f'); {self.setup or "true"}')
                 else:
                     self.update_file_mounts({

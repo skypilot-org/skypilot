@@ -4,7 +4,7 @@ resources:
   cloud: aws
   instance_type: m5.2xlarge
 
-num_nodes: 1
+num_nodes: 2
 
 file_mounts:
   /sharedfs:
@@ -13,21 +13,17 @@ file_mounts:
     persistent: True
     mode: 'MOUNT'
 
-setup: |
-  # Installing fio for benchmarking. Killing apt process to avoid lock issues
-  sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1`;
-  sudo pkill -9 apt-get;
-  sudo pkill -9 dpkg;
-  sudo apt-get install fio -y
-
 run: |
   echo This is hostname: $(hostname)
   
-  # Run read benchmark
-  fio --name=sequential-read --rw=read --refill_buffers --bs=4M --size=4G --filename=/sharedfs/$(hostname)_read.fio 2>&1 | tee $(hostname)_readbench.txt
+  for ((i=1;i<=100;i++)); 
+    do 
+      # Run example write
+      echo ${i}
+      echo File ${i}, My hostname: $(hostname) > /sharedfs/$(hostname)_${i}.txt
+      sleep 1
+    done
   
-  # Run example write
-  echo My hostname: $(hostname) > /sharedfs/$(hostname).txt
   
   # ls and exit
   ls -la /sharedfs
