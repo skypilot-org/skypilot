@@ -165,7 +165,7 @@ class SSHConfigHelper(object):
     """Helper for handling local SSH configuration."""
 
     ssh_conf_path = '~/.ssh/config'
-    ssh_multinode_path = '~/.ssh/generated/ssh'
+    ssh_multinode_path = '~/.sky/generated/ssh'
 
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
@@ -312,8 +312,23 @@ class SSHConfigHelper(object):
                     f.write(''.join(config).strip())
                 break
 
-        # If an existing config with `cluster_name` exists, raise a warning.
+        with open(config_path) as f:
+            config = f.readlines()
+
+        # Check if ~/.ssh/config contains existing names
         host_lines = [f'Host {c_name}' for c_name in cluster_names]
+        for i, line in enumerate(config):
+            if line.strip() in host_lines:
+                idx = host_lines.index(line.strip())
+                prev_line = config[i - 1] if i > 0 else ''
+                logger.warning(f'{cls.ssh_conf_path} contains '
+                               f'host named {cluster_names[idx]}.')
+                host_name = ips[idx]
+                logger.warning(f'Using {host_name} to identify host instead.')
+                codegens[idx] = cls._get_generated_config(
+                    sky_autogen_comment, host_name, ips[idx], username,
+                    key_path)
+
         # All workers go to ~/.sky/generated/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
             if line.strip() in host_lines:
@@ -323,12 +338,6 @@ class SSHConfigHelper(object):
                     host_name = cluster_names[idx]
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
-                else:
-                    logger.warning(f'{extra_path_name} contains '
-                                   f'host named {cluster_names[idx]}.')
-                    host_name = ips[idx]
-                    logger.warning(
-                        f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, ips[idx], username,
                     key_path)
