@@ -16,8 +16,8 @@ import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
-from filelock import FileLock, Timeout
-from pathlib import Path as PathlibPath
+import filelock
+import pathlib
 from rich import console as rich_console
 
 import sky
@@ -50,6 +50,8 @@ logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
 
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
+
+_LOCK_FILENAME = '~/.sky/.{}.lock'
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -1074,21 +1076,22 @@ class CloudVmRayBackend(backends.Backend):
                                             self._optimize_target)
 
         launched_nodes = task.num_nodes
-        if not dryrun:  # dry run doesn't need to check existing cluster.
-            cluster_name, to_provision, launched_nodes = (
-                self._check_existing_cluster(task, to_provision, cluster_name))
 
-        lock_path = os.path.expanduser(f'~/.sky/{cluster_name}.lock')
-        lock = PathlibPath(lock_path)
+        lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
+        lock = pathlib.Path(lock_path)
         lock.touch(exist_ok=True)
-        with FileLock(lock_path):
+        with filelock.FileLock(lock_path):
+            if not dryrun:  # dry run doesn't need to check existing cluster.
+                cluster_name, to_provision, launched_nodes = (
+                    self._check_existing_cluster(task, to_provision,
+                                                 cluster_name))
             try:
                 config_dict = provisioner.provision_with_retries(
                     task, to_provision, launched_nodes, dryrun, stream_logs,
                     cluster_name)
             except exceptions.ResourcesUnavailableError as e:
-                # Do not remove the stopped cluster from the global state if failed
-                # to start.
+                # Do not remove the stopped cluster from the global state
+                # if failed to start.
                 if e.no_retry:
                     logger.error(e)
                     sys.exit(1)
@@ -1096,7 +1099,8 @@ class CloudVmRayBackend(backends.Backend):
                 global_user_state.remove_cluster(cluster_name, terminate=True)
                 logger.error(
                     'Failed to provision all possible launchable resources. '
-                    f'Relax the task\'s resource requirements:\n {launched_nodes}x '
+                    f'Relax the task\'s resource requirements:\n \
+                        {launched_nodes}x '
                     f'{task.resources}')
                 sys.exit(1)
             if dryrun:
@@ -1703,6 +1707,19 @@ class CloudVmRayBackend(backends.Backend):
                     storage.delete()
 
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+        config = backend_utils.read_yaml(handle.cluster_yaml)
+        cluster_name = config['cluster_name']
+        lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
+        try:
+            with filelock.FileLock(lock_path, 10):
+                self._teardown(handle, terminate)
+            if terminate:
+                os.remove(lock_path)
+        except filelock.Timeout:
+            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. \
+                    Check to see if it is still being launched.')
+
+    def _teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1711,133 +1728,120 @@ class CloudVmRayBackend(backends.Backend):
         prev_status = global_user_state.get_status_from_cluster_name(
             handle.cluster_name)
         cluster_name = config['cluster_name']
+        if (terminate and
+                prev_status == global_user_state.ClusterStatus.STOPPED):
+            if isinstance(cloud, clouds.AWS):
+                # TODO(zhwu): Room for optimization. We can move these cloud
+                # specific handling to the cloud class.
+                # The stopped instance on AWS will not be correctly terminated
+                # due to ray's bug.
+                region = config['provider']['region']
+                query_cmd = (
+                    f'aws ec2 describe-instances --region {region} --filters '
+                    f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
+                    'Name=instance-state-name,Values=stopping,stopped '
+                    f'--query Reservations[].Instances[].InstanceId '
+                    '--output text')
+                terminate_cmd = (
+                    f'aws ec2 terminate-instances --region {region} '
+                    f'--instance-ids $({query_cmd})')
+                with console.status(f'[bold cyan]Terminating '
+                                    f'[green]{cluster_name}'):
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        terminate_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False,
+                        require_outputs=True)
+            elif isinstance(cloud, clouds.GCP):
+                zone = config['provider']['availability_zone']
+                query_cmd = (
+                    f'gcloud compute instances list '
+                    f'--filter=\\(labels.ray-cluster-name={cluster_name}\\) '
+                    f'--zones={zone} --format=value\\(name\\)')
+                terminate_cmd = (
+                    f'gcloud compute instances delete --zone={zone} --quiet '
+                    f'$({query_cmd})')
+                with console.status(f'[bold cyan]Terminating '
+                                    f'[green]{cluster_name}'):
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        terminate_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False,
+                        require_outputs=True)
+            elif isinstance(cloud, clouds.Azure):
+                resource_group = config['provider']['resource_group']
+                query_cmd = (f'az vm list -g {resource_group} '
+                             '--query "[].id" -o tsv')
+                terminate_cmd = f'az vm delete --yes --ids $({query_cmd})'
+                with console.status(f'[bold cyan]Terminating '
+                                    f'[green]{cluster_name}'):
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        terminate_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False,
+                        require_outputs=True)
+            else:
+                raise ValueError(f'Unsupported cloud {cloud} for stopped '
+                                 f'cluster {cluster_name!r}.')
+        else:
+            config['provider']['cache_stopped_nodes'] = not terminate
+            with tempfile.NamedTemporaryFile('w',
+                                             prefix='sky_',
+                                             delete=False,
+                                             suffix='.yml') as f:
+                backend_utils.dump_yaml(f.name, config)
+                f.flush()
 
-        lock_path = os.path.expanduser(f'~/.sky/{cluster_name}.lock')
-        try:
-            with FileLock(lock_path, 10):
-                if (terminate and
-                        prev_status == global_user_state.ClusterStatus.STOPPED):
-                    if isinstance(cloud, clouds.AWS):
-                        # TODO(zhwu): Room for optimization. We can move these cloud
-                        # specific handling to the cloud class.
-                        # The stopped instance on AWS will not be correctly terminated
-                        # due to ray's bug.
-                        region = config['provider']['region']
-                        query_cmd = (
-                            f'aws ec2 describe-instances --region {region} --filters '
-                            f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
-                            'Name=instance-state-name,Values=stopping,stopped '
-                            f'--query Reservations[].Instances[].InstanceId '
-                            '--output text')
-                        terminate_cmd = (
-                            f'aws ec2 terminate-instances --region {region} '
-                            f'--instance-ids $({query_cmd})')
-                        with console.status(f'[bold cyan]Terminating '
-                                            f'[green]{cluster_name}'):
-                            returncode, stdout, stderr = log_lib.run_with_log(
-                                terminate_cmd,
-                                log_abs_path,
-                                shell=True,
-                                stream_logs=False,
-                                require_outputs=True)
-                    elif isinstance(cloud, clouds.GCP):
-                        zone = config['provider']['availability_zone']
-                        query_cmd = (
-                            f'gcloud compute instances list '
-                            f'--filter=\\(labels.ray-cluster-name={cluster_name}\\) '
-                            f'--zones={zone} --format=value\\(name\\)')
-                        terminate_cmd = (
-                            f'gcloud compute instances delete --zone={zone} --quiet '
-                            f'$({query_cmd})')
-                        with console.status(f'[bold cyan]Terminating '
-                                            f'[green]{cluster_name}'):
-                            returncode, stdout, stderr = log_lib.run_with_log(
-                                terminate_cmd,
-                                log_abs_path,
-                                shell=True,
-                                stream_logs=False,
-                                require_outputs=True)
-                    elif isinstance(cloud, clouds.Azure):
-                        resource_group = config['provider']['resource_group']
-                        query_cmd = (f'az vm list -g {resource_group} '
-                                     '--query "[].id" -o tsv')
-                        terminate_cmd = f'az vm delete --yes --ids $({query_cmd})'
-                        with console.status(f'[bold cyan]Terminating '
-                                            f'[green]{cluster_name}'):
-                            returncode, stdout, stderr = log_lib.run_with_log(
-                                terminate_cmd,
-                                log_abs_path,
-                                shell=True,
-                                stream_logs=False,
-                                require_outputs=True)
-                    else:
-                        raise ValueError(
-                            f'Unsupported cloud {cloud} for stopped '
-                            f'cluster {cluster_name!r}.')
-                else:
-                    config['provider']['cache_stopped_nodes'] = not terminate
-                    with tempfile.NamedTemporaryFile('w',
-                                                     prefix='sky_',
-                                                     delete=False,
-                                                     suffix='.yml') as f:
-                        backend_utils.dump_yaml(f.name, config)
-                        f.flush()
+                teardown_verb = 'Terminating' if terminate else 'Stopping'
+                with console.status(f'[bold cyan]{teardown_verb} '
+                                    f'[green]{cluster_name}'):
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        ['ray', 'down', '-y', f.name],
+                        log_abs_path,
+                        stream_logs=False,
+                        require_outputs=True)
 
-                        teardown_verb = 'Terminating' if terminate else 'Stopping'
-                        with console.status(f'[bold cyan]{teardown_verb} '
-                                            f'[green]{cluster_name}'):
-                            returncode, stdout, stderr = log_lib.run_with_log(
-                                ['ray', 'down', '-y', f.name],
-                                log_abs_path,
-                                stream_logs=False,
-                                require_outputs=True)
+            if handle.tpu_delete_script is not None:
+                with console.status('[bold cyan]Terminating TPU...'):
+                    tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
+                        ['bash', handle.tpu_delete_script],
+                        log_abs_path,
+                        stream_logs=False,
+                        require_outputs=True)
+                if tpu_rc != 0:
+                    logger.error(f'{colorama.Fore.RED}Failed to delete TPU.\n'
+                                 f'**** STDOUT ****\n'
+                                 f'{tpu_stdout}\n'
+                                 f'**** STDERR ****\n'
+                                 f'{tpu_stderr}{colorama.Style.RESET_ALL}')
 
-                    if handle.tpu_delete_script is not None:
-                        with console.status('[bold cyan]Terminating TPU...'):
-                            tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
-                                ['bash', handle.tpu_delete_script],
-                                log_abs_path,
-                                stream_logs=False,
-                                require_outputs=True)
-                        if tpu_rc != 0:
-                            logger.error(
-                                f'{colorama.Fore.RED}Failed to delete TPU.\n'
-                                f'**** STDOUT ****\n'
-                                f'{tpu_stdout}\n'
-                                f'**** STDERR ****\n'
-                                f'{tpu_stderr}{colorama.Style.RESET_ALL}')
-
-                if returncode != 0:
-                    logger.error(
-                        f'{colorama.Fore.RED}Failed to terminate {cluster_name}.\n'
-                        f'**** STDOUT ****\n'
-                        f'{stdout}\n'
-                        f'**** STDERR ****\n'
-                        f'{stderr}{colorama.Style.RESET_ALL}')
-
-                auth_config = backend_utils.read_yaml(
-                    handle.cluster_yaml)['auth']
-                _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
-                name = global_user_state.get_cluster_name_from_handle(handle)
-                global_user_state.remove_cluster(name, terminate=terminate)
-
-                if terminate:
-                    # Clean up generated config
-                    # No try-except is needed since Ray will fail to teardown the
-                    # cluster if the cluster_yaml is missing.
-                    os.remove(handle.cluster_yaml)
-
-                    # Clean up TPU creation/deletion scripts
-                    if handle.tpu_delete_script is not None:
-                        assert handle.tpu_create_script is not None
-                        os.remove(handle.tpu_create_script)
-                        os.remove(handle.tpu_delete_script)
-
-                    os.remove(lock_path)
-        except Timeout:
+        if returncode != 0:
             logger.error(
-                'Cluster is locked. Check to see if it is still being launched.'
-            )
+                f'{colorama.Fore.RED}Failed to terminate {cluster_name}.\n'
+                f'**** STDOUT ****\n'
+                f'{stdout}\n'
+                f'**** STDERR ****\n'
+                f'{stderr}{colorama.Style.RESET_ALL}')
+
+        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+        _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
+        name = global_user_state.get_cluster_name_from_handle(handle)
+        global_user_state.remove_cluster(name, terminate=terminate)
+
+        if terminate:
+            # Clean up generated config
+            # No try-except is needed since Ray will fail to teardown the
+            # cluster if the cluster_yaml is missing.
+            os.remove(handle.cluster_yaml)
+
+            # Clean up TPU creation/deletion scripts
+            if handle.tpu_delete_script is not None:
+                assert handle.tpu_create_script is not None
+                os.remove(handle.tpu_create_script)
+                os.remove(handle.tpu_delete_script)
 
     def _get_node_ips(self,
                       cluster_yaml: str,
