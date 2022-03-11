@@ -1126,7 +1126,8 @@ class CloudVmRayBackend(backends.Backend):
                 global_user_state.remove_cluster(cluster_name, terminate=True)
                 logger.error(
                     'Failed to provision all possible launchable resources. '
-                    f'Relax the task\'s resource requirements:\n {launched_nodes}x '
+                    f'Relax the task\'s resource requirements:\n \
+                        {launched_nodes}x '
                     f'{task.resources}')
                 sys.exit(1)
             if dryrun:
@@ -1137,12 +1138,13 @@ class CloudVmRayBackend(backends.Backend):
             # Set TPU environment variables
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
-                self._set_tpu_name(cluster_config_file, launched_nodes, tpu_name)
+                self._set_tpu_name(cluster_config_file, launched_nodes,
+                                   tpu_name)
 
             head_ip = backend_utils.query_head_ip_with_retries(
                 cluster_config_file,
-                # Retry is useful for azure, as sometimes it will need some time for
-                # ray get-head-ip to be able to fetch the head ip.
+                # Retry is useful for azure, as sometimes it will need some
+                # time for ray get-head-ip to be able to fetch the head ip.
                 retry_count=backend_utils.WAIT_HEAD_NODE_IP_RETRY_COUNT)
             handle = self.ResourceHandle(
                 cluster_name=cluster_name,
@@ -1158,7 +1160,8 @@ class CloudVmRayBackend(backends.Backend):
                                                     handle,
                                                     ready=True)
             auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-            _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
+            _add_cluster_to_ssh_config(cluster_name, handle.head_ip,
+                                       auth_config)
             return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
