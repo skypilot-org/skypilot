@@ -2,6 +2,7 @@ cluster_name: {{cluster_name}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
 provider:
@@ -89,14 +90,20 @@ setup_commands:
   # We have to install azure-cli because the Azure cluster does not pre-install it.
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && pip3 install azure-cli==2.30.0 && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
   - which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(/home/azureuser/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base false)
+  - printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
-  - ray stop; ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
+  # Set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/guide.html?highlight=ulimit#system-configuration
+  # Solution from https://discuss.ray.io/t/setting-ulimits-on-ec2-instances/590
+  # This line is intentionally separated from the next line to reload the session after the ulimit is set.
+  - sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;'
+  - ray stop; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop; ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
+  - sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;'
+  - ray stop; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
 {%- else %}
 worker_start_ray_commands: []
 {%- endif %}

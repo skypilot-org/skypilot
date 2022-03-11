@@ -2,22 +2,22 @@
 Job Queue
 =========
 
-Sky's **job queue** feature allows multiple jobs to be scheduled on a cluster.
-This enables parallel experiments or hyperparameter tuning.
+Sky's **job queue** allows multiple jobs to be scheduled on a cluster.
+This enables parallel experiments or :ref:`hyperparameter tuning <grid-search>`.
 
 Each task submitted by :code:`sky exec` is automatically queued and scheduled
-for execution on the cluster. Use the :code:`-d / --detach` flag to detach
-logging from the terminal, which is useful for launching many long-running jobs
-concurrently.
+for execution:
 
 .. code-block:: bash
 
-   # Launch the job 5 times
+   # Launch the job 5 times.
    sky exec mycluster task.yaml -d
    sky exec mycluster task.yaml -d
    sky exec mycluster task.yaml -d
    sky exec mycluster task.yaml -d
    sky exec mycluster task.yaml -d
+
+The :code:`-d / --detach` flag detaches logging from the terminal, which is useful for launching many long-running jobs concurrently.
 
 To view the output for each job:
 
@@ -39,14 +39,60 @@ To cancel a job:
    # Cancel all jobs on a cluster.
    sky cancel mycluster --all
 
+Multi-node jobs
+--------------------------------
+
+Jobs that run on multiple nodes are also supported by the job queue.
+
+First, create a :code:`cluster.yaml` to specify the desired cluster:
+
+.. code-block:: yaml
+
+  num_nodes: 4
+  resources:
+    accelerators: V100:8
+
+  workdir: ...
+  setup: |
+    # Install dependencies.
+    ...
+
+Use :code:`sky launch -c mycluster cluster.yaml` to provision a 4-node (each having 8 V100 GPUs) cluster.
+The :code:`num_nodes` field is used to specify how many nodes are required.
+
+Next, create a :code:`task.yaml` to specify each task:
+
+.. code-block:: yaml
+
+  num_nodes: 2
+  resources:
+    accelerators: V100:4
+
+  run: |
+    # Run training script.
+    ...
+
+This specifies a task that needs to be run on 2 nodes, each of which must have 4 free V100s.
+
+Use :code:`sky exec mycluster task.yaml` to submit this task, which will be scheduled correctly by the job queue.
+
+See :ref:`Distributed Jobs on Many VMs` for more details.
+
 Scheduling behavior
 --------------------------------
 
-The sky job-queue scheduler is designed to serve two key goals: preventing
-resource oversubscription and work-conservation.
+Sky's scheduler serves two goals:
 
-1. **Preventing resource oversubscription**: Sky schedules jobs on a cluster using their resource requirements---either specified in a task YAML's :code:`resources` field, or via the :code:`--gpus` option of the :code:`sky exec` CLI command. While honoring these resource requirements, Sky also ensures that no resource in the cluster is over subscribed. I.e., if a node has 4 GPUs, it cannot host a combination of tasks whose sum of GPU requirements exceeds 4.
-2. **Work-conservation**: Sky is designed to minimize resource idling. If a resource is idle, sky will schedule a queued job in which can utilize that resource. Resource requirements for tasks are either specified in a task YAML's :code:`resources` field, or via the :code:`--gpus` option of the :code:`sky exec` CLI command.
+1. **Preventing resource oversubscription**: Sky schedules jobs on a cluster
+   using their resource requirements---either specified in a task YAML's
+   :code:`resources` field, or via the :code:`--gpus` option of the :code:`sky
+   exec` CLI command. Sky honors these resource requirements while ensuring that
+   no resource in the cluster is oversubscribed. For example, if a node has 4
+   GPUs, it cannot host a combination of tasks whose sum of GPU requirements
+   exceeds 4.
+
+2. **Minimizing resource idleness**: If a resource is idle, Sky will schedule a
+   queued job that can utilize that resource.
 
 We illustrate the scheduling behavior by revisiting :ref:`Tutorial: DNN Training <huggingface>`.
 In that tutorial, we have a task YAML that specifies these resource requirements:
@@ -59,14 +105,9 @@ In that tutorial, we have a task YAML that specifies these resource requirements
     accelerators: V100:4
   ...
 
-And we had run the task with:
-
-.. code-block:: console
-  sky launch -c lm-cluster dnn.yaml
-
-Since the cluster was created when we ran :code:`sky launch`, sky provisioned
-the cluster with exactly the same resources as those required for the task.
-Thus, `lm-cluster` has 4 V100 GPUs.
+Since a new cluster was created when we ran :code:`sky launch -c lm-cluster
+dnn.yaml`, Sky provisioned the cluster with exactly the same resources as those
+required for the task.  Thus, :code:`lm-cluster` has 4 V100 GPUs.
 
 While this initial job is running, let us submit more tasks:
 
@@ -88,11 +129,10 @@ Because the cluster has only 4 V100 GPUs, we will see the following sequence of 
 - The fourth job (job5) will start running, since its requirement is fulfilled with the 2 free GPUs.
 - Once all but job5 finish, the cluster's 4 GPUs become free again and job4 will transition from pending to running.
 
-To see job statuses, stream logs, and cancel jobs, use:
+Thus, we may see the following job statuses on this cluster:
 
 .. code-block:: console
 
-  $ # View the jobs in the queue
   $ sky queue lm-cluster
 
    ID  NAME         USER  SUBMITTED    STARTED     STATUS
@@ -101,10 +141,3 @@ To see job statuses, stream logs, and cancel jobs, use:
    3   job3         user  10 mins ago  9 mins ago  RUNNING
    2   job2         user  10 mins ago  9 mins ago  RUNNING
    1   huggingface  user  10 mins ago  1 min ago   SUCCEEDED
-
-
-  $ # Stream the logs of job5 (ID: 5) to the console
-  $ sky logs lm-cluster 5
-
-  $ # Cancel job job3 (ID: 3)
-  $ sky cancel lm-cluster 3
