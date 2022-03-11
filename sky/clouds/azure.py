@@ -182,7 +182,7 @@ class Azure(clouds.Cloud):
             return [r]
 
         # Currently, handle a filter on accelerators only.
-        accelerators = resources.get_accelerators()
+        accelerators = resources.accelerators
         if accelerators is None:
             # No requirements to filter, so just return a default VM type.
             return _make(Azure.get_default_instance_type())
@@ -198,6 +198,9 @@ class Azure(clouds.Cloud):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         help_str = (
+            ' Run the following commands:'
+            '\n    $ az login'
+            '\n    $ az account set -s <subscription_id>'
             '\n    For more info: '
             'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # pylint: disable=line-too-long
         )
@@ -206,10 +209,8 @@ class Azure(clouds.Cloud):
         # `az account show` does not guarantee this file exists.
         azure_token_cache_file = '~/.azure/msal_token_cache.json'
         if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
-            return (
-                False,
-                f'{azure_token_cache_file} does not exist. Run `az login`.' +
-                help_str)
+            return (False,
+                    f'{azure_token_cache_file} does not exist.' + help_str)
         try:
             output = _run_output('az account show --output=json')
         except subprocess.CalledProcessError:
@@ -220,7 +221,7 @@ class Azure(clouds.Cloud):
         #   Please run 'az login' to setup account.
         if output.startswith('{'):
             return True, None
-        return False, 'Azure credentials not set. Run `az login`.' + help_str
+        return False, 'Azure credentials not set.' + help_str
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
         return {'~/.azure': '~/.azure'}, []

@@ -6,6 +6,7 @@ import getpass
 from multiprocessing import pool
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -46,7 +47,14 @@ RESET_BOLD = '\033[0m'
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
-# Keep the following two fields in sync with the cluster template:
+
+_LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
+# Intentionally not using prefix 'rf' for the string format because yapf have a
+# bug with python=3.6.
+# 10.133.0.5: ray.worker.default,
+_LAUNCHING_IP_PATTERN = re.compile(
+    r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
+WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 
 
 def _fill_template(template_name: str,
@@ -577,34 +585,79 @@ def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
-def wait_until_ray_cluster_ready(cloud: clouds.Cloud, cluster_config_file: str,
-                                 num_nodes: int) -> bool:
+def wait_until_ray_cluster_ready(
+        cluster_config_file: str,
+        num_nodes: int,
+        log_path: str,
+        nodes_launching_progress_timeout: Optional[int] = None) -> bool:
     """Returns whether the entire ray cluster is ready."""
-    # FIXME: It may takes a while for the cluster to be available for ray,
-    # especially for Azure, causing `ray exec` to fail.
     if num_nodes <= 1:
         return
+
+    # Manually fetching head ip instead of using `ray exec` to avoid the bug
+    # that `ray exec` fails to connect to the head node after some workers
+    # launched especially for Azure.
+    head_ip = query_head_ip_with_retries(
+        cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
+
     expected_worker_count = num_nodes - 1
-    if isinstance(cloud, (clouds.AWS, clouds.Azure)):
-        worker_str = 'ray.worker.default'
-    elif isinstance(cloud, clouds.GCP):
-        worker_str = 'ray_worker_default'
-    else:
-        assert False, f'No support for distributed clusters for {cloud}.'
+
+    ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
+    last_workers_so_far = 0
+    start = time.time()
     while True:
-        proc = subprocess.run(f'ray exec {cluster_config_file} "ray status"',
-                              shell=True,
-                              check=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
-        output = proc.stdout.decode('ascii')
+        rc, output, stderr = run_command_on_ip_via_ssh(head_ip,
+                                                       'ray status',
+                                                       ssh_user=ssh_user,
+                                                       ssh_private_key=ssh_key,
+                                                       log_path=log_path,
+                                                       stream_logs=False,
+                                                       require_outputs=True)
+
+        handle_returncode(rc, 'ray status',
+                          'Failed to run ray status on head node.', stderr)
         logger.info(output)
-        if f'{expected_worker_count} {worker_str}' in output:
+
+        # Workers that are ready
+        result = _LAUNCHED_WORKER_PATTERN.findall(output)
+        ready_workers = 0
+        if result:
+            assert len(result) == 1, result
+            ready_workers = int(result[0])
+
+        if ready_workers == expected_worker_count:
+            # All workers are up.
             break
+
+        # Pending workers that have been launched by ray up.
+        found_ips = _LAUNCHING_IP_PATTERN.findall(output)
+        pending_workers = len(found_ips)
+
+        workers_so_far = ready_workers + pending_workers
+
+        # Check the number of nodes that are fetched. Timeout if no new
+        # nodes fetched in a while (nodes_launching_progress_timeout), though
+        # number of workers_so_far is still not as expected.
+        if workers_so_far != last_workers_so_far:
+            # Reset the start time if the number of launching nodes
+            # changes, i.e. new nodes are launched.
+            logger.debug('Reset start time, as new nodes are launched. '
+                         f'({last_workers_so_far} -> {workers_so_far})')
+            start = time.time()
+            last_workers_so_far = workers_so_far
+        elif (nodes_launching_progress_timeout is not None and
+              time.time() - start > nodes_launching_progress_timeout and
+              workers_so_far != expected_worker_count):
+            logger.error(
+                'Timed out when waiting for workers to be provisioned.')
+            return False  # failed
+
         if '(no pending nodes)' in output and '(no failures)' in output:
             # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
             # GCP can satisfy only by half, the worker node would be forgotten.
             # The correct behavior should be for it to error out.
+            logger.error('Failed to launch multiple nodes on '
+                         'GCP due to a nondeterministic bug in ray autoscaler.')
             return False  # failed
         time.sleep(10)
     return True  # success
@@ -637,6 +690,8 @@ def ssh_options_list(ssh_private_key: Optional[str],
         'ServerAliveCountMax': 3,
         # ConnectTimeout.
         'ConnectTimeout': f'{timeout}s',
+        # Agent forwarding for git.
+        'ForwardAgent': 'yes',
     }
     if ssh_control_name is not None:
         arg_dict.update({
@@ -665,6 +720,15 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     path = (f'/tmp/sky_ssh_{username}/{ssh_control_filename}')
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str]:
+    """Returns ssh_user and ssh_private_key."""
+    config = read_yaml(cluster_yaml)
+    auth_section = config['auth']
+    ssh_user = auth_section['ssh_user'].strip()
+    ssh_private_key = auth_section.get('ssh_private_key')
+    return ssh_user, ssh_private_key
 
 
 class SshMode(enum.Enum):
@@ -869,6 +933,73 @@ def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+
+
+def get_node_ips(cluster_yaml: str,
+                 expected_num_nodes: int,
+                 return_private_ips: bool = False) -> List[str]:
+    """Returns the IPs of all nodes in the cluster."""
+    yaml_handle = cluster_yaml
+    if return_private_ips:
+        config = read_yaml(yaml_handle)
+        # Add this field to a temp file to get private ips.
+        config['provider']['use_internal_ips'] = True
+        yaml_handle = cluster_yaml + '.tmp'
+        dump_yaml(yaml_handle, config)
+
+    out = run(f'ray get-head-ip {yaml_handle}',
+              stdout=subprocess.PIPE).stdout.decode().strip()
+    head_ip = re.findall(IP_ADDR_REGEX, out)
+    assert 1 == len(head_ip), out
+
+    out = run(f'ray get-worker-ips {yaml_handle}',
+              stdout=subprocess.PIPE).stdout.decode()
+    worker_ips = re.findall(IP_ADDR_REGEX, out)
+    assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes - 1,
+                                                       out)
+    if return_private_ips:
+        os.remove(yaml_handle)
+    return head_ip + worker_ips
+
+
+def get_head_ip(
+    handle: backends.Backend.ResourceHandle,
+    use_cached_head_ip: bool = True,
+    retry_count: int = 1,
+) -> str:
+    """Returns the ip of the head node."""
+    assert not use_cached_head_ip or retry_count == 1, (
+        'Cannot use cached_head_ip when retry_count is not 1')
+    if use_cached_head_ip:
+        if handle.head_ip is None:
+            # This happens for INIT clusters (e.g., exit 1 in setup).
+            raise ValueError(
+                'Cluster\'s head IP not found; is it up? To fix: '
+                'run a successful launch first (`sky launch`) to ensure'
+                ' the cluster status is UP (`sky status`).')
+        head_ip = handle.head_ip
+    else:
+        head_ip = query_head_ip_with_retries(handle.cluster_yaml, retry_count)
+    return head_ip
+
+
+def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
+    """Returns the ip of the head node from yaml file."""
+    for i in range(retry_count):
+        try:
+            out = run(f'ray get-head-ip {cluster_yaml}',
+                      stdout=subprocess.PIPE).stdout.decode().strip()
+            head_ip = re.findall(IP_ADDR_REGEX, out)
+            assert 1 == len(head_ip), out
+            head_ip = head_ip[0]
+            break
+        except subprocess.CalledProcessError as e:
+            if i == retry_count - 1:
+                raise e
+            # Retry if the cluster is not up yet.
+            logger.debug('Retrying to get head ip.')
+            time.sleep(5)
+    return head_ip
 
 
 def get_backend_from_handle(

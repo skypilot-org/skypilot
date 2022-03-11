@@ -2,6 +2,7 @@ cluster_name: {{cluster_name}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
 provider:
@@ -72,14 +73,25 @@ rsync_exclude: [
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.
-  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
+  # This also kills the process that is holding the lock on the dpkg on aws. See https://docs.ray.io/en/latest/cluster/aws-tips.html#using-amazon-efs
+  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1`;
+    sudo pkill -9 apt-get;
+    sudo pkill -9 dpkg;
+    sudo dpkg --configure -a;
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
+  - printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
-  - ray stop; ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
+  # Set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/guide.html?highlight=ulimit#system-configuration
+  # Solution from https://discuss.ray.io/t/setting-ulimits-on-ec2-instances/590
+  # This line is intentionally separated from the next line to reload the session after the ulimit is set.
+  - sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;'
+  - ray stop; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop; ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
+  - sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;'
+  - ray stop; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
 {%- endif %}

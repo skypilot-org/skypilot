@@ -37,6 +37,7 @@ Interactive Nodes
    :prog: sky cpunode
    :nested: full
 
+.. _sky-gpunode:
 .. click:: sky.cli:gpunode
    :prog: sky gpunode
    :nested: full

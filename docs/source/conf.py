@@ -19,15 +19,17 @@ version = '0.1.0'
 # -- General configuration
 
 extensions = [
+    'sphinx.ext.autodoc',
+    'sphinx.ext.autosectionlabel',
+    'sphinx.ext.autosummary',
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
-    'sphinx.ext.autodoc',
-    'sphinx.ext.napoleon',
-    'sphinx.ext.autosummary',
-    'sphinx.ext.viewcode',
     'sphinx.ext.intersphinx',
-    'sphinx_click',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.viewcode',
     'sphinx_autodoc_typehints',
+    'sphinx_click',
+    'sphinx_copybutton',
 ]
 
 intersphinx_mapping = {
@@ -55,3 +57,7 @@ html_theme_options = {
 
 # -- Options for EPUB output
 epub_show_urls = 'footnote'
+
+# -- Options for sphinx-copybutton
+copybutton_prompt_text = r'\$ '
+copybutton_prompt_is_regexp = True
