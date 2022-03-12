@@ -44,10 +44,10 @@ scripts, access checkpoints, etc.).
 
 .. note::
 
-    For large, multi-gigabyte workdirs (e.g., large datasets/checkpoints in the working
-    directory), uploading may be slow because the they are synced to the remote VM(s)
-    with :code:`rsync`. To exclude large files in your workdir from being uploaded,
-    add them to the :code:`.gitignore` file under the workdir.
+    For large, multi-gigabyte workdirs, uploading may be slow because the they
+    are synced to the remote VM(s) with :code:`rsync`. To exclude large files in
+    your workdir from being uploaded, add them to the :code:`.gitignore` file
+    under the workdir.
 
 .. note::
 
@@ -92,13 +92,17 @@ Example file mounts:
 
 For more details, see `this example <https://github.com/sky-proj/sky/blob/master/examples/using_file_mounts.yaml>`_ and :ref:`YAML Configuration <yaml-spec>`.
 
+.. note::
+
+    Items listed in a :code:`.gitignore` file under any local file_mount source
+    are also ignored (the same behavior as handling ``workdir``).
 
 Uploading or reusing large files
 --------------------------------------
 
 For large files (e.g., 10s or 100s of GBs), putting them into the workdir or a
-file_mount may be too slow, because they are processed by ``rsync``.  Use
-:ref:`Sky Storage <sky-storage>` (cloud object stores) to efficiently handling
+file_mount may be slow because they are processed by ``rsync``.  Use
+:ref:`Sky Storage <sky-storage>` (cloud object stores) to efficiently handle
 large files.
 
 
