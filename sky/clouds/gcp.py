@@ -204,6 +204,7 @@ class GCP(clouds.Cloud):
             return ([resources], fuzzy_candidate_list)
         accelerator_match = None
         if resources.accelerators is not None:
+            # TODO: Refactor below implementation with pandas
             available_accelerators = service_catalog.list_accelerators(
                 gpus_only=False, clouds='gcp')
             for acc, acc_count in resources.accelerators.items():
@@ -215,7 +216,7 @@ class GCP(clouds.Cloud):
                         accelerator_match = {acc_avail: acc_count}
                         break
                 if accelerator_match is None:
-                    return (None, fuzzy_candidate_list)
+                    return ([], fuzzy_candidate_list)
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
         r = copy.deepcopy(resources)

@@ -31,7 +31,10 @@ def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """Returns the instance type with the required count of accelerators."""
+    """
+    Returns a list of instance types satisfying the required count of
+    accelerators with sorted prices and a list of candidates with fuzzy search.
+    """
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count)

@@ -1,13 +1,13 @@
 """The Sky optimizer: assigns best resources to user tasks."""
 import collections
+import colorama
 import enum
 import pprint
-from typing import Dict, List, Tuple, Optional
+import sys
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import tabulate
-import colorama
-import sys
 
 from sky import check
 from sky import clouds
@@ -437,9 +437,9 @@ def _fill_in_launchable_resources(
         elif resources.cloud is not None:
             (feasible_resources, fuzzy_candidate_list
             ) = resources.cloud.get_feasible_launchable_resources(resources)
-            if feasible_resources is not None:
-                feasible_resources = sorted(feasible_resources,
-                                            key=lambda r: r.get_cost(3600))
+            if len(feasible_resources) > 0:
+                # Assume feasible_resources is sorted by prices and
+                # only append the cheapest option for each cloud
                 launchable[resources].append(feasible_resources[0])
                 cloud_candidates[resources.cloud] = feasible_resources
             else:
@@ -451,10 +451,9 @@ def _fill_in_launchable_resources(
             for cloud in enabled_clouds:
                 (feasible_resources, fuzzy_candidate_list
                 ) = cloud.get_feasible_launchable_resources(resources)
-                if feasible_resources is not None:
-                    feasible_resources = sorted(feasible_resources,
-                                                key=lambda r: r.get_cost(3600))
-                    # Only append the cheapest option for each cloud
+                if len(feasible_resources) > 0:
+                    # Assume feasible_resources is sorted by prices and
+                    # only append the cheapest option for each cloud
                     launchable[resources].append(feasible_resources[0])
                     cloud_candidates[cloud] = feasible_resources
                 else:

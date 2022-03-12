@@ -1,6 +1,6 @@
 """Common utilities for service catalog."""
 import os
-from typing import Dict, List, Tuple, NamedTuple, Optional
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import pandas as pd
 
@@ -93,7 +93,10 @@ def get_instance_type_for_accelerator_impl(
     acc_name: str,
     acc_count: int,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """Returns the instance type with the required count of accelerators."""
+    """
+    Returns a list of instance types satisfying the required count of
+    accelerators with sorted prices and a list of candidates with fuzzy search.
+    """
     result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
                 (df['AcceleratorCount'] == acc_count)]
     if len(result) == 0:

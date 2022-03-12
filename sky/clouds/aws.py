@@ -207,7 +207,7 @@ class AWS(clouds.Cloud):
                                                               acc_count,
                                                               clouds='aws')
         if instance_list is None:
-            return (None, fuzzy_candidate_list)
+            return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
