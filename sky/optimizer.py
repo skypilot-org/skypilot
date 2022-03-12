@@ -418,7 +418,6 @@ def _fill_in_launchable_resources(
                                              False)
     launchable = collections.defaultdict(list)
     cloud_candidates = collections.defaultdict(Resources)
-    all_fuzzy_candidates = set()
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
     for resources in task.get_resources():
@@ -434,21 +433,11 @@ def _fill_in_launchable_resources(
                 'or change the cloud requirement.')
         elif resources.is_launchable():
             launchable[resources] = [resources]
-        elif resources.cloud is not None:
-            (feasible_resources, fuzzy_candidate_list
-            ) = resources.cloud.get_feasible_launchable_resources(resources)
-            if len(feasible_resources) > 0:
-                # Assume feasible_resources is sorted by prices and
-                # only append the cheapest option for each cloud
-                launchable[resources].append(feasible_resources[0])
-                cloud_candidates[resources.cloud] = feasible_resources
-            else:
-                accelerators = resources.accelerators
-                logger.info(f'No resource satisfying {accelerators}'
-                            f' on {resources.cloud}.')
-                all_fuzzy_candidates.update(fuzzy_candidate_list)
         else:
-            for cloud in enabled_clouds:
+            clouds_list = [resources.cloud
+                          ] if resources.cloud is not None else enabled_clouds
+            all_fuzzy_candidates = set()
+            for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list
                 ) = cloud.get_feasible_launchable_resources(resources)
                 if len(feasible_resources) > 0:
@@ -459,14 +448,13 @@ def _fill_in_launchable_resources(
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
             if len(launchable[resources]) == 0:
-                accelerators = resources.accelerators
-                logger.info(f'No resource satisfying {accelerators}'
-                            f' on all clouds.')
-        if len(all_fuzzy_candidates) > 0:
-            logger.info('Did you mean: '
-                        f'{colorama.Fore.CYAN}'
-                        f'{sorted(all_fuzzy_candidates)}'
-                        f'{colorama.Style.RESET_ALL}')
+                logger.info(f'No resource satisfying {resources.accelerators} '
+                            f'on {clouds_list}.')
+            if len(all_fuzzy_candidates) > 0:
+                logger.info('Did you mean: '
+                            f'{colorama.Fore.CYAN}'
+                            f'{sorted(all_fuzzy_candidates)}'
+                            f'{colorama.Style.RESET_ALL}')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_launchable_resources)
