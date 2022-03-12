@@ -16,13 +16,15 @@ and the commands to run:
     accelerators: V100:4
 
   setup: |
-    git clone https://github.com/huggingface/transformers/
+    set -e  # Exit if any command failed.
+    git clone https://github.com/huggingface/transformers/ || true
     cd transformers
     pip3 install .
     cd examples/pytorch/text-classification
     pip3 install -r requirements.txt
 
   run: |
+    set -e  # Exit if any command failed.
     cd transformers/examples/pytorch/text-classification
     python3 run_glue.py \
       --model_name_or_path bert-base-cased \
