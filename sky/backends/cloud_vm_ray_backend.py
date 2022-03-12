@@ -928,6 +928,8 @@ class RetryingVmProvisioner(object):
                 # (otherwise will skip re-optimizing this task).
                 # TODO: set all remaining tasks' best_resources to None.
                 task.best_resources = None
+                # raise_error has to be True to make sure remove_cluster
+                # is called if provisioning fails.
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.

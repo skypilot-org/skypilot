@@ -418,6 +418,7 @@ def _fill_in_launchable_resources(
                                              False)
     launchable = collections.defaultdict(list)
     cloud_candidates = collections.defaultdict(Resources)
+    all_fuzzy_candidates = set()
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
     for resources in task.get_resources():
@@ -444,12 +445,9 @@ def _fill_in_launchable_resources(
             else:
                 accelerators = resources.accelerators
                 logger.info(f'No resource satisfying {accelerators}'
-                            f' on {resources.cloud}. Did you mean:'
-                            f'{colorama.Fore.CYAN}'
-                            f'{fuzzy_candidate_list}'
-                            f'{colorama.Style.RESET_ALL}')
+                            f' on {resources.cloud}.')
+                all_fuzzy_candidates.update(fuzzy_candidate_list)
         else:
-            all_fuzzy_candidates = set()
             for cloud in enabled_clouds:
                 (feasible_resources, fuzzy_candidate_list
                 ) = cloud.get_feasible_launchable_resources(resources)
@@ -465,11 +463,11 @@ def _fill_in_launchable_resources(
                 accelerators = resources.accelerators
                 logger.info(f'No resource satisfying {accelerators}'
                             f' on all clouds.')
-                if len(all_fuzzy_candidates) > 0:
-                    logger.info('Did you mean: '
-                                f'{colorama.Fore.CYAN}'
-                                f'{sorted(all_fuzzy_candidates)}'
-                                f'{colorama.Style.RESET_ALL}')
+        if len(all_fuzzy_candidates) > 0:
+            logger.info('Did you mean: '
+                        f'{colorama.Fore.CYAN}'
+                        f'{sorted(all_fuzzy_candidates)}'
+                        f'{colorama.Style.RESET_ALL}')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_launchable_resources)
