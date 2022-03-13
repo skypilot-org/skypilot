@@ -1140,6 +1140,8 @@ class CloudVmRayBackend(backends.Backend):
                                             self._optimize_target)
 
         launched_nodes = task.num_nodes
+        to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
+            cluster_name, to_provision, task.num_nodes)
         if not dryrun:  # dry run doesn't need to check existing cluster.
             to_provision_config = (self._check_existing_cluster(
                 task, to_provision, cluster_name))
