@@ -73,10 +73,10 @@ rsync_exclude: [
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.
-  # This also kills the process that is holding the lock on the dpkg on aws. See https://docs.ray.io/en/latest/cluster/aws-tips.html#using-amazon-efs
+  # This also kills the service that is holding the lock on the dpkg on aws.
   - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     sudo systemctl stop unattended-upgrades;
-    sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1`;
+    sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
