@@ -21,6 +21,8 @@ install_requires = [
     'pycryptodome==3.12.0',
     'pendulum',
     'PrettyTable',
+    # Lower local ray version is not fully supported, due to the
+    # autoscaler issues.
     'ray[default]>=1.9.0',
     'rich',
     'tabulate',
