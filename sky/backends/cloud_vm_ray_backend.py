@@ -636,6 +636,7 @@ class RetryingVmProvisioner(object):
             logger.error(message)
             raise exceptions.ResourcesUnavailableError()
 
+        assert cluster_status != global_user_state.ClusterStatus.UP
         for region, zones in cloud.region_zones_provision_loop(
                 instance_type=to_provision.instance_type,
                 accelerators=to_provision.accelerators,
