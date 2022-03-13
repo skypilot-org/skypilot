@@ -795,6 +795,7 @@ class RetryingVmProvisioner(object):
 
         style = colorama.Style
 
+        @backend_utils.profile_time
         def ray_up(start_streaming_at):
             # Redirect stdout/err to the file and streaming (if stream_logs).
             # With stdout/err redirected, 'ray up' will have no color and
@@ -833,12 +834,10 @@ class RetryingVmProvisioner(object):
 
         logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
-        start = time.time()
         with console.status('[bold cyan]Launching[/]'):
             # ray up.
             returncode, stdout, stderr = ray_up(
                 start_streaming_at='Shared connection to')
-        logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
@@ -1074,6 +1073,7 @@ class CloudVmRayBackend(backends.Backend):
             backend_utils.handle_returncode(returncode, cmd,
                                             'Failed to set TPU_NAME on node.')
 
+    @backend_utils.profile_time
     def provision(self,
                   task: Task,
                   to_provision: Resources,
@@ -1142,6 +1142,7 @@ class CloudVmRayBackend(backends.Backend):
         _add_cluster_to_ssh_config(cluster_name, ip_list, auth_config)
         return handle
 
+    @backend_utils.profile_time
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
@@ -1201,7 +1202,6 @@ class CloudVmRayBackend(backends.Backend):
         # File mounts handling for remote paths possibly without write access:
         #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
         #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
-        start = time.time()
         del cloud_to_remote_file_mounts  # Unused.
         mounts = all_file_mounts
         symlink_commands = []
@@ -1360,11 +1360,8 @@ class CloudVmRayBackend(backends.Backend):
 
         backend_utils.run_in_parallel(_symlink_node, ip_list)
 
-        end = time.time()
-        logger.debug(f'File mount sync took {end - start} seconds.')
-
+    @backend_utils.profile_time
     def setup(self, handle: ResourceHandle, task: Task) -> None:
-        start = time.time()
         style = colorama.Style
         fore = colorama.Fore
 
@@ -1411,8 +1408,6 @@ class CloudVmRayBackend(backends.Backend):
             with console.status('[bold cyan]Running setup[/]'):
                 backend_utils.run_in_parallel(_setup_node, ip_list)
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
-        end = time.time()
-        logger.debug(f'Setup took {end - start} seconds.')
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()
@@ -1580,6 +1575,7 @@ class CloudVmRayBackend(backends.Backend):
                              f'Returncode: {returncode}') from e
         return job_id
 
+    @backend_utils.profile_time
     def execute(
         self,
         handle: ResourceHandle,
@@ -1688,6 +1684,7 @@ class CloudVmRayBackend(backends.Backend):
                                 executable='python3',
                                 detach_run=detach_run)
 
+    @backend_utils.profile_time
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
         fore = colorama.Fore
@@ -1718,6 +1715,7 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
+    @backend_utils.profile_time
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')

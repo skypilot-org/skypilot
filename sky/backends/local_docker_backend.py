@@ -137,6 +137,7 @@ class LocalDockerBackend(backends.Backend):
             self.images[c.name] = [c.image, metadata]
             self.containers[c.name] = c
 
+    @backend_utils.profile_time
     def provision(self,
                   task: Task,
                   to_provision: Resources,
@@ -169,6 +170,7 @@ class LocalDockerBackend(backends.Backend):
                                                 ready=False)
         return handle
 
+    @backend_utils.profile_time
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         """Workdir is sync'd by adding to the docker image.
 
@@ -178,6 +180,7 @@ class LocalDockerBackend(backends.Backend):
                     ' a NoOp. If you are running sky exec, your workdir has not'
                     ' been updated.')
 
+    @backend_utils.profile_time
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
@@ -201,6 +204,7 @@ class LocalDockerBackend(backends.Backend):
                 }
         self.volume_mounts[handle] = docker_mounts
 
+    @backend_utils.profile_time
     def setup(self, handle: ResourceHandle, task: Task) -> None:
         """
         Launches a container and runs a sleep command on it.
@@ -259,6 +263,7 @@ class LocalDockerBackend(backends.Backend):
                                                 cluster_handle=handle,
                                                 ready=True)
 
+    @backend_utils.profile_time
     def execute(self, handle: ResourceHandle, task: Task,
                 detach_run: bool) -> None:
         """ Launches the container."""
@@ -320,6 +325,7 @@ class LocalDockerBackend(backends.Backend):
             for line in kill_log:
                 logger.info(line.decode('utf-8').strip())
 
+    @backend_utils.profile_time
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
         style = colorama.Style
@@ -342,6 +348,7 @@ class LocalDockerBackend(backends.Backend):
             f'task run command, run {style.BRIGHT}docker run -it '
             f'{container.image.tags[0]} /bin/bash{style.RESET_ALL}')
 
+    @backend_utils.profile_time
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         """Teardown kills the container."""
         if not terminate:
