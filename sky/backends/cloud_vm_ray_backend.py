@@ -570,7 +570,8 @@ class RetryingVmProvisioner(object):
                 region, zones, stdout, stderr)
         assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, to_provision: Resources, cluster_name: str, is_fallback: bool):
+    def _yield_region_zones(self, to_provision: Resources, cluster_name: str,
+                            is_fallback: bool):
         cloud = to_provision.cloud
         region = None
         zones = None
@@ -629,12 +630,11 @@ class RetryingVmProvisioner(object):
                 raise exceptions.ResourcesUnavailableError(message,
                                                            no_retry=True)
             assert cluster_status == global_user_state.ClusterStatus.INIT
-            message = (f'Failed to launch previous INIT cluster ({cluster_name}) '
-                       f'with the original {to_provision}.')
+            message = (
+                f'Failed to launch previous INIT cluster ({cluster_name}) '
+                f'with the original {to_provision}.')
             logger.error(message)
             raise exceptions.ResourcesUnavailableError()
-
-        
 
         for region, zones in cloud.region_zones_provision_loop(
                 instance_type=to_provision.instance_type,
@@ -694,8 +694,13 @@ class RetryingVmProvisioner(object):
             logger.error(stderr)
             raise e
 
-    def _retry_region_zones(self, to_provision: Resources, num_nodes: int,
-                            dryrun: bool, stream_logs: bool, cluster_name: str, is_fallback: bool=False):
+    def _retry_region_zones(self,
+                            to_provision: Resources,
+                            num_nodes: int,
+                            dryrun: bool,
+                            stream_logs: bool,
+                            cluster_name: str,
+                            is_fallback: bool = False):
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore
@@ -708,7 +713,8 @@ class RetryingVmProvisioner(object):
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
-                                                      cluster_name, is_fallback):
+                                                      cluster_name,
+                                                      is_fallback):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
             zone_str = ','.join(
@@ -796,8 +802,8 @@ class RetryingVmProvisioner(object):
                             f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
         message = ('Failed to acquire resources in all regions/zones'
-                f' (requested {to_provision}).'
-                ' Try changing resource requirements or use another cloud.')
+                   f' (requested {to_provision}).'
+                   ' Try changing resource requirements or use another cloud.')
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
 
@@ -1086,7 +1092,9 @@ class CloudVmRayBackend(backends.Backend):
             if cluster_status == global_user_state.ClusterStatus.INIT:
                 # INIT cluster should fallback to currently requested resources
                 # as discussed in #514.
-                logger.debug('Existing cluster is INIT, fallback to current requested resources.')
+                logger.debug(
+                    'Existing cluster is INIT, fallback to current requested resources.'
+                )
                 return RetryingVmProvisioner.ToProvisionConfig(
                     cluster_name, handle.launched_resources,
                     handle.launched_nodes, True)
