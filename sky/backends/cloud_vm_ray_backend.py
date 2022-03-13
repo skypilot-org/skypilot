@@ -629,7 +629,12 @@ class RetryingVmProvisioner(object):
                 raise exceptions.ResourcesUnavailableError(message,
                                                            no_retry=True)
             assert cluster_status == global_user_state.ClusterStatus.INIT
-            return
+            message = (f'Failed to launch previous INIT cluster ({cluster_name}) '
+                       f'with the original {to_provision}.')
+            logger.error(message)
+            raise exceptions.ResourcesUnavailableError()
+
+        
 
         for region, zones in cloud.region_zones_provision_loop(
                 instance_type=to_provision.instance_type,
@@ -790,13 +795,9 @@ class RetryingVmProvisioner(object):
                 logger.info(f'{fore.GREEN}Successfully provisioned or found'
                             f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
-        if not is_fallback:
-            message = ('Failed to launch previous INIT cluster with the original '
-                       f'{to_provision}.')
-        else:
-            message = ('Failed to acquire resources in all regions/zones'
-                    f' (requested {to_provision}).'
-                    ' Try changing resource requirements or use another cloud.')
+        message = ('Failed to acquire resources in all regions/zones'
+                f' (requested {to_provision}).'
+                ' Try changing resource requirements or use another cloud.')
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
 
@@ -947,7 +948,6 @@ class RetryingVmProvisioner(object):
                     return
                 config_dict['launched_resources'] = to_provision
             except exceptions.ResourcesUnavailableError as e:
-                # import pdb; pdb.set_trace()
                 if e.no_retry:
                     raise e
                 if launchable_retries_disabled:
@@ -959,15 +959,15 @@ class RetryingVmProvisioner(object):
                     raise e
                 provision_failed = True
                 logger.warning(
-                    f'\n{style.BRIGHT}Provision failed for {to_provision}. '
-                    'Trying other launchable resources (if any)...'
-                    f'{style.RESET_ALL}')
+                    f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
+                    f'{to_provision}. Trying other launchable resources '
+                    f'(if any)...{style.RESET_ALL}')
                 if is_fallback:
                     # Add failed resources to the blocklist.
                     self._blocked_launchable_resources.add(to_provision)
                 else:
                     logger.info('Fallback to current requested resources: '
-                                f'{task.resources}')
+                                f'{task.num_nodes}x {task.resources}')
                     num_nodes = task.num_nodes
                     is_fallback = True
 
