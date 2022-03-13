@@ -379,6 +379,22 @@ class RayCodeGen:
 class RetryingVmProvisioner(object):
     """A provisioner that retries different cloud/regions/zones."""
 
+    class ToProvisionConfig:
+        """Resources to be provisioned"""
+
+        def __init__(self,
+                     cluster_name: str,
+                     resources: Resources,
+                     num_nodes: int,
+                     fallback_resources: Optional[Resources] = None,
+                     fallback_num_nodes: Optional[int] = None) -> None:
+            assert cluster_name is not None, 'cluster_name must be specified.'
+            self.cluster_name = cluster_name
+            self.resources = resources
+            self.num_nodes = num_nodes
+            self.fallback_resources = fallback_resources
+            self.fallback_num_nodes = fallback_num_nodes
+
     class GangSchedulingStatus(enum.Enum):
         """Enum for gang scheduling status."""
         CLUSTER_READY = 0
@@ -590,6 +606,8 @@ class RetryingVmProvisioner(object):
             # Get the *previous* cluster status.
             cluster_status = global_user_state.get_status_from_cluster_name(
                 cluster_name)
+            logger.info(f'Found previous {cluster_status.value} cluster in '
+                        f'{cloud} {region.name}. Trying to launch it again.')
             yield (region, zones)  # Ok to yield again in the next loop.
 
             # If it reaches here: the cluster status gets set to INIT, since
@@ -613,6 +631,10 @@ class RetryingVmProvisioner(object):
 
                 raise exceptions.ResourcesUnavailableError(message,
                                                            no_retry=True)
+            assert cluster_status == global_user_state.ClusterStatus.INIT
+            logger.info('Failed to launch previous INIT cluster. Fallback '
+                        'to current requested resources.')
+            return
 
         for region, zones in cloud.region_zones_provision_loop(
                 instance_type=to_provision.instance_type,
@@ -894,11 +916,18 @@ class RetryingVmProvisioner(object):
             log_abs_path,
             stream_logs=True)
 
-    def provision_with_retries(self, task: Task, to_provision: Resources,
-                               num_nodes: int, dryrun: bool, stream_logs: bool,
-                               cluster_name: str):
+    def provision_with_retries(
+        self,
+        task: Task,
+        to_provision_config: ToProvisionConfig,
+        dryrun: bool,
+        stream_logs: bool,
+    ):
         """Provision with retries for all launchable resources."""
-        assert cluster_name is not None, 'cluster_name must be specified.'
+        cluster_name = to_provision_config.cluster_name
+        to_provision = to_provision_config.resources
+        num_nodes = to_provision_config.num_nodes
+        first_fallback = to_provision_config.fallback_resources is not None
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
@@ -932,8 +961,17 @@ class RetryingVmProvisioner(object):
                     f'\n{style.BRIGHT}Provision failed for {to_provision}. '
                     'Trying other launchable resources (if any)...'
                     f'{style.RESET_ALL}')
-                # Add failed resources to the blocklist.
-                self._blocked_launchable_resources.add(to_provision)
+                if first_fallback and to_provision_config.fallback_resources is not None:
+                    assert to_provision_config.fallback_num_nodes is not None
+                    task.resources = to_provision_config.fallback_resources
+                    task.num_nodes = to_provision_config.fallback_num_nodes
+                    logger.debug(f'Fallback to resources: {task.resources}')
+                    num_nodes = task.num_nodes
+                    first_fallback = False
+                else:
+                    # Add failed resources to the blocklist.
+                    self._blocked_launchable_resources.add(to_provision)
+
                 # Set to None so that sky.optimize() will assign a new one
                 # (otherwise will skip re-optimizing this task).
                 # TODO: set all remaining tasks' best_resources to None.
@@ -1037,15 +1075,24 @@ class CloudVmRayBackend(backends.Backend):
 
     def _check_existing_cluster(
             self, task: Task, to_provision: Resources,
-            cluster_name: str) -> Tuple[str, Resources, int]:
+            cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        cluster_status = global_user_state.get_status_from_cluster_name(
+            cluster_name)
         if handle is not None:
             # Cluster already exists.
             self._check_task_resources_smaller_than_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
-            return (cluster_name, handle.launched_resources,
-                    handle.launched_nodes)
+            if cluster_status == global_user_state.ClusterStatus.INIT:
+                # INIT cluster should fallback to currently requested resources
+                # as discussed in #514.
+                logger.debug('Existing cluster is INIT, fallback to current requested resources.')
+                return RetryingVmProvisioner.ToProvisionConfig(
+                    cluster_name, handle.launched_resources,
+                    handle.launched_nodes, to_provision, task.num_nodes)
+            return RetryingVmProvisioner.ToProvisionConfig(
+                cluster_name, handle.launched_resources, handle.launched_nodes)
 
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
@@ -1053,7 +1100,9 @@ class CloudVmRayBackend(backends.Backend):
             'Tip: to reuse an existing cluster, '
             'specify --cluster (-c). '
             'Run `sky status` to see existing clusters.')
-        return cluster_name, to_provision, task.num_nodes
+        return RetryingVmProvisioner.ToProvisionConfig(cluster_name,
+                                                       to_provision,
+                                                       task.num_nodes)
 
     def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
                       tpu_name: str) -> None:
@@ -1093,12 +1142,11 @@ class CloudVmRayBackend(backends.Backend):
 
         launched_nodes = task.num_nodes
         if not dryrun:  # dry run doesn't need to check existing cluster.
-            cluster_name, to_provision, launched_nodes = (
-                self._check_existing_cluster(task, to_provision, cluster_name))
+            to_provision_config = (self._check_existing_cluster(
+                task, to_provision, cluster_name))
         try:
             config_dict = provisioner.provision_with_retries(
-                task, to_provision, launched_nodes, dryrun, stream_logs,
-                cluster_name)
+                task, to_provision_config, dryrun, stream_logs)
         except exceptions.ResourcesUnavailableError as e:
             # Do not remove the stopped cluster from the global state if failed
             # to start.
