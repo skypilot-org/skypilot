@@ -1073,16 +1073,20 @@ def get_backend_from_handle(
             f'Handle type {type(handle)} is not supported yet.')
     return backend
 
+
 def profile_time(func):
     """Time a function call."""
+
     @functools.wraps(func)
     def wrap(*args, **kwargs):
         start = time.time()
         result = func(*args, **kwargs)
         end = time.time()
-        logger.debug(f'[Profiling] {func.__name__!r} took {end - start:.2f}s')
+        logger.debug(f'\n[Profiling] {func.__name__!r} took {end - start:.2f}s')
         return result
+
     return wrap
+
 
 class JobLibCodeGen(object):
     """Code generator for job utility functions.
