@@ -21,7 +21,7 @@ install_requires = [
     'pycryptodome==3.12.0',
     'pendulum',
     'PrettyTable',
-    'ray[default]',
+    'ray[default]>=1.9.0',
     'rich',
     'tabulate',
     # This is used by ray. The latest 1.44.0 will generate an error
