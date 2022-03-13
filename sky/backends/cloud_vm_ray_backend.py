@@ -385,12 +385,12 @@ class RetryingVmProvisioner(object):
                      cluster_name: str,
                      resources: Resources,
                      num_nodes: int,
-                     has_fallback: bool = False) -> None:
+                     cluster_exists: bool = False) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
             self.resources = resources
             self.num_nodes = num_nodes
-            self.has_fallback = has_fallback
+            self.cluster_exists = cluster_exists
 
     class GangSchedulingStatus(enum.Enum):
         """Enum for gang scheduling status."""
@@ -571,7 +571,7 @@ class RetryingVmProvisioner(object):
         assert False, f'Unknown cloud: {cloud}.'
 
     def _yield_region_zones(self, to_provision: Resources, cluster_name: str,
-                            is_fallback: bool):
+                            cluster_exists: bool):
         cloud = to_provision.cloud
         region = None
         zones = None
@@ -596,7 +596,7 @@ class RetryingVmProvisioner(object):
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
-        if region is not None and not is_fallback:
+        if region is not None and cluster_exists:
             region = clouds.Region(name=region)
             if zones is not None:
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
@@ -605,7 +605,7 @@ class RetryingVmProvisioner(object):
             cluster_status = global_user_state.get_status_from_cluster_name(
                 cluster_name)
             logger.info(f'Found previous {cluster_status.value} cluster in '
-                        f'{cloud} {region.name}. Trying to launch it again.')
+                        f'{cloud} {region.name}. Trying to launch it again...')
             yield (region, zones)  # Ok to yield again in the next loop.
 
             # If it reaches here: the cluster status gets set to INIT, since
@@ -700,7 +700,7 @@ class RetryingVmProvisioner(object):
                             dryrun: bool,
                             stream_logs: bool,
                             cluster_name: str,
-                            is_fallback: bool = False):
+                            cluster_exists: bool = False):
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore
@@ -714,7 +714,7 @@ class RetryingVmProvisioner(object):
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
                                                       cluster_name,
-                                                      is_fallback):
+                                                      cluster_exists):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
             zone_str = ','.join(
@@ -933,7 +933,7 @@ class RetryingVmProvisioner(object):
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
         num_nodes = to_provision_config.num_nodes
-        is_fallback = not to_provision_config.has_fallback
+        cluster_exists = to_provision_config.cluster_exists
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
@@ -949,7 +949,7 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
-                    is_fallback=is_fallback)
+                    cluster_exists=cluster_exists)
                 if dryrun:
                     return
                 config_dict['launched_resources'] = to_provision
@@ -968,14 +968,15 @@ class RetryingVmProvisioner(object):
                     f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
                     f'{to_provision}. Trying other launchable resources '
                     f'(if any)...{style.RESET_ALL}')
-                if is_fallback:
-                    # Add failed resources to the blocklist.
+                if not cluster_exists:
+                    # Add failed resources to the blocklist, only when it
+                    # is in fallback mode.
                     self._blocked_launchable_resources.add(to_provision)
                 else:
                     logger.info('Fallback to current requested resources: '
                                 f'{task.num_nodes}x {task.resources}')
                     num_nodes = task.num_nodes
-                    is_fallback = True
+                    cluster_exists = False
 
                 # Set to None so that sky.optimize() will assign a new one
                 # (otherwise will skip re-optimizing this task).
@@ -1089,17 +1090,8 @@ class CloudVmRayBackend(backends.Backend):
             self._check_task_resources_smaller_than_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
-            if cluster_status == global_user_state.ClusterStatus.INIT:
-                # INIT cluster should fallback to currently requested resources
-                # as discussed in #514.
-                logger.debug(
-                    'Existing cluster is INIT, fallback to current requested resources.'
-                )
-                return RetryingVmProvisioner.ToProvisionConfig(
-                    cluster_name, handle.launched_resources,
-                    handle.launched_nodes, True)
             return RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name, handle.launched_resources, handle.launched_nodes)
+                cluster_name, handle.launched_resources, handle.launched_nodes, True)
 
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
