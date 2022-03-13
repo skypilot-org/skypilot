@@ -1083,15 +1083,14 @@ class CloudVmRayBackend(backends.Backend):
             self, task: Task, to_provision: Resources,
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-        cluster_status = global_user_state.get_status_from_cluster_name(
-            cluster_name)
         if handle is not None:
             # Cluster already exists.
             self._check_task_resources_smaller_than_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name, handle.launched_resources, handle.launched_nodes, True)
+                cluster_name, handle.launched_resources, handle.launched_nodes,
+                True)
 
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
