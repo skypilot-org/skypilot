@@ -22,7 +22,7 @@ install_requires = [
     'pendulum',
     'PrettyTable',
     # Lower local ray version is not fully supported, due to the
-    # autoscaler issues.
+    # autoscaler issues (also tracked in #537).
     'ray[default]>=1.9.0',
     'rich',
     'tabulate',
