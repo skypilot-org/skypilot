@@ -102,9 +102,9 @@ def _add_cluster_to_ssh_config(cluster_name: str, cluster_ips: List[str],
                                               auth_config)
 
 
-def _remove_cluster_from_ssh_config(cluster_name: str, cluster_ips: List[str],
+def _remove_cluster_from_ssh_config(cluster_name: str, cluster_ip: str,
                                     auth_config: Dict[str, str]) -> None:
-    backend_utils.SSHConfigHelper.remove_cluster(cluster_name, cluster_ips,
+    backend_utils.SSHConfigHelper.remove_cluster(cluster_name, cluster_ip,
                                                  auth_config)
 
 
@@ -1724,8 +1724,6 @@ class CloudVmRayBackend(backends.Backend):
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes)
         prev_status = global_user_state.get_status_from_cluster_name(
             handle.cluster_name)
         cluster_name = config['cluster_name']
@@ -1828,7 +1826,8 @@ class CloudVmRayBackend(backends.Backend):
                 f'{stderr}{colorama.Style.RESET_ALL}')
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        _remove_cluster_from_ssh_config(cluster_name, ip_list, auth_config)
+        _remove_cluster_from_ssh_config(cluster_name, handle.head_ip,
+                                        auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name, terminate=terminate)
 
