@@ -607,16 +607,18 @@ class RetryingVmProvisioner(object):
             # Get the *previous* cluster status.
             cluster_status = global_user_state.get_status_from_cluster_name(
                 cluster_name)
-            logger.info(f'Cluster {cluster_name!r} (status: {cluster_status.value})'
-                        f'was previously launched in {cloud} ({region.name}). '
-                        'Relaunching in that region.')
+            logger.info(
+                f'Cluster {cluster_name!r} (status: {cluster_status.value})'
+                f'was previously launched in {cloud} ({region.name}). '
+                'Relaunching in that region.')
             yield (region, zones)  # Ok to yield again in the next loop.
-            
+
             if cluster_status == global_user_state.ClusterStatus.UP:
-                message = (f'Failed to connect to the cluster {cluster_name}. '
-                           'It is possibly killed by cloud provider or manually '
-                           'in the cloud provider console. To remove the cluster '
-                           f'please run: sky down {cluster_name}')
+                message = (
+                    f'Failed to connect to the cluster {cluster_name}. '
+                    'It is possibly killed by cloud provider or manually '
+                    'in the cloud provider console. To remove the cluster '
+                    f'please run: sky down {cluster_name}')
                 logger.error(message)
                 # Reset to UP (rather than keeping it at INIT), because the INIT
                 # mode will enable failover to other regions, causing data lose.
@@ -652,19 +654,22 @@ class RetryingVmProvisioner(object):
                                                            no_retry=True)
 
             assert cluster_status == global_user_state.ClusterStatus.INIT
-            message = (
-                f'Failed to launch cluster {cluster_name!r} '
-                f'(previous status: {cluster_status.value})'
-                f'with the original resources: {to_provision}.')
+            message = (f'Failed to launch cluster {cluster_name!r} '
+                       f'(previous status: {cluster_status.value})'
+                       f'with the original resources: {to_provision}.')
             logger.error(message)
-            # We attempted re-launching a previously INIT cluster with the same cloud/region/resources,
-            # but failed. Here no_retry=False, so we will retry provisioning it with the current requested resources
-            # in the outer loop.
+            # We attempted re-launching a previously INIT cluster with the
+            # same cloud/region/resources, but failed. Here no_retry=False,
+            # so we will retry provisioning it with the current requested
+            # resources in the outer loop.
             #
-            # This condition can be triggered for previously INIT cluster by (1) launch, after answering prompt immediately ctrl-c; 
-            # (2) launch again.  After (1), the cluster exists with INIT, and may or may not be live.  And if 
-            # it hits here, it's definitely not alive (because step (2) failed).  Hence it's ok to retry with 
-            # different cloud/region and with current resources.
+            # This condition can be triggered for previously INIT cluster by
+            # (1) launch, after answering prompt immediately ctrl-c;
+            # (2) launch again.
+            # After (1), the cluster exists with INIT, and may or may not be
+            # live.  And if it hits here, it's definitely not alive (because
+            # step (2) failed).  Hence it's ok to retry with different
+            # cloud/region and with current resources.
             raise exceptions.ResourcesUnavailableError()
 
         for region, zones in cloud.region_zones_provision_loop(
@@ -1004,8 +1009,9 @@ class RetryingVmProvisioner(object):
                     # is in fallback mode.
                     self._blocked_launchable_resources.add(to_provision)
                 else:
-                    logger.info('Retrying provisioning with requested resources '
-                                f'{task.num_nodes}x {task.resources}')
+                    logger.info(
+                        'Retrying provisioning with requested resources '
+                        f'{task.num_nodes}x {task.resources}')
                     num_nodes = task.num_nodes
                     cluster_exists = False
 
