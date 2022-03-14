@@ -1144,7 +1144,8 @@ class CloudVmRayBackend(backends.Backend):
                                                     handle,
                                                     ready=True)
             auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-            _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
+            _add_cluster_to_ssh_config(cluster_name, handle.head_ip,
+                                       auth_config)
             return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
