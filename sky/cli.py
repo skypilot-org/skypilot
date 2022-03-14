@@ -395,10 +395,12 @@ def _check_yaml(entrypoint: str) -> bool:
                     is_yaml = False
             except yaml.YAMLError as e:
                 click.secho(f'Invalid YAML configuration {entrypoint}:',
-                            fg='yellow')
+                            fg='red')
                 click.secho(e, fg='red')
                 is_yaml = False
     except OSError:
+        if entrypoint.endswith('.yaml') or entrypoint.endswith('.yml'):
+            click.secho(f'{entrypoint} is not a readable file', fg='red')
         is_yaml = False
     if not is_yaml:
         shell_splits = shlex.split(entrypoint)
