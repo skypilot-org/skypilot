@@ -319,7 +319,7 @@ class Optimizer:
                         logger.info(
                             f'Multiple {cloud} instances satisfy '
                             f'{acc_name}:{int(acc_count)}. '
-                            f'The cheapest {candidate_list[0]} is selected '
+                            f'The cheapest {candidate_list[0]!r} is considered '
                             f'among:\n{instance_list}.\n')
             if is_multi_instances:
                 logger.info(
@@ -410,7 +410,7 @@ def _fill_in_launchable_resources(
     task: Task,
     blocked_launchable_resources: Optional[List[Resources]],
     try_fix_with_sky_check: bool = True,
-) -> Tuple[Dict[Resources, List[Resources]], Optional[Dict[str, set]]]:
+) -> Tuple[Dict[Resources, List[Resources]], Dict[str, set]]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_check:
         check.check(quiet=True)
