@@ -1127,8 +1127,8 @@ class CloudVmRayBackend(backends.Backend):
 
             head_ip = backend_utils.query_head_ip_with_retries(
                 cluster_config_file,
-                # Retry is useful for azure, as sometimes it will need some time for
-                # ray get-head-ip to be able to fetch the head ip.
+                # Retry is useful for azure, as sometimes it will need some time
+                # for ray get-head-ip to be able to fetch the head ip.
                 retry_count=backend_utils.WAIT_HEAD_NODE_IP_RETRY_COUNT)
             handle = self.ResourceHandle(
                 cluster_name=cluster_name,
