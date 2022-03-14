@@ -341,7 +341,7 @@ def _create_and_ssh_into_node(
             to_provision = task.best_resources
             if handle is None and not no_confirm:
                 # Only show the confirmation prompt if the cluster is not
-                # in INIT mode.
+                # in the clusters table.
                 click.confirm('Launching a new cluster. Proceed?',
                               default=True,
                               abort=True,
