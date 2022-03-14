@@ -88,13 +88,13 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_default_ami(cls, region_name: str) -> str:
-        # AWS Deep Learning AMI (Ubuntu 18.04), version 50.0
-        # https://aws.amazon.com/marketplace/pp/prodview-x5nivojpquy6y
+        # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
+        # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
         amis = {
-            'us-east-1': 'ami-0e3c68b57d50caf64',
-            'us-east-2': 'ami-0ae79682024fe31cd',
+            'us-east-1': 'ami-0729d913a335efca7',
+            'us-east-2': 'ami-070f4af81c19b41bf',
             # 'us-west-1': 'TODO: cannot launch',
-            'us-west-2': 'ami-0050625d58fa27b6d',
+            'us-west-2': 'ami-050814f384259894c',
         }
         assert region_name in amis, region_name
         return amis[region_name]
