@@ -383,7 +383,6 @@ def _create_and_ssh_into_node(
     click.secho(f'rsync -rP {cluster_name}:/remote/path /local/path', bold=True)
 
 
-# TODO(gmittal): Move this into Task.from_yaml since those checks are also there
 def _check_yaml(entrypoint: str) -> bool:
     """Checks if entrypoint is a readable YAML file."""
     is_yaml = True
@@ -394,7 +393,10 @@ def _check_yaml(entrypoint: str) -> bool:
                 if isinstance(config, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
-            except yaml.YAMLError:
+            except yaml.YAMLError as e:
+                click.secho(f'Invalid YAML configuration {entrypoint}:',
+                            fg='yellow')
+                click.secho(e, fg='red')
                 is_yaml = False
     except OSError:
         is_yaml = False
