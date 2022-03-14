@@ -1020,6 +1020,11 @@ class RetryingVmProvisioner(object):
                     logger.info(
                         'Retrying provisioning with requested resources '
                         f'{task.num_nodes}x {task.resources}')
+                    # Retry with the current, potentially "smaller" resources:
+                    # to_provision == the current new resources (e.g., V100:1),
+                    # which may be "smaller" than the original (V100:8).
+                    # num_nodes is not part of a Resources so must be updated
+                    # separately.
                     num_nodes = task.num_nodes
                     cluster_exists = False
 
