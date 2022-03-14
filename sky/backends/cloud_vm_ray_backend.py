@@ -1117,44 +1117,35 @@ class CloudVmRayBackend(backends.Backend):
                 global_user_state.remove_cluster(cluster_name, terminate=True)
                 logger.error(
                     'Failed to provision all possible launchable resources. '
-                    f'Relax the task\'s resource requirements:\n \
-                        {launched_nodes}x '
-                    f'{task.resources}')
-                sys.exit(1)
-                # Clean up the cluster's entry in `sky status`.
-                global_user_state.remove_cluster(cluster_name, terminate=True)
-                logger.error(
-                    'Failed to provision all possible launchable resources. '
-                    f'Relax the task\'s resource requirements:\n \
-                        {launched_nodes}x '
-                    f'{task.resources}')
+                    f'Relax the task\'s resource requirements:\n '
+                    f'{launched_nodes}x {task.resources}')
                 sys.exit(1)
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
             provisioned_resources = config_dict['launched_resources']
 
-        head_ip = backend_utils.query_head_ip_with_retries(
-            cluster_config_file,
-            # Retry is useful for azure, as sometimes it will need some time for
-            # ray get-head-ip to be able to fetch the head ip.
-            retry_count=backend_utils.WAIT_HEAD_NODE_IP_RETRY_COUNT)
-        handle = self.ResourceHandle(
-            cluster_name=cluster_name,
-            cluster_yaml=cluster_config_file,
-            # Cache head ip in the handle to speed up ssh operations.
-            head_ip=head_ip,
-            launched_nodes=launched_nodes,
-            launched_resources=provisioned_resources,
-            # TPU.
-            tpu_create_script=config_dict.get('tpu-create-script'),
-            tpu_delete_script=config_dict.get('tpu-delete-script'))
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                handle,
-                                                ready=True)
-        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
-        return handle
+            head_ip = backend_utils.query_head_ip_with_retries(
+                cluster_config_file,
+                # Retry is useful for azure, as sometimes it will need some time for
+                # ray get-head-ip to be able to fetch the head ip.
+                retry_count=backend_utils.WAIT_HEAD_NODE_IP_RETRY_COUNT)
+            handle = self.ResourceHandle(
+                cluster_name=cluster_name,
+                cluster_yaml=cluster_config_file,
+                # Cache head ip in the handle to speed up ssh operations.
+                head_ip=head_ip,
+                launched_nodes=launched_nodes,
+                launched_resources=provisioned_resources,
+                # TPU.
+                tpu_create_script=config_dict.get('tpu-create-script'),
+                tpu_delete_script=config_dict.get('tpu-delete-script'))
+            global_user_state.add_or_update_cluster(cluster_name,
+                                                    handle,
+                                                    ready=True)
+            auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+            _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
+            return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
