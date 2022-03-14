@@ -624,7 +624,7 @@ class RetryingVmProvisioner(object):
             # relaunch, which can happen to spot instance.
             if cluster_status == global_user_state.ClusterStatus.UP:
                 message = (
-                    f'Failed to connect to the cluster {cluster_name}. '
+                    f'Failed to connect to the cluster {cluster_name!r}. '
                     'It is possibly killed by cloud provider or manually '
                     'in the cloud provider console. To remove the cluster '
                     f'please run: sky down {cluster_name}')
