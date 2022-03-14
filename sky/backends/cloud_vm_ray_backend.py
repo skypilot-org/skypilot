@@ -611,8 +611,14 @@ class RetryingVmProvisioner(object):
                 f'Cluster {cluster_name!r} (status: {cluster_status.value})'
                 f'was previously launched in {cloud} ({region.name}). '
                 'Relaunching in that region.')
+            # TODO(zhwu): The cluster being killed by cloud provider should
+            # be tested whether re-launching a cluster killed spot instance
+            # will recover the data.
             yield (region, zones)  # Ok to yield again in the next loop.
 
+            # Cluster with status UP can reach here, if it was killed by the cloud
+            # provider and no available resources in that region to relaunch, which
+            # can happen to spot instance.
             if cluster_status == global_user_state.ClusterStatus.UP:
                 message = (
                     f'Failed to connect to the cluster {cluster_name}. '
@@ -622,9 +628,7 @@ class RetryingVmProvisioner(object):
                 logger.error(message)
                 # Reset to UP (rather than keeping it at INIT), because the INIT
                 # mode will enable failover to other regions, causing data lose.
-                # TODO(zhwu): The cluster being killed by cloud provider should
-                # be tested whether re-launching a cluster killed spot instance
-                # will recover the data.
+                # TODO(zhwu): This may need a better solution.
                 global_user_state.set_cluster_status(
                     cluster_name, global_user_state.ClusterStatus.UP)
 
