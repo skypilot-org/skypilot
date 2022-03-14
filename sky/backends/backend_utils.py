@@ -683,12 +683,11 @@ def wait_until_ray_cluster_ready(
                                                        log_path=log_path,
                                                        stream_logs=False,
                                                        require_outputs=True)
-
+        if rc != 0:
+            worker_status.stop()
         handle_returncode(rc, 'ray status',
                           'Failed to run ray status on head node.', stderr)
-        logger.info(output)
-        worker_status.stop()
-        import pdb; pdb.set_trace()
+        logger.debug(output)
 
         # Workers that are ready
         result = _LAUNCHED_WORKER_PATTERN.findall(output)
@@ -703,6 +702,10 @@ def wait_until_ray_cluster_ready(
             assert len(result) == 1, result
             ready_head = int(result[0])
             assert ready_head <= 1, ready_head
+
+        worker_status.update('[bold cyan]'
+                             f'{ready_workers} out of {num_nodes - 1} '
+                             'workers ready')
 
         if ready_head + ready_workers == num_nodes:
             # All nodes are up.

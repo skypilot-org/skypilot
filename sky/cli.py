@@ -382,7 +382,7 @@ def _create_and_ssh_into_node(
     click.echo('To download a folder:\t', nl=False)
     click.secho(f'rsync -rP {cluster_name}:/remote/path /local/path', bold=True)
 
-
+# TODO(gmittal): Move this into Task.from_yaml since those checks are also there
 def _check_yaml(entrypoint: str) -> bool:
     """Checks if entrypoint is a readable YAML file."""
     is_yaml = True
