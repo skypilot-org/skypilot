@@ -3,7 +3,7 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from sky.clouds import cloud
 from sky.clouds.service_catalog import common
@@ -30,10 +30,12 @@ def get_accelerators_from_instance_type(
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
-) -> Optional[str]:
-    """Returns the instance type with the required count of accelerators."""
-    return common.get_instance_type_for_accelerator_impl(cloud='aws',
-                                                         df=_df,
+) -> Tuple[Optional[List[str]], List[str]]:
+    """
+    Returns a list of instance types satisfying the required count of
+    accelerators with sorted prices and a list of candidates with fuzzy search.
+    """
+    return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count)
 
