@@ -17,6 +17,7 @@ import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
+import filelock
 from rich import console as rich_console
 
 import sky
@@ -52,6 +53,8 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout for provision a cluster and wait for it to be ready in seconds.
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
+
+_LOCK_FILENAME = '~/.sky/.{}.lock'
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -1092,55 +1095,57 @@ class CloudVmRayBackend(backends.Backend):
                                             self._optimize_target)
 
         launched_nodes = task.num_nodes
-        if not dryrun:  # dry run doesn't need to check existing cluster.
-            cluster_name, to_provision, launched_nodes = (
-                self._check_existing_cluster(task, to_provision, cluster_name))
-        try:
-            config_dict = provisioner.provision_with_retries(
-                task, to_provision, launched_nodes, dryrun, stream_logs,
-                cluster_name)
-        except exceptions.ResourcesUnavailableError as e:
-            # Do not remove the stopped cluster from the global state if failed
-            # to start.
-            if e.no_retry:
-                logger.error(e)
+
+        lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
+        # TODO(mraheja): remove pylint disabling when filelock version updated
+        # pylint: disable=abstract-class-instantiated
+        with filelock.FileLock(lock_path):
+            if not dryrun:  # dry run doesn't need to check existing cluster.
+                cluster_name, to_provision, launched_nodes = (
+                    self._check_existing_cluster(task, to_provision,
+                                                 cluster_name))
+            try:
+                config_dict = provisioner.provision_with_retries(
+                    task, to_provision, launched_nodes, dryrun, stream_logs,
+                    cluster_name)
+            except exceptions.ResourcesUnavailableError as e:
+                # Do not remove the stopped cluster from the global state
+                # if failed to start.
+                if e.no_retry:
+                    logger.error(e)
+                    sys.exit(1)
+                # Clean up the cluster's entry in `sky status`.
+                global_user_state.remove_cluster(cluster_name, terminate=True)
+                logger.error(
+                    'Failed to provision all possible launchable resources. '
+                    f'Relax the task\'s resource requirements:\n '
+                    f'{launched_nodes}x {task.resources}')
                 sys.exit(1)
-            # Clean up the cluster's entry in `sky status`.
-            global_user_state.remove_cluster(cluster_name, terminate=True)
-            logger.error(
-                'Failed to provision all possible launchable resources. '
-                f'Relax the task\'s resource requirements:\n {launched_nodes}x '
-                f'{task.resources}')
-            sys.exit(1)
-        if dryrun:
-            return
-        cluster_config_file = config_dict['ray']
-        provisioned_resources = config_dict['launched_resources']
+            if dryrun:
+                return
+            cluster_config_file = config_dict['ray']
+            provisioned_resources = config_dict['launched_resources']
 
-        # Set TPU environment variables
-        tpu_name = config_dict.get('tpu_name')
-        if tpu_name is not None:
-            self._set_tpu_name(cluster_config_file, launched_nodes, tpu_name)
+            ip_list = backend_utils.get_node_ips(cluster_config_file,
+                                                 launched_nodes)
+            head_ip = ip_list[0]
 
-        ip_list = backend_utils.get_node_ips(cluster_config_file,
-                                             launched_nodes)
-
-        handle = self.ResourceHandle(
-            cluster_name=cluster_name,
-            cluster_yaml=cluster_config_file,
-            # Cache head ip in the handle to speed up ssh operations.
-            head_ip=ip_list[0],
-            launched_nodes=launched_nodes,
-            launched_resources=provisioned_resources,
-            # TPU.
-            tpu_create_script=config_dict.get('tpu-create-script'),
-            tpu_delete_script=config_dict.get('tpu-delete-script'))
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                handle,
-                                                ready=True)
-        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        _add_cluster_to_ssh_config(cluster_name, ip_list, auth_config)
-        return handle
+            handle = self.ResourceHandle(
+                cluster_name=cluster_name,
+                cluster_yaml=cluster_config_file,
+                # Cache head ip in the handle to speed up ssh operations.
+                head_ip=head_ip,
+                launched_nodes=launched_nodes,
+                launched_resources=provisioned_resources,
+                # TPU.
+                tpu_create_script=config_dict.get('tpu-create-script'),
+                tpu_delete_script=config_dict.get('tpu-delete-script'))
+            global_user_state.add_or_update_cluster(cluster_name,
+                                                    handle,
+                                                    ready=True)
+            auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
+            _add_cluster_to_ssh_config(cluster_name, ip_list, auth_config)
+            return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
@@ -1719,6 +1724,21 @@ class CloudVmRayBackend(backends.Backend):
                     storage.delete()
 
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+        cluster_name = handle.cluster_name
+        lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
+        try:
+            # TODO(mraheja): remove pylint disabling when filelock
+            # version updated
+            # pylint: disable=abstract-class-instantiated
+            with filelock.FileLock(lock_path, 10):
+                self._teardown(handle, terminate)
+            if terminate:
+                os.remove(lock_path)
+        except filelock.Timeout:
+            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. \
+                    Check to see if it is still being launched.')
+
+    def _teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1726,7 +1746,7 @@ class CloudVmRayBackend(backends.Backend):
         config = backend_utils.read_yaml(handle.cluster_yaml)
         prev_status = global_user_state.get_status_from_cluster_name(
             handle.cluster_name)
-        cluster_name = config['cluster_name']
+        cluster_name = handle.cluster_name
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.

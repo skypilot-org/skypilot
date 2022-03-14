@@ -21,9 +21,12 @@ install_requires = [
     'pycryptodome==3.12.0',
     'pendulum',
     'PrettyTable',
-    'ray[default]',
+    # Lower local ray version is not fully supported, due to the
+    # autoscaler issues (also tracked in #537).
+    'ray[default]>=1.9.0',
     'rich',
     'tabulate',
+    'filelock',  #TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
