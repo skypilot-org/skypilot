@@ -536,6 +536,10 @@ def wait_until_ray_cluster_ready(
         pending_workers = len(found_ips)
 
         workers_so_far = ready_workers + pending_workers
+        # TODO(zhwu): Handle the case where the following occurs, where ray
+        # cluster is not correctly started on the cluster.
+        # Pending:
+        #  172.31.9.121: ray.worker.default, uninitialized
 
         # Check the number of nodes that are fetched. Timeout if no new
         # nodes fetched in a while (nodes_launching_progress_timeout), though
