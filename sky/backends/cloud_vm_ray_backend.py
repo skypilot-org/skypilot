@@ -1188,7 +1188,7 @@ class CloudVmRayBackend(backends.Backend):
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(lock_path):
             to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
-            cluster_name, to_provision, task.num_nodes)
+                cluster_name, to_provision, task.num_nodes)
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
@@ -1231,7 +1231,8 @@ class CloudVmRayBackend(backends.Backend):
                                                     handle,
                                                     ready=True)
             auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-            _add_cluster_to_ssh_config(cluster_name, handle.head_ip, auth_config)
+            _add_cluster_to_ssh_config(cluster_name, handle.head_ip,
+                                       auth_config)
         return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
