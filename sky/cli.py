@@ -75,6 +75,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              accelerator_args={'tf_version': '2.5.0'},
                              use_spot=False),
 }
+_PRICE_STR = '${}/h'
 
 
 def _truncate_long_string(s: str, max_length: int = 50) -> str:
@@ -743,12 +744,14 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         'RESOURCES',
         'COMMAND',
         'STATUS',
+        'PRICE',
     ])
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
         handle = cluster_status['handle']
         resources_str = '<initializing>'
+
         if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
             resources_str = 'docker'
         elif isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
@@ -762,6 +765,16 @@ def status(all: bool):  # pylint: disable=redefined-builtin
                                  f'{launched_resource_str}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
+
+        instance_type = handle.launched_resources.instance_type
+        use_spot = handle.launched_resources.use_spot
+        cloud = repr(handle.launched_resources.cloud).lower()
+        hourly_cost = service_catalog.get_hourly_cost(instance_type,
+                                                      region=None,
+                                                      use_spot=use_spot,
+                                                      clouds=cloud)
+        price_str = _PRICE_STR.format(hourly_cost)
+
         cluster_table.add_row([
             # NAME
             cluster_status['name'],
@@ -774,6 +787,8 @@ def status(all: bool):  # pylint: disable=redefined-builtin
             if show_all else _truncate_long_string(cluster_status['last_use']),
             # STATUS
             cluster_status['status'].value,
+            # PRICE,
+            price_str,
         ])
     if clusters_status:
         click.echo(cluster_table)
