@@ -1732,8 +1732,7 @@ class CloudVmRayBackend(backends.Backend):
                     storage.delete()
 
     def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
-        config = backend_utils.read_yaml(handle.cluster_yaml)
-        cluster_name = config['cluster_name']
+        cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
         try:
             # TODO(mraheja): remove pylint disabling when filelock
@@ -1757,7 +1756,7 @@ class CloudVmRayBackend(backends.Backend):
                                              handle.launched_nodes)
         prev_status = global_user_state.get_status_from_cluster_name(
             handle.cluster_name)
-        cluster_name = config['cluster_name']
+        cluster_name = handle.cluster_name
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
