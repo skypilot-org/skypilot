@@ -281,11 +281,11 @@ class SSHConfigHelper(object):
         overwrites = [False] * len(ips)
         overwrite_begin_idxs = [None] * len(ips)
         codegens = [None] * len(ips)
-        cluster_names = []
+        worker_names = []
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
 
         for idx in range(len(ips)):
-            cluster_names.append(cluster_name + f'-worker{idx+1}')
+            worker_names.append(cluster_name + f'-worker{idx+1}')
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
         with open(config_path) as f:
@@ -321,13 +321,13 @@ class SSHConfigHelper(object):
             config = f.readlines()
 
         # Check if ~/.ssh/config contains existing names
-        host_lines = [f'Host {c_name}' for c_name in cluster_names]
+        host_lines = [f'Host {c_name}' for c_name in worker_names]
         for i, line in enumerate(config):
             if line.strip() in host_lines:
                 idx = host_lines.index(line.strip())
                 prev_line = config[i - 1] if i > 0 else ''
                 logger.warning(f'{cls.ssh_conf_path} contains '
-                               f'host named {cluster_names[idx]}.')
+                               f'host named {worker_names[idx]}.')
                 host_name = ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
@@ -340,7 +340,7 @@ class SSHConfigHelper(object):
                 idx = host_lines.index(line.strip())
                 prev_line = extra_config[i - 1] if i > 0 else ''
                 if prev_line.strip().startswith(sky_autogen_comment):
-                    host_name = cluster_names[idx]
+                    host_name = worker_names[idx]
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
                 codegens[idx] = cls._get_generated_config(
@@ -348,10 +348,10 @@ class SSHConfigHelper(object):
                     key_path)
 
         # This checks if all codegens have been created.
-        for idx in range(len(ips)):
+        for idx, ip in enumerate(ips):
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, cluster_names[idx], ips[idx], username,
+                    sky_autogen_comment, worker_names[idx], ip, username,
                     key_path)
 
         for idx in range(len(ips)):
