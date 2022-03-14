@@ -616,9 +616,9 @@ class RetryingVmProvisioner(object):
             # will recover the data.
             yield (region, zones)  # Ok to yield again in the next loop.
 
-            # Cluster with status UP can reach here, if it was killed by the cloud
-            # provider and no available resources in that region to relaunch, which
-            # can happen to spot instance.
+            # Cluster with status UP can reach here, if it was killed by the
+            # cloud provider and no available resources in that region to
+            # relaunch, which can happen to spot instance.
             if cluster_status == global_user_state.ClusterStatus.UP:
                 message = (
                     f'Failed to connect to the cluster {cluster_name}. '
