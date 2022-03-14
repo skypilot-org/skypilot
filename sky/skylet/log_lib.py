@@ -12,9 +12,27 @@ import textwrap
 import tempfile
 from typing import Iterator, List, Optional, Tuple, Union
 
+import rich.status
+
 from sky.skylet import job_lib
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+
+
+def _update_ray_up_status(log_line, ray_up_state: str,
+                          status_display: rich.status.Status):
+    if 'Shared connection to' in log_line and ray_up_state[
+            'state'] == 'LAUNCHING':
+        status_display.update('[bold cyan]Connecting to cluster')
+        ray_up_state['state'] = 'CONNECT_CLUSTER'
+    elif 'Looking in indexes: https://pypi.org/simple' in log_line and \
+        ray_up_state['state'] == 'CONNECT_CLUSTER':
+        status_display.update('[bold cyan]Updating runtime dependencies')
+        ray_up_state['state'] = 'INSTALLING_RUNTIME'
+    elif 'Did not find any active Ray processes' in log_line and \
+            ray_up_state['state'] == 'INSTALLING_RUNTIME':
+        status_display.update('[bold cyan]Starting Ray runtime')
+        ray_up_state['state'] = 'STARTING_RUNTIME'
 
 
 def redirect_process_output(proc,
@@ -22,6 +40,7 @@ def redirect_process_output(proc,
                             stream_logs: bool,
                             start_streaming_at: str = '',
                             skip_lines: Optional[List[str]] = None,
+                            parse_ray_up_logs: bool = False,
                             replace_crlf: bool = False) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
@@ -45,6 +64,10 @@ def redirect_process_output(proc,
     stderr = ''
 
     start_streaming_flag = False
+    provision_status = rich.status.Status('[bold cyan]Launching')
+    ray_up_state = {'state': 'LAUNCHING'}  # TODO: change to enum
+    if parse_ray_up_logs:
+        provision_status.start()
     with open(log_path, 'a') as fout:
         while len(sel.get_map()) > 0:
             events = sel.select()
@@ -77,6 +100,10 @@ def redirect_process_output(proc,
                 if log_path != '/dev/null':
                     fout.write(line)
                     fout.flush()
+                if parse_ray_up_logs:
+                    _update_ray_up_status(line, ray_up_state, provision_status)
+    if parse_ray_up_logs:
+        provision_status.stop()
     return stdout, stderr
 
 
@@ -89,11 +116,12 @@ def run_with_log(
     shell: bool = False,
     with_ray: bool = False,
     redirect_stdout_stderr: bool = True,
+    parse_ray_up_logs: bool = False,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
 
-    Retruns the returncode or returncode, stdout and stderr of the command.
+    Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
     assert redirect_stdout_stderr or log_path == '/dev/null'
@@ -147,6 +175,7 @@ def run_with_log(
                     'bash: cannot set terminal process group',
                     'bash: no job control in this shell',
                 ],
+                parse_ray_up_logs=parse_ray_up_logs,
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
             )

@@ -17,6 +17,7 @@ import uuid
 import yaml
 
 import jinja2
+import rich.status
 
 import sky
 from sky import authentication as auth
@@ -672,6 +673,8 @@ def wait_until_ray_cluster_ready(
     ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
     start = time.time()
+    worker_status = rich.status.Status('[bold cyan]Waiting for workers...')
+    worker_status.start()
     while True:
         rc, output, stderr = run_command_on_ip_via_ssh(head_ip,
                                                        'ray status',
@@ -684,6 +687,8 @@ def wait_until_ray_cluster_ready(
         handle_returncode(rc, 'ray status',
                           'Failed to run ray status on head node.', stderr)
         logger.info(output)
+        worker_status.stop()
+        import pdb; pdb.set_trace()
 
         # Workers that are ready
         result = _LAUNCHED_WORKER_PATTERN.findall(output)
@@ -726,6 +731,7 @@ def wait_until_ray_cluster_ready(
         elif (nodes_launching_progress_timeout is not None and
               time.time() - start > nodes_launching_progress_timeout and
               nodes_so_far != num_nodes):
+            worker_status.stop()
             logger.error(
                 'Timed out when waiting for workers to be provisioned.')
             return False  # failed
@@ -734,10 +740,12 @@ def wait_until_ray_cluster_ready(
             # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
             # GCP can satisfy only by half, the worker node would be forgotten.
             # The correct behavior should be for it to error out.
+            worker_status.stop()
             logger.error('Failed to launch multiple nodes on '
                          'GCP due to a nondeterministic bug in ray autoscaler.')
             return False  # failed
         time.sleep(10)
+    worker_status.stop()
     return True  # success
 
 

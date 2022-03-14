@@ -895,6 +895,7 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at=start_streaming_at,
+                parse_ray_up_logs=True,
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'),
@@ -914,10 +915,8 @@ class RetryingVmProvisioner(object):
         logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
-        with console.status('[bold cyan]Launching[/]'):
-            # ray up.
-            returncode, stdout, stderr = ray_up(
-                start_streaming_at='Shared connection to')
+        returncode, stdout, stderr = ray_up(
+            start_streaming_at='Shared connection to')
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
         # Only 1 node or head node provisioning failure.
