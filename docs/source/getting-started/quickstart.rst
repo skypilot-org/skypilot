@@ -15,7 +15,14 @@ Hello, Sky!
 
 Let's define our very first task, a simple Hello, Sky! program.
 
-Copy the following YAML into a ``hello_sky.yaml`` file (place it anywhere on your machine):
+Create a directory from anywhere on your machine:
+
+.. code-block:: console
+
+  $ mkdir hello-sky
+  $ cd hello-sky
+
+Copy the following YAML into a ``hello_sky.yaml`` file:
 
 .. code-block:: yaml
 
@@ -42,7 +49,7 @@ Copy the following YAML into a ``hello_sky.yaml`` file (place it anywhere on you
     echo "Hello, Sky!"
     conda env list
 
-This specifies the following components of a task:
+This defines a task with the following components:
 
 - :code:`resources`: cloud resources the task must be run on (e.g., accelerators, instance type, etc.)
 - :code:`workdir`: the working directory containing project code that will be synced to the provisioned instance(s)
@@ -92,7 +99,13 @@ The ``sky exec`` command is more lightweight; it
 
 Provisioning and ``setup`` commands are skipped.
 
-Bash commands are also supported, such as :code:`sky exec mycluster htop`.
+Bash commands are also supported, such as:
+
+.. code-block:: console
+
+  $ sky exec mycluster -- gpustat -i
+  $ sky exec mycluster -- ls -l
+  $ sky exec mycluster htop
 
 
 View all clusters
@@ -110,9 +123,9 @@ This may show multiple clusters, if you have created several:
 
 .. code-block::
 
-  NAME       LAUNCHED     RESOURCES             COMMAND                                 STATUS
-  gcp        1 day ago    1x GCP(n1-highmem-8)  sky cpunode -c gcp --cloud gcp          STOPPED
-  mycluster  12 mins ago  1x AWS(p3.2xlarge)    sky launch -c mycluster hello_sky.yaml  UP
+  NAME       LAUNCHED     RESOURCES             COMMAND                            STATUS
+  gcp        1 day ago    1x GCP(n1-highmem-8)  sky cpunode -c gcp --cloud gcp     STOPPED
+  mycluster  4 mins ago   1x AWS(p3.2xlarge)    sky exec mycluster hello_sky.yaml  UP
 
 To log into the a cluster, Sky provides convenient SSH access via :code:`ssh <cluster_name>`:
 
@@ -127,7 +140,7 @@ After a task's execution,  use :code:`rsync` (or :code:`scp`) to download files 
 
 .. code-block:: console
 
-    $ rsync -Pavz mycluster:/remote/source /local/dest       # copy from remote VM
+    $ rsync -Pavz mycluster:/remote/source /local/dest  # copy from remote VM
 
 For uploading files to the cluster, see :ref:`Syncing Code and Artifacts`.
 
