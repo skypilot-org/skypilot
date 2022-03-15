@@ -611,7 +611,7 @@ class RetryingVmProvisioner(object):
             cluster_status = global_user_state.get_status_from_cluster_name(
                 cluster_name)
             logger.info(
-                f'Cluster {cluster_name!r} (status: {cluster_status.value})'
+                f'Cluster {cluster_name!r} (status: {cluster_status.value}) '
                 f'was previously launched in {cloud} ({region.name}). '
                 'Relaunching in that region.')
             # TODO(zhwu): The cluster being killed by cloud provider should
@@ -629,11 +629,13 @@ class RetryingVmProvisioner(object):
                     'in the cloud provider console. To remove the cluster '
                     f'please run: sky down {cluster_name}')
                 logger.error(message)
-                # Reset to UP (rather than keeping it at INIT), because the INIT
-                # mode will enable failover to other regions, causing data lose.
-                # TODO(zhwu): This may need a better solution.
+                # Reset to STOPPED (rather than keeping it at INIT), because
+                # if the cluster is multi-node, some of the nodes may be stopped
+                # by the cloud provider, it is better to stop all the remaining
+                # nodes. INIT mode will enable failover to other regions, causing
+                # data lose.
                 global_user_state.set_cluster_status(
-                    cluster_name, global_user_state.ClusterStatus.UP)
+                    cluster_name, global_user_state.ClusterStatus.STOPPED)
 
                 raise exceptions.ResourcesUnavailableError(message,
                                                            no_retry=True)
@@ -754,6 +756,9 @@ class RetryingVmProvisioner(object):
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
+        # Get previous cluster status
+        cluster_status = global_user_state.get_cluster_status(cluster_name)
+
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
                                                       cluster_name,
@@ -823,7 +828,13 @@ class RetryingVmProvisioner(object):
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
                 logger.error('*** Tearing down the failed cluster. ***')
-                CloudVmRayBackend().teardown(handle, terminate=True)
+                # Only terminate the cluster if it is not in STOPPED or
+                # UP mode.
+                terminate = cluster_status not in [
+                    global_user_state.ClusterStatus.STOPPED,
+                    global_user_state.ClusterStatus.UP
+                ]
+                CloudVmRayBackend().teardown(handle, terminate=terminate)
                 self._update_blocklist_on_error(
                     to_provision.cloud,
                     region,
