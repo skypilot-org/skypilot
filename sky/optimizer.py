@@ -1,8 +1,10 @@
 """The Sky optimizer: assigns best resources to user tasks."""
 import collections
+import colorama
 import enum
 import pprint
-from typing import Dict, List, Optional
+import sys
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import tabulate
@@ -72,17 +74,18 @@ class Optimizer:
         return egress_time
 
     @staticmethod
-    def optimize(
-            dag: Dag,
-            minimize=OptimizeTarget.COST,
-            blocked_launchable_resources: Optional[List[Resources]] = None):
+    def optimize(dag: Dag,
+                 minimize=OptimizeTarget.COST,
+                 blocked_launchable_resources: Optional[List[Resources]] = None,
+                 raise_error: bool = False):
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
         optimized_dag, unused_best_plan = Optimizer._optimize_cost(
             dag,
             minimize_cost=minimize == OptimizeTarget.COST,
-            blocked_launchable_resources=blocked_launchable_resources)
+            blocked_launchable_resources=blocked_launchable_resources,
+            raise_error=raise_error)
         optimized_dag = Optimizer._remove_dummy_source_sink_nodes(optimized_dag)
         return optimized_dag
 
@@ -166,6 +169,7 @@ class Optimizer:
         dag: Dag,
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
+        raise_error: bool = False,
     ):
         import networkx as nx  # pylint: disable=import-outside-toplevel
         # TODO: The output of this function is useful. Should generate a
@@ -179,6 +183,7 @@ class Optimizer:
         # d[node][resources][parent] = (best parent resources, best parent cost)
         dp_point_backs = collections.defaultdict(
             lambda: collections.defaultdict(dict))
+        node_to_candidates = collections.defaultdict(dict)
 
         for node_i, node in enumerate(topo_order):
             # Base case: a special source node.
@@ -191,11 +196,12 @@ class Optimizer:
                 logger.debug('#### {} ####'.format(node))
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
-                launchable_resources = \
+                launchable_resources, cloud_candidates = \
                     _fill_in_launchable_resources(
                         node,
                         blocked_launchable_resources
                     )
+                node_to_candidates[node_i] = cloud_candidates
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
@@ -206,11 +212,16 @@ class Optimizer:
             parents = list(graph.predecessors(node))
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
-                    raise exceptions.ResourcesUnavailableError(
+                    error_msg = (
                         f'No launchable resource found for task {node}. '
                         'To fix: relax its resource requirements.\n'
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.')
+                    if raise_error:
+                        raise exceptions.ResourcesUnavailableError(error_msg)
+                    else:
+                        logger.error(error_msg)
+                        sys.exit(1)
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')
@@ -284,7 +295,14 @@ class Optimizer:
                 for k, v in dp_best_cost.items()
                 if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
             }
-            metric = 'cost' if minimize_cost else 'time'
+            metric = 'cost ($)' if minimize_cost else 'time (hr)'
+            for k, v in dp_best_cost.items():
+                dp_best_cost[k] = {
+                    resources: round(cost, 2) if minimize_cost \
+                        else round(cost / 3600, 2)
+                    for resources, cost in v.items()
+                }
+
             if len(dp_best_cost) > 1:
                 logger.info(f'Details: task -> {{resources -> {metric}}}')
                 logger.info('%s\n', pprint.pformat(dp_best_cost))
@@ -293,6 +311,26 @@ class Optimizer:
                 logger.info('%s\n',
                             pprint.pformat(list(dp_best_cost.values())[0]))
 
+        for node_i, candidate_set in node_to_candidates.items():
+            node = topo_order[node_i]
+            accelerator = list(node.get_resources())[0].accelerators
+            is_multi_instances = False
+            if accelerator:
+                acc_name, acc_count = list(accelerator.items())[0]
+                for cloud, candidate_list in candidate_set.items():
+                    if len(candidate_list) > 1:
+                        is_multi_instances = True
+                        instance_list = [
+                            res.instance_type for res in candidate_list
+                        ]
+                        logger.info(
+                            f'Multiple {cloud} instances satisfy '
+                            f'{acc_name}:{int(acc_count)}. '
+                            f'The cheapest {candidate_list[0]!r} is considered '
+                            f'among:\n{instance_list}.\n')
+            if is_multi_instances:
+                logger.info(
+                    f'To list more details, run \'sky show-gpus {acc_name}\'.')
         return dag, best_plan
 
     @staticmethod
@@ -379,13 +417,14 @@ def _fill_in_launchable_resources(
     task: Task,
     blocked_launchable_resources: Optional[List[Resources]],
     try_fix_with_sky_check: bool = True,
-) -> Dict[Resources, List[Resources]]:
+) -> Tuple[Dict[Resources, List[Resources]], Dict[str, set]]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_check:
         check.check(quiet=True)
         return _fill_in_launchable_resources(task, blocked_launchable_resources,
                                              False)
     launchable = collections.defaultdict(list)
+    cloud_candidates = collections.defaultdict(Resources)
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
     for resources in task.get_resources():
@@ -401,16 +440,30 @@ def _fill_in_launchable_resources(
                 'or change the cloud requirement.')
         elif resources.is_launchable():
             launchable[resources] = [resources]
-        elif resources.cloud is not None:
-            launchable[
-                resources] = resources.cloud.get_feasible_launchable_resources(
-                    resources)
         else:
-            for cloud in enabled_clouds:
-                feasible_resources = cloud.get_feasible_launchable_resources(
-                    resources)
-                launchable[resources].extend(feasible_resources)
+            clouds_list = [resources.cloud
+                          ] if resources.cloud is not None else enabled_clouds
+            all_fuzzy_candidates = set()
+            for cloud in clouds_list:
+                (feasible_resources, fuzzy_candidate_list
+                ) = cloud.get_feasible_launchable_resources(resources)
+                if len(feasible_resources) > 0:
+                    # Assume feasible_resources is sorted by prices and
+                    # only append the cheapest option for each cloud
+                    launchable[resources].append(feasible_resources[0])
+                    cloud_candidates[cloud] = feasible_resources
+                else:
+                    all_fuzzy_candidates.update(fuzzy_candidate_list)
+            if len(launchable[resources]) == 0:
+                logger.info(f'No resource satisfying {resources.accelerators} '
+                            f'on {clouds_list}.')
+            if len(all_fuzzy_candidates) > 0:
+                logger.info('Did you mean: '
+                            f'{colorama.Fore.CYAN}'
+                            f'{sorted(all_fuzzy_candidates)}'
+                            f'{colorama.Style.RESET_ALL}')
+
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_launchable_resources)
 
-    return launchable
+    return launchable, cloud_candidates

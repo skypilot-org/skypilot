@@ -857,7 +857,7 @@ class RetryingVmProvisioner(object):
             ]
             terminate_str = 'Terminating' if terminate else 'Stopping'
             logger.error(f'*** {terminate_str} the failed cluster. ***')
-            CloudVmRayBackend().teardown(handle, terminate=terminate)
+            CloudVmRayBackend().teardown(handle, terminate=terminate, _force=True)
 
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -1047,10 +1047,13 @@ class RetryingVmProvisioner(object):
                 # (otherwise will skip re-optimizing this task).
                 # TODO: set all remaining tasks' best_resources to None.
                 task.best_resources = None
+                # raise_error has to be True to make sure remove_cluster
+                # is called if provisioning fails.
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.
-                                         _blocked_launchable_resources)
+                                         _blocked_launchable_resources,
+                                         raise_error=True)
                 to_provision = task.best_resources
                 assert task in self._dag.tasks, 'Internal logic error.'
                 assert to_provision is not None, task
@@ -1253,7 +1256,8 @@ class CloudVmRayBackend(backends.Backend):
             auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
             _add_cluster_to_ssh_config(cluster_name, handle.head_ip,
                                        auth_config)
-        return handle
+            os.remove(lock_path)
+            return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
@@ -1831,17 +1835,27 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
-    def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+    def teardown(self,
+                 handle: ResourceHandle,
+                 terminate: bool,
+                 _force: bool = False) -> None:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
+
+        if _force:
+            # Should only be forced when teardown is called within a
+            # locked section of the code (i.e teardown when not enough
+            # resources can be provisioned)
+            self._teardown(handle, terminate)
+            return
+
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
-            # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(lock_path, 10):
+            with filelock.FileLock(lock_path, 10):  # pylint: disable=abstract-class-instantiated
                 self._teardown(handle, terminate)
-            if terminate:
-                os.remove(lock_path)
+                if terminate:
+                    os.remove(lock_path)
         except filelock.Timeout:
             logger.error(f'Cluster {cluster_name} is locked by {lock_path}. \
                     Check to see if it is still being launched.')
