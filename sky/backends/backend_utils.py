@@ -500,8 +500,12 @@ def wait_until_ray_cluster_ready(
     # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
-    head_ip = query_head_ip_with_retries(
-        cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
+    try:
+        head_ip = query_head_ip_with_retries(
+            cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
+    except RuntimeError as e:
+        logger.error(e)
+        return False  # failed
 
     ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
@@ -541,6 +545,10 @@ def wait_until_ray_cluster_ready(
         found_ips = _LAUNCHING_IP_PATTERN.findall(output)
         pending_workers = len(found_ips)
 
+        # TODO(zhwu): Handle the case where the following occurs, where ray
+        # cluster is not correctly started on the cluster.
+        # Pending:
+        #  172.31.9.121: ray.worker.default, uninitialized
         nodes_so_far = ready_head + ready_workers + pending_workers
 
         # Check the number of nodes that are fetched. Timeout if no new
@@ -903,7 +911,7 @@ def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
             break
         except subprocess.CalledProcessError as e:
             if i == retry_count - 1:
-                raise e
+                raise RuntimeError('Failed to get head ip') from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
             time.sleep(5)
