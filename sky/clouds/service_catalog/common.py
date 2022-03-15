@@ -1,12 +1,11 @@
 """Common utilities for service catalog."""
 import os
-from typing import Dict, List, NamedTuple, Optional
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import pandas as pd
 
 from sky.clouds import cloud as cloud_lib
 from sky import sky_logging
-import colorama
 
 logger = sky_logging.init_logger(__name__)
 
@@ -90,43 +89,33 @@ def get_accelerators_from_instance_type_impl(
 
 
 def get_instance_type_for_accelerator_impl(
-    cloud: str,
     df: pd.DataFrame,
     acc_name: str,
     acc_count: int,
-) -> Optional[str]:
-    """Returns the instance type with the required count of accelerators."""
-    result = df[(df['AcceleratorName'] == acc_name) &
+) -> Tuple[Optional[List[str]], List[str]]:
+    """
+    Returns a list of instance types satisfying the required count of
+    accelerators with sorted prices and a list of candidates with fuzzy search.
+    """
+    result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
                 (df['AcceleratorCount'] == acc_count)]
     if len(result) == 0:
-        fuzzy_result = df[(df['AcceleratorName'].str.contains(acc_name)) &
-                          (df['AcceleratorCount'] >= acc_count)]
+        fuzzy_result = df[
+            (df['AcceleratorName'].str.contains(acc_name, case=False)) &
+            (df['AcceleratorCount'] >= acc_count)]
         fuzzy_result = fuzzy_result.sort_values('Price', ascending=True)
         fuzzy_result = fuzzy_result[['AcceleratorName',
                                      'AcceleratorCount']].drop_duplicates()
+        fuzzy_candidate_list = []
         if len(fuzzy_result) > 0:
-            candidate_list = ''
             for _, row in fuzzy_result.iterrows():
-                candidate_list += (f' {row["AcceleratorName"]}:'
-                                   f'{int(row["AcceleratorCount"])}')
-            logger.info(f'No resource satisfying {acc_name}:{int(acc_count)}'
-                        f' on {cloud.upper()}. Did you mean:'
-                        f'{colorama.Fore.CYAN}'
-                        f'{candidate_list}'
-                        f'{colorama.Style.RESET_ALL}')
-        return None
+                fuzzy_candidate_list.append(f'{row["AcceleratorName"]}:'
+                                            f'{int(row["AcceleratorCount"])}')
+        return (None, fuzzy_candidate_list)
     # Current strategy: choose the cheapest instance
     result = result.sort_values('Price', ascending=True)
-    best_candidate = result.iloc[0]['InstanceType']
     instance_types = list(result['InstanceType'].drop_duplicates())
-    if len(instance_types) > 1:
-        logger.info(f'Multiple {cloud.upper()} instances satisfy '
-                    f'{acc_name}:{int(acc_count)}. '
-                    f'Choosing the cheapest {best_candidate} among: '
-                    f'{instance_types}.\n'
-                    f'Run \'sky show-gpus {acc_name} --cloud {cloud}\' to '
-                    'list more details.')
-    return best_candidate
+    return (instance_types, [])
 
 
 def list_accelerators_impl(

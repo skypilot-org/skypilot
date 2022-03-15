@@ -166,34 +166,41 @@ class Azure(clouds.Cloud):
         }
 
     def get_feasible_launchable_resources(self, resources):
+        fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources.accelerators = None
-            return [resources]
+            return ([resources], fuzzy_candidate_list)
 
-        def _make(instance_type):
-            r = copy.deepcopy(resources)
-            r.cloud = Azure()
-            r.instance_type = instance_type
-            # Setting this to None as Azure doesn't separately bill / attach
-            # the accelerators.  Billed as part of the VM type.
-            r.accelerators = None
-            return [r]
+        def _make(instance_list):
+            resource_list = []
+            for instance_type in instance_list:
+                r = copy.deepcopy(resources)
+                r.cloud = Azure()
+                r.instance_type = instance_type
+                # Setting this to None as Azure doesn't separately bill / attach
+                # the accelerators.  Billed as part of the VM type.
+                r.accelerators = None
+                resource_list.append(r)
+            return resource_list
 
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
             # No requirements to filter, so just return a default VM type.
-            return _make(Azure.get_default_instance_type())
+            return (_make([Azure.get_default_instance_type()]),
+                    fuzzy_candidate_list)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        instance_type = service_catalog.get_instance_type_for_accelerator(
-            acc, acc_count, clouds='azure')
-        if instance_type is None:
-            return []
-        return _make(instance_type)
+        (instance_list, fuzzy_candidate_list
+        ) = service_catalog.get_instance_type_for_accelerator(acc,
+                                                              acc_count,
+                                                              clouds='azure')
+        if instance_list is None:
+            return ([], fuzzy_candidate_list)
+        return (_make(instance_list), fuzzy_candidate_list)
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""

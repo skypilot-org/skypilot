@@ -941,10 +941,13 @@ class RetryingVmProvisioner(object):
                 # (otherwise will skip re-optimizing this task).
                 # TODO: set all remaining tasks' best_resources to None.
                 task.best_resources = None
+                # raise_error has to be True to make sure remove_cluster
+                # is called if provisioning fails.
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.
-                                         _blocked_launchable_resources)
+                                         _blocked_launchable_resources,
+                                         raise_error=True)
                 to_provision = task.best_resources
                 assert task in self._dag.tasks, 'Internal logic error.'
                 assert to_provision is not None, task
