@@ -940,10 +940,18 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--ignore-errors',
+              '-i',
+              is_flag=True,
+              default=False,
+              required=False,
+              help=('When a cluster\'s stop request fails, ignore the error to '
+                    'continue stopping other requested clusters.'))
 def stop(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
+    ignore_errors: bool,
 ):
     """Stop cluster(s).
 
@@ -977,7 +985,8 @@ def stop(
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=False,
-                                no_confirm=yes)
+                                no_confirm=yes,
+                                ignore_errors=ignore_errors)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1112,10 +1121,18 @@ def start(clusters: Tuple[str], yes: bool):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--ignore-errors',
+              '-i',
+              is_flag=True,
+              default=False,
+              required=False,
+              help=('When a cluster\'s termination fails, ignore the error to '
+                    'continue terminating other requested clusters.'))
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
+    ignore_errors: bool,
 ):
     """Tear down cluster(s).
 
@@ -1148,11 +1165,15 @@ def down(
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=True,
-                                no_confirm=yes)
+                                no_confirm=yes,
+                                ignore_errors=ignore_errors)
 
 
-def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
-                                terminate: bool, no_confirm: bool) -> None:
+def _terminate_or_stop_clusters(names: Tuple[str],
+                                apply_to_all: Optional[bool],
+                                terminate: bool,
+                                no_confirm: bool,
+                                ignore_errors: bool = False) -> None:
     """Terminates or stops a cluster (or all clusters)."""
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
@@ -1178,8 +1199,8 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         print('No existing clusters found (see `sky status`).')
         return
 
+    teardown_verb = 'Terminating' if terminate else 'Stopping'
     if not no_confirm:
-        teardown_verb = 'Terminating' if terminate else 'Stopping'
         cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
         cluster_list = ', '.join([r['name'] for r in to_down])
         click.confirm(
@@ -1203,7 +1224,14 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             click.echo('  To terminate the cluster, run: ', nl=False)
             click.secho(f'sky down {name}', bold=True)
             continue
-        backend.teardown(handle, terminate=terminate)
+        try:
+            backend.teardown(handle, terminate=terminate)
+        except Exception as e:
+            logger.error(
+                f'Error when {teardown_verb.lower()} cluster {name!r}: {e}')
+            if ignore_errors:
+                continue
+            raise e
         if terminate:
             click.secho(f'Terminating cluster {name}...done.', fg='green')
         else:
