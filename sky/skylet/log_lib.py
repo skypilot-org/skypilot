@@ -2,6 +2,7 @@
 
 This is a remote utility module that provides logging functionality.
 """
+import enum
 import io
 import os
 import selectors
@@ -19,20 +20,27 @@ from sky.skylet import job_lib
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 
 
+class ProvisionStatus(enum.Enum):
+    LAUNCH = 0
+    CONNECT = 1
+    INSTALL_RUNTIME = 2
+    START_RUNTIME = 3
+
+
 def _update_ray_up_status(log_line, ray_up_state: str,
                           status_display: rich.status.Status):
     if 'Shared connection to' in log_line and ray_up_state[
-            'state'] == 'LAUNCHING':
+            'state'] == ProvisionStatus.LAUNCH:
         status_display.update('[bold cyan]Connecting to cluster')
-        ray_up_state['state'] = 'CONNECT_CLUSTER'
+        ray_up_state['state'] = ProvisionStatus.CONNECT
     elif 'Looking in indexes: https://pypi.org/simple' in log_line and \
-        ray_up_state['state'] == 'CONNECT_CLUSTER':
+        ray_up_state['state'] == ProvisionStatus.CONNECT:
         status_display.update('[bold cyan]Updating runtime dependencies')
-        ray_up_state['state'] = 'INSTALLING_RUNTIME'
+        ray_up_state['state'] = ProvisionStatus.INSTALL_RUNTIME
     elif 'Did not find any active Ray processes' in log_line and \
-            ray_up_state['state'] == 'INSTALLING_RUNTIME':
+            ray_up_state['state'] == ProvisionStatus.INSTALL_RUNTIME:
         status_display.update('[bold cyan]Starting Ray runtime')
-        ray_up_state['state'] = 'STARTING_RUNTIME'
+        ray_up_state['state'] = ProvisionStatus.START_RUNTIME
 
 
 def redirect_process_output(proc,
@@ -43,6 +51,8 @@ def redirect_process_output(proc,
                             parse_ray_up_logs: bool = False,
                             replace_crlf: bool = False) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
+    # FIXME(gmittal): Remove hard-coded `parse_ray_up_logs` flag and add general
+    # LineParser: https://github.com/sky-proj/sky/pull/565#discussion_r826615923
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
@@ -64,8 +74,8 @@ def redirect_process_output(proc,
     stderr = ''
 
     start_streaming_flag = False
-    ray_up_state = {'state': 'LAUNCHING'}  # TODO: change to enum
     if parse_ray_up_logs:
+        ray_up_state = {'state': ProvisionStatus.LAUNCH}
         provision_status = rich.status.Status('[bold cyan]Launching')
         provision_status.start()
     with open(log_path, 'a') as fout:
