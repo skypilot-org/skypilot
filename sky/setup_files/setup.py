@@ -36,7 +36,7 @@ def version_comparator(v1, v2):
 system = platform.system()
 if system == 'Darwin':
     mac_version = platform.mac_ver()[0]
-    if version_comparator(mac_version, '10.16') == -1:
+    if version_comparator(mac_version, '10.15') == -1:
         warnings.warn(
             f"Detected MacOS version {mac_version}. MacOS version >=1.15 "
             "is needed to satisfy Ray>=1.9")
