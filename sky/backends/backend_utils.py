@@ -531,6 +531,7 @@ def wait_until_ray_cluster_ready(
         if result:
             assert len(result) == 1, result
             ready_head = int(result[0])
+            assert ready_head <= 1, ready_head
 
         if ready_head + ready_workers == num_nodes:
             # All nodes are up.
