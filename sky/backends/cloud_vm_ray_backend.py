@@ -629,13 +629,14 @@ class RetryingVmProvisioner(object):
                     'in the cloud provider console. To remove the cluster '
                     f'please run: sky down {cluster_name}')
                 logger.error(message)
-                # Reset to STOPPED (rather than keeping it at INIT), because
-                # if the cluster is multi-node, some of the nodes may be stopped
-                # by the cloud provider, it is better to stop all the remaining
-                # nodes. INIT mode will enable failover to other regions,
-                # causing data lose.
+                # Reset to UP (rather than keeping it at INIT), as INIT
+                # mode will enable failover to other regions, causing
+                # data lose.
+                # TODO(zhwu): This is set to UP to be more conservative,
+                # we may need to confirm whether the cluster is down in all
+                # cases.
                 global_user_state.set_cluster_status(
-                    cluster_name, global_user_state.ClusterStatus.STOPPED)
+                    cluster_name, global_user_state.ClusterStatus.UP)
 
                 raise exceptions.ResourcesUnavailableError(message,
                                                            no_retry=True)
@@ -854,14 +855,14 @@ class RetryingVmProvisioner(object):
                 terminate_str = 'Terminating' if need_terminate else 'Stopping'
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
 
-            # There may exists partial nodes (e.g., head node) so we must
-            # terminate before moving on to other regions or stop.
-            # FIXME(zongheng): terminating a potentially live cluster
-            # is scary.  Say: users have an existing cluster, do sky
-            # launch, gang failed, then we are terminating it here.
-            CloudVmRayBackend().teardown(handle,
-                                         terminate=need_terminate,
-                                         _force=True)
+                # There may exists partial nodes (e.g., head node) so we must
+                # terminate before moving on to other regions or stop.
+                # FIXME(zongheng): terminating a potentially live cluster
+                # is scary.  Say: users have an existing cluster, do sky
+                # launch, gang failed, then we are terminating it here.
+                CloudVmRayBackend().teardown(handle,
+                                             terminate=need_terminate,
+                                             _force=True)
 
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -1862,7 +1863,7 @@ class CloudVmRayBackend(backends.Backend):
                     os.remove(lock_path)
         except filelock.Timeout:
             logger.error(f'Cluster {cluster_name} is locked by {lock_path}. \
-                    Check to see if it is still being launched.'                                                                )
+                    Check to see if it is still being launched.')
 
     def _teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
