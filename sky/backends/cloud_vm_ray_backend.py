@@ -129,13 +129,13 @@ def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
                     f'( git status --short {path} | '
                     'grep "^?" | cut -d " " -f2- '
                     f'&& git ls-files {path} ) | '
-                    'xargs -n 1 du -hsk | '
+                    'xargs -n 1000 du -hsk | '
                     f'awk {awk_program!r}',
                     shell=True)) // (2**10)
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, ValueError):
             # If git is not installed, or if the user is not in a git repo.
-            # NOTE: Sky currently does not support using .gitignore exclusion in
-            # a non-git repo.
+            # Fall back to du -shk if it is not a git repo (size does not
+            # consider .gitignore).
             pass
     return int(
         subprocess.check_output(['du', '-sh', '-k', path
