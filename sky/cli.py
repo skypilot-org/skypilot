@@ -75,7 +75,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              accelerator_args={'tf_version': '2.5.0'},
                              use_spot=False),
 }
-_PRICE_STR = '${}/h'
+_PRICE_STR = '$ {}'
 
 
 def _truncate_long_string(s: str, max_length: int = 50) -> str:
@@ -738,14 +738,19 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
     show_all = all
     clusters_status = global_user_state.get_clusters()
-    cluster_table = util_lib.create_table([
+    columns = [
         'NAME',
         'LAUNCHED',
         'RESOURCES',
         'COMMAND',
         'STATUS',
-        'PRICE',
-    ])
+    ]
+    if all:
+        columns.extend([
+            'HOURLY PRICE',
+            'REGION',
+        ])
+    cluster_table = util_lib.create_table(columns)
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
@@ -765,17 +770,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
                                  f'{launched_resource_str}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
-
-        instance_type = handle.launched_resources.instance_type
-        use_spot = handle.launched_resources.use_spot
-        cloud = repr(handle.launched_resources.cloud).lower()
-        hourly_cost = service_catalog.get_hourly_cost(instance_type,
-                                                      region=None,
-                                                      use_spot=use_spot,
-                                                      clouds=cloud)
-        price_str = _PRICE_STR.format(hourly_cost)
-
-        cluster_table.add_row([
+        row = [
             # NAME
             cluster_status['name'],
             # LAUNCHED
@@ -787,9 +782,20 @@ def status(all: bool):  # pylint: disable=redefined-builtin
             if show_all else _truncate_long_string(cluster_status['last_use']),
             # STATUS
             cluster_status['status'].value,
-            # PRICE,
-            price_str,
-        ])
+        ]
+        if all:
+            hourly_cost = handle.launched_resources.get_cost(3600) \
+                * handle.launched_nodes
+            price_str = _PRICE_STR.format(hourly_cost)
+            region = handle.get_cluster_region()
+            print(region)
+            row.extend([
+                # HOURLY PRICE
+                price_str,
+                # REGION
+                region,
+            ])
+        cluster_table.add_row(row)
     if clusters_status:
         click.echo(cluster_table)
     else:

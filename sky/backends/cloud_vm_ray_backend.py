@@ -1000,6 +1000,15 @@ class CloudVmRayBackend(backends.Backend):
         def get_cluster_name(self):
             return self.cluster_name
 
+        def get_cluster_region(self):
+            config = backend_utils.read_yaml(self.cluster_yaml)
+            provider = config['provider']
+            cloud = self.launched_resources.cloud
+            if type(cloud) in [clouds.Azure]:
+                return provider['location']
+            elif type(cloud) in [clouds.GCP, clouds.AWS]:
+                return provider['region']
+
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
         self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, self.run_timestamp)
