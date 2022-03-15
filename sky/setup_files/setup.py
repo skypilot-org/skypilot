@@ -19,8 +19,8 @@ if system == 'Darwin':
     mac_minor = int(mac_minor)
     if mac_major < 10 or (mac_major == 10 and mac_minor >= 15):
         warnings.warn(
-            f"Detected MacOS version {mac_version}. MacOS version >=10.15 "
-            "is required to install \"ray>=1.9\"")
+            f"\'Detected MacOS version {mac_version}. MacOS version >=10.15 "
+            "is required to install ray>=1.9\'")
 
 install_requires = [
     'wheel',
