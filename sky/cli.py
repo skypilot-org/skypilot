@@ -1203,9 +1203,12 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             click.echo('  To terminate the cluster, run: ', nl=False)
             click.secho(f'sky down {name}', bold=True)
             continue
-        backend.teardown(handle, terminate=terminate)
+        success = backend.teardown(handle, terminate=terminate)
         if terminate:
-            click.secho(f'Terminating cluster {name}...done.', fg='green')
+            if success:
+                click.secho(f'Terminating cluster {name}...done.', fg='green')
+            else:
+                click.secho(f'Terminating cluster {name}...failed.', fg='red')
         else:
             click.secho(f'Stopping cluster {name}...done.', fg='green')
             click.echo('  To restart the cluster, run: ', nl=False)

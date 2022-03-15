@@ -1727,7 +1727,7 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
-    def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+    def teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
         try:
@@ -1735,14 +1735,16 @@ class CloudVmRayBackend(backends.Backend):
             # version updated
             # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(lock_path, 10):
-                self._teardown(handle, terminate)
-            if terminate:
+                success = self._teardown(handle, terminate)
+            if success and terminate:
                 os.remove(lock_path)
+            return success
         except filelock.Timeout:
-            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. \
-                    Check to see if it is still being launched.')
+            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. ' \
+                'Check to see if it is still being launched.')
+            return False
 
-    def _teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+    def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1840,6 +1842,7 @@ class CloudVmRayBackend(backends.Backend):
                                  f'{tpu_stdout}\n'
                                  f'**** STDERR ****\n'
                                  f'{tpu_stderr}{colorama.Style.RESET_ALL}')
+                    return False
 
         if returncode != 0:
             logger.error(
@@ -1848,6 +1851,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'{stdout}\n'
                 f'**** STDERR ****\n'
                 f'{stderr}{colorama.Style.RESET_ALL}')
+            return False
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         _remove_cluster_from_ssh_config(handle.head_ip, auth_config)
