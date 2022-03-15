@@ -756,7 +756,6 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         launched_at = cluster_status['launched_at']
         handle = cluster_status['handle']
         resources_str = '<initializing>'
-
         if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
             resources_str = 'docker'
         elif isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
