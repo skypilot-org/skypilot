@@ -857,7 +857,9 @@ class RetryingVmProvisioner(object):
             ]
             terminate_str = 'Terminating' if terminate else 'Stopping'
             logger.error(f'*** {terminate_str} the failed cluster. ***')
-            CloudVmRayBackend().teardown(handle, terminate=terminate, _force=True)
+            CloudVmRayBackend().teardown(handle,
+                                         terminate=terminate,
+                                         _force=True)
 
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
