@@ -757,7 +757,7 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         # Get previous cluster status
-        previous_cluster_status = global_user_state.get_status_from_cluster_name(
+        prev_cluster_status = global_user_state.get_status_from_cluster_name(
             cluster_name)
 
         self._clear_blocklist()
@@ -813,6 +813,7 @@ class RetryingVmProvisioner(object):
                 to_provision.cloud, num_nodes, cluster_config_file,
                 log_abs_path, stream_logs, logging_info)
 
+            # The cluster is not ready.
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 # However, ray processes may not be up due to 'ray up
                 # --no-restart' flag.  Ensure so.
@@ -842,15 +843,15 @@ class RetryingVmProvisioner(object):
                     zones=None,
                     stdout=None,
                     stderr=None)
+
             # There may exists partial nodes (e.g., head node) so we must
             # terminate before moving on to other regions or stop.
             # FIXME(zongheng): terminating a potentially live cluster
             # is scary.  Say: users have an existing cluster, do sky
             # launch, gang failed, then we are terminating it here.
-            
             # If cluster was previously UP or STOPPED, stop it; otherwise
             # terminate.
-            terminate = previous_cluster_status not in [
+            terminate = prev_cluster_status not in [
                 global_user_state.ClusterStatus.STOPPED,
                 global_user_state.ClusterStatus.UP
             ]
@@ -1843,7 +1844,7 @@ class CloudVmRayBackend(backends.Backend):
                 os.remove(lock_path)
         except filelock.Timeout:
             logger.error(f'Cluster {cluster_name} is locked by {lock_path}. \
-                    Check to see if it is still being launched.'                                                                )
+                    Check to see if it is still being launched.')
 
     def _teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         log_path = os.path.join(os.path.expanduser(self.log_dir),

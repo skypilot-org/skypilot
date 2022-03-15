@@ -504,8 +504,7 @@ def wait_until_ray_cluster_ready(
             cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
     except RuntimeError as e:
         logger.error(e)
-        return False # failed
-        
+        return False  # failed
 
     expected_worker_count = num_nodes - 1
 
