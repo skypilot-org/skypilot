@@ -5,9 +5,41 @@ and its resource requirements, and Sky will automatically execute it on AWS,
 Google Cloud Platform or Microsoft Azure."""
 
 import os
+import platform
 import setuptools
+import warnings
 
 ROOT_DIR = os.path.dirname(__file__)
+
+
+def version_comparator(v1, v2):
+    v1_num = [int(i) for i in v1.split(".")]
+    v2_num = [int(i) for i in v2.split(".")]
+    v1_size = len(v1_num)
+    v2_size = len(v2_num)
+
+    size_diff = abs(v1_size - v2_size)
+    for _ in range(size_diff):
+        if v1_size > v2_size:
+            v2_num.append(0)
+        elif v2_size > v1_size:
+            v1_num.append(0)
+
+    for i in range(v1_size):
+        if v1_num[i] > v2_num[i]:
+            return 1
+        elif v2_num[i] > v1_num[i]:
+            return -1
+    return 0
+
+
+system = platform.system()
+if system == 'Darwin':
+    mac_version = platform.mac_ver()[0]
+    if version_comparator(mac_version, '10.16') == -1:
+        warnings.warn(
+            f"Detected MacOS version {mac_version}. MacOS version >=1.15 "
+            "is needed to satisfy Ray>=1.9")
 
 install_requires = [
     'wheel',

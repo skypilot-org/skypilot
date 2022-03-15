@@ -17,6 +17,10 @@ only have access to certain clouds, use any combination of
 :code:`".[aws,azure,gcp]"` (e.g., :code:`".[aws,gcp]"`) to reduce the
 dependencies installed.
 
+.. note::
+
+    On Mac, support for Sky below macOS version < 1.15 (Mojave) is currently limited. Sky requires Ray ≥ 1.9, which works for macOS ≥ 1.15.
+
 Cloud account setup
 -------------------
 
