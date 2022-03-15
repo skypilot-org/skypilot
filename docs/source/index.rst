@@ -59,6 +59,12 @@ Key features:
    .. reference/optimizer
    .. reference/service-catalog
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Reference
+
+   reference/quota
+
 
 .. .. toctree::
 ..   :maxdepth: 1
