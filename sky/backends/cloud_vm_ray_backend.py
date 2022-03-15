@@ -1745,8 +1745,7 @@ class CloudVmRayBackend(backends.Backend):
             else:
                 # TODO(mraheja): remove pylint disabling when filelock
                 # version updated
-                # pylint: disable=abstract-class-instantiated
-                with filelock.FileLock(lock_path, 10):
+                with filelock.FileLock(lock_path, 10):  # pylint: disable=abstract-class-instantiated
                     self._teardown(handle, terminate)
                 if terminate:
                     os.remove(lock_path)
