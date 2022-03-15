@@ -533,7 +533,7 @@ def wait_until_ray_cluster_ready(
             ready_head = int(result[0])
 
         if ready_head + ready_workers == num_nodes:
-            # All workers are up.
+            # All nodes are up.
             break
 
         # Pending workers that have been launched by ray up.
