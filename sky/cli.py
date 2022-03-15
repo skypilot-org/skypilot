@@ -339,7 +339,9 @@ def _create_and_ssh_into_node(
             task = dag.tasks[0]
             backend.register_info(dag=dag)
             to_provision = task.best_resources
-            if not no_confirm:
+            if handle is None and not no_confirm:
+                # Only show the confirmation prompt if the cluster is not
+                # in the clusters table.
                 click.confirm('Launching a new cluster. Proceed?',
                               default=True,
                               abort=True,
