@@ -825,6 +825,12 @@ class RetryingVmProvisioner(object):
                             f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
 
+            # If cluster was previously UP or STOPPED, stop it; otherwise
+            # terminate.
+            need_terminate = prev_cluster_status not in [
+                global_user_state.ClusterStatus.STOPPED,
+                global_user_state.ClusterStatus.UP
+            ]
             if status == self.GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
@@ -843,22 +849,18 @@ class RetryingVmProvisioner(object):
                     zones=None,
                     stdout=None,
                     stderr=None)
+                # Only log the error message for gang scheduling failure, since
+                # head_fail may not create any resources.
+                terminate_str = 'Terminating' if need_terminate else 'Stopping'
+                logger.error(f'*** {terminate_str} the failed cluster. ***')
 
             # There may exists partial nodes (e.g., head node) so we must
             # terminate before moving on to other regions or stop.
             # FIXME(zongheng): terminating a potentially live cluster
             # is scary.  Say: users have an existing cluster, do sky
             # launch, gang failed, then we are terminating it here.
-            # If cluster was previously UP or STOPPED, stop it; otherwise
-            # terminate.
-            terminate = prev_cluster_status not in [
-                global_user_state.ClusterStatus.STOPPED,
-                global_user_state.ClusterStatus.UP
-            ]
-            terminate_str = 'Terminating' if terminate else 'Stopping'
-            logger.error(f'*** {terminate_str} the failed cluster. ***')
             CloudVmRayBackend().teardown(handle,
-                                         terminate=terminate,
+                                         terminate=need_terminate,
                                          _force=True)
 
         message = ('Failed to acquire resources in all regions/zones'
@@ -1860,7 +1862,7 @@ class CloudVmRayBackend(backends.Backend):
                     os.remove(lock_path)
         except filelock.Timeout:
             logger.error(f'Cluster {cluster_name} is locked by {lock_path}. \
-                    Check to see if it is still being launched.')
+                    Check to see if it is still being launched.'                                                                )
 
     def _teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
