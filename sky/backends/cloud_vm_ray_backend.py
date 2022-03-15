@@ -1241,6 +1241,10 @@ class CloudVmRayBackend(backends.Backend):
                 return
             cluster_config_file = config_dict['ray']
 
+            if 'tpu_name' in config_dict:
+                self._set_tpu_name(cluster_config_file, launched_nodes,
+                                   config_dict['tpu_name'])
+
             head_ip = backend_utils.query_head_ip_with_retries(
                 cluster_config_file,
                 # Retry is useful for azure, as sometimes it will need some time
