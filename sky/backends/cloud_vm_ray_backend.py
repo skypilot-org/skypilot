@@ -99,11 +99,46 @@ def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
     return accelerator_dict
 
 
-def _path_size_megabytes(path: str) -> int:
-    """Returns the size of 'path' (directory or file) in megabytes."""
+def _add_cluster_to_ssh_config(cluster_name: str, cluster_ip: str,
+                               auth_config: Dict[str, str]) -> None:
+    backend_utils.SSHConfigHelper.add_cluster(cluster_name, cluster_ip,
+                                              auth_config)
+
+
+def _remove_cluster_from_ssh_config(cluster_ip: str,
+                                    auth_config: Dict[str, str]) -> None:
+    backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
+
+
+def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
+    """Returns the size of 'path' (directory or file) in megabytes.
+
+    Args:
+        path: The path to check.
+        exclude_gitignore: If True, excludes files matched in .gitignore.
+
+    Returns:
+        The size of 'path' in megabytes.
+    """
+    if exclude_gitignore:
+        try:
+            # FIXME: add git index size (du -hsc .git) in this computation.
+            return int(
+                subprocess.check_output(
+                    f'( git status --short {path} | '
+                    'grep "^?" | cut -d\  -f2- '
+                    f'&& git ls-files {path} ) | '
+                    'xargs -n 1 du -hsk | '
+                    'awk \'{ sum += $1 } END { print sum }\'',
+                    shell=True)) // (2**10)
+        except:
+            # If git is not installed, or if the user is not in a git repo.
+            # NOTE: Sky currently does not support using .gitignore exclusion in
+            # a non-git repo.
+            pass
     return int(
-        subprocess.check_output(['du', '-sh', '-m',
-                                 path]).split()[0].decode('utf-8'))
+        subprocess.check_output(['du', '-sh', '-k', path
+                                ]).split()[0].decode('utf-8')) // (2**10)
 
 
 class RayCodeGen:
@@ -1279,20 +1314,22 @@ class CloudVmRayBackend(backends.Backend):
             workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
 
         # Raise warning if directory is too large
-        dir_size = _path_size_megabytes(full_workdir)
+        dir_size = _path_size_megabytes(full_workdir, exclude_gitignore=True)
         if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
             logger.warning(
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
-                f'is {dir_size} MB. Try to keep workdir small, as '
+                f'is {dir_size} MB. Try to keep workdir small or use '
+                '.gitignore to exclude large files, as '
                 f'large sizes will slow down rsync.{style.RESET_ALL}')
+
+        log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
         def _sync_workdir_node(ip):
             self._rsync_up(handle,
                            ip=ip,
                            source=workdir,
                            target=SKY_REMOTE_WORKDIR,
-                           log_path=os.path.join(self.log_dir,
-                                                 'workdir_sync.log'),
+                           log_path=log_path,
                            stream_logs=False,
                            raise_error=True)
 
@@ -1303,6 +1340,9 @@ class CloudVmRayBackend(backends.Backend):
             f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
             f' -> '
             f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
+        tail_cmd = f'tail -n100 -f {log_path}'
+        logger.info('To view detailed progress: '
+                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
         with console.status('[bold cyan]Syncing[/]'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
@@ -1377,6 +1417,9 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'{fore.CYAN}Syncing (to {num_nodes} node{plural}): '
                         f'{style.BRIGHT}{src}{style.RESET_ALL} -> '
                         f'{style.BRIGHT}{dst}{style.RESET_ALL}')
+            tail_cmd = f'tail -n100 -f {log_path}'
+            logger.info('To view detailed progress: '
+                        f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
             with console.status('[bold cyan]Syncing[/]'):
                 backend_utils.run_in_parallel(_sync_node, ip_list)
 
@@ -1386,11 +1429,13 @@ class CloudVmRayBackend(backends.Backend):
                 full_src = os.path.abspath(os.path.expanduser(src))
                 # Checked during Task.set_file_mounts().
                 assert os.path.exists(full_src), f'{full_src} does not exist.'
-                src_size = _path_size_megabytes(full_src)
+                src_size = _path_size_megabytes(full_src,
+                                                exclude_gitignore=True)
                 if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src!r} '
-                        f'is {src_size} MB. Try to keep src small, as '
+                        f'is {src_size} MB. Try to keep src small or use '
+                        '.gitignore to exclude large files, as '
                         f'large sizes will slow down rsync.{style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(
