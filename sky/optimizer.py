@@ -295,7 +295,14 @@ class Optimizer:
                 for k, v in dp_best_cost.items()
                 if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
             }
-            metric = 'cost' if minimize_cost else 'time'
+            metric = 'cost ($)' if minimize_cost else 'time (hr)'
+            for k, v in dp_best_cost.items():
+                dp_best_cost[k] = {
+                    resources: round(cost, 2) if minimize_cost \
+                        else round(cost / 3600, 2)
+                    for resources, cost in v.items()
+                }
+
             if len(dp_best_cost) > 1:
                 logger.info(f'Details: task -> {{resources -> {metric}}}')
                 logger.info('%s\n', pprint.pformat(dp_best_cost))
