@@ -17,12 +17,15 @@ from sky.skylet import job_lib
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 
 
-def redirect_process_output(proc,
-                            log_path: str,
-                            stream_logs: bool,
-                            start_streaming_at: str = '',
-                            skip_lines: Optional[List[str]] = None,
-                            replace_crlf: bool = False) -> Tuple[str, str]:
+def redirect_process_output(
+    proc,
+    log_path: str,
+    stream_logs: bool,
+    start_streaming_at: str = '',
+    skip_lines: Optional[List[str]] = None,
+    replace_crlf: bool = False,
+    add_timestamps: bool = True,
+) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
@@ -63,6 +66,9 @@ def redirect_process_output(proc,
                 if (skip_lines is not None and
                         any(skip in line for skip in skip_lines)):
                     continue
+                if add_timestamps:
+                    line = (' '.join((time.strftime('[%Y-%m-%d %H:%M:%S]',
+                                                    time.localtime()), line)))
                 if start_streaming_at in line:
                     start_streaming_flag = True
                 if key.fileobj is out_io:
@@ -89,6 +95,7 @@ def run_with_log(
     shell: bool = False,
     with_ray: bool = False,
     redirect_stdout_stderr: bool = True,
+    add_timestamps: bool = True,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -149,6 +156,7 @@ def run_with_log(
                 ],
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
+                add_timestamps=add_timestamps,
             )
         proc.wait()
         if require_outputs:
