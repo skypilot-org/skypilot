@@ -757,7 +757,7 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         # Get previous cluster status
-        cluster_status = global_user_state.get_status_from_cluster_name(
+        previous_cluster_status = global_user_state.get_status_from_cluster_name(
             cluster_name)
 
         self._clear_blocklist()
@@ -813,40 +813,7 @@ class RetryingVmProvisioner(object):
                 to_provision.cloud, num_nodes, cluster_config_file,
                 log_abs_path, stream_logs, logging_info)
 
-            if status == self.GangSchedulingStatus.HEAD_FAILED:
-                # ray up failed for the head node.
-                self._update_blocklist_on_error(to_provision.cloud, region,
-                                                zones, stdout, stderr)
-            elif status == self.GangSchedulingStatus.GANG_FAILED:
-                # gang scheduling failed.
-
-                # There exist partial nodes (e.g., head node) so we must
-                # down before moving on to other regions.
-                # FIXME(zongheng): terminating a potentially live cluster
-                # is scary.  Say: users have an existing cluster, do sky
-                # launch, gang failed, then we are terminating it here.
-                logger.error('*** Failed provisioning the cluster. ***')
-                # The stdout/stderr of ray up is not useful here, since
-                # head node is successfully provisioned.
-                logger.error('*** Tearing down the failed cluster. ***')
-                # Only terminate the cluster if it is not in STOPPED or
-                # UP mode.
-                terminate = cluster_status not in [
-                    global_user_state.ClusterStatus.STOPPED,
-                    global_user_state.ClusterStatus.UP
-                ]
-                CloudVmRayBackend().teardown(handle, terminate=terminate)
-                self._update_blocklist_on_error(
-                    to_provision.cloud,
-                    region,
-                    # Ignored and block region:
-                    zones=None,
-                    stdout=None,
-                    stderr=None)
-            else:
-                # Success.
-                assert status == self.GangSchedulingStatus.CLUSTER_READY, status
-
+            if status == self.GangSchedulingStatus.CLUSTER_READY:
                 # However, ray processes may not be up due to 'ray up
                 # --no-restart' flag.  Ensure so.
                 self._ensure_cluster_ray_started(handle, log_abs_path)
@@ -856,6 +823,41 @@ class RetryingVmProvisioner(object):
                 logger.info(f'{fore.GREEN}Successfully provisioned or found'
                             f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
+
+            if status == self.GangSchedulingStatus.HEAD_FAILED:
+                # ray up failed for the head node.
+                self._update_blocklist_on_error(to_provision.cloud, region,
+                                                zones, stdout, stderr)
+            else:
+                assert status == self.GangSchedulingStatus.GANG_FAILED, status
+                # gang scheduling failed.
+
+                logger.error('*** Failed provisioning the cluster. ***')
+                # The stdout/stderr of ray up is not useful here, since
+                # head node is successfully provisioned.
+                self._update_blocklist_on_error(
+                    to_provision.cloud,
+                    region,
+                    # Ignored and block region:
+                    zones=None,
+                    stdout=None,
+                    stderr=None)
+            # There may exists partial nodes (e.g., head node) so we must
+            # terminate before moving on to other regions or stop.
+            # FIXME(zongheng): terminating a potentially live cluster
+            # is scary.  Say: users have an existing cluster, do sky
+            # launch, gang failed, then we are terminating it here.
+            
+            # If cluster was previously UP or STOPPED, stop it; otherwise
+            # terminate.
+            terminate = previous_cluster_status not in [
+                global_user_state.ClusterStatus.STOPPED,
+                global_user_state.ClusterStatus.UP
+            ]
+            terminate_str = 'Terminating' if terminate else 'Stopping'
+            logger.error(f'*** {terminate_str} the failed cluster. ***')
+            CloudVmRayBackend().teardown(handle, terminate=terminate)
+
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
                    ' Try changing resource requirements or use another cloud.')
@@ -1841,7 +1843,7 @@ class CloudVmRayBackend(backends.Backend):
                 os.remove(lock_path)
         except filelock.Timeout:
             logger.error(f'Cluster {cluster_name} is locked by {lock_path}. \
-                    Check to see if it is still being launched.')
+                    Check to see if it is still being launched.'                                                                )
 
     def _teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
