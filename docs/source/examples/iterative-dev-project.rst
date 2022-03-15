@@ -40,6 +40,12 @@ Alternatively, the user can directly :code:`ssh` into the head node of the clust
 
   $ ssh dev
 
+If the cluster has one or more worker nodes, the user can also :code:`ssh` into the i-th (e.g., 0-th) worker node:
+
+.. code-block:: console
+
+  $ ssh dev-worker-0
+
 Sky provides easy password-less SSH access by automatically creating an entry for each cluster in the :code:`~/.ssh/config` file.
 Referring to clusters by names also allows for seamless integration with common tools
 such as :code:`scp`, :code:`rsync`, and `Visual Studio Code Remote
