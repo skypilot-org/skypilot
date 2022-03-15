@@ -754,7 +754,9 @@ class RetryingVmProvisioner(object):
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
                 logger.error('*** Tearing down the failed cluster. ***')
-                CloudVmRayBackend().teardown(handle, terminate=True)
+                CloudVmRayBackend().teardown(handle,
+                                             terminate=True,
+                                             _force=True)
                 self._update_blocklist_on_error(
                     to_provision.cloud,
                     region,
@@ -1149,6 +1151,7 @@ class CloudVmRayBackend(backends.Backend):
             auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
             _add_cluster_to_ssh_config(cluster_name, handle.head_ip,
                                        auth_config)
+            os.remove(lock_path)
             return handle
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -1727,17 +1730,26 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
-    def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+    def teardown(self,
+                 handle: ResourceHandle,
+                 terminate: bool,
+                 _force: bool = False) -> None:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
         try:
-            # TODO(mraheja): remove pylint disabling when filelock
-            # version updated
-            # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(lock_path, 10):
+            if _force:
+                # Should only be forced when teardown is called within a
+                # locked section of the code (i.e teardown when not enough
+                # resources can be provisioned)
                 self._teardown(handle, terminate)
-            if terminate:
-                os.remove(lock_path)
+            else:
+                # TODO(mraheja): remove pylint disabling when filelock
+                # version updated
+                # pylint: disable=abstract-class-instantiated
+                with filelock.FileLock(lock_path, 10):
+                    self._teardown(handle, terminate)
+                if terminate:
+                    os.remove(lock_path)
         except filelock.Timeout:
             logger.error(f'Cluster {cluster_name} is locked by {lock_path}. \
                     Check to see if it is still being launched.')
