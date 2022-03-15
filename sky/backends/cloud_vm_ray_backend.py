@@ -757,7 +757,8 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         # Get previous cluster status
-        cluster_status = global_user_state.get_cluster_status(cluster_name)
+        cluster_status = global_user_state.get_status_from_cluster_name(
+            cluster_name)
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
