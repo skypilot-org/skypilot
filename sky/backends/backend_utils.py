@@ -48,6 +48,7 @@ RESET_BOLD = '\033[0m'
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
+_LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
@@ -502,10 +503,8 @@ def wait_until_ray_cluster_ready(
     head_ip = query_head_ip_with_retries(
         cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
 
-    expected_worker_count = num_nodes - 1
-
     ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
-    last_workers_so_far = 0
+    last_nodes_so_far = 0
     start = time.time()
     while True:
         rc, output, stderr = run_command_on_ip_via_ssh(head_ip,
@@ -527,7 +526,13 @@ def wait_until_ray_cluster_ready(
             assert len(result) == 1, result
             ready_workers = int(result[0])
 
-        if ready_workers == expected_worker_count:
+        result = _LAUNCHED_HEAD_PATTERN.findall(output)
+        ready_head = 0
+        if result:
+            assert len(result) == 1, result
+            ready_head = int(result[0])
+
+        if ready_head + ready_workers == num_nodes:
             # All workers are up.
             break
 
@@ -535,21 +540,21 @@ def wait_until_ray_cluster_ready(
         found_ips = _LAUNCHING_IP_PATTERN.findall(output)
         pending_workers = len(found_ips)
 
-        workers_so_far = ready_workers + pending_workers
+        nodes_so_far = ready_head + ready_workers + pending_workers
 
         # Check the number of nodes that are fetched. Timeout if no new
         # nodes fetched in a while (nodes_launching_progress_timeout), though
-        # number of workers_so_far is still not as expected.
-        if workers_so_far != last_workers_so_far:
+        # number of nodes_so_far is still not as expected.
+        if nodes_so_far > last_nodes_so_far:
             # Reset the start time if the number of launching nodes
             # changes, i.e. new nodes are launched.
             logger.debug('Reset start time, as new nodes are launched. '
-                         f'({last_workers_so_far} -> {workers_so_far})')
+                         f'({last_nodes_so_far} -> {nodes_so_far})')
             start = time.time()
-            last_workers_so_far = workers_so_far
+            last_nodes_so_far = nodes_so_far
         elif (nodes_launching_progress_timeout is not None and
               time.time() - start > nodes_launching_progress_timeout and
-              workers_so_far != expected_worker_count):
+              nodes_so_far != num_nodes):
             logger.error(
                 'Timed out when waiting for workers to be provisioned.')
             return False  # failed
