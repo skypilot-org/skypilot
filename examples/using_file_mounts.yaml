@@ -33,7 +33,7 @@ file_mounts:
 
   # Intermediate dirs are created and chown-ed to $USER if they don't already
   # exist.  Thus they can be used too, e.g., 'mkdir -p /data/logs'.  See 'run'.
-  /data/checkpoints/best.pt: ~/tmp
+  /data/checkpoints/best.pt: ~/tmpfile
 
   ~/.ssh/id_rsa.pub: ~/.ssh/id_rsa.pub
 
