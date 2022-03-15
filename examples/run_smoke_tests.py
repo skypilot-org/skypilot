@@ -27,45 +27,6 @@ Implemented behaviors:
 Note to developers:
   * To add a test: append to the _SMOKE_TESTS list.
   * Certain tests (e.g., tpu_app) may need longer timeouts than the default.
-
-Tests:
-
-  * Successful scenarios
-    - time python -u examples/run_smoke.py 2>&1 | tee run.log
-    - 31:23.62 total
-    - except: tpu_app (name bug)
-
-
-  * Erroneous scenarios
-
-    * [env_check, minimal (with exit 1 in setup)]
-
-    * [minimal (with exit 1 in setup), env_check]
-
-    * [minimal (with exit 1 in run), env_check]
-
-FIXME:
-
- - tpu_app less '/var/folders/8f/56gzvwkd3n3293xjlrztr6600000gp/T/tpu_app-cassduyg.log'
-   - tpu_name bug + we don't have a way to query exitcode
-
-Future TODOs
- - sky logs --status cluster 1
- - at the end of this script, concat all .log into one file so we can view it
-   to ensure nothing is wrong (or auto grep for error/exception etc.)
-
-----
-
-Known issues
-
-cannot ctrl-c the terminal that launches this script -- during or after the execution.
-- workaround: kill the window,
- (and if you want to ctrl-c in the middle) just run 'sky down -a -y' and the tests will error out (assuming you have no other clusters) manually
-
-Our logging would mess up spacing (related to new line replacement?) after an error occurs / or just after a while
-- workaround: pipe to a file and view
-
- python -u run_smoke.py 2>&1  142.87s user 85.26s system 12% cpu 31:23.62 total
 """
 import subprocess
 import sys
