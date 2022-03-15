@@ -116,9 +116,3 @@ To transfer files from the head node of a cluster, use :code:`rsync` (or :code:`
 .. code-block:: console
 
   $ rsync -Pavz dev:/path/to/checkpoints local/
-
-.. note::
-    For a multi-node cluster, Sky currently does not natively support
-    downloading artifacts from the worker machines.  As temporary workarounds,
-    query the worker IPs from the cloud console, and run :code:`rsync -Pavz -e
-    'ssh -i ~/.ssh/sky-key' <worker_ip>:/path /local_path`.
