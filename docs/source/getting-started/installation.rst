@@ -19,7 +19,7 @@ dependencies installed.
 
 .. note::
 
-    On Mac, support for Sky below macOS version < 1.15 (Mojave) is currently limited. Sky requires Ray ≥ 1.9, which works for macOS ≥ 1.15.
+    For Macs, Sky requires non-Apple silicon devices with macOS >= 10.15.
 
 Cloud account setup
 -------------------
