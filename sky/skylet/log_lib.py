@@ -64,9 +64,9 @@ def redirect_process_output(proc,
     stderr = ''
 
     start_streaming_flag = False
-    provision_status = rich.status.Status('[bold cyan]Launching')
     ray_up_state = {'state': 'LAUNCHING'}  # TODO: change to enum
     if parse_ray_up_logs:
+        provision_status = rich.status.Status('[bold cyan]Launching')
         provision_status.start()
     with open(log_path, 'a') as fout:
         while len(sel.get_map()) > 0:

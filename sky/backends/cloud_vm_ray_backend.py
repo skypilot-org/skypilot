@@ -123,15 +123,16 @@ def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
     if exclude_gitignore:
         try:
             # FIXME: add git index size (du -hsc .git) in this computation.
+            awk_program = '{ sum += $1 } END { print sum }'
             return int(
                 subprocess.check_output(
                     f'( git status --short {path} | '
-                    'grep "^?" | cut -d\  -f2- '
+                    'grep "^?" | cut -d " " -f2- '
                     f'&& git ls-files {path} ) | '
                     'xargs -n 1 du -hsk | '
-                    'awk \'{ sum += $1 } END { print sum }\'',
+                    f'awk {awk_program!r}',
                     shell=True)) // (2**10)
-        except:
+        except subprocess.CalledProcessError:
             # If git is not installed, or if the user is not in a git repo.
             # NOTE: Sky currently does not support using .gitignore exclusion in
             # a non-git repo.
