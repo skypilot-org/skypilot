@@ -19,7 +19,7 @@ dependencies installed.
 
 .. note::
 
-    For Macs, Sky requires non-Apple silicon devices with macOS >= 10.15.
+    For Macs, macOS >= 10.15 is required to install Sky. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio` prior to installing Sky.
 
 Cloud account setup
 -------------------
