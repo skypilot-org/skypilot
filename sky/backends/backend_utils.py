@@ -239,7 +239,7 @@ class SSHConfigHelper(object):
                         overwrite_begin_idx = i - 1
                     else:
                         logger.warning(f'{cls.ssh_conf_path} contains '
-                                        f'host named {host_name}.')
+                                       f'host named {host_name}.')
                         host_name = ip
                         logger.warning(f'Using {ip} to identify host instead.')
                     break
@@ -252,7 +252,7 @@ class SSHConfigHelper(object):
             if overwrite:
                 assert overwrite_begin_idx is not None
                 config[overwrite_begin_idx:overwrite_begin_idx +
-                    len(updated_lines)] = updated_lines
+                       len(updated_lines)] = updated_lines
             else:
                 if len(config) > 0 and not config[-1].endswith('\n'):
                     # Add trailing newline if it doesn't exist.
