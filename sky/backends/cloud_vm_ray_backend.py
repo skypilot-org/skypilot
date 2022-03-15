@@ -1128,14 +1128,9 @@ class CloudVmRayBackend(backends.Backend):
             cluster_config_file = config_dict['ray']
             provisioned_resources = config_dict['launched_resources']
 
-            accelerator_dict = provisioned_resources.accelerators
-            if accelerator_dict is not None:
-                assert len(accelerator_dict.keys()) == 1
-                acc_name = list(accelerator_dict.keys())[0]
-                tpu_name = config_dict['tpu_name']
-                if 'tpu' in acc_name.lower():
-                    self._set_tpu_name(cluster_config_file, launched_nodes,
-                                       tpu_name)
+            if 'tpu_name' in config_dict:
+                self._set_tpu_name(cluster_config_file, launched_nodes,
+                                   config_dict['tpu_name'])
 
             head_ip = backend_utils.query_head_ip_with_retries(
                 cluster_config_file,
