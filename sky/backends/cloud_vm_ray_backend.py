@@ -632,8 +632,8 @@ class RetryingVmProvisioner(object):
                 # Reset to STOPPED (rather than keeping it at INIT), because
                 # if the cluster is multi-node, some of the nodes may be stopped
                 # by the cloud provider, it is better to stop all the remaining
-                # nodes. INIT mode will enable failover to other regions, causing
-                # data lose.
+                # nodes. INIT mode will enable failover to other regions,
+                # causing data lose.
                 global_user_state.set_cluster_status(
                     cluster_name, global_user_state.ClusterStatus.STOPPED)
 
