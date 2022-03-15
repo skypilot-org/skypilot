@@ -1862,8 +1862,8 @@ class CloudVmRayBackend(backends.Backend):
                 if terminate:
                     os.remove(lock_path)
         except filelock.Timeout:
-            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. \
-                    Check to see if it is still being launched.')
+            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. '
+                         'Check to see if it is still being launched.')
 
     def _teardown(self, handle: ResourceHandle, terminate: bool) -> None:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
