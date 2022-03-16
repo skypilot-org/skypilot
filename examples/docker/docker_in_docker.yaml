@@ -4,8 +4,8 @@
 # docker-in-docker (dind) capabilities of sky docker mode.
 #
 # Usage:
-#   sky launch -c dind docker_in_docke.yaml --docker
-#   sky down ping
+#   sky launch --docker -c dind docker_in_docker.yaml
+#   sky down dind
 
 name: dind
 

@@ -3,7 +3,7 @@
 # Runs a task that pings localhost 100 times.
 #
 # Usage:
-#   sky launch -c ping ping.yaml --docker
+#   sky launch --docker -c ping ping.yaml
 #   sky down ping
 
 name: ping
