@@ -99,18 +99,6 @@ def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
     return accelerator_dict
 
 
-def _add_cluster_to_ssh_config(cluster_name: str, cluster_ips: List[str],
-                               auth_config: Dict[str, str]) -> None:
-    backend_utils.SSHConfigHelper.add_cluster(cluster_name, cluster_ips,
-                                              auth_config)
-
-
-def _remove_cluster_from_ssh_config(cluster_name: str, cluster_ip: str,
-                                    auth_config: Dict[str, str]) -> None:
-    backend_utils.SSHConfigHelper.remove_cluster(cluster_name, cluster_ip,
-                                                 auth_config)
-
-
 def _path_size_megabytes(path: str) -> int:
     """Returns the size of 'path' (directory or file) in megabytes."""
     return int(
@@ -1265,7 +1253,8 @@ class CloudVmRayBackend(backends.Backend):
                                                     handle,
                                                     ready=True)
             auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-            _add_cluster_to_ssh_config(cluster_name, ip_list, auth_config)
+            backend_utils.SSHConfigHelper.add_cluster(cluster_name, ip_list,
+                                                      auth_config)
             os.remove(lock_path)
             return handle
 
@@ -1978,8 +1967,9 @@ class CloudVmRayBackend(backends.Backend):
                 f'{stderr}{colorama.Style.RESET_ALL}')
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        _remove_cluster_from_ssh_config(cluster_name, handle.head_ip,
-                                        auth_config)
+        backend_utils.SSHConfigHelper.remove_cluster(cluster_name,
+                                                     handle.head_ip,
+                                                     auth_config)
         name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(name, terminate=terminate)
 

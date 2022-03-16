@@ -270,22 +270,22 @@ class SSHConfigHelper(object):
     def _add_multinode_config(
         cls,
         cluster_name: str,
-        ips: List[str],
+        worker_ips: List[str],
         auth_config: Dict[str, str],
     ):
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
-        sky_autogen_comment = '# Added by sky (use `sky stop/down ' + \
-                            f'{cluster_name}` to remove)'
+        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
+                               f'{cluster_name}` to remove)')
 
-        overwrites = [False] * len(ips)
-        overwrite_begin_idxs = [None] * len(ips)
-        codegens = [None] * len(ips)
+        overwrites = [False] * len(worker_ips)
+        overwrite_begin_idxs = [None] * len(worker_ips)
+        codegens = [None] * len(worker_ips)
         worker_names = []
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
 
-        for idx in range(len(ips)):
+        for idx in range(len(worker_ips)):
             worker_names.append(cluster_name + f'-worker{idx+1}')
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
@@ -329,10 +329,10 @@ class SSHConfigHelper(object):
                 prev_line = config[i - 1] if i > 0 else ''
                 logger.warning(f'{cls.ssh_conf_path} contains '
                                f'host named {worker_names[idx]}.')
-                host_name = ips[idx]
+                host_name = worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, ips[idx], username,
+                    sky_autogen_comment, host_name, worker_ips[idx], username,
                     key_path)
 
         # All workers go to ~/.sky/generated/ssh/{cluster_name}
@@ -345,17 +345,17 @@ class SSHConfigHelper(object):
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, ips[idx], username,
+                    sky_autogen_comment, host_name, worker_ips[idx], username,
                     key_path)
 
         # This checks if all codegens have been created.
-        for idx, ip in enumerate(ips):
+        for idx, ip in enumerate(worker_ips):
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, worker_names[idx], ip, username,
                     key_path)
 
-        for idx in range(len(ips)):
+        for idx in range(len(worker_ips)):
             # Add (or overwrite) the new config.
             overwrite = overwrites[idx]
             overwrite_begin_idx = overwrite_begin_idxs[idx]
@@ -453,8 +453,8 @@ class SSHConfigHelper(object):
             os.remove(extra_config_path)
 
         # Delete include statement
-        sky_autogen_comment = '# Added by sky (use `sky stop/down ' + \
-                            f'{cluster_name}` to remove)'
+        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
+                               f'{cluster_name}` to remove)')
         with open(config_path) as f:
             config = f.readlines()
 
