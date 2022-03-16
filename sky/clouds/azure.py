@@ -219,20 +219,19 @@ class Azure(clouds.Cloud):
             return (False,
                     f'{azure_token_cache_file} does not exist.' + help_str)
 
-        cli_help = ''
         try:
             output = _run_output('az account show --output=json')
-            # If Azure is properly logged in, this will return something like:
-            #   {"id": ..., "user": ...}
-            # and if not, it will return:
-            #   Please run 'az login' to setup account.
-            if output.startswith('{'):
-                return True, None
         except subprocess.CalledProcessError:
-            cli_help = (
-                'Azure CLI returned error. To install Azure CLI, run: \n'
-                '    $ pip install azure-cli==2.30.0\n')
-        return False, cli_help + 'Azure credentials not set.' + help_str
+            return False, (
+                'Azure CLI returned error. To install Azure CLI, run:'
+                '\n    $ pip install azure-cli==2.30.0')
+        # If Azure is properly logged in, this will return something like:
+        #   {"id": ..., "user": ...}
+        # and if not, it will return:
+        #   Please run 'az login' to setup account.
+        if output.startswith('{'):
+            return True, None
+        return False, 'Azure credentials not set.' + help_str
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
         return {'~/.azure': '~/.azure'}, []
