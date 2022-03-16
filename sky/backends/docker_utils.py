@@ -16,7 +16,7 @@ logger = sky_logging.init_logger(__name__)
 
 # Add docker-cli from official docker image to support docker-in-docker.
 # We copy instead of installing docker-cli to keep the image builds fast.
-DOCKERFILE_TEMPLATE = """
+DOCKERFILE_TEMPLATE = r"""
 FROM {base_image}
 COPY --from=docker:dind /usr/local/bin/docker /usr/local/bin/
 SHELL ["/bin/bash", "-c"]
