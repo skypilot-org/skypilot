@@ -969,6 +969,11 @@ def stop(
 
         # Stop multiple clusters.
         sky stop cluster1 cluster2
+        
+    .. code-block:: bash
+
+        # Tear down all clusters with prefix 'cluster'
+        sky stop "cluster*"
 
     .. code-block:: bash
 
@@ -1140,6 +1145,11 @@ def down(
 
         # Tear down multiple clusters.
         sky down cluster1 cluster2
+    
+    .. code-block:: bash
+
+        # Tear down all clusters with prefix 'cluster'
+        sky down "cluster*"
 
     .. code-block:: bash
 
