@@ -4,6 +4,7 @@ import tempfile
 from typing import Dict, Optional, Union
 
 import colorama
+from rich import console as rich_console
 
 from sky import backends
 from sky.adaptors import docker
@@ -18,6 +19,7 @@ Task = task_lib.Task
 Resources = resources.Resources
 Path = str
 
+console = rich_console.Console()
 logger = sky_logging.init_logger(__name__)
 
 _DOCKER_RUN_FOREVER_CMD = 'tail -f /dev/null'
@@ -160,7 +162,8 @@ class LocalDockerBackend(backends.Backend):
         handle = LocalDockerBackend.ResourceHandle(cluster_name)
         logger.info(f'Building docker image for task {task.name}. '
                     'This might take some time.')
-        image_tag, metadata = docker_utils.build_dockerimage_from_task(task)
+        with console.status('[bold cyan]Building Docker image[/]'):
+            image_tag, metadata = docker_utils.build_dockerimage_from_task(task)
         self.images[handle] = [image_tag, metadata]
         logger.info(f'Image {image_tag} built.')
         logger.info('Provisioning complete.')

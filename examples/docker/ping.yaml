@@ -12,8 +12,8 @@ resources:
   cloud: aws
 
 setup: |
-  apt-get update --allow-insecure-repositories
-  apt-get install -y iputils-ping
+  sudo apt-get update --allow-insecure-repositories
+  sudo apt-get install -y iputils-ping
 
 run: |
   ping 127.0.0.1 -c 100

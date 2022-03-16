@@ -19,6 +19,8 @@ logger = sky_logging.init_logger(__name__)
 DOCKERFILE_TEMPLATE = """
 FROM {base_image}
 COPY --from=docker:dind /usr/local/bin/docker /usr/local/bin/
+SHELL ["/bin/bash", "-c"]
+RUN echo "alias sudo="\$@"" >> ~/.bashrc
 """.strip()
 
 DOCKERFILE_SETUPCMD = """RUN {setup_command}"""
@@ -203,9 +205,15 @@ def make_bash_from_multiline(codegen: str) -> str:
     script = [
         textwrap.dedent(f"""\
         #!/bin/bash
+        sudo() {{
+            "$@"
+        }}
+        export -f sudo
         {CONDA_SETUP_PREFIX}"""),
         codegen,
     ]
+    # We need to override sudo in the script because bashrc is not sourced if
+    # not running in interactive mode (e.g. in a docker container).
     script = '\n'.join(script)
     return script
 
