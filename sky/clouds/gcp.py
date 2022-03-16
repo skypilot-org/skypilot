@@ -1,4 +1,5 @@
 """Google Cloud Platform."""
+from asyncio import subprocess
 import copy
 import json
 import os
@@ -7,6 +8,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from google import auth
 
 from sky import clouds
+from sky.check import check
 from sky.clouds import service_catalog
 
 
@@ -262,6 +264,13 @@ class GCP(clouds.Cloud):
                 'For more info: '
                 'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
+        try:
+            subprocess.run(['gcloud', '--version'],
+                                    check=True)
+        except subprocess.CalledProcessError:
+            return True, (
+                'To use TPU, you must install gcloud.\n    '
+                '$ conda install -c conda-forge google-cloud-sdk')
         return True, None
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
