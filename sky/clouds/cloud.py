@@ -100,8 +100,9 @@ class Cloud:
         """
         raise NotImplementedError
 
+    @classmethod
     def get_accelerators_from_instance_type(
-        self,
+        cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
