@@ -328,7 +328,6 @@ def launch_multitask(dag: sky.Dag,
                                              stream_logs=stream_logs,
                                              handle=None,
                                              backend=backend,
-                                             optimize_target=optimize_target,
                                              cluster_name=sub_cluster_name,
                                              detach_run=detach_run))
         # FIXME: is this needed?
