@@ -216,7 +216,8 @@ class Optimizer:
                         f'No launchable resource found for task {node}. '
                         'To fix: relax its resource requirements.\n'
                         'Hint: \'sky show-gpus --all\' '
-                        'to list available accelerators.')
+                        'to list available accelerators.\n'
+                        '      \'sky check\' to check the enabled clouds.')
                     if raise_error:
                         raise exceptions.ResourcesUnavailableError(error_msg)
                     else:
