@@ -264,7 +264,11 @@ class GCP(clouds.Cloud):
                 'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
         try:
-            subprocess.run('gcloud --version', shell=True, check=True)
+            subprocess.run('gcloud --version',
+                           shell=True,
+                           check=True,
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
         except subprocess.CalledProcessError:
             return True, ('To use TPU, gcloud need to be installed.\n    '
                           '$ conda install -c conda-forge google-cloud-sdk')
