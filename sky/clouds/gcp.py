@@ -11,6 +11,14 @@ from sky import clouds
 from sky.clouds import service_catalog
 
 
+def _run_output(cmd):
+    proc = subprocess.run(cmd,
+                          shell=True,
+                          check=True,
+                          stderr=subprocess.PIPE,
+                          stdout=subprocess.PIPE)
+    return proc.stdout.decode('ascii')
+
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 
@@ -248,10 +256,13 @@ class GCP(clouds.Cloud):
             # Calling `auth.default()` ensures the GCP client library works,
             # which is used by Ray Autoscaler to launch VMs.
             auth.default()
-        except (AssertionError, auth.exceptions.DefaultCredentialsError):
+            # Check the installation of google-cloud-sdk.
+            _run_output('gcloud --version')
+        except (AssertionError, auth.exceptions.DefaultCredentialsError, subprocess.CalledProcessError):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
-                'GCP credentials not set. Run the following commands:\n    '
+                'GCP tools are not installed or GCP credentials are not set. '
+                'Run the following commands:\n    '
                 # Install the Google Cloud SDK:
                 '$ pip install google-api-python-client\n    '
                 '$ conda install -c conda-forge google-cloud-sdk\n    '
@@ -263,15 +274,6 @@ class GCP(clouds.Cloud):
                 'For more info: '
                 'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
-        try:
-            subprocess.run('gcloud --version',
-                           shell=True,
-                           check=True,
-                           stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE)
-        except subprocess.CalledProcessError:
-            return True, ('To use TPU, gcloud need to be installed.\n    '
-                          '$ conda install -c conda-forge google-cloud-sdk')
         return True, None
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:

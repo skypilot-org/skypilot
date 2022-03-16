@@ -223,8 +223,10 @@ class Azure(clouds.Cloud):
             output = _run_output('az account show --output=json')
         except subprocess.CalledProcessError:
             return False, (
-                'Azure CLI returned error. To install Azure CLI, run:'
-                '\n    $ pip install azure-cli==2.30.0')
+                'Azure CLI returned error. Run the following commands '
+                'under sky folder:'
+                '\n    $ pip install .[azure]'
+                '\n    Credentials may also need to be set.' + help_str)
         # If Azure is properly logged in, this will return something like:
         #   {"id": ..., "user": ...}
         # and if not, it will return:
