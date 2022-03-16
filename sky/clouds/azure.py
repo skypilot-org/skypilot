@@ -137,8 +137,9 @@ class Azure(clouds.Cloud):
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
 
+    @classmethod
     def get_accelerators_from_instance_type(
-        self,
+        cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(

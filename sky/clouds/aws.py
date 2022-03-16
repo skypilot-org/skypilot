@@ -87,9 +87,27 @@ class AWS(clouds.Cloud):
             yield region, region.zones
 
     @classmethod
-    def get_default_ami(cls, region_name: str) -> str:
+    def get_default_ami(cls, region_name: str, instance_type: str) -> str:
+        acc = cls.get_accelerators_from_instance_type(instance_type)
+        if acc is not None:
+            assert len(acc) == 1, acc
+            acc_name = list(acc.keys())[0]
+            if acc_name == 'K80':
+                # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
+                # Downgrade the AMI for K80 due as it is only compatible with
+                # NVIDIA driver lower than 470.
+                print('K80 AMI downgrade')
+                amis = {
+                    'us-east-1': 'ami-0868a20f5a3bf9702',
+                    'us-east-2': 'ami-09b8825010d4dc701',
+                    # 'us-west-1': 'TODO: cannot launch',
+                    'us-west-2': 'ami-06b3479ab15aaeaf1',
+                }
+                assert region_name in amis, region_name
+                return amis[region_name]
         # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
         # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
+        # Nvidia driver: 510.47.03
         amis = {
             'us-east-1': 'ami-0729d913a335efca7',
             'us-east-2': 'ami-070f4af81c19b41bf',
@@ -149,9 +167,9 @@ class AWS(clouds.Cloud):
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
-
+    @classmethod
     def get_accelerators_from_instance_type(
-        self,
+        cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
