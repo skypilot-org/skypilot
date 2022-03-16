@@ -36,10 +36,10 @@ class AWS(clouds.Cloud):
             # https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/
             cls._regions = [
                 # TODO: troubles launching AMIs.
-                # clouds.Region('us-west-1').set_zones([
-                #     clouds.Zone('us-west-1a'),
-                #     clouds.Zone('us-west-1b'),
-                # ]),
+                clouds.Region('us-west-1').set_zones([
+                    clouds.Zone('us-west-1a'),
+                    clouds.Zone('us-west-1b'),
+                ]),
                 clouds.Region('us-west-2').set_zones([
                     clouds.Zone('us-west-2a'),
                     clouds.Zone('us-west-2b'),
@@ -81,9 +81,6 @@ class AWS(clouds.Cloud):
             regions = service_catalog.get_region_zones_for_instance_type(
                 instance_type, use_spot, 'aws')
         for region in regions:
-            if region.name == 'us-west-1':
-                # TODO: troubles launching AMIs.
-                continue
             yield region, region.zones
 
     @classmethod
@@ -99,7 +96,8 @@ class AWS(clouds.Cloud):
                 amis = {
                     'us-east-1': 'ami-0868a20f5a3bf9702',
                     'us-east-2': 'ami-09b8825010d4dc701',
-                    # 'us-west-1': 'TODO: cannot launch',
+                    # This AMI is 20210623 as aws does not provide a newer one.
+                    'us-west-1': 'ami-0b3c34d643904a734',
                     'us-west-2': 'ami-06b3479ab15aaeaf1',
                 }
                 assert region_name in amis, region_name
@@ -110,7 +108,8 @@ class AWS(clouds.Cloud):
         amis = {
             'us-east-1': 'ami-0729d913a335efca7',
             'us-east-2': 'ami-070f4af81c19b41bf',
-            # 'us-west-1': 'TODO: cannot launch',
+            # This AMI is 20210623 as aws does not provide a newer one.
+            'us-west-1': 'ami-0b3c34d643904a734',
             'us-west-2': 'ami-050814f384259894c',
         }
         assert region_name in amis, region_name
