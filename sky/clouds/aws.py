@@ -96,7 +96,6 @@ class AWS(clouds.Cloud):
                 # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
                 # Downgrade the AMI for K80 due as it is only compatible with
                 # NVIDIA driver lower than 470.
-                print('K80 AMI downgrade')
                 amis = {
                     'us-east-1': 'ami-0868a20f5a3bf9702',
                     'us-east-2': 'ami-09b8825010d4dc701',
