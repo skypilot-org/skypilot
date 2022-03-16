@@ -137,8 +137,9 @@ class Azure(clouds.Cloud):
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
 
+    @classmethod
     def get_accelerators_from_instance_type(
-        self,
+        cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
@@ -206,8 +207,8 @@ class Azure(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         help_str = (
             ' Run the following commands:'
-            '\n    $ az login'
-            '\n    $ az account set -s <subscription_id>'
+            '\n      $ az login'
+            '\n      $ az account set -s <subscription_id>'
             '\n    For more info: '
             'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # pylint: disable=line-too-long
         )
@@ -218,10 +219,17 @@ class Azure(clouds.Cloud):
         if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
             return (False,
                     f'{azure_token_cache_file} does not exist.' + help_str)
+
         try:
             output = _run_output('az account show --output=json')
         except subprocess.CalledProcessError:
-            return False, 'Azure CLI returned error.'
+            return False, (
+                'Azure CLI returned error. Run the following commands '
+                'under sky folder:'
+                # TODO(zhwu): after we publish sky to pypi, change this to
+                # `pip install sky[azure]`
+                '\n      $ pip install .[azure]'
+                '\n    Credentials may also need to be set.' + help_str)
         # If Azure is properly logged in, this will return something like:
         #   {"id": ..., "user": ...}
         # and if not, it will return:
