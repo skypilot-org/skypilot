@@ -1164,6 +1164,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
 
     to_down = []
     if len(names) > 0:
+        names = list(set(names))
         for name in names:
             handle = global_user_state.get_handle_from_cluster_name(name)
             if handle is not None:
