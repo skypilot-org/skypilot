@@ -214,8 +214,8 @@ class AWS(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         help_str = (
             ' Run the following commands:'
-            '\n    $ pip install boto3'
-            '\n    $ aws configure'
+            '\n      $ pip install boto3'
+            '\n      $ aws configure'
             '\n    For more info: '
             'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
         )
@@ -229,7 +229,9 @@ class AWS(clouds.Cloud):
         except subprocess.CalledProcessError:
             return False, ('AWS CLI is not installed properly.'
                            ' Run the following commands under sky folder:'
-                           '\n   $ pip install .[aws]'
+                           # TODO(zhwu): after we publish sky to pypi,
+                           # change this to `pip install sky[aws]`
+                           '\n     $ pip install .[aws]'
                            '\n   Credentials may also need to be set.' +
                            help_str)
         # Configured correctly, the AWS output should look like this:
