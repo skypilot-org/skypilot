@@ -13,34 +13,41 @@ import textwrap
 import tempfile
 from typing import Iterator, List, Optional, Tuple, Union
 
+import colorama
 import rich.status
 
 from sky.skylet import job_lib
+from sky import sky_logging
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+
+logger = sky_logging.init_logger(__name__)
 
 
 class ProvisionStatus(enum.Enum):
     LAUNCH = 0
-    CONNECT = 1
-    INSTALL_RUNTIME = 2
-    START_RUNTIME = 3
+    WAIT_FOR_SSH = 1
+    PREPARE_RUNTIME = 2
 
 
 def _update_ray_up_status(log_line, ray_up_state: str,
-                          status_display: rich.status.Status):
+                          status_display: rich.status.Status) -> None:
     if 'Shared connection to' in log_line and ray_up_state[
             'state'] == ProvisionStatus.LAUNCH:
-        status_display.update('[bold cyan]Connecting to cluster')
-        ray_up_state['state'] = ProvisionStatus.CONNECT
+        status_display.stop()
+        logger.info(f'{colorama.Fore.GREEN}Cluster is ready.'
+                    f'{colorama.Style.RESET_ALL}')
+        status_display.start()
+        status_display.update('[bold cyan]Waiting for SSH')
+        ray_up_state['state'] = ProvisionStatus.WAIT_FOR_SSH
     elif 'Looking in indexes: https://pypi.org/simple' in log_line and \
-        ray_up_state['state'] == ProvisionStatus.CONNECT:
-        status_display.update('[bold cyan]Updating runtime dependencies')
-        ray_up_state['state'] = ProvisionStatus.INSTALL_RUNTIME
-    elif 'Did not find any active Ray processes' in log_line and \
-            ray_up_state['state'] == ProvisionStatus.INSTALL_RUNTIME:
-        status_display.update('[bold cyan]Starting Ray runtime')
-        ray_up_state['state'] = ProvisionStatus.START_RUNTIME
+        ray_up_state['state'] == ProvisionStatus.WAIT_FOR_SSH:
+        status_display.stop()
+        logger.info(f'{colorama.Fore.GREEN}SSH is ready.'
+                    f'{colorama.Style.RESET_ALL}')
+        status_display.start()
+        status_display.update('[bold cyan]Preparing Sky runtime')
+        ray_up_state['state'] = ProvisionStatus.PREPARE_RUNTIME
 
 
 def redirect_process_output(proc,

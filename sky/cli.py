@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
+import colorama
 import pendulum
 from rich import console as rich_console
 
@@ -386,6 +387,9 @@ def _create_and_ssh_into_node(
 def _check_yaml(entrypoint: str) -> bool:
     """Checks if entrypoint is a readable YAML file."""
     is_yaml = True
+    shell_splits = shlex.split(entrypoint)
+    yaml_file_provided = len(shell_splits) == 1 and \
+        (shell_splits[0].endswith('yaml') or shell_splits[0].endswith('.yml'))
     try:
         with open(entrypoint, 'r') as f:
             try:
@@ -394,18 +398,19 @@ def _check_yaml(entrypoint: str) -> bool:
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
             except yaml.YAMLError as e:
-                click.secho(f'Invalid YAML configuration {entrypoint}:',
-                            fg='red')
-                click.secho(e, fg='red')
+                if yaml_file_provided:
+                    click.secho(e, fg='red')
+                    raise click.BadParameter(
+                        f'Invalid YAML configuration {entrypoint}. '
+                        'Please check the syntax.')
                 is_yaml = False
     except OSError:
-        if entrypoint.endswith('.yaml') or entrypoint.endswith('.yml'):
-            click.secho(f'{entrypoint} is not a readable file', fg='red')
+        if yaml_file_provided:
+            raise click.BadParameter(f'{entrypoint} is not a readable file; '
+                                     'check if the path is correct.')
         is_yaml = False
     if not is_yaml:
-        shell_splits = shlex.split(entrypoint)
-        if len(shell_splits) == 1 and (shell_splits[0].endswith('.yaml') or
-                                       shell_splits[0].endswith('.yml')):
+        if yaml_file_provided:
             click.confirm(
                 f'{entrypoint!r} looks like a yaml path but yaml.safe_load() '
                 'failed to return a dict (check if it exists or it\'s valid).\n'

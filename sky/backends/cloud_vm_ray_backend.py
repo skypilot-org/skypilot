@@ -131,7 +131,8 @@ def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
                     f'&& git ls-files {path} ) | '
                     'xargs -n 1000 du -hsk | '
                     f'awk {awk_program!r}',
-                    shell=True)) // (2**10)
+                    shell=True,
+                    stderr=subprocess.DEVNULL)) // (2**10)
         except (subprocess.CalledProcessError, ValueError):
             # If git is not installed, or if the user is not in a git repo.
             # Fall back to du -shk if it is not a git repo (size does not
@@ -1418,9 +1419,6 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'{fore.CYAN}Syncing (to {num_nodes} node{plural}): '
                         f'{style.BRIGHT}{src}{style.RESET_ALL} -> '
                         f'{style.BRIGHT}{dst}{style.RESET_ALL}')
-            tail_cmd = f'tail -n100 -f {log_path}'
-            logger.info('To view detailed progress: '
-                        f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
             with console.status('[bold cyan]Syncing[/]'):
                 backend_utils.run_in_parallel(_sync_node, ip_list)
 
@@ -1442,6 +1440,10 @@ class CloudVmRayBackend(backends.Backend):
                     logger.warning(
                         f'{fore.YELLOW}Source path {src!r} is a symlink. '
                         f'Symlink contents are not uploaded.{style.RESET_ALL}')
+
+        tail_cmd = f'tail -n100 -f {log_path}'
+        logger.info('To view detailed progress: '
+                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
