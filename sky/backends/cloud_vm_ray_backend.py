@@ -737,6 +737,13 @@ class RetryingVmProvisioner(object):
                     f'  TPU type {tpu_type} is not available in this zone.')
                 return False
 
+            if 'gcloud: command not found' in stderr:
+                logger.info(
+                    f'  TPU provision requires library \'gcloud\'. '
+                    'To install gcloud, run the following commands:\n'
+                    '    $ conda install -c conda-forge google-cloud-sdk')
+                raise exceptions.ResourcesUnavailableError(no_retry=True)
+
             logger.error(stderr)
             raise e
 
