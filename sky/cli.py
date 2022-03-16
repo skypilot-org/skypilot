@@ -36,7 +36,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
-import colorama
 import pendulum
 from rich import console as rich_console
 
@@ -406,8 +405,10 @@ def _check_yaml(entrypoint: str) -> bool:
                 is_yaml = False
     except OSError:
         if yaml_file_provided:
+            # pylint: disable=raise-missing-from
             raise click.BadParameter(f'{entrypoint} is not a readable file; '
                                      'check if the path is correct.')
+            # pylint: enable=raise-missing-from
         is_yaml = False
     if not is_yaml:
         if yaml_file_provided:
