@@ -265,8 +265,7 @@ class GCP(clouds.Cloud):
                 'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
         try:
-            subprocess.run(['gcloud', '--version'],
-                                    check=True)
+            subprocess.run('gcloud --version', shell=True, check=True)
         except subprocess.CalledProcessError:
             return True, (
                 'To use TPU, you must install gcloud.\n    '
