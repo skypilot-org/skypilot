@@ -35,6 +35,7 @@ class Dag:
 
     _PREVIOUS_DAGS = []
     _CURRENT_DAG = None
+    task_id = 0
 
     def __init__(self):
         self.tasks = []
@@ -43,6 +44,8 @@ class Dag:
         self.graph = nx.DiGraph()
 
     def add(self, task):
+        task.task_id = self.task_id
+        self.task_id += 1
         self.graph.add_node(task)
         self.tasks.append(task)
 

@@ -124,6 +124,7 @@ class Task:
         self.file_mounts = None
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
+        self.task_id = None
 
         # Check if the task is legal.
         self._validate()
