@@ -227,13 +227,13 @@ class AWS(clouds.Cloud):
         try:
             output = _run_output('aws configure list')
         except subprocess.CalledProcessError:
-            return False, ('AWS CLI is not installed properly.'
-                           ' Run the following commands under sky folder:'
-                           # TODO(zhwu): after we publish sky to pypi,
-                           # change this to `pip install sky[aws]`
-                           '\n     $ pip install .[aws]'
-                           '\n   Credentials may also need to be set.' +
-                           help_str)
+            return False, (
+                'AWS CLI is not installed properly.'
+                ' Run the following commands under sky folder:'
+                # TODO(zhwu): after we publish sky to pypi,
+                # change this to `pip install sky[aws]`
+                '\n     $ pip install .[aws]'
+                '\n   Credentials may also need to be set.' + help_str)
         # Configured correctly, the AWS output should look like this:
         #   ...
         #   access_key     ******************** shared-credentials-file

@@ -19,6 +19,7 @@ def _run_output(cmd):
                           stdout=subprocess.PIPE)
     return proc.stdout.decode('ascii')
 
+
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 
@@ -258,7 +259,8 @@ class GCP(clouds.Cloud):
             auth.default()
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
-        except (AssertionError, auth.exceptions.DefaultCredentialsError, subprocess.CalledProcessError):
+        except (AssertionError, auth.exceptions.DefaultCredentialsError,
+                subprocess.CalledProcessError):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
                 'GCP tools are not installed or credentials are not set. '
