@@ -8,7 +8,6 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from google import auth
 
 from sky import clouds
-from sky.check import check
 from sky.clouds import service_catalog
 
 
@@ -267,9 +266,8 @@ class GCP(clouds.Cloud):
         try:
             subprocess.run('gcloud --version', shell=True, check=True)
         except subprocess.CalledProcessError:
-            return True, (
-                'To use TPU, you must install gcloud.\n    '
-                '$ conda install -c conda-forge google-cloud-sdk')
+            return True, ('To use TPU, gcloud need to be installed.\n    '
+                          '$ conda install -c conda-forge google-cloud-sdk')
         return True, None
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:

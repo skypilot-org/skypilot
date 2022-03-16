@@ -738,10 +738,8 @@ class RetryingVmProvisioner(object):
                 return False
 
             if 'gcloud: command not found' in stderr:
-                logger.info(
-                    '  TPU provision requires library \'gcloud\'. '
-                    'To install gcloud, run the following commands:\n'
-                    '  $ conda install -c conda-forge google-cloud-sdk')
+                logger.info('  To use TPU, gcloud need to be installed.\n'
+                            '  $ conda install -c conda-forge google-cloud-sdk')
                 raise exceptions.ResourcesUnavailableError(no_retry=True)
 
             logger.error(stderr)
