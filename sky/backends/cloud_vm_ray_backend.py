@@ -1518,7 +1518,7 @@ class CloudVmRayBackend(backends.Backend):
                                target=f'/tmp/{setup_file}',
                                stream_logs=False)
                 # Need this `-i` option to make sure `source ~/.bashrc` work
-                cmd = f'/bin/bash -i /tmp/{setup_file}'
+                cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
                 returncode = backend_utils.run_command_on_ip_via_ssh(
                     ip,
                     cmd,
