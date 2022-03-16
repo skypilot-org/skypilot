@@ -235,8 +235,9 @@ class GCP(clouds.Cloud):
         r.accelerators = accelerator_match
         return ([r], fuzzy_candidate_list)
 
+    @classmethod
     def get_accelerators_from_instance_type(
-        self,
+        cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
         # GCP handles accelerators separately from regular instance types,

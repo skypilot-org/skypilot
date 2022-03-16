@@ -356,7 +356,8 @@ def write_cluster_config(to_provision: Resources,
 
     aws_default_ami = None
     if isinstance(cloud, clouds.AWS):
-        aws_default_ami = cloud.get_default_ami(region)
+        instance_type = resources_vars['instance_type']
+        aws_default_ami = cloud.get_default_ami(region, instance_type)
 
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
