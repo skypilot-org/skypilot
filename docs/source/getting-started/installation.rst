@@ -17,6 +17,10 @@ only have access to certain clouds, use any combination of
 :code:`".[aws,azure,gcp]"` (e.g., :code:`".[aws,gcp]"`) to reduce the
 dependencies installed.
 
+.. note::
+
+    For Macs, macOS >= 10.15 is required to install Sky. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio` prior to installing Sky.
+
 Cloud account setup
 -------------------
 

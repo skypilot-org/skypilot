@@ -1,7 +1,7 @@
 """Service catalog."""
 import collections
 import importlib
-from typing import Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sky.clouds import cloud
@@ -114,8 +114,11 @@ def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
     clouds: CloudFilter = None,
-) -> Optional[str]:
-    """Returns the instance type with the required count of accelerators."""
+) -> Tuple[Optional[List[str]], List[str]]:
+    """
+    Returns a list of instance types satisfying the required count of
+    accelerators with sorted prices and a list of candidates with fuzzy search.
+    """
     return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
                                acc_name, acc_count)
 
