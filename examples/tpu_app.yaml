@@ -1,7 +1,7 @@
 name: tpu_app
 
 # The working directory contains all code and will be synced to remote.
-workdir: ./examples/tpu_app_codes
+workdir: ./examples/tpu_app_code
 
 resources:
   accelerators: tpu-v3-8

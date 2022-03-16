@@ -17,7 +17,7 @@ sky down -y min &
 time sky launch -y -c env "$DIR"/env_check.yaml
 sky down -y env &
 
-touch ~/tempfile
+touch ~/tmpfile
 mkdir -p ~/tmp
 mkdir -p ~/tmp-workdir
 touch ~/tmp-workdir/foo
