@@ -163,6 +163,12 @@ def get_handle_from_cluster_name(
     for (handle,) in rows:
         return pickle.loads(handle)
 
+def get_glob_cluster_names(
+        cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
+    assert cluster_name is not None, 'cluster_name cannot be None'
+    rows = _CURSOR.execute('SELECT name FROM clusters WHERE name GLOB (?)',
+                           (cluster_name,))
+    return [row[0] for row in rows]
 
 def get_cluster_name_from_handle(
         cluster_handle: 'backends.Backend.ResourceHandle') -> Optional[str]:
