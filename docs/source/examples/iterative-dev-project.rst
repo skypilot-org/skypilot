@@ -34,13 +34,18 @@ To run a command or a script on the cluster, use :code:`sky exec`:
   $ # Run a command.
   $ sky exec dev -- gpustat -i
 
-Alternatively, the user can directly :code:`ssh` into the head node of the cluster and run commands:
+Alternatively, the user can directly :code:`ssh` into the cluster's nodes and run commands:
 
 .. code-block:: console
 
+  $ # SSH into head node
   $ ssh dev
 
-Sky provides easy password-less SSH access by automatically creating an entry for each cluster in the :code:`~/.ssh/config` file.
+  $ # SSH into worker nodes
+  $ ssh dev-worker1
+  $ ssh dev-worker2
+
+Sky provides easy password-less SSH access by automatically creating entries for each cluster in :code:`~/.ssh/config`.
 Referring to clusters by names also allows for seamless integration with common tools
 such as :code:`scp`, :code:`rsync`, and `Visual Studio Code Remote
 <https://code.visualstudio.com/docs/remote/remote-overview>`_.

@@ -111,14 +111,12 @@ Downloading files and artifacts
 After a task's execution, artifacts such as **logs and checkpoints** may be
 transferred from remote clusters to the local machine.
 
-To transfer files from the head node of a cluster, use :code:`rsync` (or :code:`scp`):
+To transfer files from cluster nodes, use :code:`rsync` (or :code:`scp`):
 
 .. code-block:: console
 
+  $ # Rsync from head
   $ rsync -Pavz dev:/path/to/checkpoints local/
 
-.. note::
-    For a multi-node cluster, Sky currently does not natively support
-    downloading artifacts from the worker machines.  As temporary workarounds,
-    query the worker IPs from the cloud console, and run :code:`rsync -Pavz -e
-    'ssh -i ~/.ssh/sky-key' <worker_ip>:/path /local_path`.
+  $ # Rsync from worker nodes (1-based indexing)
+  $ rsync -Pavz dev-worker1:/path/to/checkpoints local/

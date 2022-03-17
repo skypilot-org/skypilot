@@ -23,6 +23,8 @@ def check(quiet: bool = False) -> None:
              ' ' * 10)
         if ok:
             enabled_clouds.append(str(cloud))
+            if reason is not None:
+                echo(f'    Hint: {reason}')
         else:
             echo(f'    Reason: {reason}')
 

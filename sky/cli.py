@@ -341,7 +341,9 @@ def _create_and_ssh_into_node(
             task = dag.tasks[0]
             backend.register_info(dag=dag)
             to_provision = task.best_resources
-            if not no_confirm:
+            if handle is None and not no_confirm:
+                # Only show the confirmation prompt if the cluster is not
+                # in the clusters table.
                 click.confirm('Launching a new cluster. Proceed?',
                               default=True,
                               abort=True,
@@ -1183,6 +1185,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
 
     to_down = []
     if len(names) > 0:
+        names = list(set(names))
         for name in names:
             handle = global_user_state.get_handle_from_cluster_name(name)
             if handle is not None:
