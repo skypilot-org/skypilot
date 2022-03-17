@@ -26,8 +26,7 @@ logger = sky_logging.init_logger(__name__)
 
 class ProvisionStatus(enum.Enum):
     LAUNCH = 0
-    WAIT_FOR_SSH = 1
-    PREPARE_RUNTIME = 2
+    RUNTIME_SETUP = 1
 
 
 def _update_ray_up_status(log_line, ray_up_state: str,
@@ -35,19 +34,11 @@ def _update_ray_up_status(log_line, ray_up_state: str,
     if 'Shared connection to' in log_line and ray_up_state[
             'state'] == ProvisionStatus.LAUNCH:
         status_display.stop()
-        logger.info(f'{colorama.Fore.GREEN}Cluster is ready.'
+        logger.info(f'{colorama.Fore.GREEN}Head node is up.'
                     f'{colorama.Style.RESET_ALL}')
         status_display.start()
-        status_display.update('[bold cyan]Waiting for SSH')
-        ray_up_state['state'] = ProvisionStatus.WAIT_FOR_SSH
-    elif 'ray[default]' in log_line and \
-        ray_up_state['state'] == ProvisionStatus.WAIT_FOR_SSH:
-        status_display.stop()
-        logger.info(f'{colorama.Fore.GREEN}SSH is ready.'
-                    f'{colorama.Style.RESET_ALL}')
-        status_display.start()
-        status_display.update('[bold cyan]Preparing Sky runtime')
-        ray_up_state['state'] = ProvisionStatus.PREPARE_RUNTIME
+        status_display.update('[bold cyan] Preparing Sky runtime')
+        ray_up_state['state'] = ProvisionStatus.RUNTIME_SETUP
 
 
 def redirect_process_output(proc,
