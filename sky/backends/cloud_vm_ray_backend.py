@@ -99,17 +99,6 @@ def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
     return accelerator_dict
 
 
-def _add_cluster_to_ssh_config(cluster_name: str, cluster_ip: str,
-                               auth_config: Dict[str, str]) -> None:
-    backend_utils.SSHConfigHelper.add_cluster(cluster_name, cluster_ip,
-                                              auth_config)
-
-
-def _remove_cluster_from_ssh_config(cluster_ip: str,
-                                    auth_config: Dict[str, str]) -> None:
-    backend_utils.SSHConfigHelper.remove_cluster(cluster_ip, auth_config)
-
-
 def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
     """Returns the size of 'path' (directory or file) in megabytes.
 
