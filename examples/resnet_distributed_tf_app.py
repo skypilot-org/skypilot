@@ -69,6 +69,4 @@ with sky.Dag() as dag:
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
 
-# sky.launch(dag, dryrun=True)
-sky.launch(dag, cluster_name='dtf')
-# sky.exec(dag, cluster_name='dtf')
+sky.launch(dag, cluster_name='test-dtf')

@@ -63,26 +63,31 @@ _SMOKE_TESTS = [
     Test(
         'azure-start-stop',
         [
-            'sky launch -y -c azure-start-stop examples/azure_start_stop.yaml',
-            'sky exec azure-start-stop examples/azure_start_stop.yaml',
-            'sky stop -y azure-start-stop',
-            'sky start -y azure-start-stop',
-            'sky exec azure-start-stop examples/azure_start_stop.yaml',
+            'sky launch -y -c test-azure-start-stop examples/azure_start_stop.yaml',
+            'sky exec test-azure-start-stop examples/azure_start_stop.yaml',
+            'sky logs test-azure-start-stop 1 --status',  # Ensure the job succeeded.
+            'sky stop -y test-azure-start-stop',
+            'sky start -y test-azure-start-stop',
+            'sky exec test-azure-start-stop examples/azure_start_stop.yaml',
+            'sky logs test-azure-start-stop 2 --status',  # Ensure the job succeeded.
         ],
-        'sky down -y azure-start-stop',
+        'sky down -y test-azure-start-stop',
         timeout=30 * 60,  # 30 mins  (it takes around ~23 mins)
     ),
     # ---------- Testing GCP start and stop instances ----------
     Test(
         'gcp-start-stop',
         [
-            'sky launch -y -c gcp-start-stop examples/gcp_start_stop.yaml',
-            'sky exec gcp-start-stop examples/gcp_start_stop.yaml',
-            'sky stop -y gcp-start-stop',
-            'sky start -y gcp-start-stop',
-            'sky exec gcp-start-stop examples/gcp_start_stop.yaml',
+            'sky launch -y -c test-gcp-start-stop examples/gcp_start_stop.yaml',
+            'sky logs test-gcp-start-stop 1 --status',  # Ensure the job succeeded.
+            'sky exec test-gcp-start-stop examples/gcp_start_stop.yaml',
+            'sky logs test-gcp-start-stop 2 --status',  # Ensure the job succeeded.
+            'sky stop -y test-gcp-start-stop',
+            'sky start -y test-gcp-start-stop',
+            'sky exec test-gcp-start-stop examples/gcp_start_stop.yaml',
+            'sky logs test-gcp-start-stop 3 --status',  # Ensure the job succeeded.
         ],
-        'sky down -y gcp-start-stop',
+        'sky down -y test-gcp-start-stop',
     ),
     # ---------- Task: n=2 nodes with setups. ----------
     Test(
@@ -90,8 +95,9 @@ _SMOKE_TESTS = [
         [
             # NOTE: running it twice will hang (sometimes?) - an app-level bug.
             'python examples/resnet_distributed_tf_app.py',
+            'sky logs test-dtf 1 --status',  # Ensure the job succeeded.
         ],
-        'sky down -y dtf',
+        'sky down -y test-dtf',
         timeout=25 * 60,  # 25 mins (it takes around ~19 mins)
     ),
     # ---------- file_mounts ----------
@@ -101,80 +107,102 @@ _SMOKE_TESTS = [
             'touch ~/tmpfile',
             'mkdir -p ~/tmp-workdir',
             'touch ~/tmp-workdir/foo',
-            'sky launch -y -c fm examples/using_file_mounts.yaml',
+            'sky launch -y -c test-fm examples/using_file_mounts.yaml',
+            'sky logs test-fm 1 --status',  # Ensure the job succeeded.
         ],
-        'sky down -y fm',
+        'sky down -y test-fm',
         timeout=20 * 60,  # 20 mins
     ),
     # ---------- Job Queue. ----------
     Test(
         'job_queue_multinode',
         [
-            'sky launch -y -c mjq examples/job_queue/cluster_multinode.yaml',
-            'sky exec mjq -d examples/job_queue/job_multinode.yaml',
-            'sky exec mjq -d examples/job_queue/job_multinode.yaml',
-            'sky exec mjq -d examples/job_queue/job_multinode.yaml',
-            'sky cancel mjq 1',
-            'sky logs mjq 2',
-            'sky queue mjq',
+            'sky launch -y -c test-mjq examples/job_queue/cluster_multinode.yaml',
+            'sky exec test-mjq -d examples/job_queue/job_multinode.yaml',
+            'sky exec test-mjq -d examples/job_queue/job_multinode.yaml',
+            'sky exec test-mjq -d examples/job_queue/job_multinode.yaml',
+            'sky cancel test-mjq 1',
+            'sky logs test-mjq 2',
+            'sky queue test-mjq',
         ],
-        'sky down -y mjq',
+        'sky down -y test-mjq',
     ),
     Test(
         'job_queue',
         [
-            'sky launch -y -c jq examples/job_queue/cluster.yaml',
-            'sky exec jq -d examples/job_queue/job.yaml',
-            'sky exec jq -d examples/job_queue/job.yaml',
-            'sky exec jq -d examples/job_queue/job.yaml',
-            'sky logs jq 2',
-            'sky queue jq',
+            'sky launch -y -c test-jq examples/job_queue/cluster.yaml',
+            'sky exec test-jq -d examples/job_queue/job.yaml',
+            'sky exec test-jq -d examples/job_queue/job.yaml',
+            'sky exec test-jq -d examples/job_queue/job.yaml',
+            'sky logs test-jq 2',
+            'sky queue test-jq',
         ],
-        'sky down -y jq',
+        'sky down -y test-jq',
     ),
     # ---------- Task: 1 node training. ----------
     Test(
         'huggingface_glue_imdb_app',
         [
-            ('sky launch -y -c huggingface '
+            ('sky launch -y -c test-huggingface '
              'examples/huggingface_glue_imdb_app.yaml'),
-            'sky exec huggingface examples/huggingface_glue_imdb_app.yaml',
+            'sky logs test-huggingface 1 --status',  # Ensure the job succeeded.
+            'sky exec test-huggingface examples/huggingface_glue_imdb_app.yaml',
+            'sky logs test-huggingface 2 --status',  # Ensure the job succeeded.
         ],
-        'sky down -y huggingface',
+        'sky down -y test-huggingface',
     ),
     # ---------- TPU. ----------
     Test(
         'tpu_app',
-        ['sky launch -y -c tpu examples/tpu_app.yaml'],
-        'sky down -y tpu',
+        [
+            'sky launch -y -c test-tpu examples/tpu_app.yaml',
+            'sky logs test-tpu 1 --status',  # Ensure the job succeeded.
+        ],
+        'sky down -y test-tpu',
     ),
     # ---------- Check Sky's environment variables; workdir. ----------
     Test(
         'env_check',
-        ['sky launch -y -c env examples/env_check.yaml'],
-        'sky down -y env',
+        [
+            'sky launch -y -c test-env examples/env_check.yaml',
+            'sky logs test-env 1 --status',  # Ensure the job succeeded.
+        ],
+        'sky down -y test-env',
     ),
     # ---------- Simple apps. ----------
     Test(
         'multi_hostname',
         [
-            'sky launch -y -c mh examples/multi_hostname.yaml',
-            'sky exec mh examples/multi_hostname.yaml',
+            'sky launch -y -c test-mh examples/multi_hostname.yaml',
+            'sky logs test-mh 1 --status',  # Ensure the job succeeded.
+            'sky exec test-mh examples/multi_hostname.yaml',
+            'sky logs test-mh 2 --status',  # Ensure the job succeeded.
         ],
-        'sky down -y mh',
+        'sky down -y test-mh',
     ),
     Test(
         'minimal',
-        ['sky launch -y -c min examples/minimal.yaml'],
-        'sky down -y min',
+        [
+            'sky launch -y -c test-min examples/minimal.yaml',
+            'sky logs test-min 1 --status',  # Ensure the job succeeded.
+        ],
+        'sky down -y test-min',
     ),
     # ---------- Submitting multiple tasks to the same cluster.. ----------
     Test(
         'multi_echo',
-        ['python examples/multi_echo.py'],
-        'sky down -y multi-echo',
+        ['python examples/multi_echo.py'] +
+        # Ensure jobs succeeded.
+        [f'sky logs test-multi-echo {i + 1} --status' for i in range(16)],
+        'sky down -y test-multi-echo',
     ),
 ]
+
+
+# Hack: without this, Ray seems to mess up \r and this script will output
+# misaligned spacing after running for a while.
+def echo(*args):
+    print(*args, end='\r\n', flush=True)
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
@@ -189,11 +217,11 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
                                            suffix='.log',
                                            delete=False)
 
-    print(f'{test.name}: per-command timeout'
-          f'={test.timeout} seconds.')
-    print(f'  tail -f -n100 {log_file.name}')
+    echo(f'{test.name}: per-command timeout'
+         f'={test.timeout} seconds.')
+    echo(f'  tail -f -n100 {log_file.name}')
     for command in test.commands:
-        print(f'  {command}')
+        echo(f'  {command}')
         proc = subprocess.Popen(
             command,
             stdout=log_file,
@@ -209,8 +237,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             outs, errs = proc.communicate(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
             log_file.flush()
-            print(e)
-            print(error_occurred)
+            echo(e)
+            echo(error_occurred)
             proc.returncode = 1  # None if we don't set it.
 
             # raise e  # Raise = retry
@@ -221,13 +249,13 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             proc.kill()
 
         if proc.returncode:
-            print(error_occurred)
+            echo(error_occurred)
             break
 
     outcome = 'failed' if proc.returncode else 'succeeded'
-    print(f'{test.name} {outcome}. Log: less {log_file.name}')
+    echo(f'{test.name} {outcome}. Log: less {log_file.name}')
     if test.teardown is not None:
-        print(f'Teardown: {test.teardown}')
+        echo(f'Teardown: {test.teardown}')
         backend_utils.run(
             test.teardown,
             stdout=log_file,
@@ -275,17 +303,17 @@ def main():
         failed_str = '' if not failed_tests else f' ({",".join(failed_tests)})'
         succeeded_str = ('' if not succeeded_tests else
                          f' ({",".join(succeeded_tests)})')
-        print('Tests: '
-              f'{len(failed_tests)} failed{failed_str}, '
-              f'{len(succeeded_tests)} succeeded{succeeded_str}, '
-              f'{len(remaining_refs)} remaining')
+        echo('Tests: '
+             f'{len(failed_tests)} failed{failed_str}, '
+             f'{len(succeeded_tests)} succeeded{succeeded_str}, '
+             f'{len(remaining_refs)} remaining')
 
     if failed_tests:
-        print(f'*** {len(failed_tests)} failed tests ***')
+        echo(f'*** {len(failed_tests)} failed tests ***')
         for name, log in zip(failed_tests, failed_tests_logs):
-            print(f'{name}: less {log}')
+            echo(f'{name}: less {log}')
     else:
-        print('*** All tests succeeded. ***')
+        echo('*** All tests succeeded. ***')
 
     sys.exit(status)
 
