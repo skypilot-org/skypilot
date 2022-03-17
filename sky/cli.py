@@ -399,22 +399,18 @@ def _check_yaml(entrypoint: str) -> bool:
             except yaml.YAMLError as e:
                 if yaml_file_provided:
                     click.secho(e, fg='red')
-                    raise click.BadParameter(
-                        f'Invalid YAML configuration {entrypoint}. '
-                        'Please check the syntax.')
+                    invalid_reason = ('contains an invalid configuration. '
+                                      ' Please check syntax.')
                 is_yaml = False
     except OSError:
         if yaml_file_provided:
-            # pylint: disable=raise-missing-from
-            raise click.BadParameter(f'{entrypoint} is not a readable file; '
-                                     'check if the path is correct.')
-            # pylint: enable=raise-missing-from
+            invalid_reason = ('is not a readable file. Please check if the path'
+                              ' is correct.')
         is_yaml = False
     if not is_yaml:
         if yaml_file_provided:
             click.confirm(
-                f'{entrypoint!r} looks like a yaml path but yaml.safe_load() '
-                'failed to return a dict (check if it exists or it\'s valid).\n'
+                f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
     return is_yaml
