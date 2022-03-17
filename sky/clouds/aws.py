@@ -35,7 +35,6 @@ class AWS(clouds.Cloud):
         if not cls._regions:
             # https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/
             cls._regions = [
-                # TODO: troubles launching AMIs.
                 clouds.Region('us-west-1').set_zones([
                     clouds.Zone('us-west-1a'),
                     clouds.Zone('us-west-1b'),
@@ -104,7 +103,7 @@ class AWS(clouds.Cloud):
                 return amis[region_name]
         # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
         # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
-        # Nvidia driver: 510.47.03
+        # Nvidia driver: 510.47.03, CUDA Version: 11.6
         amis = {
             'us-east-1': 'ami-0729d913a335efca7',
             'us-east-2': 'ami-070f4af81c19b41bf',
