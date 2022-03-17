@@ -48,6 +48,7 @@ RESET_BOLD = '\033[0m'
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
+_LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
@@ -165,6 +166,7 @@ class SSHConfigHelper(object):
     """Helper for handling local SSH configuration."""
 
     ssh_conf_path = '~/.ssh/config'
+    ssh_multinode_path = '~/.sky/generated/ssh/{}'
 
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
@@ -186,7 +188,7 @@ class SSHConfigHelper(object):
     def add_cluster(
         cls,
         cluster_name: str,
-        ip: str,
+        ips: List[str],
         auth_config: Dict[str, str],
     ):
         """Add authentication information for cluster to local SSH config file.
@@ -201,16 +203,17 @@ class SSHConfigHelper(object):
 
         Args:
             cluster_name: Cluster name (see `sky status`)
-            ip: IP address of head node associated with the cluster
+            ips: List of IP addresses in the cluster. First IP is head node.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
-        sky_autogen_comment = '# Added by sky (use `sky stop/down' + \
-                            f'-c {cluster_name}` to remove)'
+        sky_autogen_comment = '# Added by sky (use `sky stop/down ' + \
+                            f'{cluster_name}` to remove)'
         overwrite = False
         overwrite_begin_idx = None
+        ip = ips[0]
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if os.path.exists(config_path):
@@ -246,28 +249,149 @@ class SSHConfigHelper(object):
                    len(updated_lines)] = updated_lines
             with open(config_path, 'w') as f:
                 f.write(''.join(config).strip())
-                f.write('\n')
+                f.write('\n' * 2)
         else:
             with open(config_path, 'a') as f:
-                if len(config) > 0 and not config[-1].endswith('\n'):
-                    # Add trailing newline if it doesn't exist.
+                if len(config) > 0 and config[-1] != '\n':
                     f.write('\n')
-                f.write('\n')
                 f.write(codegen)
+                f.write('\n')
+
+        with open(config_path, 'r+') as f:
+            config = f.readlines()
+            if config[-1] != '\n':
+                f.write('\n')
+
+        if len(ips) > 1:
+            SSHConfigHelper._add_multinode_config(cluster_name, ips[1:],
+                                                  auth_config)
 
     @classmethod
-    def remove_cluster(cls, ip: str, auth_config: Dict[str, str]):
+    def _add_multinode_config(
+        cls,
+        cluster_name: str,
+        worker_ips: List[str],
+        auth_config: Dict[str, str],
+    ):
+        username = auth_config['ssh_user']
+        key_path = os.path.expanduser(auth_config['ssh_private_key'])
+        host_name = cluster_name
+        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
+                               f'{cluster_name}` to remove)')
+
+        overwrites = [False] * len(worker_ips)
+        overwrite_begin_idxs = [None] * len(worker_ips)
+        codegens = [None] * len(worker_ips)
+        worker_names = []
+        extra_path_name = cls.ssh_multinode_path.format(cluster_name)
+
+        for idx in range(len(worker_ips)):
+            worker_names.append(cluster_name + f'-worker{idx+1}')
+
+        config_path = os.path.expanduser(cls.ssh_conf_path)
+        with open(config_path) as f:
+            config = f.readlines()
+
+        extra_config_path = os.path.expanduser(extra_path_name)
+        os.makedirs(os.path.dirname(extra_config_path), exist_ok=True)
+        if not os.path.exists(extra_config_path):
+            extra_config = ['\n']
+            with open(extra_config_path, 'w') as f:
+                f.writelines(extra_config)
+        else:
+            with open(extra_config_path) as f:
+                extra_config = f.readlines()
+
+        # Handle Include on top of Config file
+        include_str = f'Include {extra_config_path}'
+        for i, line in enumerate(config):
+            config_str = line.strip()
+            if config_str == include_str:
+                break
+            # Did not find Include string
+            if 'Host' in config_str:
+                with open(config_path, 'w') as f:
+                    config.insert(0, '\n')
+                    config.insert(0, include_str + '\n')
+                    config.insert(0, sky_autogen_comment + '\n')
+                    f.write(''.join(config).strip())
+                    f.write('\n' * 2)
+                break
+
+        with open(config_path) as f:
+            config = f.readlines()
+
+        # Check if ~/.ssh/config contains existing names
+        host_lines = [f'Host {c_name}' for c_name in worker_names]
+        for i, line in enumerate(config):
+            if line.strip() in host_lines:
+                idx = host_lines.index(line.strip())
+                prev_line = config[i - 1] if i > 0 else ''
+                logger.warning(f'{cls.ssh_conf_path} contains '
+                               f'host named {worker_names[idx]}.')
+                host_name = worker_ips[idx]
+                logger.warning(f'Using {host_name} to identify host instead.')
+                codegens[idx] = cls._get_generated_config(
+                    sky_autogen_comment, host_name, worker_ips[idx], username,
+                    key_path)
+
+        # All workers go to ~/.sky/generated/ssh/{cluster_name}
+        for i, line in enumerate(extra_config):
+            if line.strip() in host_lines:
+                idx = host_lines.index(line.strip())
+                prev_line = extra_config[i - 1] if i > 0 else ''
+                if prev_line.strip().startswith(sky_autogen_comment):
+                    host_name = worker_names[idx]
+                    overwrites[idx] = True
+                    overwrite_begin_idxs[idx] = i - 1
+                codegens[idx] = cls._get_generated_config(
+                    sky_autogen_comment, host_name, worker_ips[idx], username,
+                    key_path)
+
+        # This checks if all codegens have been created.
+        for idx, ip in enumerate(worker_ips):
+            if not codegens[idx]:
+                codegens[idx] = cls._get_generated_config(
+                    sky_autogen_comment, worker_names[idx], ip, username,
+                    key_path)
+
+        for idx in range(len(worker_ips)):
+            # Add (or overwrite) the new config.
+            overwrite = overwrites[idx]
+            overwrite_begin_idx = overwrite_begin_idxs[idx]
+            codegen = codegens[idx]
+            if overwrite:
+                assert overwrite_begin_idx is not None
+                updated_lines = codegen.splitlines(keepends=True) + ['\n']
+                extra_config[overwrite_begin_idx:overwrite_begin_idx +
+                             len(updated_lines)] = updated_lines
+                with open(extra_config_path, 'w') as f:
+                    f.write(''.join(extra_config).strip())
+                    f.write('\n' * 2)
+            else:
+                with open(extra_config_path, 'a') as f:
+                    f.write(codegen)
+                    f.write('\n')
+
+        # Add trailing new line at the end of the file if it doesn't exit
+        with open(extra_config_path, 'r+') as f:
+            extra_config = f.readlines()
+            if extra_config[-1] != '\n':
+                f.write('\n')
+
+    @classmethod
+    def remove_cluster(cls, cluster_name: str, ip: str, auth_config: Dict[str,
+                                                                          str]):
         """Remove authentication information for cluster from local SSH config.
 
         If no existing host matching the provided specification is found, then
         nothing is removed.
 
         Args:
-            ip: IP address of a cluster's head node.
+            ip: Head node's IP address.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
         username = auth_config['ssh_user']
-
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if not os.path.exists(config_path):
             return
@@ -275,8 +399,8 @@ class SSHConfigHelper(object):
         with open(config_path) as f:
             config = f.readlines()
 
-        # Scan the config for the cluster name.
         start_line_idx = None
+        # Scan the config for the cluster name.
         for i, line in enumerate(config):
             next_line = config[i + 1] if i + 1 < len(config) else ''
             if line.strip() == f'HostName {ip}' and next_line.strip(
@@ -310,7 +434,45 @@ class SSHConfigHelper(object):
         ] if end_line_idx is not None else []
         with open(config_path, 'w') as f:
             f.write(''.join(config).strip())
-            f.write('\n')
+            f.write('\n' * 2)
+
+        SSHConfigHelper._remove_multinode_config(cluster_name)
+
+    @classmethod
+    def _remove_multinode_config(
+        cls,
+        cluster_name: str,
+    ):
+        config_path = os.path.expanduser(cls.ssh_conf_path)
+        if not os.path.exists(config_path):
+            return
+
+        extra_path_name = cls.ssh_multinode_path.format(cluster_name)
+        extra_config_path = os.path.expanduser(extra_path_name)
+        if os.path.exists(extra_config_path):
+            os.remove(extra_config_path)
+
+        # Delete include statement
+        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
+                               f'{cluster_name}` to remove)')
+        with open(config_path) as f:
+            config = f.readlines()
+
+        for i, line in enumerate(config):
+            config_str = line.strip()
+            if f'Include {extra_config_path}' in config_str:
+                with open(config_path, 'w') as f:
+                    if i < len(config) - 1 and config[i + 1] == '\n':
+                        del config[i + 1]
+                    # Delete Include string
+                    del config[i]
+                    # Delete Sky Autogen Comment
+                    if i > 0 and sky_autogen_comment in config[i - 1].strip():
+                        del config[i - 1]
+                    f.write(''.join(config))
+                break
+            if 'Host' in config_str:
+                break
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
@@ -355,7 +517,8 @@ def write_cluster_config(to_provision: Resources,
 
     aws_default_ami = None
     if isinstance(cloud, clouds.AWS):
-        aws_default_ami = cloud.get_default_ami(region)
+        instance_type = resources_vars['instance_type']
+        aws_default_ami = cloud.get_default_ami(region, instance_type)
 
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
@@ -499,13 +662,15 @@ def wait_until_ray_cluster_ready(
     # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
-    head_ip = query_head_ip_with_retries(
-        cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
-
-    expected_worker_count = num_nodes - 1
+    try:
+        head_ip = query_head_ip_with_retries(
+            cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
+    except RuntimeError as e:
+        logger.error(e)
+        return False  # failed
 
     ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
-    last_workers_so_far = 0
+    last_nodes_so_far = 0
     start = time.time()
     while True:
         rc, output, stderr = run_command_on_ip_via_ssh(head_ip,
@@ -527,29 +692,40 @@ def wait_until_ray_cluster_ready(
             assert len(result) == 1, result
             ready_workers = int(result[0])
 
-        if ready_workers == expected_worker_count:
-            # All workers are up.
+        result = _LAUNCHED_HEAD_PATTERN.findall(output)
+        ready_head = 0
+        if result:
+            assert len(result) == 1, result
+            ready_head = int(result[0])
+            assert ready_head <= 1, ready_head
+
+        if ready_head + ready_workers == num_nodes:
+            # All nodes are up.
             break
 
         # Pending workers that have been launched by ray up.
         found_ips = _LAUNCHING_IP_PATTERN.findall(output)
         pending_workers = len(found_ips)
 
-        workers_so_far = ready_workers + pending_workers
+        # TODO(zhwu): Handle the case where the following occurs, where ray
+        # cluster is not correctly started on the cluster.
+        # Pending:
+        #  172.31.9.121: ray.worker.default, uninitialized
+        nodes_so_far = ready_head + ready_workers + pending_workers
 
         # Check the number of nodes that are fetched. Timeout if no new
         # nodes fetched in a while (nodes_launching_progress_timeout), though
-        # number of workers_so_far is still not as expected.
-        if workers_so_far != last_workers_so_far:
+        # number of nodes_so_far is still not as expected.
+        if nodes_so_far > last_nodes_so_far:
             # Reset the start time if the number of launching nodes
             # changes, i.e. new nodes are launched.
             logger.debug('Reset start time, as new nodes are launched. '
-                         f'({last_workers_so_far} -> {workers_so_far})')
+                         f'({last_nodes_so_far} -> {nodes_so_far})')
             start = time.time()
-            last_workers_so_far = workers_so_far
+            last_nodes_so_far = nodes_so_far
         elif (nodes_launching_progress_timeout is not None and
               time.time() - start > nodes_launching_progress_timeout and
-              workers_so_far != expected_worker_count):
+              nodes_so_far != num_nodes):
             logger.error(
                 'Timed out when waiting for workers to be provisioned.')
             return False  # failed
@@ -897,7 +1073,7 @@ def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
             break
         except subprocess.CalledProcessError as e:
             if i == retry_count - 1:
-                raise e
+                raise RuntimeError('Failed to get head ip') from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
             time.sleep(5)

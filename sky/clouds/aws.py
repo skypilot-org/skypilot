@@ -35,11 +35,10 @@ class AWS(clouds.Cloud):
         if not cls._regions:
             # https://aws.amazon.com/premiumsupport/knowledge-center/vpc-find-availability-zone-options/
             cls._regions = [
-                # TODO: troubles launching AMIs.
-                # clouds.Region('us-west-1').set_zones([
-                #     clouds.Zone('us-west-1a'),
-                #     clouds.Zone('us-west-1b'),
-                # ]),
+                clouds.Region('us-west-1').set_zones([
+                    clouds.Zone('us-west-1a'),
+                    clouds.Zone('us-west-1b'),
+                ]),
                 clouds.Region('us-west-2').set_zones([
                     clouds.Zone('us-west-2a'),
                     clouds.Zone('us-west-2b'),
@@ -81,20 +80,36 @@ class AWS(clouds.Cloud):
             regions = service_catalog.get_region_zones_for_instance_type(
                 instance_type, use_spot, 'aws')
         for region in regions:
-            if region.name == 'us-west-1':
-                # TODO: troubles launching AMIs.
-                continue
             yield region, region.zones
 
     @classmethod
-    def get_default_ami(cls, region_name: str) -> str:
-        # AWS Deep Learning AMI (Ubuntu 18.04), version 50.0
-        # https://aws.amazon.com/marketplace/pp/prodview-x5nivojpquy6y
+    def get_default_ami(cls, region_name: str, instance_type: str) -> str:
+        acc = cls.get_accelerators_from_instance_type(instance_type)
+        if acc is not None:
+            assert len(acc) == 1, acc
+            acc_name = list(acc.keys())[0]
+            if acc_name == 'K80':
+                # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
+                # Downgrade the AMI for K80 due as it is only compatible with
+                # NVIDIA driver lower than 470.
+                amis = {
+                    'us-east-1': 'ami-0868a20f5a3bf9702',
+                    'us-east-2': 'ami-09b8825010d4dc701',
+                    # This AMI is 20210623 as aws does not provide a newer one.
+                    'us-west-1': 'ami-0b3c34d643904a734',
+                    'us-west-2': 'ami-06b3479ab15aaeaf1',
+                }
+                assert region_name in amis, region_name
+                return amis[region_name]
+        # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
+        # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
+        # Nvidia driver: 510.47.03, CUDA Version: 11.6
         amis = {
-            'us-east-1': 'ami-0e3c68b57d50caf64',
-            'us-east-2': 'ami-0ae79682024fe31cd',
-            # 'us-west-1': 'TODO: cannot launch',
-            'us-west-2': 'ami-0050625d58fa27b6d',
+            'us-east-1': 'ami-0729d913a335efca7',
+            'us-east-2': 'ami-070f4af81c19b41bf',
+            # This AMI is 20210623 as aws does not provide a newer one.
+            'us-west-1': 'ami-0b3c34d643904a734',
+            'us-west-2': 'ami-050814f384259894c',
         }
         assert region_name in amis, region_name
         return amis[region_name]
@@ -149,9 +164,9 @@ class AWS(clouds.Cloud):
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
-
+    @classmethod
     def get_accelerators_from_instance_type(
-        self,
+        cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
@@ -214,8 +229,8 @@ class AWS(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         help_str = (
             ' Run the following commands:'
-            '\n    $ pip install boto3'
-            '\n    $ aws configure'
+            '\n      $ pip install boto3'
+            '\n      $ aws configure'
             '\n    For more info: '
             'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
         )
@@ -227,7 +242,13 @@ class AWS(clouds.Cloud):
         try:
             output = _run_output('aws configure list')
         except subprocess.CalledProcessError:
-            return False, 'AWS CLI not installed properly.'
+            return False, (
+                'AWS CLI is not installed properly.'
+                ' Run the following commands under sky folder:'
+                # TODO(zhwu): after we publish sky to pypi,
+                # change this to `pip install sky[aws]`
+                '\n     $ pip install .[aws]'
+                '\n   Credentials may also need to be set.' + help_str)
         # Configured correctly, the AWS output should look like this:
         #   ...
         #   access_key     ******************** shared-credentials-file
@@ -249,7 +270,7 @@ class AWS(clouds.Cloud):
                     secret_key_ok = True
         if access_key_ok and secret_key_ok:
             return True, None
-        return False, 'AWS credentials not set.' + help_str
+        return False, 'AWS credentials is not set.' + help_str
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
         return {'~/.aws': '~/.aws'}, []

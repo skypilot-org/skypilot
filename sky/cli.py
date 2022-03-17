@@ -339,7 +339,9 @@ def _create_and_ssh_into_node(
             task = dag.tasks[0]
             backend.register_info(dag=dag)
             to_provision = task.best_resources
-            if not no_confirm:
+            if handle is None and not no_confirm:
+                # Only show the confirmation prompt if the cluster is not
+                # in the clusters table.
                 click.confirm('Launching a new cluster. Proceed?',
                               default=True,
                               abort=True,
@@ -947,8 +949,8 @@ def stop(
 ):
     """Stop cluster(s).
 
-    CLUSTER is the name of the cluster to stop.  If both CLUSTER and --all are
-    supplied, the latter takes precedence.
+    CLUSTER is the name (or glob pattern) of the cluster to stop.  If both
+    CLUSTER and --all are supplied, the latter takes precedence.
 
     Stopping a cluster does not lose data on the attached disks (billing for
     the instances will stop while the disks will still be charged).  Those
@@ -967,6 +969,11 @@ def stop(
 
         # Stop multiple clusters.
         sky stop cluster1 cluster2
+
+    .. code-block:: bash
+
+        # Stop down all clusters with prefix 'cluster'
+        sky stop "cluster*"
 
     .. code-block:: bash
 
@@ -1119,8 +1126,8 @@ def down(
 ):
     """Tear down cluster(s).
 
-    CLUSTER is the name of the cluster to tear down.  If both CLUSTER and --all
-    are supplied, the latter takes precedence.
+    CLUSTER is the name of the cluster (or glob pattern) to tear down.  If both
+    CLUSTER and --all are supplied, the latter takes precedence.
 
     Terminating a cluster will delete all associated resources (all billing
     stops), and any data on the attached disks will be lost.
@@ -1138,6 +1145,11 @@ def down(
 
         # Tear down multiple clusters.
         sky down cluster1 cluster2
+
+    .. code-block:: bash
+
+        # Tear down all clusters with prefix 'cluster'
+        sky down "cluster*"
 
     .. code-block:: bash
 
@@ -1162,6 +1174,10 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
 
     to_down = []
     if len(names) > 0:
+        glob_names = []
+        for name in names:
+            glob_names.extend(global_user_state.get_glob_cluster_names(name))
+        names = list(set(glob_names))
         for name in names:
             handle = global_user_state.get_handle_from_cluster_name(name)
             if handle is not None:

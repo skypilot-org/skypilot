@@ -20,6 +20,7 @@ with sky.Dag() as dag:
         conda activate resnet || \
           (conda create -n resnet python=3.7 -y && \
            conda activate resnet && \
+           conda install cudatoolkit=11.0 -y && \
            pip install tensorflow==2.4.0 pyyaml && \
            cd models && pip install -e .)'
 
