@@ -1229,8 +1229,8 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         else:
             click.secho(
                 f'{operation} cluster {name}...failed. '
-                'Please check the logs and try again.'
-            , fg='red')
+                'Please check the logs and try again.',
+                fg='red')
 
 
 @_interactive_node_cli_command

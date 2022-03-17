@@ -1846,7 +1846,6 @@ class CloudVmRayBackend(backends.Backend):
             # locked section of the code (i.e teardown when not enough
             # resources can be provisioned)
             return self._teardown(handle, terminate)
-            
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
@@ -1858,11 +1857,10 @@ class CloudVmRayBackend(backends.Backend):
                 os.remove(lock_path)
             return success
         except filelock.Timeout:
-            logger.error(
-                f'Cluster {cluster_name} is locked by {lock_path}. '
-                'Check to see if it is still being launched.')
+            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. '
+                         'Check to see if it is still being launched.')
         return False
-        
+
     def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
