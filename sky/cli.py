@@ -30,6 +30,7 @@ each other.
 import copy
 import functools
 import getpass
+import os
 import shlex
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -404,8 +405,16 @@ def _check_yaml(entrypoint: str) -> bool:
                 is_yaml = False
     except OSError:
         if yaml_file_provided:
-            invalid_reason = ('is not a readable file. Please check if the path'
-                              ' is correct.')
+            entry_point_path = os.path.expanduser(entrypoint)
+            if not os.path.exists(entry_point_path):
+                invalid_reason = ('does not exist. Please check if the path'
+                                  ' is correct.')
+            elif not os.path.isfile(entry_point_path):
+                invalid_reason = ('is not a file. Please check if the path'
+                                  ' is correct.')
+            else:
+                invalid_reason = ('yaml.safe_load() failed. Please check if the'
+                                  ' path is correct.')
         is_yaml = False
     if not is_yaml:
         if yaml_file_provided:
