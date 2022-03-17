@@ -55,6 +55,7 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 
 _LOCK_FILENAME = '~/.sky/.{}.lock'
+_FILELOCK_TIMEOUT_SECONDS = 10
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -1837,7 +1838,7 @@ class CloudVmRayBackend(backends.Backend):
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
-                 _force: bool = False) -> None:
+                 _force: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
 
@@ -1845,21 +1846,23 @@ class CloudVmRayBackend(backends.Backend):
             # Should only be forced when teardown is called within a
             # locked section of the code (i.e teardown when not enough
             # resources can be provisioned)
-            self._teardown(handle, terminate)
-            return
+            return self._teardown(handle, terminate)
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
-            with filelock.FileLock(lock_path, 10):  # pylint: disable=abstract-class-instantiated
-                self._teardown(handle, terminate)
-                if terminate:
-                    os.remove(lock_path)
+            # pylint: disable=abstract-class-instantiated
+            with filelock.FileLock(lock_path, _FILELOCK_TIMEOUT_SECONDS):
+                success = self._teardown(handle, terminate)
+            if success and terminate:
+                os.remove(lock_path)
+            return success
         except filelock.Timeout:
             logger.error(f'Cluster {cluster_name} is locked by {lock_path}. '
                          'Check to see if it is still being launched.')
+        return False
 
-    def _teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+    def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1957,6 +1960,7 @@ class CloudVmRayBackend(backends.Backend):
                                  f'{tpu_stdout}\n'
                                  f'**** STDERR ****\n'
                                  f'{tpu_stderr}{colorama.Style.RESET_ALL}')
+                    return False
 
         if returncode != 0:
             logger.error(
@@ -1965,6 +1969,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'{stdout}\n'
                 f'**** STDERR ****\n'
                 f'{stderr}{colorama.Style.RESET_ALL}')
+            return False
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         backend_utils.SSHConfigHelper.remove_cluster(cluster_name,
@@ -1984,6 +1989,7 @@ class CloudVmRayBackend(backends.Backend):
                 assert handle.tpu_create_script is not None
                 os.remove(handle.tpu_create_script)
                 os.remove(handle.tpu_delete_script)
+        return True
 
     def _rsync_up(
         self,
