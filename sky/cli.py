@@ -1204,15 +1204,17 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             click.secho(f'sky down {name}', bold=True)
             continue
         success = backend.teardown(handle, terminate=terminate)
-        if terminate:
-            if success:
-                click.secho(f'Terminating cluster {name}...done.', fg='green')
-            else:
-                click.secho(f'Terminating cluster {name}...failed.', fg='red')
+        operation = 'Terminating' if terminate else 'Stopping'
+        if success:
+            click.secho(f'{operation} cluster {name}...done.', fg='green')
+            if not terminate:
+                click.echo('  To restart the cluster, run: ', nl=False)
+                click.secho(f'sky start {name}', bold=True)
         else:
-            click.secho(f'Stopping cluster {name}...done.', fg='green')
-            click.echo('  To restart the cluster, run: ', nl=False)
-            click.secho(f'sky start {name}', bold=True)
+            click.secho(
+                f'{operation} cluster {name}...failed. '
+                'Please check the logs and try again.'
+            , fg='red')
 
 
 @_interactive_node_cli_command

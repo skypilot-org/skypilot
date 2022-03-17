@@ -1740,9 +1740,10 @@ class CloudVmRayBackend(backends.Backend):
                 os.remove(lock_path)
             return success
         except filelock.Timeout:
-            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. ' \
+            logger.error(
+                f'Cluster {cluster_name} is locked by {lock_path}. '
                 'Check to see if it is still being launched.')
-            return False
+        return False
 
     def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
@@ -1869,6 +1870,7 @@ class CloudVmRayBackend(backends.Backend):
                 assert handle.tpu_create_script is not None
                 os.remove(handle.tpu_create_script)
                 os.remove(handle.tpu_delete_script)
+        return True
 
     def _rsync_up(
         self,
