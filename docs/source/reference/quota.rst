@@ -14,7 +14,7 @@ AWS
 
 1. Go to the `EC2 Quotas console <https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas>`_.
 2. **Select a region** on the top right.
-3. Choose an EC2 instance type from the list (e.g, ``Running On-Demand P instances``). You may check `here <https://aws.amazon.com/ec2/instance-types/>`_ for more instance types.
+3. Choose an EC2 instance type from the list (e.g, ``Running On-Demand P instances``). Use ``sky show-gpus --cloud aws --all`` or check `here <https://aws.amazon.com/ec2/instance-types/>`_ for more instance types.
 4. Click the quota name, and then choose **Request quota increase**.
 5. For **Change quota value**, enter the new value.
 6. Choose **Request**.
@@ -24,7 +24,7 @@ Azure
 
 1. First go to Azure's `quota <https://portal.azure.com/#blade/Microsoft_Azure_Capacity/QuotaMenuBlade/myQuotas>`_ page.
 2. Select **Request Increase** near the top of the screen.
-3. For Quota type, select ``Compute-VM (cores-vCPUs) subscription limit increases``. You may notice messages like `you don’t need a support ticket to get more quota.` as an alternative to submit quota requests. But for most GPU instances you will still be re-directed back to create support tickets.
+3. For Quota type, select ``Compute-VM (cores-vCPUs) subscription limit increases``. Hint: note that a message "Get more quota now. You don’t need a support ticket to get more quota..." may pop up; feel free to skip it as requesting quotas for most GPU instances still requires creating support tickets (next steps).
 4. Select **Next** to go to the Additional details screen, then select **Enter details**.
   - In the Quota details screen:
   - For Deployment model, ensure **Resource Manager** is selected.
