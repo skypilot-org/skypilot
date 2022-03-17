@@ -1311,7 +1311,9 @@ class CloudVmRayBackend(backends.Backend):
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
                 f'is {dir_size} MB. Try to keep workdir small or use '
                 '.gitignore to exclude large files, as '
-                f'large sizes will slow down rsync.{style.RESET_ALL}')
+                'large sizes will slow down rsync. If you use .gitignore but '
+                'the path is not initialized in git, you can ignore this '
+                f'warning.{style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
@@ -1424,7 +1426,9 @@ class CloudVmRayBackend(backends.Backend):
                         f'{fore.YELLOW}The size of file mount src {src!r} '
                         f'is {src_size} MB. Try to keep src small or use '
                         '.gitignore to exclude large files, as '
-                        f'large sizes will slow down rsync.{style.RESET_ALL}')
+                        'large sizes will slow down rsync. If you use '
+                        '.gitignore but the path is not initialized in git, you'
+                        f' can ignore this warning.{style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(
                         f'{fore.YELLOW}Source path {src!r} is a symlink. '
