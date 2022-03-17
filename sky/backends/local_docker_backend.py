@@ -357,3 +357,4 @@ class LocalDockerBackend(backends.Backend):
             container.remove(force=True)
         cluster_name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(cluster_name, terminate=True)
+        return True

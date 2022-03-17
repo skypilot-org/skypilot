@@ -55,6 +55,7 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 
 _LOCK_FILENAME = '~/.sky/.{}.lock'
+_FILELOCK_TIMEOUT_SECONDS = 10
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -1851,7 +1852,7 @@ class CloudVmRayBackend(backends.Backend):
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
             # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(lock_path, 10):
+            with filelock.FileLock(lock_path, _FILELOCK_TIMEOUT_SECONDS):
                 success = self._teardown(handle, terminate)
             if success and terminate:
                 os.remove(lock_path)
