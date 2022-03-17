@@ -73,7 +73,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
     if proc.returncode:
         raise Exception(
-            f'{test.name}: test command exited with non-zero status.'
+            f'{test.name}: test command exited with non-zero status.\n'
             f' Log: less {log_file.name}')
 
 

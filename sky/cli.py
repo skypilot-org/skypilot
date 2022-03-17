@@ -873,7 +873,7 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
           'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
 @click.argument('cluster', required=True, type=str)
 @click.argument('job_id', required=True, type=str)
-def logs(cluster: str, job_id: str, sync_down: bool, status: bool): # pylint: disable=redefined-outer-name
+def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
     """Tail the log of a job."""
     cluster_name = cluster
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
