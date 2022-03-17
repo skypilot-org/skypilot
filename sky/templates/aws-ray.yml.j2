@@ -77,13 +77,13 @@ setup_commands:
   - (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
     pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    which conda > /dev/null 2>&1 && conda init > /dev/null && conda config --set auto_activate_base false
     sudo systemctl stop unattended-upgrades;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
-  - which conda > /dev/null 2>&1 && conda init > /dev/null && conda config --set auto_activate_base false
   - printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config
 
 # Command to start ray on the head node. You don't need to change this.
