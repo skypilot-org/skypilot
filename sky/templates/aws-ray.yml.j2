@@ -83,6 +83,7 @@ setup_commands:
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
+  - which conda > /dev/null 2>&1 && conda init > /dev/null && conda config --set auto_activate_base false
   - printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config
 
 # Command to start ray on the head node. You don't need to change this.
