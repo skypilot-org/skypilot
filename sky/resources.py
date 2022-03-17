@@ -177,13 +177,36 @@ class Resources:
             return False
         # self.cloud == other.cloud
 
-        if (self.instance_type is not None and
-                self.instance_type != other.instance_type):
+        other_instance_type = other.instance_type
+        instance_type = self.instance_type
+        if other.accelerators is not None:
+            assert len(other.accelerators.items()) == 1
+            acc, acc_count = list(other.accelerators.items())[0]
+            if 'A100' in acc:
+                other_instance_type = {
+                    1.0: 'a2-highgpu-1g',
+                    2.0: 'a2-highgpu-2g',
+                    4.0: 'a2-highgpu-4g',
+                    8.0: 'a2-highgpu-8g',
+                    16.0: 'a2-megagpu-16g',
+                }[acc_count]
+        if (instance_type is not None and instance_type != other_instance_type):
             return False
         # self.instance_type == other.instance_type
 
         other_accelerators = other.accelerators
         accelerators = self.accelerators
+        if other.instance_type is not None and 'a2' in other.instance_type:
+            assert other.cloud.is_same_cloud(clouds.GCP())
+            acc_count = {
+                'a2-highgpu-1g': 1.0,
+                'a2-highgpu-2g': 2.0,
+                'a2-highgpu-4g': 4.0,
+                'a2-highgpu-8g': 8.0,
+                'a2-megagpu-16g': 16.0,
+            }[other.instance_type]
+            other_accelerators = {'A100': acc_count}
+
         if accelerators != other_accelerators:
             return False
         # self.accelerators == other.accelerators
@@ -200,6 +223,9 @@ class Resources:
 
     def less_demanding_than(self, other: 'Resources') -> bool:
         """Returns whether this resources is less demanding than the other."""
+        if self.is_same_resources(other):
+            return True
+
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud

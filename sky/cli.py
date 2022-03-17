@@ -220,11 +220,14 @@ def _infer_interactive_node_type(resources: sky.Resources):
     """Determine interactive node type from resources."""
     accelerators = resources.accelerators
     cloud = resources.cloud
+    is_gcp = cloud is not None and cloud.is_same_cloud(sky.GCP())
+    if is_gcp and (resources.instance_type is not None and
+                   'a2' in resources.instance_type):
+        return 'gpunode'
     if accelerators:
         # We only support homogenous accelerators for now.
         assert len(accelerators) == 1, resources
         acc, _ = list(accelerators.items())[0]
-        is_gcp = cloud is not None and cloud.is_same_cloud(sky.GCP())
         if is_gcp and 'tpu' in acc:
             return 'tpunode'
         return 'gpunode'

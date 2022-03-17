@@ -48,7 +48,7 @@ class GCP(clouds.Cloud):
         'n1-highmem-64': 3.785696,
         'n1-highmem-96': 5.678544,
         # A2
-        'a2-highgpu-1g': 3.678477,
+        'a2-highgpu-1g': 3.673477,
         'a2-highgpu-2g': 7.356954,
         'a2-highgpu-4g': 14.713908,
         'a2-highgpu-8g': 29.427816,
@@ -243,6 +243,18 @@ class GCP(clouds.Cloud):
         # default VM type.
         r = copy.deepcopy(resources)
         r.cloud = GCP()
+        if r.accelerators is not None:
+            assert len(r.accelerators.items()) == 1
+            acc, acc_count = list(r.accelerators.items())[0]
+            if 'A100' in acc:
+                if acc_count == 16:
+                    r.instance_type = 'a2-megagpu-16g'
+                else:
+                    r.instance_type = f'a2-highgpu-{int(acc_count)}g'
+                # Avoid double-billing for both instance type and accelerators.
+                r.accelerators = None
+                return ([r], fuzzy_candidate_list)
+
         r.instance_type = GCP.get_default_instance_type()
         r.accelerators = accelerator_match
         return ([r], fuzzy_candidate_list)
