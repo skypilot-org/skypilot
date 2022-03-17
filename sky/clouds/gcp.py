@@ -133,7 +133,15 @@ class GCP(clouds.Cloud):
         use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
-        del instance_type  # unused
+        if instance_type is not None and 'a2' in instance_type:
+            acc_count = {
+                'a2-highgpu-1g': 1.0,
+                'a2-highgpu-2g': 2.0,
+                'a2-highgpu-4g': 4.0,
+                'a2-highgpu-8g': 8.0,
+                'a2-megagpu-16g': 16.0,
+            }[instance_type]
+            accelerators = {'A100': acc_count}
         if accelerators is None:
             # fallback to manually specified region/zones
             regions = cls.regions()
