@@ -1834,14 +1834,10 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
-<<<<<<< HEAD
-    def teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
-=======
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
-                 _force: bool = False) -> None:
->>>>>>> 0e2933605949f83a1759df75236bc27f80a80001
+                 _force: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
 
@@ -1849,13 +1845,12 @@ class CloudVmRayBackend(backends.Backend):
             # Should only be forced when teardown is called within a
             # locked section of the code (i.e teardown when not enough
             # resources can be provisioned)
-            self._teardown(handle, terminate)
-            return
+            return self._teardown(handle, terminate)
+            
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
-<<<<<<< HEAD
             # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(lock_path, 10):
                 success = self._teardown(handle, terminate)
@@ -1867,16 +1862,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'Cluster {cluster_name} is locked by {lock_path}. '
                 'Check to see if it is still being launched.')
         return False
-=======
-            with filelock.FileLock(lock_path, 10):  # pylint: disable=abstract-class-instantiated
-                self._teardown(handle, terminate)
-                if terminate:
-                    os.remove(lock_path)
-        except filelock.Timeout:
-            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. '
-                         'Check to see if it is still being launched.')
->>>>>>> 0e2933605949f83a1759df75236bc27f80a80001
-
+        
     def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
