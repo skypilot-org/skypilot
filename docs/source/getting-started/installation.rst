@@ -63,6 +63,8 @@ If running :code:`conda install -c conda-forge google-cloud-sdk` produces the er
   $ # Set the subscription to use
   $ az account set -s <subscription_id>
 
+Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
+
 **Verifying cloud setup**
 
 After configuring the desired clouds, you can optionally run :code:`sky check` to verify that credentials are correctly set up:

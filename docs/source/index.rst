@@ -44,13 +44,14 @@ Key features:
 
 .. toctree::
    :maxdepth: 1
-   :caption: Features
+   :caption: User Guides
 
    .. reference/faq
 
    reference/yaml-spec
    reference/interactive-nodes
    reference/storage
+   reference/quota
    .. reference/production-workflow
 
    .. reference/tasks
