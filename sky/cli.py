@@ -31,6 +31,7 @@ import copy
 import functools
 import getpass
 import shlex
+import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
@@ -50,6 +51,7 @@ from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
+from sky.skylet import job_lib
 from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -861,11 +863,16 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
     default=False,
     help='Sync down the logs of the job (This is useful for distributed jobs to'
     'download separate log for each job from all the workers).')
+@click.option(
+    '--status',
+    is_flag=True,
+    default=False,
+    help=('If specified, do not show logs but exit with a status code for the '
+          'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
 @click.argument('cluster', required=True, type=str)
 @click.argument('job_id', required=True, type=str)
-def logs(cluster: str, job_id: str, sync_down: bool):
+def logs(cluster: str, job_id: str, sync_down: bool, status: bool):
     """Tail the log of a job."""
-    # TODO: Add an option for downloading logs.
     cluster_name = cluster
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
@@ -876,9 +883,23 @@ def logs(cluster: str, job_id: str, sync_down: bool):
                                'LocalDockerBackend.')
     backend = backend_utils.get_backend_from_handle(handle)
 
+    if sync_down and status:
+        raise click.UsageError(
+            'Both --sync_down and --status are specified '
+            '(ambiguous). To fix: specify at most one of them.')
+
     if sync_down:
         click.secho('Syncing down logs to local...', fg='yellow')
         backend.sync_down_logs(handle, job_id)
+    elif status:
+        # FIXME(zongheng,zhwu): non-existent job ids throw:
+        # TypeError: expected str, bytes or os.PathLike object, not tuple
+        job_status = backend.get_job_status(handle, job_id)
+        # print(job_status)
+        if job_status == job_lib.JobStatus.SUCCEEDED:
+            sys.exit(0)
+        else:
+            sys.exit(1)
     else:
         backend.tail_logs(handle, job_id)
 

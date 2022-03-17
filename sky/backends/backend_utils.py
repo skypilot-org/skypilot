@@ -958,6 +958,12 @@ class JobLibCodeGen(object):
             f'log_lib.tail_logs({job_id}, log_dir)',
         ]
 
+    def get_job_status(self, job_id: str) -> None:
+        self._code += [
+            f'job_status = job_lib.get_status({job_id})',
+            'print(job_status, flush=True)',
+        ]
+
     def get_log_path(self, job_id: int) -> None:
         self._code += [
             f'log_dir = job_lib.log_dir({job_id})',
