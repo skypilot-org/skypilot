@@ -40,7 +40,7 @@ def _update_ray_up_status(log_line, ray_up_state: str,
         status_display.start()
         status_display.update('[bold cyan]Waiting for SSH')
         ray_up_state['state'] = ProvisionStatus.WAIT_FOR_SSH
-    elif 'Looking in indexes: https://pypi.org/simple' in log_line and \
+    elif 'ray[default]' in log_line and \
         ray_up_state['state'] == ProvisionStatus.WAIT_FOR_SSH:
         status_display.stop()
         logger.info(f'{colorama.Fore.GREEN}SSH is ready.'

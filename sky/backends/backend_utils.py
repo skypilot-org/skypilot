@@ -17,7 +17,7 @@ import uuid
 import yaml
 
 import jinja2
-import rich.status
+import rich.console as rich_console
 
 import sky
 from sky import authentication as auth
@@ -32,6 +32,7 @@ from sky.backends import wheel_utils
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
+console = rich_console.Console()
 
 Resources = resources.Resources
 
@@ -673,82 +674,77 @@ def wait_until_ray_cluster_ready(
     ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
     start = time.time()
-    worker_status = rich.status.Status('[bold cyan]Waiting for workers...')
-    worker_status.start()
-    while True:
-        rc, output, stderr = run_command_on_ip_via_ssh(head_ip,
-                                                       'ray status',
-                                                       ssh_user=ssh_user,
-                                                       ssh_private_key=ssh_key,
-                                                       log_path=log_path,
-                                                       stream_logs=False,
-                                                       require_outputs=True)
-        if rc != 0:
-            worker_status.stop()
-        handle_returncode(rc, 'ray status',
-                          'Failed to run ray status on head node.', stderr)
-        logger.debug(output)
+    with console.status('[bold cyan]Waiting for workers...') as worker_status:
+        while True:
+            rc, output, stderr = run_command_on_ip_via_ssh(
+                head_ip,
+                'ray status',
+                ssh_user=ssh_user,
+                ssh_private_key=ssh_key,
+                log_path=log_path,
+                stream_logs=False,
+                require_outputs=True)
+            handle_returncode(rc, 'ray status',
+                              'Failed to run ray status on head node.', stderr)
+            logger.debug(output)
 
-        # Workers that are ready
-        result = _LAUNCHED_WORKER_PATTERN.findall(output)
-        ready_workers = 0
-        if result:
-            assert len(result) == 1, result
-            ready_workers = int(result[0])
+            # Workers that are ready
+            result = _LAUNCHED_WORKER_PATTERN.findall(output)
+            ready_workers = 0
+            if result:
+                assert len(result) == 1, result
+                ready_workers = int(result[0])
 
-        result = _LAUNCHED_HEAD_PATTERN.findall(output)
-        ready_head = 0
-        if result:
-            assert len(result) == 1, result
-            ready_head = int(result[0])
-            assert ready_head <= 1, ready_head
+            result = _LAUNCHED_HEAD_PATTERN.findall(output)
+            ready_head = 0
+            if result:
+                assert len(result) == 1, result
+                ready_head = int(result[0])
+                assert ready_head <= 1, ready_head
 
-        worker_status.update('[bold cyan]'
-                             f'{ready_workers} out of {num_nodes - 1} '
-                             'workers ready')
+            worker_status.update('[bold cyan]'
+                                 f'{ready_workers} out of {num_nodes - 1} '
+                                 'workers ready')
 
-        if ready_head + ready_workers == num_nodes:
-            # All nodes are up.
-            break
+            if ready_head + ready_workers == num_nodes:
+                # All nodes are up.
+                break
 
-        # Pending workers that have been launched by ray up.
-        found_ips = _LAUNCHING_IP_PATTERN.findall(output)
-        pending_workers = len(found_ips)
+            # Pending workers that have been launched by ray up.
+            found_ips = _LAUNCHING_IP_PATTERN.findall(output)
+            pending_workers = len(found_ips)
 
-        # TODO(zhwu): Handle the case where the following occurs, where ray
-        # cluster is not correctly started on the cluster.
-        # Pending:
-        #  172.31.9.121: ray.worker.default, uninitialized
-        nodes_so_far = ready_head + ready_workers + pending_workers
+            # TODO(zhwu): Handle the case where the following occurs, where ray
+            # cluster is not correctly started on the cluster.
+            # Pending:
+            #  172.31.9.121: ray.worker.default, uninitialized
+            nodes_so_far = ready_head + ready_workers + pending_workers
 
-        # Check the number of nodes that are fetched. Timeout if no new
-        # nodes fetched in a while (nodes_launching_progress_timeout), though
-        # number of nodes_so_far is still not as expected.
-        if nodes_so_far > last_nodes_so_far:
-            # Reset the start time if the number of launching nodes
-            # changes, i.e. new nodes are launched.
-            logger.debug('Reset start time, as new nodes are launched. '
-                         f'({last_nodes_so_far} -> {nodes_so_far})')
-            start = time.time()
-            last_nodes_so_far = nodes_so_far
-        elif (nodes_launching_progress_timeout is not None and
-              time.time() - start > nodes_launching_progress_timeout and
-              nodes_so_far != num_nodes):
-            worker_status.stop()
-            logger.error(
-                'Timed out when waiting for workers to be provisioned.')
-            return False  # failed
+            # Check the number of nodes that are fetched. Timeout if no new
+            # nodes fetched in a while (nodes_launching_progress_timeout), though
+            # number of nodes_so_far is still not as expected.
+            if nodes_so_far > last_nodes_so_far:
+                # Reset the start time if the number of launching nodes
+                # changes, i.e. new nodes are launched.
+                logger.debug('Reset start time, as new nodes are launched. '
+                            f'({last_nodes_so_far} -> {nodes_so_far})')
+                start = time.time()
+                last_nodes_so_far = nodes_so_far
+            elif (nodes_launching_progress_timeout is not None and
+                time.time() - start > nodes_launching_progress_timeout and
+                nodes_so_far != num_nodes):
+                logger.error(
+                    'Timed out when waiting for workers to be provisioned.')
+                return False  # failed
 
-        if '(no pending nodes)' in output and '(no failures)' in output:
-            # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
-            # GCP can satisfy only by half, the worker node would be forgotten.
-            # The correct behavior should be for it to error out.
-            worker_status.stop()
-            logger.error('Failed to launch multiple nodes on '
-                         'GCP due to a nondeterministic bug in ray autoscaler.')
-            return False  # failed
-        time.sleep(10)
-    worker_status.stop()
+            if '(no pending nodes)' in output and '(no failures)' in output:
+                # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
+                # GCP can satisfy only by half, the worker node would be forgotten.
+                # The correct behavior should be for it to error out.
+                logger.error('Failed to launch multiple nodes on '
+                            'GCP due to a nondeterministic bug in ray autoscaler.')
+                return False  # failed
+            time.sleep(10)
     return True  # success
 
 
