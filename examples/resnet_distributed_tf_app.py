@@ -17,12 +17,13 @@ with sky.Dag() as dag:
     num_nodes = 2
 
     # The setup command.  Will be run under the working directory.
-    setup = 'pip3 install --upgrade pip && \
-           pip3 install ray[default] awscli botocore boto3 && \
-           conda create -n resnet python=3.7 -y && \
-           conda activate resnet && \
-           pip install tensorflow==2.4.0 pyyaml && \
-           cd models && pip install -e .'
+    setup = """
+            conda create -n resnet python=3.7 -y
+            conda activate resnet
+            conda install cudatoolkit=11.0 -y
+            pip install tensorflow==2.4.0 pyyaml
+            cd models && pip install -e .
+            """
 
     # The command to run.  Will be run under the working directory.
     # If a str, run the same command on all nodes.
