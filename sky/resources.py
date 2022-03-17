@@ -182,7 +182,8 @@ class Resources:
         if other.accelerators is not None:
             assert len(other.accelerators.items()) == 1
             acc, acc_count = list(other.accelerators.items())[0]
-            if 'A100' in acc:
+            if 'A100' in acc and (other.cloud is not None and
+                                  other.cloud.is_same_cloud(clouds.GCP())):
                 other_instance_type = {
                     1.0: 'a2-highgpu-1g',
                     2.0: 'a2-highgpu-2g',
