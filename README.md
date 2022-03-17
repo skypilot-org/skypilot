@@ -39,3 +39,6 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
   * Use `class MyClass:` instead of `class MyClass(object):`. The later one was a workaround for python2.x.
   * Use `abc` module for abstract classes to ensure all abstract methods are implemented.
   * Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.
+
+### Testing
+To run smoke test in parallel: `pytest -n <n_jobs> tests/test_smoke.py`
