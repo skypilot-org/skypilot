@@ -945,7 +945,7 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at=start_streaming_at,
-                parse_ray_up_logs=True,
+                line_processor=log_lib.RayUpLineProcessor(),
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'),

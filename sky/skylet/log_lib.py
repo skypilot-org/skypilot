@@ -24,59 +24,46 @@ SKY_REMOTE_WORKDIR = '~/sky_workdir'
 logger = sky_logging.init_logger(__name__)
 
 
-class ProvisionStatus(enum.Enum):
-    LAUNCH = 0
-    RUNTIME_SETUP = 1
-
-
-class LineParser(object):
-    """A parser for log lines."""
+class LineProcessor(object):
+    """A processor for log lines."""
 
     def __enter__(self):
         pass
 
-    def parse_line(self, log_line):
-        return log_line
+    def process_line(self, log_line):
+        pass
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
         pass
 
 
-class RayUpLineParser(LineParser):
-    """A parser for Ray up log lines."""
+class RayUpLineProcessor(LineProcessor):
+    """A processor for Ray up log lines."""
 
-    def __init__(self):
-        import pdb; pdb.set_trace()
-
-        self.state = ProvisionStatus.LAUNCH
-        self.provision_status = rich.status.Status('[bold cyan]Launching')
+    class ProvisionStatus(enum.Enum):
+        LAUNCH = 0
+        RUNTIME_SETUP = 1
 
     def __enter__(self):
-        import pdb; pdb.set_trace()
-        self.provision_status.start()
+        self.state = self.ProvisionStatus.LAUNCH
+        self.status_display = rich.status.Status('[bold cyan]Launching')
+        self.status_display.start()
 
-    def parse_line(self, log_line):
-        if self.state == ProvisionStatus.LAUNCH:
-            if 'Shared connection to' in log_line:
-                self.state = ProvisionStatus.RUNTIME_SETUP
+    def process_line(self, log_line):
+        if ('Shared connection to' in log_line and
+                self.state == self.ProvisionStatus.LAUNCH):
+            self.status_display.stop()
+            logger.info(f'{colorama.Fore.GREEN}Head node is up.'
+                        f'{colorama.Style.RESET_ALL}')
+            self.status_display.start()
+            self.status_display.update('[bold cyan] Preparing Sky runtime')
+            self.state = self.ProvisionStatus.RUNTIME_SETUP
         return log_line
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
-        self.provision_status.stop()
-
-
-def _update_ray_up_status(log_line, ray_up_state: str,
-                          status_display: rich.status.Status) -> None:
-    if 'Shared connection to' in log_line and ray_up_state[
-            'state'] == ProvisionStatus.LAUNCH:
-        status_display.stop()
-        logger.info(f'{colorama.Fore.GREEN}Head node is up.'
-                    f'{colorama.Style.RESET_ALL}')
-        status_display.start()
-        status_display.update('[bold cyan] Preparing Sky runtime')
-        ray_up_state['state'] = ProvisionStatus.RUNTIME_SETUP
+        self.status_display.stop()
 
 
 def redirect_process_output(
@@ -86,17 +73,14 @@ def redirect_process_output(
         start_streaming_at: str = '',
         skip_lines: Optional[List[str]] = None,
         replace_crlf: bool = False,
-        line_parser: Optional[LineParser] = None) -> Tuple[str, str]:
+        line_processor: Optional[LineProcessor] = None) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
-    # FIXME(gmittal): Remove hard-coded `parse_ray_up_logs` flag and add general
-    # LineParser: https://github.com/sky-proj/sky/pull/565#discussion_r826615923
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
 
-    import pdb; pdb.set_trace()
-    if line_parser is None:
-        line_parser = RayUpLineParser()
+    if line_processor is None:
+        line_processor = LineProcessor()
 
     sel = selectors.DefaultSelector()
     out_io = io.TextIOWrapper(proc.stdout,
@@ -115,7 +99,7 @@ def redirect_process_output(
     stderr = ''
 
     start_streaming_flag = False
-    with line_parser:
+    with line_processor:
         with open(log_path, 'a') as fout:
             while len(sel.get_map()) > 0:
                 events = sel.select()
@@ -128,8 +112,8 @@ def redirect_process_output(
                     # Remove special characters to avoid cursor hidding
                     line = line.replace('\x1b[?25l', '')
                     if replace_crlf and line.endswith('\r\n'):
-                        # Replace CRLF with LF to avoid ray logging to the same line
-                        # due to separating lines with '\n'.
+                        # Replace CRLF with LF to avoid ray logging to the same
+                        # line due to separating lines with '\n'.
                         line = line[:-2] + '\n'
                     if (skip_lines is not None and
                             any(skip in line for skip in skip_lines)):
@@ -148,7 +132,7 @@ def redirect_process_output(
                     if log_path != '/dev/null':
                         fout.write(line)
                         fout.flush()
-                    line_parser.parse_line(line)
+                    line_processor.process_line(line)
     return stdout, stderr
 
 
@@ -161,7 +145,7 @@ def run_with_log(
     shell: bool = False,
     with_ray: bool = False,
     redirect_stdout_stderr: bool = True,
-    parse_ray_up_logs: bool = False,
+    line_processor: Optional[LineProcessor] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -220,7 +204,7 @@ def run_with_log(
                     'bash: cannot set terminal process group',
                     'bash: no job control in this shell',
                 ],
-                parse_ray_up_logs=parse_ray_up_logs,
+                line_processor=line_processor,
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
             )
