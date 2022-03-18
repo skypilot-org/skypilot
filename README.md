@@ -39,3 +39,10 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
   * Use `class MyClass:` instead of `class MyClass(object):`. The later one was a workaround for python2.x.
   * Use `abc` module for abstract classes to ensure all abstract methods are implemented.
   * Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.
+
+For profiling code, use:
+```
+pip install tuna # Tuna for viz
+python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
+tuna sky.prof
+```

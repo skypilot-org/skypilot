@@ -100,11 +100,39 @@ def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
     return accelerator_dict
 
 
-def _path_size_megabytes(path: str) -> int:
-    """Returns the size of 'path' (directory or file) in megabytes."""
+def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
+    """Returns the size of 'path' (directory or file) in megabytes.
+
+    Args:
+        path: The path to check.
+        exclude_gitignore: If True, excludes files matched in .gitignore.
+
+    Returns:
+        The size of 'path' in megabytes.
+    """
+    if exclude_gitignore:
+        try:
+            # FIXME: add git index size (du -hsc .git) in this computation.
+            awk_program = '{ sum += $1 } END { print sum }'
+            return int(
+                subprocess.check_output(
+                    f'( git status --short {path} | '
+                    'grep "^?" | cut -d " " -f2- '
+                    f'&& git ls-files {path} ) | '
+                    'xargs -n 1000 du -hsk | '
+                    f'awk {awk_program!r}',
+                    shell=True,
+                    stderr=subprocess.DEVNULL)) // (2**10)
+        except (subprocess.CalledProcessError, ValueError):
+            # If git is not installed, or if the user is not in a git repo.
+            # Fall back to du -shk if it is not a git repo (size does not
+            # consider .gitignore).
+            logger.debug('Failed to get size with .gitignore exclusion, '
+                         'falling back to du -shk')
+            pass
     return int(
-        subprocess.check_output(['du', '-sh', '-m',
-                                 path]).split()[0].decode('utf-8'))
+        subprocess.check_output(['du', '-sh', '-k', path
+                                ]).split()[0].decode('utf-8')) // (2**10)
 
 
 class RayCodeGen:
@@ -896,6 +924,7 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at=start_streaming_at,
+                parse_ray_up_logs=True,
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'),
@@ -915,10 +944,8 @@ class RetryingVmProvisioner(object):
         logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
-        with console.status('[bold cyan]Launching[/]'):
-            # ray up.
-            returncode, stdout, stderr = ray_up(
-                start_streaming_at='Shared connection to')
+        returncode, stdout, stderr = ray_up(
+            start_streaming_at='Shared connection to')
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
         # Only 1 node or head node provisioning failure.
@@ -1281,20 +1308,24 @@ class CloudVmRayBackend(backends.Backend):
             workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
 
         # Raise warning if directory is too large
-        dir_size = _path_size_megabytes(full_workdir)
+        dir_size = _path_size_megabytes(full_workdir, exclude_gitignore=True)
         if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
             logger.warning(
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
-                f'is {dir_size} MB. Try to keep workdir small, as '
-                f'large sizes will slow down rsync.{style.RESET_ALL}')
+                f'is {dir_size} MB. Try to keep workdir small or use '
+                '.gitignore to exclude large files, as '
+                'large sizes will slow down rsync. If you use .gitignore but '
+                'the path is not initialized in git, you can ignore this '
+                f'warning.{style.RESET_ALL}')
+
+        log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
         def _sync_workdir_node(ip):
             self._rsync_up(handle,
                            ip=ip,
                            source=workdir,
                            target=SKY_REMOTE_WORKDIR,
-                           log_path=os.path.join(self.log_dir,
-                                                 'workdir_sync.log'),
+                           log_path=log_path,
                            stream_logs=False,
                            raise_error=True)
 
@@ -1305,6 +1336,9 @@ class CloudVmRayBackend(backends.Backend):
             f'{style.BRIGHT}{workdir}{style.RESET_ALL}'
             f' -> '
             f'{style.BRIGHT}{SKY_REMOTE_WORKDIR}{style.RESET_ALL}')
+        tail_cmd = f'tail -n100 -f {log_path}'
+        logger.info('To view detailed progress: '
+                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
         with console.status('[bold cyan]Syncing[/]'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
@@ -1388,16 +1422,24 @@ class CloudVmRayBackend(backends.Backend):
                 full_src = os.path.abspath(os.path.expanduser(src))
                 # Checked during Task.set_file_mounts().
                 assert os.path.exists(full_src), f'{full_src} does not exist.'
-                src_size = _path_size_megabytes(full_src)
+                src_size = _path_size_megabytes(full_src,
+                                                exclude_gitignore=True)
                 if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src!r} '
-                        f'is {src_size} MB. Try to keep src small, as '
-                        f'large sizes will slow down rsync.{style.RESET_ALL}')
+                        f'is {src_size} MB. Try to keep src small or use '
+                        '.gitignore to exclude large files, as '
+                        'large sizes will slow down rsync. If you use '
+                        '.gitignore but the path is not initialized in git, you'
+                        f' can ignore this warning.{style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(
                         f'{fore.YELLOW}Source path {src!r} is a symlink. '
                         f'Symlink contents are not uploaded.{style.RESET_ALL}')
+
+        tail_cmd = f'tail -n100 -f {log_path}'
+        logger.info('To view detailed progress: '
+                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         for dst, src in mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
