@@ -74,7 +74,9 @@ file_mounts:
   # Commenting out as this takes a while.
   # /data/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet
 
-setup: 'sudo apt-get install -y tree'
+setup: |
+  # Ubuntu 20.04 LTS uses snap instead of apt.
+  sudo snap install tree
 
 run: |
   set -ex
