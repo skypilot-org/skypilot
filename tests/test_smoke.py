@@ -1,6 +1,8 @@
 import subprocess
+import sys
 import tempfile
 from typing import List, Optional, Tuple, NamedTuple
+
 from sky.backends import backend_utils
 
 
@@ -12,29 +14,22 @@ class Test(NamedTuple):
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
     timeout: int = 15 * 60
-    # timeout: int = 10
 
-
-# Hack: without this, Ray seems to mess up \r and this script will output
-# misaligned spacing after running for a while.
-def echo(*args):
-    with open('test.log', 'a') as f:
-        print(*args, file=f)
+    def echo(self, *args):
+        # pytest's xdist plugin captures stdout; print to stderr so that the
+        # logs are streaming while the tests are running.
+        print(f'[{self.name}]', *args, file=sys.stderr)
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
-    # FIXME(zongheng,suquark): starting all tests (almost) together fails
-    # backend_utils#write_cluster_config() -> wheel_utils#build_sky_wheel().
     log_file = tempfile.NamedTemporaryFile('a',
                                            prefix=f'{test.name}-',
                                            suffix='.log',
                                            delete=False)
-
-    echo(f'{test.name}: per-command timeout'
-         f'={test.timeout} seconds.')
-    echo(f'  tail -f -n100 {log_file.name}')
+    test.echo(f'per-command timeout={test.timeout} seconds.')
+    test.echo(f'  tail -f -n100 {log_file.name}')
     for command in test.commands:
-        echo(f'  {command}')
+        test.echo(f'  {command}')
         proc = subprocess.Popen(
             command,
             stdout=log_file,
@@ -48,21 +43,19 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             proc.wait(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
             log_file.flush()
-            echo(e)
-            echo(error_occurred)
+            test.echo(e)
+            test.echo(error_occurred)
             proc.returncode = 1  # None if we don't set it.
-
-            # raise e  # Raise = retry
-            break  # no retry
+            break
 
         if proc.returncode:
-            echo(error_occurred)
+            test.echo(error_occurred)
             break
 
     outcome = 'failed' if proc.returncode else 'succeeded'
-    echo(f'{test.name} {outcome}. Log: less {log_file.name}')
+    test.echo(f'{test.name} {outcome}. Log: less {log_file.name}')
     if test.teardown is not None:
-        echo(f'Teardown: {test.teardown}')
+        test.echo(f'Teardown: {test.teardown}')
         backend_utils.run(
             test.teardown,
             stdout=log_file,
@@ -72,9 +65,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         )
 
     if proc.returncode:
-        raise Exception(
-            f'{test.name}: test command exited with non-zero status.\n'
-            f'Log: less {log_file.name}')
+        raise Exception(f'test exited with non-zero status. '
+                        f'Log: less {log_file.name}')
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
@@ -86,6 +78,7 @@ def test_example_app():
     run_one_test(test)
 
 
+# ---------- A minimal task ----------
 def test_min():
     test = Test(
         'minimal',

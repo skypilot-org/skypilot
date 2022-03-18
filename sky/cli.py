@@ -913,7 +913,6 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
         # FIXME(zongheng,zhwu): non-existent job ids throw:
         # TypeError: expected str, bytes or os.PathLike object, not tuple
         job_status = backend.get_job_status(handle, job_id)
-        # print(job_status)
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
         else:
