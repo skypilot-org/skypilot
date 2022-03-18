@@ -42,3 +42,10 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
 
 ### Testing
 To run smoke test in parallel: `pytest -n <n_jobs> -q --tb=short --disable-warnings tests/test_smoke.py`
+
+For profiling code, use:
+```
+pip install tuna # Tuna for viz
+python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
+tuna sky.prof
+```

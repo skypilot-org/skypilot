@@ -342,7 +342,7 @@ class LocalDockerBackend(backends.Backend):
             f'task run command, run {style.BRIGHT}docker run -it '
             f'{container.image.tags[0]} /bin/bash{style.RESET_ALL}')
 
-    def teardown(self, handle: ResourceHandle, terminate: bool) -> None:
+    def teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
         """Teardown kills the container."""
         if not terminate:
             logger.warning(
@@ -357,3 +357,4 @@ class LocalDockerBackend(backends.Backend):
             container.remove(force=True)
         cluster_name = global_user_state.get_cluster_name_from_handle(handle)
         global_user_state.remove_cluster(cluster_name, terminate=True)
+        return True

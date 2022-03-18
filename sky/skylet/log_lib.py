@@ -2,6 +2,7 @@
 
 This is a remote utility module that provides logging functionality.
 """
+import enum
 import io
 import os
 import selectors
@@ -12,9 +13,32 @@ import textwrap
 import tempfile
 from typing import Iterator, List, Optional, Tuple, Union
 
+import colorama
+import rich.status
+
 from sky.skylet import job_lib
+from sky import sky_logging
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+
+logger = sky_logging.init_logger(__name__)
+
+
+class ProvisionStatus(enum.Enum):
+    LAUNCH = 0
+    RUNTIME_SETUP = 1
+
+
+def _update_ray_up_status(log_line, ray_up_state: str,
+                          status_display: rich.status.Status) -> None:
+    if 'Shared connection to' in log_line and ray_up_state[
+            'state'] == ProvisionStatus.LAUNCH:
+        status_display.stop()
+        logger.info(f'{colorama.Fore.GREEN}Head node is up.'
+                    f'{colorama.Style.RESET_ALL}')
+        status_display.start()
+        status_display.update('[bold cyan] Preparing Sky runtime')
+        ray_up_state['state'] = ProvisionStatus.RUNTIME_SETUP
 
 
 def redirect_process_output(proc,
@@ -22,8 +46,11 @@ def redirect_process_output(proc,
                             stream_logs: bool,
                             start_streaming_at: str = '',
                             skip_lines: Optional[List[str]] = None,
+                            parse_ray_up_logs: bool = False,
                             replace_crlf: bool = False) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
+    # FIXME(gmittal): Remove hard-coded `parse_ray_up_logs` flag and add general
+    # LineParser: https://github.com/sky-proj/sky/pull/565#discussion_r826615923
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
@@ -45,6 +72,10 @@ def redirect_process_output(proc,
     stderr = ''
 
     start_streaming_flag = False
+    if parse_ray_up_logs:
+        ray_up_state = {'state': ProvisionStatus.LAUNCH}
+        provision_status = rich.status.Status('[bold cyan]Launching')
+        provision_status.start()
     with open(log_path, 'a') as fout:
         while len(sel.get_map()) > 0:
             events = sel.select()
@@ -77,6 +108,10 @@ def redirect_process_output(proc,
                 if log_path != '/dev/null':
                     fout.write(line)
                     fout.flush()
+                if parse_ray_up_logs:
+                    _update_ray_up_status(line, ray_up_state, provision_status)
+    if parse_ray_up_logs:
+        provision_status.stop()
     return stdout, stderr
 
 
@@ -89,11 +124,12 @@ def run_with_log(
     shell: bool = False,
     with_ray: bool = False,
     redirect_stdout_stderr: bool = True,
+    parse_ray_up_logs: bool = False,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
 
-    Retruns the returncode or returncode, stdout and stderr of the command.
+    Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
     assert redirect_stdout_stderr or log_path == '/dev/null'
@@ -147,6 +183,7 @@ def run_with_log(
                     'bash: cannot set terminal process group',
                     'bash: no job control in this shell',
                 ],
+                parse_ray_up_logs=parse_ray_up_logs,
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
             )

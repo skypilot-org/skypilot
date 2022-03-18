@@ -30,6 +30,7 @@ each other.
 import copy
 import functools
 import getpass
+import os
 import shlex
 import sys
 import time
@@ -388,6 +389,9 @@ def _create_and_ssh_into_node(
 def _check_yaml(entrypoint: str) -> bool:
     """Checks if entrypoint is a readable YAML file."""
     is_yaml = True
+    shell_splits = shlex.split(entrypoint)
+    yaml_file_provided = len(shell_splits) == 1 and \
+        (shell_splits[0].endswith('yaml') or shell_splits[0].endswith('.yml'))
     try:
         with open(entrypoint, 'r') as f:
             try:
@@ -395,17 +399,29 @@ def _check_yaml(entrypoint: str) -> bool:
                 if isinstance(config, str):
                     # 'sky exec cluster ./my_script.sh'
                     is_yaml = False
-            except yaml.YAMLError:
+            except yaml.YAMLError as e:
+                if yaml_file_provided:
+                    logger.debug(e)
+                    invalid_reason = ('contains an invalid configuration. '
+                                      ' Please check syntax.')
                 is_yaml = False
     except OSError:
+        if yaml_file_provided:
+            entry_point_path = os.path.expanduser(entrypoint)
+            if not os.path.exists(entry_point_path):
+                invalid_reason = ('does not exist. Please check if the path'
+                                  ' is correct.')
+            elif not os.path.isfile(entry_point_path):
+                invalid_reason = ('is not a file. Please check if the path'
+                                  ' is correct.')
+            else:
+                invalid_reason = ('yaml.safe_load() failed. Please check if the'
+                                  ' path is correct.')
         is_yaml = False
     if not is_yaml:
-        shell_splits = shlex.split(entrypoint)
-        if len(shell_splits) == 1 and (shell_splits[0].endswith('.yaml') or
-                                       shell_splits[0].endswith('.yml')):
+        if yaml_file_provided:
             click.confirm(
-                f'{entrypoint!r} looks like a yaml path but yaml.safe_load() '
-                'failed to return a dict (check if it exists or it\'s valid).\n'
+                f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
     return is_yaml
@@ -1240,13 +1256,18 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             click.echo('  To terminate the cluster, run: ', nl=False)
             click.secho(f'sky down {name}', bold=True)
             continue
-        backend.teardown(handle, terminate=terminate)
-        if terminate:
-            click.secho(f'Terminating cluster {name}...done.', fg='green')
+        success = backend.teardown(handle, terminate=terminate)
+        operation = 'Terminating' if terminate else 'Stopping'
+        if success:
+            click.secho(f'{operation} cluster {name}...done.', fg='green')
+            if not terminate:
+                click.echo('  To restart the cluster, run: ', nl=False)
+                click.secho(f'sky start {name}', bold=True)
         else:
-            click.secho(f'Stopping cluster {name}...done.', fg='green')
-            click.echo('  To restart the cluster, run: ', nl=False)
-            click.secho(f'sky start {name}', bold=True)
+            click.secho(
+                f'{operation} cluster {name}...failed. '
+                'Please check the logs and try again.',
+                fg='red')
 
 
 @_interactive_node_cli_command
