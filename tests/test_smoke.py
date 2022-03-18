@@ -65,8 +65,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         )
 
     if proc.returncode:
-        raise Exception(f'test exited with non-zero status. '
-                        f'Log: less {log_file.name}')
+        raise Exception(f'test failed: less {log_file.name}')
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------

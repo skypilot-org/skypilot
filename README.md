@@ -41,13 +41,12 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
   * Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.
 
 ### Testing
-To run smoke test in parallel: 
+To run smoke tests:
 ```
-# Run smoke tests
-pytest -n auto -q --tb=short --disable-warnings tests/test_smoke.py
+bash tests/run_smoke_tests.sh
 
 # Run one of the smoke tests
-pytest -n auto -q --tb=short --disable-warnings tests/test_smoke.py::test_gcp_start_stop
+pytest -n 16 tests/test_smoke.py::test_gcp_start_stop
 ```
 
 For profiling code, use:
