@@ -126,6 +126,8 @@ def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
             # If git is not installed, or if the user is not in a git repo.
             # Fall back to du -shk if it is not a git repo (size does not
             # consider .gitignore).
+            logger.debug('Failed to get size with .gitignore exclusion, '
+                         'falling back to du -shk')
             pass
     return int(
         subprocess.check_output(['du', '-sh', '-k', path

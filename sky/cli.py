@@ -399,7 +399,7 @@ def _check_yaml(entrypoint: str) -> bool:
                     is_yaml = False
             except yaml.YAMLError as e:
                 if yaml_file_provided:
-                    click.secho(e, fg='red')
+                    logger.debug(e)
                     invalid_reason = ('contains an invalid configuration. '
                                       ' Please check syntax.')
                 is_yaml = False
