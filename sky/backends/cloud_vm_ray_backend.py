@@ -1649,7 +1649,6 @@ class CloudVmRayBackend(backends.Backend):
                            target=script_path,
                            stream_logs=False)
         remote_log_dir = self.log_dir
-        local_log_dir = os.path.expanduser(remote_log_dir)
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         assert executable == 'python3', executable

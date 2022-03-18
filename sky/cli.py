@@ -636,18 +636,26 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
          workdir: Optional[str], gpus: Optional[str], name: Optional[str]):
     """Execute a task or a command on a cluster (skip setup).
 
-    If entrypoint points to a valid YAML file, it is read in as the task
-    specification. Otherwise, it is interpreted as a bash command to be
-    executed on the head node of the cluster. The task will be submitted to
-    the job queue of the cluster, except if a bash command is used without
-    providing --gpus.
+    If ENTRYPOINT points to a valid YAML file, it is read in as the task
+    specification. Otherwise, it is interpreted as a bash command.
 
     \b
-    Actions performed by this command only include:
-    - workdir syncing (optional; specified in the YAML spec or via --workdir)
-    - executing the task's run command (if entrypoint is a yaml; executed
-      either on the cluster's head node or optionally on all nodes), or a
-      bash command (only executed on the head node)
+    Inline commands vs. tasks sent to job queue:
+    \b
+    - If ENTRYPOINT is a YAML, or if it is a command with `--gpus` specified:
+      it is treated as a proper task which will undergo job queue scheduling,
+      respecting the resource requirement.
+    - Otherwise (if ENTRYPOINT is a command and no `--gpus` specified), it is
+      treated as an inline command, to be executed only on the head node of the
+      cluster.
+
+    \b
+    Actions performed by `sky exec`:
+    \b
+    - workdir syncing, if:
+      - ENTRYPOINT is a YAML, and `workdir` is specified inside; OR
+      - ENTRYPOINT is a command, and flag `--workdir=<local_path>` is supplied.
+    - executing the specified task's `run` commands / the bash command.
 
     `sky exec` is thus typically faster than `sky launch`, provided a cluster
     already exists.
@@ -679,7 +687,7 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
 
     .. code-block:: bash
 
-        #  Pass in commands for execution
+        # Pass in commands for execution
         sky exec mycluster -- echo Hello World
 
     """
