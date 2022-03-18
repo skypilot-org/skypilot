@@ -29,6 +29,44 @@ class ProvisionStatus(enum.Enum):
     RUNTIME_SETUP = 1
 
 
+class LineParser(object):
+    """A parser for log lines."""
+
+    def __enter__(self):
+        pass
+
+    def parse_line(self, log_line):
+        return log_line
+
+    def __exit__(self, except_type, except_value, traceback):
+        del except_type, except_value, traceback  # unused
+        pass
+
+
+class RayUpLineParser(LineParser):
+    """A parser for Ray up log lines."""
+
+    def __init__(self):
+        import pdb; pdb.set_trace()
+
+        self.state = ProvisionStatus.LAUNCH
+        self.provision_status = rich.status.Status('[bold cyan]Launching')
+
+    def __enter__(self):
+        import pdb; pdb.set_trace()
+        self.provision_status.start()
+
+    def parse_line(self, log_line):
+        if self.state == ProvisionStatus.LAUNCH:
+            if 'Shared connection to' in log_line:
+                self.state = ProvisionStatus.RUNTIME_SETUP
+        return log_line
+
+    def __exit__(self, except_type, except_value, traceback):
+        del except_type, except_value, traceback  # unused
+        self.provision_status.stop()
+
+
 def _update_ray_up_status(log_line, ray_up_state: str,
                           status_display: rich.status.Status) -> None:
     if 'Shared connection to' in log_line and ray_up_state[
@@ -41,19 +79,24 @@ def _update_ray_up_status(log_line, ray_up_state: str,
         ray_up_state['state'] = ProvisionStatus.RUNTIME_SETUP
 
 
-def redirect_process_output(proc,
-                            log_path: str,
-                            stream_logs: bool,
-                            start_streaming_at: str = '',
-                            skip_lines: Optional[List[str]] = None,
-                            parse_ray_up_logs: bool = False,
-                            replace_crlf: bool = False) -> Tuple[str, str]:
+def redirect_process_output(
+        proc,
+        log_path: str,
+        stream_logs: bool,
+        start_streaming_at: str = '',
+        skip_lines: Optional[List[str]] = None,
+        replace_crlf: bool = False,
+        line_parser: Optional[LineParser] = None) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     # FIXME(gmittal): Remove hard-coded `parse_ray_up_logs` flag and add general
     # LineParser: https://github.com/sky-proj/sky/pull/565#discussion_r826615923
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
+
+    import pdb; pdb.set_trace()
+    if line_parser is None:
+        line_parser = RayUpLineParser()
 
     sel = selectors.DefaultSelector()
     out_io = io.TextIOWrapper(proc.stdout,
@@ -72,44 +115,40 @@ def redirect_process_output(proc,
     stderr = ''
 
     start_streaming_flag = False
-    if parse_ray_up_logs:
-        ray_up_state = {'state': ProvisionStatus.LAUNCH}
-        provision_status = rich.status.Status('[bold cyan]Launching')
-        provision_status.start()
-    with open(log_path, 'a') as fout:
-        while len(sel.get_map()) > 0:
-            events = sel.select()
-            for key, _ in events:
-                line = key.fileobj.readline()
-                if not line:
-                    # Unregister the io when EOF reached
-                    sel.unregister(key.fileobj)
-                    continue
-                if replace_crlf and line.endswith('\r\n'):
-                    # Replace CRLF with LF to avoid ray logging to the same line
-                    # due to separating lines with '\n'.
-                    line = line[:-2] + '\n'
-                if (skip_lines is not None and
-                        any(skip in line for skip in skip_lines)):
-                    continue
-                if start_streaming_at in line:
-                    start_streaming_flag = True
-                if key.fileobj is out_io:
-                    stdout += line
-                    out_stream = sys.stdout
-                else:
-                    stderr += line
-                    out_stream = sys.stderr
-                if stream_logs and start_streaming_flag:
-                    out_stream.write(line)
-                    out_stream.flush()
-                if log_path != '/dev/null':
-                    fout.write(line)
-                    fout.flush()
-                if parse_ray_up_logs:
-                    _update_ray_up_status(line, ray_up_state, provision_status)
-    if parse_ray_up_logs:
-        provision_status.stop()
+    with line_parser:
+        with open(log_path, 'a') as fout:
+            while len(sel.get_map()) > 0:
+                events = sel.select()
+                for key, _ in events:
+                    line = key.fileobj.readline()
+                    if not line:
+                        # Unregister the io when EOF reached
+                        sel.unregister(key.fileobj)
+                        continue
+                    # Remove special characters to avoid cursor hidding
+                    line = line.replace('\x1b[?25l', '')
+                    if replace_crlf and line.endswith('\r\n'):
+                        # Replace CRLF with LF to avoid ray logging to the same line
+                        # due to separating lines with '\n'.
+                        line = line[:-2] + '\n'
+                    if (skip_lines is not None and
+                            any(skip in line for skip in skip_lines)):
+                        continue
+                    if start_streaming_at in line:
+                        start_streaming_flag = True
+                    if key.fileobj is out_io:
+                        stdout += line
+                        out_stream = sys.stdout
+                    else:
+                        stderr += line
+                        out_stream = sys.stderr
+                    if stream_logs and start_streaming_flag:
+                        out_stream.write(line)
+                        out_stream.flush()
+                    if log_path != '/dev/null':
+                        fout.write(line)
+                        fout.flush()
+                    line_parser.parse_line(line)
     return stdout, stderr
 
 
