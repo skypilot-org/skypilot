@@ -78,7 +78,7 @@ def test_example_app():
 
 
 # ---------- A minimal task ----------
-def test_min():
+def test_minimal():
     test = Test(
         'minimal',
         [
