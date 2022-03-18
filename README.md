@@ -46,7 +46,7 @@ To run smoke tests:
 bash tests/run_smoke_tests.sh
 
 # Run one of the smoke tests
-pytest -s -n 16 tests/test_smoke.py::test_minimal
+pytest -s -q tests/test_smoke.py::test_minimal
 ```
 
 For profiling code, use:

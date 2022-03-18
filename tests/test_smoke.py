@@ -3,6 +3,8 @@ import sys
 import tempfile
 from typing import List, Optional, Tuple, NamedTuple
 
+import colorama
+
 from sky.backends import backend_utils
 
 
@@ -15,10 +17,13 @@ class Test(NamedTuple):
     # Timeout for each command in seconds.
     timeout: int = 15 * 60
 
-    def echo(self, *args):
+    def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
         # logs are streaming while the tests are running.
-        print(f'[{self.name}]', *args, file=sys.stderr)
+        prefix = f'[{self.name}]'
+        message = f'{prefix} {message}'
+        message = message.replace('\n', f'\n{prefix} ')
+        print(message, file=sys.stderr, flush=True)
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
@@ -26,36 +31,37 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
                                            prefix=f'{test.name}-',
                                            suffix='.log',
                                            delete=False)
-    test.echo(f'per-command timeout={test.timeout} seconds.')
-    test.echo(f'  tail -f -n100 {log_file.name}')
+    test.echo('Test started.')
     for command in test.commands:
-        test.echo(f'  {command}')
+        # test.echo(f'  {command}')
         proc = subprocess.Popen(
             command,
             stdout=log_file,
             stderr=subprocess.STDOUT,
             shell=True,
         )
-        message = (f'{test.name}: test command exited with non-zero status: '
-                   f'{command}')
+        message = (f'Test command exited with non-zero status: '
+                   f'{command!r}')
         error_occurred = (f'{message}')
         try:
             proc.wait(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
             log_file.flush()
             test.echo(e)
-            test.echo(error_occurred)
             proc.returncode = 1  # None if we don't set it.
             break
 
         if proc.returncode:
-            test.echo(error_occurred)
             break
 
-    outcome = 'failed' if proc.returncode else 'succeeded'
-    test.echo(f'{test.name} {outcome}. Log: less {log_file.name}')
+    style = colorama.Style
+    fore = colorama.Fore
+    outcome = f'{fore.RED}Failed{style.RESET_ALL}' if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}'
+    reason = f'\nReason: {command!r}' if proc.returncode else ''
+    test.echo(f'{outcome}.'
+              f'{reason}'
+              f'\nLog: less {log_file.name}\n')
     if test.teardown is not None:
-        test.echo(f'Teardown: {test.teardown}')
         backend_utils.run(
             test.teardown,
             stdout=log_file,
