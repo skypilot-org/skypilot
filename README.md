@@ -41,7 +41,7 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
   * Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.
 
 ### Testing
-To run smoke test in parallel: `pytest -n <n_jobs> -q --tb=short --disable-warnings tests/test_smoke.py`
+To run smoke test in parallel: `pytest -n auto -q --tb=short --disable-warnings tests/test_smoke.py`
 
 For profiling code, use:
 ```

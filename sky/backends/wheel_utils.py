@@ -23,17 +23,21 @@ def _cleanup_wheels_dir(wheel_dir: pathlib.Path,
             else:
                 f.unlink()
 
-WHEEL_LOCK = '~/.sky/wheel.lock'
-lock = filelock.FileLock(os.path.expanduser(WHEEL_LOCK))
+
+_WHEEL_LOCK_PATH = '~/.sky/wheel.lock'
+# pylint: disable=abstract-class-instantiated
+_WHEEL_LOCK = filelock.FileLock(os.path.expanduser(_WHEEL_LOCK_PATH))
+
 
 def build_sky_wheel() -> pathlib.Path:
     """Build a wheel for sky. This works correctly only when sky is installed
     with development/editable mode."""
-    with lock:
+    with _WHEEL_LOCK:
         # check if sky is installed under development mode.
         package_root = pathlib.Path(sky.__file__).parent.parent
         username = getpass.getuser()
-        wheel_dir = pathlib.Path(tempfile.gettempdir()) / f'sky_wheels_{username}'
+        wheel_dir = pathlib.Path(
+            tempfile.gettempdir()) / f'sky_wheels_{username}'
 
         if not wheel_dir.exists():
             wheel_dir.mkdir()
@@ -44,32 +48,34 @@ def build_sky_wheel() -> pathlib.Path:
 
         # prepare files
         (wheel_dir / 'sky').symlink_to(package_root / 'sky',
-                                    target_is_directory=True)
+                                       target_is_directory=True)
         setup_files_dir = package_root / 'sky' / 'setup_files'
         for f in setup_files_dir.iterdir():
             if f.is_file():
                 shutil.copy(str(f), str(wheel_dir))
 
-        # It is important to normalize the path, otherwise 'pip wheel' would treat
-        # the directory as a file and generate an empty wheel.
+        # It is important to normalize the path, otherwise 'pip wheel' would
+        # treat the directory as a file and generate an empty wheel.
         norm_path = str(wheel_dir) + os.sep
         try:
-            # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
-            # the output.
+            # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
+            # of the output.
             subprocess.run([
                 'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
                 str(wheel_dir)
             ],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.PIPE,
-                        check=True)
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.PIPE,
+                           check=True)
         except subprocess.CalledProcessError as e:
             raise RuntimeError('Fail to build pip wheel for Sky. '
-                            f'Error message: {e.stderr.decode()}') from e
+                               f'Error message: {e.stderr.decode()}') from e
         try:
-            latest_wheel = max(wheel_dir.glob('sky-*.whl'), key=os.path.getctime)
+            latest_wheel = max(wheel_dir.glob('sky-*.whl'),
+                               key=os.path.getctime)
         except ValueError:
-            raise FileNotFoundError('Could not find built Sky wheels.') from None
+            raise FileNotFoundError(
+                'Could not find built Sky wheels.') from None
         _cleanup_wheels_dir(wheel_dir, latest_wheel)
         return wheel_dir.absolute()
 
