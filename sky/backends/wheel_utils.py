@@ -24,21 +24,19 @@ def _cleanup_wheels_dir(wheel_dir: pathlib.Path,
                 f.unlink()
 
 
-_WHEEL_LOCK_PATH = '~/.sky/wheel.lock'
-# pylint: disable=abstract-class-instantiated
-_WHEEL_LOCK = filelock.FileLock(os.path.expanduser(_WHEEL_LOCK_PATH))
+_TMP_FOLDER = pathlib.Path(tempfile.gettempdir())
 
 
 def build_sky_wheel() -> pathlib.Path:
     """Build a wheel for sky. This works correctly only when sky is installed
     with development/editable mode."""
-    with _WHEEL_LOCK:
-        # check if sky is installed under development mode.
-        package_root = pathlib.Path(sky.__file__).parent.parent
-        username = getpass.getuser()
-        wheel_dir = pathlib.Path(
-            tempfile.gettempdir()) / f'sky_wheels_{username}'
-
+    # check if sky is installed under development mode.
+    package_root = pathlib.Path(sky.__file__).parent.parent
+    username = getpass.getuser()
+    wheel_dir = _TMP_FOLDER / f'sky_wheels_{username}'
+    wheel_lock_path = _TMP_FOLDER / f'.sky_wheel_{username}.lock'
+    # pylint: disable=abstract-class-instantiated
+    with filelock.FileLock(wheel_lock_path):
         if not wheel_dir.exists():
             wheel_dir.mkdir()
         # cleanup the directory
