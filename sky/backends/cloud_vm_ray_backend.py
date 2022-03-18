@@ -1577,7 +1577,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.debug(f'Setup took {end - start} seconds.')
 
     def get_job_status(self, handle: ResourceHandle,
-                       job_id: int) -> job_lib.JobStatus:
+                       job_id: int) -> Optional[job_lib.JobStatus]:
         codegen = backend_utils.JobLibCodeGen()
         codegen.get_job_status(job_id)
         code = codegen.build()
@@ -1587,7 +1587,10 @@ class CloudVmRayBackend(backends.Backend):
                                                       require_outputs=True)
         backend_utils.handle_returncode(returncode, code,
                                         'Failed to get job status.', stderr)
-        return job_lib.JobStatus(stdout.strip())
+        result = stdout.strip()
+        if result == 'None':
+            return None
+        return job_lib.JobStatus(result)
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()
