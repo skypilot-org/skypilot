@@ -186,6 +186,7 @@ class GCP(clouds.Cloud):
             'tpu': None,
             'custom_resources': None,
             'use_spot': r.use_spot,
+            'image_name': 'common-cpu',
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -204,6 +205,10 @@ class GCP(clouds.Cloud):
                 # https://cloud.google.com/compute/docs/gpus
                 resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
                 resources_vars['gpu_count'] = acc_count
+                if acc.lower() == 'k80':
+                    resources_vars['image_name'] = 'common-cu110-ubuntu-2004'
+                else:
+                    resources_vars['image_name'] = 'common-cu113-ubuntu-2004'
 
         return resources_vars
 
