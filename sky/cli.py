@@ -527,9 +527,11 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
            name: Optional[str], disk_size: Optional[int], yes: bool):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
-    If entrypoint points to a valid YAML file, it is read in as the task
-    specification. Otherwise, it is interpreted as a bash command to be
-    executed on the head node of the cluster.
+    If ENTRYPOINT points to a valid YAML file, it is read in as the task
+    specification. Otherwise, it is interpreted as a bash command.
+
+    In both cases, the commands are run under the task's workdir (if specified)
+    and they undergo job queue scheduling.
     """
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
@@ -640,14 +642,17 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
     specification. Otherwise, it is interpreted as a bash command.
 
     \b
-    Inline commands vs. tasks sent to job queue:
+    Execution and scheduling behavior:
     \b
     - If ENTRYPOINT is a YAML, or if it is a command with `--gpus` specified:
-      it is treated as a proper task which will undergo job queue scheduling,
-      respecting the resource requirement.
+      it is treated as a proper task that will undergo job queue scheduling,
+      respecting its resource requirement. It can be executed on any node of th
+      cluster with enough resources.
     - Otherwise (if ENTRYPOINT is a command and no `--gpus` specified), it is
       treated as an inline command, to be executed only on the head node of the
       cluster.
+
+    In both cases, the commands are run under the task's workdir (if specified).
 
     \b
     Actions performed by `sky exec`:
