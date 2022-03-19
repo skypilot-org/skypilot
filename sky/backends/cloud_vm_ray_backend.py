@@ -1236,9 +1236,13 @@ class CloudVmRayBackend(backends.Backend):
         with filelock.FileLock(lock_path):
             to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, to_provision, task.num_nodes)
+            prev_cluster_status = None
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
+                prev_cluster_status = (
+                    global_user_state.get_status_from_cluster_name(cluster_name)
+                )
             try:
                 config_dict = provisioner.provision_with_retries(
                     task, to_provision_config, dryrun, stream_logs)
@@ -1281,12 +1285,17 @@ class CloudVmRayBackend(backends.Backend):
 
             # Update job queue to avoid stale jobs (when restarted), before
             # setting the cluster to be ready.
-            codegen = backend_utils.JobLibCodeGen()
-            codegen.update_status()
-            cmd = codegen.build()
-            returncode = self.run_on_head(handle, cmd)
-            backend_utils.handle_returncode(returncode, cmd,
-                                            'Failed to update job status.')
+            # Only update the status if the cluster was STOPPED, since that
+            # is the only case that will cause staled jobs.
+            # TODO(zhwu): Make sure that we do not update the status in other
+            # cases.
+            if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
+                codegen = backend_utils.JobLibCodeGen()
+                codegen.update_status()
+                cmd = codegen.build()
+                returncode = self.run_on_head(handle, cmd)
+                backend_utils.handle_returncode(returncode, cmd,
+                                                'Failed to update job status.')
 
             global_user_state.add_or_update_cluster(cluster_name,
                                                     handle,
