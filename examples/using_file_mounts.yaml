@@ -76,7 +76,7 @@ file_mounts:
 
 setup: |
   # Ubuntu 20.04 LTS uses snap instead of apt.
-  sudo snap install tree
+  sudo apt install tree
 
 run: |
   set -ex
