@@ -1649,8 +1649,6 @@ class CloudVmRayBackend(backends.Backend):
                            target=script_path,
                            stream_logs=False)
         remote_log_dir = self.log_dir
-        local_log_dir = os.path.expanduser(remote_log_dir)
-        job_log_path = os.path.join(local_log_dir, 'job_submit.log')
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         assert executable == 'python3', executable
@@ -1663,7 +1661,6 @@ class CloudVmRayBackend(backends.Backend):
 
         returncode = self.run_on_head(handle,
                                       f'{cd} && {job_submit_cmd}',
-                                      log_path=job_log_path,
                                       stream_logs=False)
         backend_utils.handle_returncode(returncode, job_submit_cmd,
                                         f'Failed to submit job {job_id}.')
