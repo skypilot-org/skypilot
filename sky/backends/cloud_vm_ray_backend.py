@@ -346,8 +346,8 @@ class RayCodeGen:
 
         resources_str = ', placement_group=pg'
         resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
-        logger.debug(
-            f'Added Task with options: {name_str}{cpu_str}{resources_str}{num_gpus_str}')
+        logger.debug('Added Task with options: '
+                     f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
         self._code += [
             textwrap.dedent(f"""\
         script = {bash_script!r}

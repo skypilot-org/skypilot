@@ -211,7 +211,8 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
 
 
 def update_status() -> None:
-    running_jobs = _get_jobs(username=None, status_list=[JobStatus.PENDING, JobStatus.RUNNING])
+    running_jobs = _get_jobs(username=None,
+                             status_list=[JobStatus.PENDING, JobStatus.RUNNING])
     running_job_ids = [job['job_id'] for job in running_jobs]
 
     job_status = query_job_status(running_job_ids)
