@@ -785,7 +785,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
             # sky.launch().
             'ControlMaster': 'auto',
             'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
-            'ControlPersist': '30s',
+            'ControlPersist': '120s',
         })
     ssh_key_option = [
         '-i',
@@ -1128,6 +1128,11 @@ class JobLibCodeGen(object):
             'job_id = job_lib.add_job('
             f'{job_name!r}, {username!r}, {run_timestamp!r})',
             'print(job_id, flush=True)',
+        ]
+
+    def update_status(self) -> None:
+        self._code += [
+            'job_lib.update_status()',
         ]
 
     def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:

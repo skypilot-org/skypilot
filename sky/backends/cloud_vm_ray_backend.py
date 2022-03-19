@@ -150,6 +150,10 @@ class RayCodeGen:
       >> code = codegen.build()
     """
 
+    # Allow each CPU thread take 2 tasks.
+    # Note: This value cannot be too small, otherwise OOM issue may occur.
+    _EACH_TASK_NUM_CPU = 0.5
+
     def __init__(self):
         # Code generated so far, to be joined via '\n'.
         self._code = []
@@ -227,7 +231,7 @@ class RayCodeGen:
         # Set CPU to avoid ray hanging the resources allocation
         # for remote functions, since the task will request 1 CPU
         # by default.
-        bundles = [{'CPU': 1} for _ in range(num_nodes)]
+        bundles = [{'CPU': self._EACH_TASK_NUM_CPU} for _ in range(num_nodes)]
 
         if accelerator_dict is not None:
             acc_name = list(accelerator_dict.keys())[0]
@@ -268,12 +272,13 @@ class RayCodeGen:
 
         # Export IP and node rank to the environment variables.
         self._code += [
-            textwrap.dedent("""\
+            textwrap.dedent(f"""\
                 @ray.remote
                 def check_ip():
                     return ray.util.get_node_ip_address()
                 ip_list = ray.get([
-                    check_ip.options(placement_group=pg,
+                    check_ip.options(num_cpus={self._EACH_TASK_NUM_CPU},
+                                     placement_group=pg,
                                      placement_group_bundle_index=i).remote()
                     for i in range(pg.bundle_count)
                 ])
@@ -323,11 +328,11 @@ class RayCodeGen:
         if task_name is None:
             # Make the task name more meaningful in ray log.
             name_str = 'name=\'task\''
+        cpu_str = f', num_cpus={self._EACH_TASK_NUM_CPU}'
 
-        if ray_resources_dict is None:
-            resources_str = ''
-            num_gpus_str = ''
-        else:
+        resources_str = ''
+        num_gpus_str = ''
+        if ray_resources_dict is not None:
             assert len(ray_resources_dict) == 1, \
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')
@@ -345,8 +350,8 @@ class RayCodeGen:
 
         resources_str = ', placement_group=pg'
         resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
-        logger.debug(
-            f'Added Task with options: {name_str}{resources_str}{num_gpus_str}')
+        logger.debug('Added Task with options: '
+                     f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
         self._code += [
             textwrap.dedent(f"""\
         script = {bash_script!r}
@@ -357,7 +362,7 @@ class RayCodeGen:
             node_export_sky_env_vars = (export_sky_env_vars +
                                         'export SKY_NODE_RANK={gang_scheduling_id}\\n')
             futures.append(run_bash_command_with_log \\
-                    .options({name_str}{resources_str}{num_gpus_str}) \\
+                    .options({name_str}{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(
                         script,
                         {log_path!r},
@@ -1238,9 +1243,13 @@ class CloudVmRayBackend(backends.Backend):
         with filelock.FileLock(lock_path):
             to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, to_provision, task.num_nodes)
+            prev_cluster_status = None
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
+                prev_cluster_status = (
+                    global_user_state.get_status_from_cluster_name(cluster_name)
+                )
             try:
                 config_dict = provisioner.provision_with_retries(
                     task, to_provision_config, dryrun, stream_logs)
@@ -1280,12 +1289,28 @@ class CloudVmRayBackend(backends.Backend):
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
+
+            # Update job queue to avoid stale jobs (when restarted), before
+            # setting the cluster to be ready.
+            # Only update the status if the cluster was STOPPED, since that
+            # is the only case that will cause staled jobs.
+            # TODO(zhwu): Make sure that we do not need to update the status in
+            # other cases.
+            if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
+                codegen = backend_utils.JobLibCodeGen()
+                codegen.update_status()
+                cmd = codegen.build()
+                returncode = self.run_on_head(handle, cmd)
+                backend_utils.handle_returncode(returncode, cmd,
+                                                'Failed to update job status.')
+
             global_user_state.add_or_update_cluster(cluster_name,
                                                     handle,
                                                     ready=True)
             auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
             backend_utils.SSHConfigHelper.add_cluster(cluster_name, ip_list,
                                                       auth_config)
+
             os.remove(lock_path)
             return handle
 

@@ -93,7 +93,6 @@ def set_status(job_id: int, status: JobStatus) -> None:
 
 
 def get_status(job_id: int) -> Optional[JobStatus]:
-    _update_status()
     rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for row in rows:
@@ -218,8 +217,10 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
     return job_status_list
 
 
-def _update_status() -> None:
-    running_jobs = _get_jobs(username=None, status_list=[JobStatus.RUNNING])
+def update_status() -> None:
+    running_jobs = _get_jobs(
+        username=None,
+        status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
     running_job_ids = [job['job_id'] for job in running_jobs]
 
     job_status = query_job_status(running_job_ids)
@@ -264,7 +265,6 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
         username: The username to show jobs for. Show all the users if None.
         all_jobs: Whether to show all jobs, not just the pending/running ones.
     """
-    _update_status()
     status_list = [JobStatus.PENDING, JobStatus.RUNNING]
     if all_jobs:
         status_list = None
@@ -279,9 +279,8 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
     Args:
         jobs: The job ids to cancel. If None, cancel all the jobs.
     """
-    # Update the status of the jobs to avoid setting the status of staled
+    # Update the status of the jobs to avoid setting the status of stale
     # jobs to CANCELLED.
-    _update_status()
     if jobs is None:
         job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
     else:
