@@ -1291,8 +1291,8 @@ class CloudVmRayBackend(backends.Backend):
             # setting the cluster to be ready.
             # Only update the status if the cluster was STOPPED, since that
             # is the only case that will cause staled jobs.
-            # TODO(zhwu): Make sure that we do not update the status in other
-            # cases.
+            # TODO(zhwu): Make sure that we do not need to update the status in
+            # other cases.
             if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
                 codegen = backend_utils.JobLibCodeGen()
                 codegen.update_status()
