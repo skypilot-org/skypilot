@@ -150,6 +150,10 @@ class RayCodeGen:
       >> code = codegen.build()
     """
 
+    # Allow each CPU thread take 2 tasks.
+    # Note: This value cannot be too small, otherwise OOM issue may occur.
+    _EACH_TASK_NUM_CPU = 0.5
+
     def __init__(self):
         # Code generated so far, to be joined via '\n'.
         self._code = []
@@ -227,7 +231,7 @@ class RayCodeGen:
         # Set CPU to avoid ray hanging the resources allocation
         # for remote functions, since the task will request 1 CPU
         # by default.
-        bundles = [{'CPU': 0.001} for _ in range(num_nodes)]
+        bundles = [{'CPU': self._EACH_TASK_NUM_CPU} for _ in range(num_nodes)]
 
         if accelerator_dict is not None:
             acc_name = list(accelerator_dict.keys())[0]
@@ -268,12 +272,12 @@ class RayCodeGen:
 
         # Export IP and node rank to the environment variables.
         self._code += [
-            textwrap.dedent("""\
+            textwrap.dedent(f"""\
                 @ray.remote
                 def check_ip():
                     return ray.util.get_node_ip_address()
                 ip_list = ray.get([
-                    check_ip.options(num_cpus=0,
+                    check_ip.options(num_cpus={self._EACH_TASK_NUM_CPU},
                                      placement_group=pg,
                                      placement_group_bundle_index=i).remote()
                     for i in range(pg.bundle_count)
@@ -324,7 +328,7 @@ class RayCodeGen:
         if task_name is None:
             # Make the task name more meaningful in ray log.
             name_str = 'name=\'task\''
-        cpu_str = ', num_cpus=0'
+        cpu_str = f', num_cpus={self._EACH_TASK_NUM_CPU}'
 
         resources_str = ''
         num_gpus_str = ''
