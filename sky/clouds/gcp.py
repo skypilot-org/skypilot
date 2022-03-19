@@ -186,7 +186,7 @@ class GCP(clouds.Cloud):
             'tpu': None,
             'custom_resources': None,
             'use_spot': r.use_spot,
-            'image_name': 'common-cpu',
+            'image_name': 'common-cpu-ubuntu-2004',
         }
         accelerators = r.accelerators
         if accelerators is not None:
