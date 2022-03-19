@@ -100,43 +100,14 @@ def _get_task_demands_dict(
     return accelerator_dict
 
 
-def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
-    """Returns the size of 'path' (directory or file) in megabytes.
-
-    Args:
-        path: The path to check.
-        exclude_gitignore: If True, excludes files matched in .gitignore.
-
-    Returns:
-        The size of 'path' in megabytes.
-    """
-    if exclude_gitignore:
-        try:
-            # FIXME: add git index size (du -hsc .git) in this computation.
-            awk_program = '{ sum += $1 } END { print sum }'
-            return int(
-                subprocess.check_output(
-                    f'( git status --short {path} | '
-                    'grep "^?" | cut -d " " -f2- '
-                    f'&& git ls-files {path} ) | '
-                    'xargs -n 1000 du -hsk | '
-                    f'awk {awk_program!r}',
-                    shell=True,
-                    stderr=subprocess.DEVNULL)) // (2**10)
-        except (subprocess.CalledProcessError, ValueError):
-            # If git is not installed, or if the user is not in a git repo.
-            # Fall back to du -shk if it is not a git repo (size does not
-            # consider .gitignore).
-            logger.debug('Failed to get size with .gitignore exclusion, '
-                         'falling back to du -shk')
-            pass
-    return int(
-        subprocess.check_output([
-            'du',
-            '-sh',
-            '-k',
-            path,
-        ]).split()[0].decode('utf-8')) // (2**10)
+def _path_size_megabytes(path: str) -> int:
+    """Returns the size of 'path' (directory or file) in megabytes."""
+    rsync_output = str(
+        subprocess.check_output(
+            f'rsync -Pavz --filter=\':- .gitignore\' --dry-run {path}',
+            shell=True).splitlines()[-1])
+    total_bytes = rsync_output.split(' ')[3].replace(',', '')
+    return int(total_bytes) // 10**6
 
 
 class RayCodeGen:
@@ -1385,10 +1356,8 @@ class CloudVmRayBackend(backends.Backend):
             logger.warning(
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
                 f'is {dir_size} MB. Try to keep workdir small or use '
-                '.gitignore to exclude large files, as '
-                'large sizes will slow down rsync. If you use .gitignore but '
-                'the path is not initialized in git, you can ignore this '
-                f'warning.{style.RESET_ALL}')
+                '.gitignore to exclude large files, as large sizes will slow '
+                'down rsync. {style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
@@ -1501,10 +1470,8 @@ class CloudVmRayBackend(backends.Backend):
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src!r} '
                         f'is {src_size} MB. Try to keep src small or use '
-                        '.gitignore to exclude large files, as '
-                        'large sizes will slow down rsync. If you use '
-                        '.gitignore but the path is not initialized in git, you'
-                        f' can ignore this warning.{style.RESET_ALL}')
+                        '.gitignore to exclude large files, as large sizes '
+                        f'will slow down rsync. {style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(
                         f'{fore.YELLOW}Source path {src!r} is a symlink. '

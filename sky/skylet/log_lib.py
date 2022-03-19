@@ -39,7 +39,7 @@ class LineProcessor(object):
 
 
 class RayUpLineProcessor(LineProcessor):
-    """A processor for Ray up log lines."""
+    """A processor for `ray up` log lines."""
 
     class ProvisionStatus(enum.Enum):
         LAUNCH = 0
@@ -57,9 +57,9 @@ class RayUpLineProcessor(LineProcessor):
             logger.info(f'{colorama.Fore.GREEN}Head node is up.'
                         f'{colorama.Style.RESET_ALL}')
             self.status_display.start()
-            self.status_display.update('[bold cyan] Preparing Sky runtime')
+            self.status_display.update(
+                '[bold cyan]Launching - Preparing Sky runtime')
             self.state = self.ProvisionStatus.RUNTIME_SETUP
-        return log_line
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
