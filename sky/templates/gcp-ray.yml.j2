@@ -20,7 +20,7 @@ provider:
   cache_stopped_nodes: True
 
 auth:
-  ssh_user: ubuntu
+  ssh_user: gcpuser
 
 available_node_types:
   ray_head_default:
@@ -35,9 +35,9 @@ available_node_types:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
 {%- if gpu is none %}
-            sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu
+            sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
 {%- else %}
-            sourceImage: projects/deeplearning-platform-release/global/images/family/common-cu110
+            sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
       guestAccelerators:
         - acceleratorType: projects/intercloud-320520/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
@@ -45,12 +45,12 @@ available_node_types:
         items:
           - key: install-nvidia-driver
             value: "True"
+{%- endif %}
       scheduling:
 {%- if use_spot %}
         - preemptible: true
 {%- endif %}
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
-{%- endif %}
 {% if num_nodes > 1 %}
   ray_worker_default:
     min_workers: {{num_nodes - 1}}
@@ -66,9 +66,9 @@ available_node_types:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
 {%- if gpu is none %}
-            sourceImage: projects/deeplearning-platform-release/global/images/family/common-cpu
+            sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
 {%- else %}
-            sourceImage: projects/deeplearning-platform-release/global/images/family/common-cu110
+            sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
       guestAccelerators:
         - acceleratorType: projects/intercloud-320520/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
@@ -76,12 +76,12 @@ available_node_types:
         items:
           - key: install-nvidia-driver
             value: "True"
+{%- endif %}
       scheduling:
 {%- if use_spot %}
         - preemptible: true
 {%- endif %}
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
-{%- endif %}
 {%- endif %}
 
 head_node_type: ray_head_default
