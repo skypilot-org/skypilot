@@ -76,12 +76,12 @@ available_node_types:
         items:
           - key: install-nvidia-driver
             value: "True"
+{%- endif %}
       scheduling:
 {%- if use_spot %}
         - preemptible: true
 {%- endif %}
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
-{%- endif %}
 {%- endif %}
 
 head_node_type: ray_head_default
