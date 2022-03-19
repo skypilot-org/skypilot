@@ -6,3 +6,4 @@ pylint-quotes==0.2.3
 
 # testing
 pytest
+pytest-xdist

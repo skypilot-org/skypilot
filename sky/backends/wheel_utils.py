@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import tempfile
 
+import filelock
+
 import sky
 
 
@@ -22,51 +24,58 @@ def _cleanup_wheels_dir(wheel_dir: pathlib.Path,
                 f.unlink()
 
 
+_TMP_FOLDER = pathlib.Path(tempfile.gettempdir())
+
+
 def build_sky_wheel() -> pathlib.Path:
     """Build a wheel for sky. This works correctly only when sky is installed
     with development/editable mode."""
     # check if sky is installed under development mode.
     package_root = pathlib.Path(sky.__file__).parent.parent
     username = getpass.getuser()
-    wheel_dir = pathlib.Path(tempfile.gettempdir()) / f'sky_wheels_{username}'
+    wheel_dir = _TMP_FOLDER / f'sky_wheels_{username}'
+    wheel_lock_path = _TMP_FOLDER / f'.sky_wheel_{username}.lock'
+    # pylint: disable=abstract-class-instantiated
+    with filelock.FileLock(wheel_lock_path):
+        if not wheel_dir.exists():
+            wheel_dir.mkdir()
+        # cleanup the directory
+        # TODO(suquark): Cache built wheels to prevent rebuilding.
+        # This may not be necessary because it's fast to build the wheel.
+        _cleanup_wheels_dir(wheel_dir, None)
 
-    if not wheel_dir.exists():
-        wheel_dir.mkdir()
-    # cleanup the directory
-    # TODO(suquark): Cache built wheels to prevent rebuilding.
-    # This may not be necessary because it's fast to build the wheel.
-    _cleanup_wheels_dir(wheel_dir, None)
+        # prepare files
+        (wheel_dir / 'sky').symlink_to(package_root / 'sky',
+                                       target_is_directory=True)
+        setup_files_dir = package_root / 'sky' / 'setup_files'
+        for f in setup_files_dir.iterdir():
+            if f.is_file():
+                shutil.copy(str(f), str(wheel_dir))
 
-    # prepare files
-    (wheel_dir / 'sky').symlink_to(package_root / 'sky',
-                                   target_is_directory=True)
-    setup_files_dir = package_root / 'sky' / 'setup_files'
-    for f in setup_files_dir.iterdir():
-        if f.is_file():
-            shutil.copy(str(f), str(wheel_dir))
-
-    # It is important to normalize the path, otherwise 'pip wheel' would treat
-    # the directory as a file and generate an empty wheel.
-    norm_path = str(wheel_dir) + os.sep
-    try:
-        # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
-        # the output.
-        subprocess.run([
-            'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
-            str(wheel_dir)
-        ],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.PIPE,
-                       check=True)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError('Fail to build pip wheel for Sky. '
-                           f'Error message: {e.stderr.decode()}') from e
-    try:
-        latest_wheel = max(wheel_dir.glob('sky-*.whl'), key=os.path.getctime)
-    except ValueError:
-        raise FileNotFoundError('Could not find built Sky wheels.') from None
-    _cleanup_wheels_dir(wheel_dir, latest_wheel)
-    return wheel_dir.absolute()
+        # It is important to normalize the path, otherwise 'pip wheel' would
+        # treat the directory as a file and generate an empty wheel.
+        norm_path = str(wheel_dir) + os.sep
+        try:
+            # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
+            # of the output.
+            subprocess.run([
+                'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
+                str(wheel_dir)
+            ],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.PIPE,
+                           check=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError('Fail to build pip wheel for Sky. '
+                               f'Error message: {e.stderr.decode()}') from e
+        try:
+            latest_wheel = max(wheel_dir.glob('sky-*.whl'),
+                               key=os.path.getctime)
+        except ValueError:
+            raise FileNotFoundError(
+                'Could not find built Sky wheels.') from None
+        _cleanup_wheels_dir(wheel_dir, latest_wheel)
+        return wheel_dir.absolute()
 
 
 if __name__ == '__main__':
