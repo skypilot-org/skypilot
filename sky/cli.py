@@ -32,6 +32,7 @@ import functools
 import getpass
 import os
 import shlex
+import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
@@ -51,6 +52,7 @@ from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
+from sky.skylet import job_lib
 from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -527,9 +529,11 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
            name: Optional[str], disk_size: Optional[int], yes: bool):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
-    If entrypoint points to a valid YAML file, it is read in as the task
-    specification. Otherwise, it is interpreted as a bash command to be
-    executed on the head node of the cluster.
+    If ENTRYPOINT points to a valid YAML file, it is read in as the task
+    specification. Otherwise, it is interpreted as a bash command.
+
+    In both cases, the commands are run under the task's workdir (if specified)
+    and they undergo job queue scheduling.
     """
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
@@ -636,18 +640,29 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
          workdir: Optional[str], gpus: Optional[str], name: Optional[str]):
     """Execute a task or a command on a cluster (skip setup).
 
-    If entrypoint points to a valid YAML file, it is read in as the task
-    specification. Otherwise, it is interpreted as a bash command to be
-    executed on the head node of the cluster. The task will be submitted to
-    the job queue of the cluster, except if a bash command is used without
-    providing --gpus.
+    If ENTRYPOINT points to a valid YAML file, it is read in as the task
+    specification. Otherwise, it is interpreted as a bash command.
 
     \b
-    Actions performed by this command only include:
-    - workdir syncing (optional; specified in the YAML spec or via --workdir)
-    - executing the task's run command (if entrypoint is a yaml; executed
-      either on the cluster's head node or optionally on all nodes), or a
-      bash command (only executed on the head node)
+    Execution and scheduling behavior:
+    \b
+    - If ENTRYPOINT is a YAML, or if it is a command with `--gpus` specified:
+      it is treated as a proper task that will undergo job queue scheduling,
+      respecting its resource requirement. It can be executed on any node of th
+      cluster with enough resources.
+    - Otherwise (if ENTRYPOINT is a command and no `--gpus` specified), it is
+      treated as an inline command, to be executed only on the head node of the
+      cluster.
+
+    In both cases, the commands are run under the task's workdir (if specified).
+
+    \b
+    Actions performed by `sky exec`:
+    \b
+    - workdir syncing, if:
+      - ENTRYPOINT is a YAML, and `workdir` is specified inside; OR
+      - ENTRYPOINT is a command, and flag `--workdir=<local_path>` is supplied.
+    - executing the specified task's `run` commands / the bash command.
 
     `sky exec` is thus typically faster than `sky launch`, provided a cluster
     already exists.
@@ -679,7 +694,7 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
 
     .. code-block:: bash
 
-        #  Pass in commands for execution
+        # Pass in commands for execution
         sky exec mycluster -- echo Hello World
 
     """
@@ -879,11 +894,16 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
     default=False,
     help='Sync down the logs of the job (This is useful for distributed jobs to'
     'download separate log for each job from all the workers).')
+@click.option(
+    '--status',
+    is_flag=True,
+    default=False,
+    help=('If specified, do not show logs but exit with a status code for the '
+          'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
 @click.argument('cluster', required=True, type=str)
 @click.argument('job_id', required=True, type=str)
-def logs(cluster: str, job_id: str, sync_down: bool):
+def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
     """Tail the log of a job."""
-    # TODO: Add an option for downloading logs.
     cluster_name = cluster
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
@@ -894,9 +914,23 @@ def logs(cluster: str, job_id: str, sync_down: bool):
                                'LocalDockerBackend.')
     backend = backend_utils.get_backend_from_handle(handle)
 
+    if sync_down and status:
+        raise click.UsageError(
+            'Both --sync_down and --status are specified '
+            '(ambiguous). To fix: specify at most one of them.')
+
     if sync_down:
         click.secho('Syncing down logs to local...', fg='yellow')
         backend.sync_down_logs(handle, job_id)
+    elif status:
+        # FIXME(zongheng,zhwu): non-existent job ids throw:
+        # TypeError: expected str, bytes or os.PathLike object, not tuple
+        job_status = backend.get_job_status(handle, job_id)
+        if job_status == job_lib.JobStatus.SUCCEEDED:
+            sys.exit(0)
+        else:
+            click.secho(f'Status failed for job {job_id}', fg='red')
+            sys.exit(1)
     else:
         backend.tail_logs(handle, job_id)
 
@@ -1207,7 +1241,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
                   'Letting --all take effect.')
             names = []
     if not to_down and not names:
-        print('No existing clusters found (see `sky status`).')
+        print('Cluster(s) not found (see `sky status`).')
         return
 
     if not no_confirm:

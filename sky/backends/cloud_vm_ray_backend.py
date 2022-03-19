@@ -633,10 +633,11 @@ class RetryingVmProvisioner(object):
             # Get the *previous* cluster status.
             cluster_status = global_user_state.get_status_from_cluster_name(
                 cluster_name)
-            logger.info(
-                f'Cluster {cluster_name!r} (status: {cluster_status.value}) '
-                f'was previously launched in {cloud} ({region.name}). '
-                'Relaunching in that region.')
+            if cluster_status != global_user_state.ClusterStatus.UP:
+                logger.info(
+                    f'Cluster {cluster_name!r} (status: {cluster_status.value})'
+                    f' was previously launched in {cloud} ({region.name}). '
+                    'Relaunching in that region.')
             # TODO(zhwu): The cluster being killed by cloud provider should
             # be tested whether re-launching a cluster killed spot instance
             # will recover the data.
@@ -825,6 +826,8 @@ class RetryingVmProvisioner(object):
                 launched_resources=to_provision,
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
+
+            # This sets the status to INIT (even for a normal, UP cluster).
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
@@ -1598,6 +1601,22 @@ class CloudVmRayBackend(backends.Backend):
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
 
+    def get_job_status(self, handle: ResourceHandle,
+                       job_id: int) -> Optional[job_lib.JobStatus]:
+        codegen = backend_utils.JobLibCodeGen()
+        codegen.get_job_status(job_id)
+        code = codegen.build()
+        returncode, stdout, stderr = self.run_on_head(handle,
+                                                      code,
+                                                      stream_logs=True,
+                                                      require_outputs=True)
+        backend_utils.handle_returncode(returncode, code,
+                                        'Failed to get job status.', stderr)
+        result = stdout.strip()
+        if result == 'None':
+            return None
+        return job_lib.JobStatus(result)
+
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         codegen = backend_utils.JobLibCodeGen()
         codegen.get_log_path(job_id)
@@ -1674,8 +1693,6 @@ class CloudVmRayBackend(backends.Backend):
                            target=script_path,
                            stream_logs=False)
         remote_log_dir = self.log_dir
-        local_log_dir = os.path.expanduser(remote_log_dir)
-        job_log_path = os.path.join(local_log_dir, 'job_submit.log')
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
         assert executable == 'python3', executable
@@ -1688,7 +1705,6 @@ class CloudVmRayBackend(backends.Backend):
 
         returncode = self.run_on_head(handle,
                                       f'{cd} && {job_submit_cmd}',
-                                      log_path=job_log_path,
                                       stream_logs=False)
         backend_utils.handle_returncode(returncode, job_submit_cmd,
                                         f'Failed to submit job {job_id}.')

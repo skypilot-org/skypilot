@@ -92,6 +92,14 @@ def set_status(job_id: int, status: JobStatus) -> None:
     _CONN.commit()
 
 
+def get_status(job_id: int) -> Optional[JobStatus]:
+    _update_status()
+    rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
+                           (job_id,))
+    for row in rows:
+        return row[0]
+
+
 def set_job_started(job_id: int) -> None:
     _CURSOR.execute('UPDATE jobs SET status=(?), start_at=(?) WHERE job_id=(?)',
                     (JobStatus.RUNNING.value, int(time.time()), job_id))
