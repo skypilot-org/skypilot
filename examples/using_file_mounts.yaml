@@ -75,7 +75,6 @@ file_mounts:
   # /data/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet
 
 setup: |
-  # Ubuntu 20.04 LTS uses snap instead of apt.
   sudo apt update
   sudo apt install tree
 
