@@ -205,10 +205,8 @@ class GCP(clouds.Cloud):
                 # https://cloud.google.com/compute/docs/gpus
                 resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                if acc.lower() == 'k80':
-                    resources_vars['image_name'] = 'common-cu110-ubuntu-2004'
-                else:
-                    resources_vars['image_name'] = 'common-cu113-ubuntu-2004'
+                # CUDA driver version 470.103.01, CUDA Library 11.3
+                resources_vars['image_name'] = 'common-cu113-ubuntu-2004'
 
         return resources_vars
 
