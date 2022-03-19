@@ -210,8 +210,8 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
     return job_status_list
 
 
-def _update_status() -> None:
-    running_jobs = _get_jobs(username=None, status_list=[JobStatus.RUNNING])
+def update_status() -> None:
+    running_jobs = _get_jobs(username=None, status_list=[JobStatus.PENDING, JobStatus.RUNNING])
     running_job_ids = [job['job_id'] for job in running_jobs]
 
     job_status = query_job_status(running_job_ids)
@@ -256,7 +256,6 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
         username: The username to show jobs for. Show all the users if None.
         all_jobs: Whether to show all jobs, not just the pending/running ones.
     """
-    _update_status()
     status_list = [JobStatus.PENDING, JobStatus.RUNNING]
     if all_jobs:
         status_list = None
@@ -273,7 +272,6 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
     """
     # Update the status of the jobs to avoid setting the status of staled
     # jobs to CANCELLED.
-    _update_status()
     if jobs is None:
         job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
     else:

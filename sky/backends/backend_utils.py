@@ -1130,6 +1130,11 @@ class JobLibCodeGen(object):
             'print(job_id, flush=True)',
         ]
 
+    def update_status(self) -> None:
+        self._code += [
+            'job_lib.update_status()',
+        ]
+
     def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:
         self._code.append(f'job_lib.show_jobs({username!r}, {all_jobs})')
 
