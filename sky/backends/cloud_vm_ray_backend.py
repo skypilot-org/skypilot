@@ -1351,7 +1351,7 @@ class CloudVmRayBackend(backends.Backend):
             workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
 
         # Raise warning if directory is too large
-        dir_size = _path_size_megabytes(full_workdir, exclude_gitignore=True)
+        dir_size = _path_size_megabytes(full_workdir)
         if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
             logger.warning(
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
@@ -1464,8 +1464,7 @@ class CloudVmRayBackend(backends.Backend):
                 full_src = os.path.abspath(os.path.expanduser(src))
                 # Checked during Task.set_file_mounts().
                 assert os.path.exists(full_src), f'{full_src} does not exist.'
-                src_size = _path_size_megabytes(full_src,
-                                                exclude_gitignore=True)
+                src_size = _path_size_megabytes(full_src)
                 if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src!r} '
