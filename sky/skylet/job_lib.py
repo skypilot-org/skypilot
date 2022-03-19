@@ -93,7 +93,6 @@ def set_status(job_id: int, status: JobStatus) -> None:
 
 
 def get_status(job_id: int) -> Optional[JobStatus]:
-    _update_status()
     rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for row in rows:
