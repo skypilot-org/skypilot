@@ -1019,8 +1019,9 @@ class RetryingVmProvisioner(object):
     ):
         """Provision with retries for all launchable resources."""
         cluster_name = to_provision_config.cluster_name
-        assert cluster_name is not None, 'cluster_name must be specified.'
         to_provision = to_provision_config.resources
+        assert cluster_name is not None, 'cluster_name must be specified.'
+        assert to_provision is not None, 'to_provision must be specified.'
         num_nodes = to_provision_config.num_nodes
         cluster_exists = to_provision_config.cluster_exists
         launchable_retries_disabled = (self._dag is None or

@@ -97,6 +97,7 @@ def _execute(dag: sky.Dag,
                 # moving `sky check` checks out of optimize()?
                 dag = sky.optimize(dag, minimize=optimize_target)
             task = dag.tasks[0]  # Keep: dag may have been deep-copied.
+            assert task.best_resources is not None, task
 
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
