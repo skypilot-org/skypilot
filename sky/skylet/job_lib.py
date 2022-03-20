@@ -299,6 +299,8 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
     else:
         job_records = _get_jobs_by_ids(jobs)
     jobs = [job['job_id'] for job in job_records]
+    # TODO(zhwu): `ray job stop` will wait for the jobs to be killed, but
+    # when the memory is not enough, this will keep waiting.
     cancel_cmd = [
         f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
     ]
