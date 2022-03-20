@@ -238,8 +238,7 @@ def update_status() -> None:
     job_status = query_job_status(running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
-        if status != JobStatus.RUNNING:
-            set_status(job['job_id'], status)
+        set_status(job['job_id'], status)
 
 
 def _readable_time_duration(start: Optional[int]) -> str:
