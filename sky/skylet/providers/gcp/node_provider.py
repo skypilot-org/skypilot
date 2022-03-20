@@ -52,6 +52,7 @@ def _retry(method, max_tries=5, backoff_s=1):
 
 
 class GCPNodeProvider(NodeProvider):
+
     def __init__(self, provider_config: dict, cluster_name: str):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
@@ -165,15 +166,18 @@ class GCPNodeProvider(NodeProvider):
             # Try to reuse previously stopped nodes with compatible configs
             if self.cache_stopped_nodes:
                 if not isinstance(resource, GCPCompute):
-                    raise NotImplementedError("Starting cached TPU nodes is not supported.")
+                    raise NotImplementedError(
+                        "Starting cached TPU nodes is not supported.")
                 filters = {
                     TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
                     TAG_RAY_LAUNCH_CONFIG: labels[TAG_RAY_LAUNCH_CONFIG]
                 }
                 # This tag may not always be present.
                 if TAG_RAY_USER_NODE_TYPE in labels:
-                    filters[TAG_RAY_USER_NODE_TYPE] = labels[TAG_RAY_USER_NODE_TYPE]
-                reuse_nodes = resource._list_instances(filters, ["TERMINATED"])[:count]
+                    filters[TAG_RAY_USER_NODE_TYPE] = labels[
+                        TAG_RAY_USER_NODE_TYPE]
+                reuse_nodes = resource._list_instances(filters,
+                                                       ["TERMINATED"])[:count]
                 reuse_node_ids = [n.id for n in reuse_nodes]
                 if reuse_nodes:
                     # TODO(suquark): Some instances could still be stopping.
@@ -182,8 +186,7 @@ class GCPNodeProvider(NodeProvider):
                         # TODO: handle plural vs singular?
                         f"Reusing nodes {cli_logger.render_list(reuse_node_ids)}. "
                         "To disable reuse, set `cache_stopped_nodes: False` "
-                        "under `provider` in the cluster configuration."
-                    )
+                        "under `provider` in the cluster configuration.")
                     for node_id in reuse_node_ids:
                         resource.start_instance(node_id)
                     for node_id in reuse_node_ids:
@@ -191,6 +194,10 @@ class GCPNodeProvider(NodeProvider):
                     count -= len(reuse_node_ids)
             if count:
                 resource.create_instances(base_config, labels, count)
+        # SSH connection is unstable in the beginning of VM creation.
+        # Workaround with sleeping one minute.
+        # More details at https://github.com/ray-project/ray/issues/16539
+        time.sleep(60)
 
     @_retry
     def terminate_node(self, node_id: str):
@@ -198,13 +205,10 @@ class GCPNodeProvider(NodeProvider):
             resource = self._get_resource_depending_on_node_name(node_id)
             if self.cache_stopped_nodes:
                 cli_logger.print(
-                    f"Stopping instance {node_id} "
-                    + cf.dimmed(
+                    f"Stopping instance {node_id} " + cf.dimmed(
                         "(to terminate instead, "
                         "set `cache_stopped_nodes: False` "
-                        "under `provider` in the cluster configuration)"
-                    ),
-                )
+                        "under `provider` in the cluster configuration)"),)
                 result = resource.stop_instance(node_id=node_id)
             else:
                 result = resource.delete_instance(node_id=node_id)
