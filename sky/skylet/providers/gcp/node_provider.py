@@ -194,7 +194,7 @@ class GCPNodeProvider(NodeProvider):
                     count -= len(reuse_node_ids)
             if count:
                 resource.create_instances(base_config, labels, count)
-        # SSH connection is unstable in the beginning of VM creation.
+        # SSH connection can be unstable in the beginning of VM creation.
         # Workaround with sleeping one minute.
         # More details at https://github.com/ray-project/ray/issues/16539
         time.sleep(60)
