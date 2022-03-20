@@ -219,7 +219,7 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
 
 def fail_all_jobs_in_progress() -> None:
     in_progress_status = [
-        JobStatus.INIT.value, JobStatus.RUNNING.value, JobStatus.PENDING.value
+        JobStatus.INIT.value, JobStatus.PENDING.value, JobStatus.RUNNING.value
     ]
     _CURSOR.execute(
         f"""\
@@ -238,7 +238,8 @@ def update_status() -> None:
     job_status = query_job_status(running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
-        set_status(job['job_id'], status)
+        if status != JobStatus.RUNNING:
+            set_status(job['job_id'], status)
 
 
 def _readable_time_duration(start: Optional[int]) -> str:
