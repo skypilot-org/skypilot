@@ -229,12 +229,11 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status(running_jobs: Optional[List[int]] = None) -> None:
-    if running_jobs is not None:
-        running_jobs = _get_jobs(
-            username=None,
-            status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
-        running_job_ids = [job['job_id'] for job in running_jobs]
+def update_status() -> None:
+    running_jobs = _get_jobs(
+        username=None,
+        status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
+    running_job_ids = [job['job_id'] for job in running_jobs]
 
     job_status = query_job_status(running_job_ids)
     # Process the results
