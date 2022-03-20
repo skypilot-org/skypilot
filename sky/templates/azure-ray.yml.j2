@@ -98,6 +98,10 @@ setup_commands:
   - which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(/home/azureuser/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base false)
   - printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config
 
+head_setup_commands:
+  # Start skylet daemon.
+  - (ps aux | grep sky.skylet.skylet | grep -q python3) || (python3 -m sky.skylet.skylet &)
+
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
   # Set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/guide.html?highlight=ulimit#system-configuration

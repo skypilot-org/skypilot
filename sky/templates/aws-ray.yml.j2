@@ -88,7 +88,8 @@ setup_commands:
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()"
 
 head_setup_commands:
-  - python3 -m sky.skylet.skylet &
+  # Start skylet daemon.
+  - (ps aux | grep sky.skylet.skylet | grep -q python3) || (python3 -m sky.skylet.skylet &)
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:

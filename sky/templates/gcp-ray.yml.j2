@@ -108,6 +108,10 @@ setup_commands:
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
   - printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config
 
+head_setup_commands:
+  # Start skylet daemon.
+  - (ps aux | grep sky.skylet.skylet | grep -q python3) || (python3 -m sky.skylet.skylet &)
+
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
   # Set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/guide.html?highlight=ulimit#system-configuration
