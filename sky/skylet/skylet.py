@@ -1,3 +1,5 @@
+"""skylet: the daemon function for skylet."""
+
 import time
 from sky.skylet import job_lib
 
