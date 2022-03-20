@@ -208,7 +208,7 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
                                    (job_id,))
             for row in rows:
                 status = JobStatus[row[JobInfoLoc.STATUS.value]]
-            if status in [JobStatus.RUNNING, JobStatus.PENDING]:
+            if status in [JobStatus.INIT, JobStatus.RUNNING, JobStatus.PENDING]:
                 status = JobStatus.FAILED
         else:
             ray_status = res.rpartition(' ')[-1]

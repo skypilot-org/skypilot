@@ -1297,9 +1297,10 @@ class CloudVmRayBackend(backends.Backend):
                 # PENDING / RUNNING jobs for the real status, since we do not
                 # know the actual previous status of the cluster.
                 cmd = backend_utils.JobLibCodeGen.update_status()
-                returncode, _, stderr = self.run_on_head(handle,
-                                                         cmd,
-                                                         require_outputs=True)
+                with console.status('[bold cyan]Preparing Job Queue'):
+                    returncode, _, stderr = self.run_on_head(handle,
+                                                            cmd,
+                                                            require_outputs=True)
                 backend_utils.handle_returncode(returncode, cmd,
                                                 'Failed to update job status.',
                                                 stderr)
