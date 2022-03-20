@@ -221,8 +221,11 @@ def fail_all_jobs_in_progress() -> None:
     in_progress_status = ','.join([
         JobStatus.INIT.value, JobStatus.RUNNING.value, JobStatus.PENDING.value
     ])
-    _CURSOR.execute(f'UPDATE jobs SET status={JobStatus.FAILED.value} '
-                    f'WHERE status IN ({in_progress_status})')
+    _CURSOR.execute(
+        f"""\
+        UPDATE jobs SET status=(?)
+        WHERE status IN ({','.join(['?'] * len(in_progress_status))})
+        """, JobStatus.FAILED.value, *in_progress_status)
     _CONN.commit()
 
 
