@@ -849,6 +849,9 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
     unsupported_clusters = []
     for cluster, handle in zip(clusters, handles):
+        if handle is None:
+            print(f'Cluster {cluster} was not found. Skipping.')
+            continue
         backend = backend_utils.get_backend_from_handle(handle)
         if isinstance(backend, backends.LocalDockerBackend):
             # LocalDockerBackend does not support job queues
@@ -864,10 +867,6 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
 def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
                                backend: backend_lib.Backend, code: str):
-    if handle is None:
-        print(f'Cluster {cluster} was not found. Skipping.')
-        return
-
     click.echo(f'\nSky Job Queue of Cluster {cluster}')
     if handle.head_ip is None:
         click.echo(
