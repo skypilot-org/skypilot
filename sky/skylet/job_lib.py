@@ -238,6 +238,9 @@ def update_status() -> None:
     job_status = query_job_status(running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
+        # Do not update the status if the ray job status is RUNNING,
+        # because it could be PENDING for resources instead. The
+        # RUNNING status will be set by our generated ray program.
         if status != JobStatus.RUNNING:
             set_status(job['job_id'], status)
 
