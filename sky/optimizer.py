@@ -1,5 +1,6 @@
 """The Sky optimizer: assigns best resources to user tasks."""
 import collections
+import resource
 import colorama
 import enum
 import pprint
@@ -165,35 +166,33 @@ class Optimizer:
         return fn(src_cloud, dst_cloud, nbytes)
 
     @staticmethod
-    def _optimize_cost(
-        dag: Dag,
+    def _estimate_compute_cost(
+        topo_order: List,
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
         raise_error: bool = False,
     ):
-        import networkx as nx  # pylint: disable=import-outside-toplevel
-        # TODO: The output of this function is useful. Should generate a
-        # text plan and print to both console and a log file.
-        graph = dag.get_graph()
-        topo_order = list(nx.topological_sort(graph))
+        """Estimates the compute cost of feasible task-resource mappings."""
+        # Cost of running the task on the resources
+        # node -> {resources -> cost}
+        compute_cost = collections.defaultdict(dict)
 
-        # FIXME: write to (node, cloud) as egress cost depends only on clouds.
-        # node -> {resources -> best estimated cost}
-        dp_best_cost = collections.defaultdict(dict)
-        # d[node][resources][parent] = (best parent resources, best parent cost)
-        dp_point_backs = collections.defaultdict(
-            lambda: collections.defaultdict(dict))
+        # If a cloud has multiple instance types with the same accelerators,
+        # Sky informs users of the candidates and its decisions.
+        # node -> cloud candidates
         node_to_candidates = collections.defaultdict(dict)
 
+        # Compute the estimated cost/time for each node
         for node_i, node in enumerate(topo_order):
-            # Base case: a special source node.
             if node_i == 0:
-                dp_best_cost[node][list(node.get_resources())[0]] = 0
+                # Base case: a special source node.
+                compute_cost[node][list(node.get_resources())[0]] = 0
                 continue
-            # Don't print for the last node, Sink.
+
             do_print = node_i != len(topo_order) - 1
             if do_print:
                 logger.debug('#### {} ####'.format(node))
+
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources, cloud_candidates = \
@@ -201,15 +200,15 @@ class Optimizer:
                         node,
                         blocked_launchable_resources
                     )
-                node_to_candidates[node_i] = cloud_candidates
+                node_to_candidates[node] = cloud_candidates
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
                 launchable_resources = {
                     list(node.get_resources())[0]: launchable_resources
                 }
+
             num_resources = len(node.get_resources())
-            parents = list(graph.predecessors(node))
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     error_msg = (
@@ -240,12 +239,6 @@ class Optimizer:
                     # part of a Resources.
                     estimated_runtime = node.estimate_runtime(orig_resources)
                 for resources in launchable_list:
-                    # Computes dp_best_cost[node][resources]
-                    # = my estimated cost +
-                    #      sum_p min_phw { dp_best_cost(p, phw) +
-                    #                      egress_cost(p, phw, hw) }
-                    # where p in Parents(node).
-                    assert resources not in dp_best_cost[node]
                     if do_print:
                         logger.debug(f'resources: {resources}')
 
@@ -263,57 +256,189 @@ class Optimizer:
                             logger.debug(
                                 '  estimated_cost (not incl. egress): ${:.1f}'.
                                 format(estimated_cost))
+                    compute_cost[node][resources] = estimated_cost
+        return compute_cost, node_to_candidates
 
-                    # FIXME: Account for egress costs for multi-node clusters
-                    sum_parent_cost_and_egress = 0
-                    for parent in parents:
-                        min_pred_cost_plus_egress = np.inf
-                        for parent_resources, parent_cost in dp_best_cost[
-                                parent].items():
-                            egress_cost = Optimizer._egress_cost_or_time(
-                                minimize_cost, parent, parent_resources, node,
-                                resources)
-                            if parent_cost + egress_cost < \
-                               min_pred_cost_plus_egress:
-                                min_pred_cost_plus_egress = \
-                                    parent_cost + egress_cost
-                                best_parent_hardware = parent_resources
-                        sum_parent_cost_and_egress += min_pred_cost_plus_egress
-                        dp_point_backs[node][resources][parent] = (
-                            best_parent_hardware, min_pred_cost_plus_egress)
-                    dp_best_cost[node][
-                        resources] = estimated_cost + sum_parent_cost_and_egress
+    @staticmethod
+    def _optimize_by_dp(
+        topo_order: List,
+        compute_costs: Dict,
+        minimize_cost: bool = True,
+    ):
+        """Optimizes a chain DAG using a dynamic programming algorithm."""
+        # node -> { resources -> best estimated cost }
+        dp_best_cost = collections.defaultdict(dict)
+        # node -> { resources -> best parent resources }
+        dp_point_backs = collections.defaultdict(dict)
 
-        # Dict: node -> (resources, cost).
-        best_plan = Optimizer.read_optimized_plan(dp_best_cost, topo_order,
-                                                  dp_point_backs, minimize_cost)
+        # Computes dp_best_cost[node][resources]
+        # = my estimated cost + min_phw { dp_best_cost(p, phw) +
+        #                                 egress_cost(p, phw, hw) }
+        # where p is the parent of the node.
+        for node_i, node in enumerate(topo_order):
+            if node_i == 0:
+                # Base case: a special source node.
+                dp_best_cost[node][list(node.get_resources())[0]] = 0
+                continue
 
-        # If it's 1 resource choice, the info is already printed.
-        should_print = any(len(v) > 1 for v in dp_best_cost.values())
+            parent = topo_order[node_i - 1]
+            # FIXME: Account for egress costs for multi-node clusters
+            for resources, compute_cost in compute_costs[node].items():
+                min_pred_cost_plus_egress = np.inf
+                for parent_resources, parent_cost in \
+                    dp_best_cost[parent].items():
+                    egress_cost = Optimizer._egress_cost_or_time(
+                        minimize_cost,
+                        parent,
+                        parent_resources,
+                        node,
+                        resources,
+                    )
+
+                    if parent_cost + egress_cost < min_pred_cost_plus_egress:
+                        min_pred_cost_plus_egress = parent_cost + egress_cost
+                        best_parent_hardware = parent_resources
+
+                dp_point_backs[node][resources] = best_parent_hardware
+                dp_best_cost[node][resources] = \
+                    compute_cost + min_pred_cost_plus_egress
+
+        # Compute the total cost of the DAG.
+        sink_node = topo_order[-1]
+        total_costs = dp_best_cost[sink_node]
+        assert len(total_costs) == 1, f'Should be DummyCloud: {total_costs}'
+        best_resources, best_total_cost = list(total_costs.items())[0]
+
+        # Find the best plan for the DAG.
+        # node -> best resources
+        best_plan = {}
+        for node in reversed(topo_order):
+            best_plan[node] = best_resources
+            node.best_resources = best_resources
+            if node.name != _DUMMY_SOURCE_NAME:
+                best_resources = dp_point_backs[node][best_resources]
+        return best_plan, best_total_cost
+
+    @staticmethod
+    def _optimize_by_ilp(
+        topo_order: List,
+        compute_costs: Dict,
+        minimize_cost: bool = True,
+    ):
+        """Optimizes a general DAG using an ILP solver."""
+        pass
+
+    @staticmethod
+    def _compute_total_time(graph, topo_order, plan):
+        cache_finish_time = {}
+
+        def finish_time(node):
+            if node in cache_finish_time:
+                return cache_finish_time[node]
+
+            resources = plan[node]
+            if node.time_estimator_func is None:
+                compute_time = 1 * 3600
+            else:
+                compute_time = node.estimate_runtime(resources)
+
+            pred_finish_times = [0]
+            for pred in graph.predecessors(node):
+                # FIXME: Account for egress time for multi-node clusters
+                egress_time = Optimizer._egress_cost_or_time(
+                    False,
+                    pred,
+                    plan[pred],
+                    node,
+                    resources,
+                )
+                pred_finish_times.append(finish_time(pred) + egress_time)
+
+            cache_finish_time[node] = compute_time + max(pred_finish_times)
+            return cache_finish_time[node]
+
+        sink_node = topo_order[-1]
+        return finish_time(sink_node)
+
+    @staticmethod
+    def _compute_total_cost(graph, topo_order, plan):
+        total_cost = 0
+        for node in topo_order:
+            resources = plan[node]
+            if node.time_estimator_func is None:
+                compute_time = 1 * 3600
+            else:
+                compute_time = node.estimate_runtime(resources)
+
+            cost_per_node = resources.get_cost(compute_time)
+            total_cost += cost_per_node * node.num_nodes
+
+            for pred in graph.predecessors(node):
+                # FIXME: Account for egress costs for multi-node clusters
+                egress_cost = Optimizer._egress_cost_or_time(
+                    True,
+                    pred,
+                    plan[pred],
+                    node,
+                    resources,
+                )
+                total_cost += egress_cost
+        return total_cost
+
+    @staticmethod
+    def print_optimized_plan(
+        best_plan,
+        total_time,
+        total_cost,
+        minimize_cost: bool,
+        compute_costs,
+    ):
+        if minimize_cost:
+            logger.info('Optimizer - plan minimizing cost')
+        else:
+            logger.info('Optimizer - plan minimizing run time')
+        logger.info(f'Estimated Run time: ~{total_time / 3600:.1f} hr, '
+                    f'Cost: ~${total_cost:.1f}')
+
+        # Do not print Source or Sink.
+        message_data = [
+            (t, f'{t.num_nodes}x {repr(r)}' if t.num_nodes > 1 else repr(r))
+            for t, r in best_plan.items()
+            if t.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
+        ]
+        message = tabulate.tabulate(reversed(message_data),
+                                    headers=['TASK', 'BEST_RESOURCE'],
+                                    tablefmt='plain')
+        logger.info(f'\n{message}\n')
+
+        # Print the list of resouces that the optimizer considered.
+        should_print = any(len(v) > 1 for v in compute_costs.values())
         if should_print:
-            dp_best_cost = {
+            compute_costs = {
                 k: v
-                for k, v in dp_best_cost.items()
+                for k, v in compute_costs.items()
                 if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
             }
             metric = 'cost ($)' if minimize_cost else 'time (hr)'
-            for k, v in dp_best_cost.items():
-                dp_best_cost[k] = {
+            for k, v in compute_costs.items():
+                compute_costs[k] = {
                     resources: round(cost, 2) if minimize_cost \
                         else round(cost / 3600, 2)
                     for resources, cost in v.items()
                 }
 
-            if len(dp_best_cost) > 1:
+            num_tasks = len(compute_costs)
+            if num_tasks > 1:
                 logger.info(f'Details: task -> {{resources -> {metric}}}')
-                logger.info('%s\n', pprint.pformat(dp_best_cost))
-            elif len(dp_best_cost) == 1:
+                logger.info('%s\n', pprint.pformat(compute_costs))
+            elif num_tasks == 1:
                 logger.info(f'Considered resources -> {metric}')
                 logger.info('%s\n',
-                            pprint.pformat(list(dp_best_cost.values())[0]))
+                            pprint.pformat(list(compute_costs.values())[0]))
 
-        for node_i, candidate_set in node_to_candidates.items():
-            node = topo_order[node_i]
+    @staticmethod
+    def _print_candidates(node_to_candidates):
+        for node, candidate_set in node_to_candidates.items():
             accelerator = list(node.get_resources())[0].accelerators
             is_multi_instances = False
             if accelerator:
@@ -332,51 +457,52 @@ class Optimizer:
             if is_multi_instances:
                 logger.info(
                     f'To list more details, run \'sky show-gpus {acc_name}\'.')
-        return dag, best_plan
 
     @staticmethod
-    def read_optimized_plan(dp_best_cost, topo_order, dp_point_backs,
-                            minimize_cost):
-        message_data = []
-        best_plan = {}
+    def _optimize_cost(
+        dag: Dag,
+        minimize_cost: bool = True,
+        blocked_launchable_resources: Optional[List[Resources]] = None,
+        raise_error: bool = False,
+    ):
+        import networkx as nx  # pylint: disable=import-outside-toplevel
+        # TODO: The output of this function is useful. Should generate a
+        # text plan and print to both console and a log file.
 
-        def _walk(node, best_hardware, best_cost):
-            if node.best_resources is None:
-                # Record the best decision for 'node'.
-                message_data.append((node, best_hardware))
-                best_plan[node] = (best_hardware, best_cost)
-                node.best_resources = best_hardware
-            # Recurse back to parent(s).
-            for tup in dp_point_backs[node][best_hardware].items():
-                parent, (parent_best_hardware, parent_best_cost) = tup
-                _walk(parent, parent_best_hardware, parent_best_cost)
+        graph = dag.get_graph()
+        topo_order = list(nx.topological_sort(graph))
 
-        # Start at Sink, the last node in the topo order.
-        node = topo_order[-1]
-        # Find the best (hardware, cost) for node.
-        best_costs = dp_best_cost[node]
-        assert len(best_costs) == 1, f'Should be DummyCloud: {best_costs}'
-        h, overall_best = list(best_costs.items())[0]
-        _walk(node, h, overall_best)
+        compute_cost, node_to_candidates = Optimizer._estimate_compute_cost(
+            topo_order,
+            minimize_cost,
+            blocked_launchable_resources,
+            raise_error,
+        )
 
-        if minimize_cost:
-            logger.info('Optimizer - plan minimizing cost (~${:.1f}):'.format(
-                overall_best))
+        is_chain = True
+        for node in topo_order[:-1]:
+            if len(list(graph.successors(node))) != 1:
+                is_chain = False
+
+        if is_chain:
+            opt_algo = Optimizer._optimize_by_dp
         else:
-            logger.info(
-                'Optimizer - plan minimizing run time (~{:.1f} hr):'.format(
-                    overall_best / 3600))
-        # Do not print Source or Sink.
-        message_data = [
-            (t, f'{t.num_nodes}x {repr(r)}' if t.num_nodes > 1 else repr(r))
-            for (t, r) in message_data
-            if t.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
-        ]
-        message = tabulate.tabulate(reversed(message_data),
-                                    headers=['TASK', 'BEST_RESOURCE'],
-                                    tablefmt='plain')
-        logger.info(f'\n{message}\n')
-        return best_plan
+            opt_algo = Optimizer._optimize_by_ilp
+
+        best_plan, best_total_cost = opt_algo(
+            topo_order, compute_cost, minimize_cost)
+        if minimize_cost:
+            total_time = Optimizer._compute_total_time(
+                graph, topo_order, best_plan)
+            total_cost = best_total_cost
+        else:
+            total_time = best_total_cost
+            total_cost = Optimizer._compute_total_cost(
+                graph, topo_order, best_plan)
+
+        Optimizer.print_optimized_plan(
+            best_plan, total_time, total_cost, minimize_cost, compute_cost)
+        Optimizer._print_candidates(node_to_candidates)
 
 
 class DummyResources(Resources):
