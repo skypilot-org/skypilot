@@ -1,6 +1,5 @@
 """The Sky optimizer: assigns best resources to user tasks."""
 import collections
-import resource
 import colorama
 import enum
 import pprint
