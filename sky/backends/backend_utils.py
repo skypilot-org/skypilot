@@ -1023,9 +1023,11 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def get_node_ips(cluster_yaml: str,
-                 expected_num_nodes: int,
-                 return_private_ips: bool = False) -> List[str]:
+def get_node_ips(
+        cluster_yaml: str,
+        expected_num_nodes: int,
+        return_private_ips: bool = False,
+        handle: Optional[backends.Backend.ResourceHandle] = None) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
     yaml_handle = cluster_yaml
     if return_private_ips:
@@ -1035,16 +1037,24 @@ def get_node_ips(cluster_yaml: str,
         yaml_handle = cluster_yaml + '.tmp'
         dump_yaml(yaml_handle, config)
 
+    # Try optimize for the common case where we have 1 node.
+    if (not return_private_ips and expected_num_nodes == 1 and
+            handle is not None and handle.head_ip is not None):
+        return [handle.head_ip]
+
     out = run(f'ray get-head-ip {yaml_handle}',
               stdout=subprocess.PIPE).stdout.decode().strip()
     head_ip = re.findall(IP_ADDR_REGEX, out)
     assert 1 == len(head_ip), out
 
-    out = run(f'ray get-worker-ips {yaml_handle}',
-              stdout=subprocess.PIPE).stdout.decode()
-    worker_ips = re.findall(IP_ADDR_REGEX, out)
-    assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes - 1,
-                                                       out)
+    if expected_num_nodes > 1:
+        out = run(f'ray get-worker-ips {yaml_handle}',
+                  stdout=subprocess.PIPE).stdout.decode()
+        worker_ips = re.findall(IP_ADDR_REGEX, out)
+        assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes -
+                                                           1, out)
+    else:
+        worker_ips = []
     if return_private_ips:
         os.remove(yaml_handle)
     return head_ip + worker_ips
