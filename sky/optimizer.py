@@ -488,19 +488,19 @@ class Optimizer:
         else:
             opt_algo = Optimizer._optimize_by_ilp
 
-        best_plan, best_total_cost = opt_algo(
-            topo_order, compute_cost, minimize_cost)
+        best_plan, best_total_cost = opt_algo(topo_order, compute_cost,
+                                              minimize_cost)
         if minimize_cost:
-            total_time = Optimizer._compute_total_time(
-                graph, topo_order, best_plan)
+            total_time = Optimizer._compute_total_time(graph, topo_order,
+                                                       best_plan)
             total_cost = best_total_cost
         else:
             total_time = best_total_cost
-            total_cost = Optimizer._compute_total_cost(
-                graph, topo_order, best_plan)
+            total_cost = Optimizer._compute_total_cost(graph, topo_order,
+                                                       best_plan)
 
-        Optimizer.print_optimized_plan(
-            best_plan, total_time, total_cost, minimize_cost, compute_cost)
+        Optimizer.print_optimized_plan(best_plan, total_time, total_cost,
+                                       minimize_cost, compute_cost)
         Optimizer._print_candidates(node_to_candidates)
 
 
