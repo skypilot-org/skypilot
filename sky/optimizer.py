@@ -319,15 +319,6 @@ class Optimizer:
         return best_plan, best_total_cost
 
     @staticmethod
-    def _optimize_by_ilp(
-        topo_order: List,
-        compute_costs: Dict,
-        minimize_cost: bool = True,
-    ):
-        """Optimizes a general DAG using an ILP solver."""
-        pass
-
-    @staticmethod
     def _compute_total_time(graph, topo_order, plan):
         cache_finish_time = {}
 
@@ -486,7 +477,7 @@ class Optimizer:
         if is_chain:
             opt_algo = Optimizer._optimize_by_dp
         else:
-            opt_algo = Optimizer._optimize_by_ilp
+            raise NotImplementedError('Currently Sky only supports chain DAGs')
 
         best_plan, best_total_cost = opt_algo(topo_order, compute_cost,
                                               minimize_cost)
