@@ -1315,7 +1315,8 @@ class CloudVmRayBackend(backends.Backend):
                                                          require_outputs=True)
                 backend_utils.handle_returncode(
                     returncode, cmd,
-                    'Failed to reset all job status to FAILED.', stderr)
+                    'Failed to set previously in-progress jobs to FAILED',
+                    stderr)
 
             global_user_state.add_or_update_cluster(cluster_name,
                                                     handle,
