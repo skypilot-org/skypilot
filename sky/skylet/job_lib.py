@@ -20,9 +20,11 @@ SKY_LOGS_DIRECTORY = '~/sky_logs'
 
 class JobStatus(enum.Enum):
     """Job status"""
+    # 3 in-flux states: each can transition to any state below it.
     INIT = 'INIT'
     PENDING = 'PENDING'
     RUNNING = 'RUNNING'
+    # 3 terminal states below: once reached, they do not transition.
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
     CANCELLED = 'CANCELLED'
@@ -208,13 +210,25 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
                                    (job_id,))
             for row in rows:
                 status = JobStatus[row[JobInfoLoc.STATUS.value]]
-            if status in [JobStatus.RUNNING, JobStatus.PENDING]:
+            if status in [JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING]:
                 status = JobStatus.FAILED
         else:
             ray_status = res.rpartition(' ')[-1]
             status = _RAY_TO_JOB_STATUS_MAP[ray_status]
         job_status_list.append(status)
     return job_status_list
+
+
+def fail_all_jobs_in_progress() -> None:
+    in_progress_status = [
+        JobStatus.INIT.value, JobStatus.PENDING.value, JobStatus.RUNNING.value
+    ]
+    _CURSOR.execute(
+        f"""\
+        UPDATE jobs SET status=(?)
+        WHERE status IN ({','.join(['?'] * len(in_progress_status))})
+        """, (JobStatus.FAILED.value, *in_progress_status))
+    _CONN.commit()
 
 
 def update_status() -> None:
@@ -226,6 +240,9 @@ def update_status() -> None:
     job_status = query_job_status(running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
+        # Do not update the status if the ray job status is RUNNING,
+        # because it could be pending for resources instead. The
+        # RUNNING status will be set by our generated ray program.
         if status != JobStatus.RUNNING:
             set_status(job['job_id'], status)
 
@@ -286,6 +303,8 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
     else:
         job_records = _get_jobs_by_ids(jobs)
     jobs = [job['job_id'] for job in job_records]
+    # TODO(zhwu): `ray job stop` will wait for the jobs to be killed, but
+    # when the memory is not enough, this will keep waiting.
     cancel_cmd = [
         f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
     ]
