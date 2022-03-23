@@ -588,8 +588,6 @@ def launch(
             new_resources.disk_size = disk_size
         task.set_resources({new_resources})
         if num_nodes is not None:
-            if num_nodes <= 0:
-                raise ValueError('Must set num_nodes to >0.')
             task.num_nodes = num_nodes
         if name is not None:
             task.name = name
@@ -740,8 +738,6 @@ def exec(
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
-    if num_nodes is not None and num_nodes <= 0:
-        raise ValueError('Must set num_nodes to >0.')
     resource_demand_specified = gpus is not None or num_nodes is not None
 
     with sky.Dag() as dag:
