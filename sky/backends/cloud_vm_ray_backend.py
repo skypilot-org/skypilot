@@ -174,7 +174,6 @@ class RayCodeGen:
         # To generate the job ID, we use the following logic:
         #   job_codegen = backend_utils.JobLibCodeGen.add_job(username,
         #                                                  run_timestamp)
-        #   code = job_codegen.build()
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
@@ -413,6 +412,7 @@ class RetryingVmProvisioner(object):
                      num_nodes: int,
                      cluster_exists: bool = False) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
+            assert resources is not None, 'resources must be specified.'
             self.cluster_name = cluster_name
             self.resources = resources
             self.num_nodes = num_nodes
@@ -1020,8 +1020,6 @@ class RetryingVmProvisioner(object):
         """Provision with retries for all launchable resources."""
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
-        assert cluster_name is not None, 'cluster_name must be specified.'
-        assert to_provision is not None, 'to_provision must be specified.'
         num_nodes = to_provision_config.num_nodes
         cluster_exists = to_provision_config.cluster_exists
         launchable_retries_disabled = (self._dag is None or
@@ -1307,6 +1305,10 @@ class CloudVmRayBackend(backends.Backend):
             if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
                 # Safely set all the previous jobs to FAILED since the cluster
                 # is restarted
+                # An edge case here due to racing:
+                # 1. A job finishes RUNNING, but right before it update itself
+                # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
+                # 2. On next `sky start`, it gets reset to FAILED.
                 cmd = backend_utils.JobLibCodeGen.fail_all_jobs_in_progress()
                 returncode, _, stderr = self.run_on_head(handle,
                                                          cmd,

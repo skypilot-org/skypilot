@@ -1114,7 +1114,7 @@ class JobLibCodeGen(object):
       >> codegen = JobLibCodeGen.add_job(...)
     """
 
-    PREFIX = ['from sky.skylet import job_lib, log_lib']
+    _PREFIX = ['from sky.skylet import job_lib, log_lib']
 
     @classmethod
     def add_job(cls, job_name: str, username: str, run_timestamp: str) -> str:
@@ -1125,30 +1125,30 @@ class JobLibCodeGen(object):
             f'{job_name!r}, {username!r}, {run_timestamp!r})',
             'print(job_id, flush=True)',
         ]
-        return cls._build(cls.PREFIX + code)
+        return cls._build(code)
 
     @classmethod
     def update_status(cls) -> str:
         code = [
             'job_lib.update_status()',
         ]
-        return cls._build(cls.PREFIX + code)
+        return cls._build(code)
 
     @classmethod
     def show_jobs(cls, username: Optional[str], all_jobs: bool) -> str:
         code = [f'job_lib.show_jobs({username!r}, {all_jobs})']
-        return cls._build(cls.PREFIX + code)
+        return cls._build(code)
 
     @classmethod
     def cancel_jobs(cls, job_ids: Optional[List[int]]) -> str:
         code = [f'job_lib.cancel_jobs({job_ids!r})']
-        return cls._build(cls.PREFIX + code)
+        return cls._build(code)
 
     @classmethod
     def fail_all_jobs_in_progress(cls) -> str:
         # Used only for restarting a cluster.
         code = ['job_lib.fail_all_jobs_in_progress()']
-        return cls._build(cls.PREFIX + code)
+        return cls._build(code)
 
     @classmethod
     def tail_logs(cls, job_id: str) -> str:
@@ -1156,7 +1156,7 @@ class JobLibCodeGen(object):
             f'log_dir = job_lib.log_dir({job_id})',
             f'log_lib.tail_logs({job_id}, log_dir)',
         ]
-        return cls._build(cls.PREFIX + code)
+        return cls._build(code)
 
     @classmethod
     def get_job_status(cls, job_id: str) -> str:
@@ -1164,7 +1164,7 @@ class JobLibCodeGen(object):
             f'job_status = job_lib.get_status({job_id})',
             'print(job_status, flush=True)',
         ]
-        return cls._build(cls.PREFIX + code)
+        return cls._build(code)
 
     @classmethod
     def get_log_path(cls, job_id: int) -> str:
@@ -1172,9 +1172,10 @@ class JobLibCodeGen(object):
             f'log_dir = job_lib.log_dir({job_id})',
             'print(log_dir, flush=True)',
         ]
-        return cls._build(cls.PREFIX + code)
+        return cls._build(code)
 
     @classmethod
     def _build(cls, code: List[str]) -> str:
+        code = cls._PREFIX + code
         code = ';'.join(code)
         return f'python3 -u -c {code!r}'
