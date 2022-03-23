@@ -458,11 +458,11 @@ def _fill_in_launchable_resources(
             if len(launchable[resources]) == 0:
                 logger.info(f'No resource satisfying {resources.accelerators} '
                             f'on {clouds_list}.')
-            if len(all_fuzzy_candidates) > 0:
-                logger.info('Did you mean: '
-                            f'{colorama.Fore.CYAN}'
-                            f'{sorted(all_fuzzy_candidates)}'
-                            f'{colorama.Style.RESET_ALL}')
+                if len(all_fuzzy_candidates) > 0:
+                    logger.info('Did you mean: '
+                                f'{colorama.Fore.CYAN}'
+                                f'{sorted(all_fuzzy_candidates)}'
+                                f'{colorama.Style.RESET_ALL}')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_launchable_resources)
