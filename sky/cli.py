@@ -833,12 +833,10 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     click.secho('Fetching and parsing job queue...', fg='yellow')
     all_jobs = not skip_finished
 
-    codegen = backend_utils.JobLibCodeGen()
     username = getpass.getuser()
     if all_users:
         username = None
-    codegen.show_jobs(username, all_jobs)
-    code = codegen.build()
+    code = backend_utils.JobLibCodeGen.show_jobs(username, all_jobs)
 
     if clusters:
         handles = [
@@ -964,9 +962,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster}...',
                     fg='yellow')
 
-    codegen = backend_utils.JobLibCodeGen()
-    codegen.cancel_jobs(jobs)
-    code = codegen.build()
+    code = backend_utils.JobLibCodeGen.cancel_jobs(jobs)
 
     # FIXME: Assumes a specific backend.
     backend = backends.CloudVmRayBackend()
