@@ -4,6 +4,7 @@ import tempfile
 from typing import List, Optional, Tuple, NamedTuple
 
 import colorama
+import pytest
 
 from sky.backends import backend_utils
 
@@ -33,16 +34,12 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
                                            delete=False)
     test.echo('Test started.')
     for command in test.commands:
-        # test.echo(f'  {command}')
         proc = subprocess.Popen(
             command,
             stdout=log_file,
             stderr=subprocess.STDOUT,
             shell=True,
         )
-        message = (f'Test command exited with non-zero status: '
-                   f'{command!r}')
-        error_occurred = (f'{message}')
         try:
             proc.wait(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
@@ -56,7 +53,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
     style = colorama.Style
     fore = colorama.Fore
-    outcome = f'{fore.RED}Failed{style.RESET_ALL}' if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}'
+    outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
+               if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
     reason = f'\nReason: {command!r}' if proc.returncode else ''
     test.echo(f'{outcome}.'
               f'{reason}'
@@ -231,25 +229,6 @@ def test_distributed_tf():
     run_one_test(test)
 
 
-# ---------- Testing Azure start and stop instances ----------
-def test_azure_start_stop():
-    test = Test(
-        'azure-start-stop',
-        [
-            'sky launch -y -c test-azure-start-stop examples/azure_start_stop.yaml',
-            'sky exec test-azure-start-stop examples/azure_start_stop.yaml',
-            'sky logs test-azure-start-stop 1 --status',  # Ensure the job succeeded.
-            'sky stop -y test-azure-start-stop',
-            'sky start -y test-azure-start-stop',
-            'sky exec test-azure-start-stop examples/azure_start_stop.yaml',
-            'sky logs test-azure-start-stop 2 --status',  # Ensure the job succeeded.
-        ],
-        'sky down -y test-azure-start-stop',
-        timeout=30 * 60,  # 30 mins  (it takes around ~23 mins)
-    )
-    run_one_test(test)
-
-
 # ---------- Testing GCP start and stop instances ----------
 def test_gcp_start_stop():
     test = Test(
@@ -265,5 +244,43 @@ def test_gcp_start_stop():
             'sky logs test-gcp-start-stop 3 --status',  # Ensure the job succeeded.
         ],
         'sky down -y test-gcp-start-stop',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing Azure start and stop instances ----------
+def test_azure_start_stop():
+    test = Test(
+        'azure-start-stop',
+        [
+            'sky launch -y -c test-azure-start-stop examples/azure_start_stop.yaml',
+            'sky exec test-azure-start-stop examples/azure_start_stop.yaml',
+            'sky logs test-azure-start-stop 1 --status',  # Ensure the job succeeded.
+            'sky stop -y test-azure-start-stop',
+            'sky start -y test-azure-start-stop',
+            'sky exec test-azure-start-stop examples/azure_start_stop.yaml',
+            'sky logs test-azure-start-stop 2 --status',  # Ensure the job succeeded.
+        ],
+        'sky down -y test-azure-start-stop',
+        timeout=30 * 60,  # 30 mins
+    )
+    run_one_test(test)
+
+
+@pytest.mark.slow
+def test_azure_start_stop_two_nodes():
+    test = Test(
+        'azure-start-stop-two-nodes',
+        [
+            'sky launch --num_nodes=2 -y -c test-azure-start-stop examples/azure_start_stop.yaml',
+            'sky exec --num_nodes=2 test-azure-start-stop examples/azure_start_stop.yaml',
+            'sky logs test-azure-start-stop 1 --status',  # Ensure the job succeeded.
+            'sky stop -y test-azure-start-stop',
+            'sky start -y test-azure-start-stop',
+            'sky exec --num_nodes=2 test-azure-start-stop examples/azure_start_stop.yaml',
+            'sky logs test-azure-start-stop 2 --status',  # Ensure the job succeeded.
+        ],
+        'sky down -y test-azure-start-stop',
+        timeout=30 * 60,  # 30 mins  (it takes around ~23 mins)
     )
     run_one_test(test)

@@ -20,9 +20,11 @@ SKY_LOGS_DIRECTORY = '~/sky_logs'
 
 class JobStatus(enum.Enum):
     """Job status"""
+    # 3 in-flux states: each can transition to any state below it.
     INIT = 'INIT'
     PENDING = 'PENDING'
     RUNNING = 'RUNNING'
+    # 3 terminal states below: once reached, they do not transition.
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
     CANCELLED = 'CANCELLED'
@@ -208,7 +210,7 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
                                    (job_id,))
             for row in rows:
                 status = JobStatus[row[JobInfoLoc.STATUS.value]]
-            if status in [JobStatus.INIT, JobStatus.RUNNING, JobStatus.PENDING]:
+            if status in [JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING]:
                 status = JobStatus.FAILED
         else:
             ray_status = res.rpartition(' ')[-1]
@@ -239,7 +241,7 @@ def update_status() -> None:
     # Process the results
     for job, status in zip(running_jobs, job_status):
         # Do not update the status if the ray job status is RUNNING,
-        # because it could be PENDING for resources instead. The
+        # because it could be pending for resources instead. The
         # RUNNING status will be set by our generated ray program.
         if status != JobStatus.RUNNING:
             set_status(job['job_id'], status)

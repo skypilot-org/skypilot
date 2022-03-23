@@ -110,10 +110,9 @@ class Task:
         self.storage_plans = {}
         self.setup = setup
         self.workdir = workdir
-        self.docker_image = docker_image if docker_image \
-            else 'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'
-        self._explicit_num_nodes = num_nodes  # Used as a scheduling constraint.
-        self.num_nodes = 1 if num_nodes is None else num_nodes
+        self.docker_image = (docker_image if docker_image else
+                             'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04')
+        self.num_nodes = num_nodes
         self.inputs = None
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
@@ -323,9 +322,18 @@ class Task:
         task.set_resources({resources})
         return task
 
-    def validate_config(self):
-        if self.num_nodes <= 0:
-            raise ValueError('Must set Task.num_nodes to >0.')
+    @property
+    def num_nodes(self) -> int:
+        return self._num_nodes
+
+    @num_nodes.setter
+    def num_nodes(self, num_nodes: Optional[int]) -> None:
+        if num_nodes is None:
+            num_nodes = 1
+        if not isinstance(num_nodes, int) or num_nodes <= 0:
+            raise ValueError(
+                f'num_nodes should be a positive int. Got: {num_nodes}')
+        self._num_nodes = num_nodes
 
     # E.g., 's3://bucket', 'gs://bucket', or None.
     def set_inputs(self, inputs, estimated_size_gigabytes):

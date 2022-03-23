@@ -4,7 +4,10 @@ name: azure-start-stop
 resources:
   cloud: azure
 
-num_nodes: 2
+# Optimizing for smoke tests
+#   2 nodes: smoke tests ~37 mins
+#   1 node: smoke tests ~19 mins
+# num_nodes: 2
 
 # The setup command.  Will be run under the working directory.
 setup: 'echo "azure-start-stop [setup]"'
