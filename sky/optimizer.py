@@ -361,12 +361,7 @@ class Optimizer:
             for pred in graph.predecessors(node):
                 # FIXME: Account for egress costs for multi-node clusters
                 egress_cost = Optimizer._egress_cost_or_time(
-                    True,
-                    pred,
-                    plan[pred],
-                    node,
-                    resources,
-                )
+                    True, pred, plan[pred], node, resources)
                 total_cost += egress_cost
         return total_cost
 
@@ -487,6 +482,7 @@ class Optimizer:
         Optimizer.print_optimized_plan(best_plan, total_time, total_cost,
                                        node_to_cost_map, minimize_cost)
         Optimizer._print_candidates(node_to_candidates)
+        exit(-1)
         return dag, best_plan
 
 
