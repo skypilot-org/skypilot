@@ -16,9 +16,11 @@ logger = sky_logging.init_logger(__name__)
 
 # Add docker-cli from official docker image to support docker-in-docker.
 # We copy instead of installing docker-cli to keep the image builds fast.
-DOCKERFILE_TEMPLATE = """
+DOCKERFILE_TEMPLATE = r"""
 FROM {base_image}
+SHELL ["/bin/bash", "-c"]
 COPY --from=docker:dind /usr/local/bin/docker /usr/local/bin/
+RUN apt-get update && apt-get -y install sudo
 """.strip()
 
 DOCKERFILE_SETUPCMD = """RUN {setup_command}"""
@@ -203,6 +205,7 @@ def make_bash_from_multiline(codegen: str) -> str:
     script = [
         textwrap.dedent(f"""\
         #!/bin/bash
+        set -e
         {CONDA_SETUP_PREFIX}"""),
         codegen,
     ]

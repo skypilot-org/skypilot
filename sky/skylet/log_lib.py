@@ -268,6 +268,9 @@ def _follow_job_logs(file,
             if status not in [
                     job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
             ]:
+                print(
+                    f'SKY INFO: Job {job_id} finished (status: {status.value}).'
+                )
                 return
 
             if sleep_sec:
@@ -297,5 +300,10 @@ def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
         except KeyboardInterrupt:
             return
     else:
-        with open(log_path, 'r') as f:
-            print(f.read())
+        try:
+            with open(log_path, 'r') as f:
+                print(f.read())
+        except FileNotFoundError:
+            print(
+                f'{colorama.Fore.RED}SKY ERROR: Logs for job {job_id} (status:'
+                f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
