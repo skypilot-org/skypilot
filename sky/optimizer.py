@@ -326,7 +326,7 @@ class Optimizer:
         minimize_cost: bool = True,
     ):
         """Optimizes a general DAG using an ILP solver."""
-        import pulp # pylint: disable=import-outside-toplevel
+        import pulp  # pylint: disable=import-outside-toplevel
 
         if minimize_cost:
             prob = pulp.LpProblem('Sky-Cost-Optimization', pulp.LpMinimize)
@@ -346,21 +346,21 @@ class Optimizer:
             for r_u in compute_costs[u].keys():
                 for r_v in compute_costs[v].keys():
                     F[u][v].append(
-                        Optimizer._egress_cost_or_time(
-                            minimize_cost, u, r_u, v, r_v))
+                        Optimizer._egress_cost_or_time(minimize_cost, u, r_u, v,
+                                                       r_v))
 
         # Define the decision variables.
         c = {
-            v: pulp.LpVariable.matrix(
-                v.name, (range(len(k[v])),), cat='Binary')
+            v: pulp.LpVariable.matrix(v.name, (range(len(k[v])),), cat='Binary')
             for v in V
         }
 
         e = collections.defaultdict(dict)
         for u, v in E:
             num_vars = len(c[u]) * len(c[v])
-            e[u][v] = pulp.LpVariable.matrix(
-                f'{u.name},{v.name}', (range(num_vars),), cat='Binary')
+            e[u][v] = pulp.LpVariable.matrix(f'({u.name}->{v.name})',
+                                             (range(num_vars),),
+                                             cat='Binary')
 
         # Formulate the constraints.
         # 1. c[v] is an one-hot vector.
@@ -373,19 +373,17 @@ class Optimizer:
 
         # 3. e[u][v] linearizes c[u] x c[v].
         for u, v in E:
-            e_uv = e[u][v] # 1-d one-hot vector
+            e_uv = e[u][v]  # 1-d one-hot vector
             N_u = len(c[u])
             N_v = len(c[v])
 
             for row in range(N_u):
                 prob += pulp.lpSum(
-                    e_uv[N_v * row + col] for col in range(N_v)
-                ) == c[u][row]
+                    e_uv[N_v * row + col] for col in range(N_v)) == c[u][row]
 
             for col in range(N_v):
                 prob += pulp.lpSum(
-                    e_uv[N_v * row + col] for row in range(N_u)
-                ) == c[v][col]
+                    e_uv[N_v * row + col] for row in range(N_u)) == c[v][col]
 
         # Formulate the objective.
         if minimize_cost:
@@ -398,12 +396,9 @@ class Optimizer:
             # We need additional decision variables.
             lat = {v: pulp.LpVariable(f'lat({v})', lowBound=0) for v in V}
             for u, v in E:
-                prob += lat[v] >= (
-                    pulp.lpDot(c[v], k[v])
-                    + lat[u]
-                    + pulp.lpDot(e[u][v], F[u][v])
-                )
-            obj = lat[V[-1]] # latency of the sink node.
+                prob += lat[v] >= (pulp.lpDot(c[v], k[v]) + lat[u] +
+                                   pulp.lpDot(e[u][v], F[u][v]))
+            obj = lat[V[-1]]  # latency of the sink node.
         prob += obj
 
         # Solve the optimization problem.
