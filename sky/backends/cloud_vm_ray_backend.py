@@ -381,16 +381,16 @@ class RayCodeGen:
             textwrap.dedent(f"""\
             returncodes = ray.get(futures)
             if sum(returncodes) != 0:
-                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # This waits for all streaming logs to finish.
                 time.sleep(1)
-                print('SKY INFO: {colorama.Fore.RED}Job {self.job_id} failed with '
+                print('SKY ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
                       file=sys.stderr,
                       flush=True)
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # Need this to set the job status in ray job to be FAILED.
-                raise RunTimeError('Job failed.')
+                sys.exit(1)
             else:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
             """)
@@ -414,7 +414,6 @@ class RetryingVmProvisioner(object):
                      num_nodes: int,
                      cluster_exists: bool = False) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
-            assert resources is not None, 'resources must be specified.'
             self.cluster_name = cluster_name
             self.resources = resources
             self.num_nodes = num_nodes
@@ -1191,7 +1190,6 @@ class CloudVmRayBackend(backends.Backend):
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, handle.launched_resources, handle.launched_nodes,
                 True)
-
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
@@ -1252,6 +1250,7 @@ class CloudVmRayBackend(backends.Backend):
                     global_user_state.get_status_from_cluster_name(cluster_name)
                 )
             try:
+                assert to_provision_config.resources is not None, ('to_provision should not be None', to_provision_config)
                 config_dict = provisioner.provision_with_retries(
                     task, to_provision_config, dryrun, stream_logs)
             except exceptions.ResourcesUnavailableError as e:
