@@ -287,12 +287,8 @@ class Optimizer:
                 for parent_resources, parent_cost in \
                     dp_best_cost[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
-                        minimize_cost,
-                        parent,
-                        parent_resources,
-                        node,
-                        resources,
-                    )
+                        minimize_cost, parent, parent_resources, node,
+                        resources)
 
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
@@ -336,12 +332,7 @@ class Optimizer:
             for pred in graph.predecessors(node):
                 # FIXME: Account for egress time for multi-node clusters
                 egress_time = Optimizer._egress_cost_or_time(
-                    False,
-                    pred,
-                    plan[pred],
-                    node,
-                    resources,
-                )
+                    False, pred, plan[pred], node, resources)
                 pred_finish_times.append(finish_time(pred) + egress_time)
 
             cache_finish_time[node] = compute_time + max(pred_finish_times)
@@ -475,12 +466,11 @@ class Optimizer:
                 is_chain = False
 
         if is_chain:
-            opt_algo = Optimizer._optimize_by_dp
+            best_plan, best_total_cost = Optimizer._optimize_by_dp(
+                topo_order, compute_cost, minimize_cost)
         else:
-            raise NotImplementedError('Currently Sky only supports chain DAGs')
+            raise NotImplementedError('Currently Sky only supports chain DAGs.')
 
-        best_plan, best_total_cost = opt_algo(topo_order, compute_cost,
-                                              minimize_cost)
         if minimize_cost:
             total_time = Optimizer._compute_total_time(graph, topo_order,
                                                        best_plan)
