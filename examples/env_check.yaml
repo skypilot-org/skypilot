@@ -28,3 +28,7 @@ run: |
   echo NODE IPS: "$SKY_NODE_IPS"
   worker_addr=`echo "$SKY_NODE_IPS" | sed -n 2p`
   echo Worker IP: $worker_addr
+  
+  if [[ $SKY_NODE_RANK -eq 1 ]]; then
+    (ps aux | grep sky.skylet.skylet | grep -q python) || (echo "skylet not running" && exit 1)
+  fi
