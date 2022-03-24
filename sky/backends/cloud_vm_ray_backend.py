@@ -1627,7 +1627,7 @@ class CloudVmRayBackend(backends.Backend):
         result = stdout.strip()
         if result == 'None':
             return None
-        return job_lib.JobStatus(result)
+        return job_lib.JobStatus(result.split(' ')[-1])
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         code = backend_utils.JobLibCodeGen.get_log_path(job_id)
