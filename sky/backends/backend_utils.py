@@ -1151,7 +1151,7 @@ class JobLibCodeGen(object):
         return cls._build(code)
 
     @classmethod
-    def tail_logs(cls, job_id: str) -> str:
+    def tail_logs(cls, job_id: int) -> str:
         code = [
             f'log_dir = job_lib.log_dir({job_id})',
             f'log_lib.tail_logs({job_id}, log_dir)',
@@ -1159,10 +1159,10 @@ class JobLibCodeGen(object):
         return cls._build(code)
 
     @classmethod
-    def get_job_status(cls, job_id: str) -> str:
+    def get_job_status(cls, job_id: int) -> str:
         code = [
             f'job_status = job_lib.get_status({job_id})',
-            'print(job_status, flush=True)',
+            'print(job_status.value, flush=True)',
         ]
         return cls._build(code)
 

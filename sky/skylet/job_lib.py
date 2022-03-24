@@ -94,11 +94,12 @@ def set_status(job_id: int, status: JobStatus) -> None:
     _CONN.commit()
 
 
-def get_status(job_id: int) -> Optional[JobStatus]:
+def get_status(job_id: int) -> JobStatus:
     rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
                            (job_id,))
-    for row in rows:
-        return row[0]
+    for (status, ) in rows:
+        assert status is not None
+        return JobStatus[status]
 
 
 def set_job_started(job_id: int) -> None:
@@ -206,10 +207,7 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
             # The job may be stale, when the instance is restarted (the ray
             # redis is volatile). We need to reset the status of the task to
             # FAILED if its original status is RUNNING or PENDING.
-            rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
-                                   (job_id,))
-            for row in rows:
-                status = JobStatus[row]
+            status = get_status(job_id)
             if status in [JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING]:
                 status = JobStatus.FAILED
         else:
