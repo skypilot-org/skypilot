@@ -422,7 +422,7 @@ class Optimizer:
                             pprint.pformat(list(node_to_cost_map.values())[0]))
 
     @staticmethod
-    def _print_candidates(node_to_candidates: Dict[Task, ]):
+    def _print_candidates(node_to_candidates: Dict[Task, set]):
         for node, candidate_set in node_to_candidates.items():
             accelerator = list(node.get_resources())[0].accelerators
             is_multi_instances = False
