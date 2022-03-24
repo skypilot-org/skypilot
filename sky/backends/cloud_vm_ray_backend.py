@@ -382,13 +382,13 @@ class RayCodeGen:
             returncodes = ray.get(futures)
             if sum(returncodes) != 0:
                 # This waits for all streaming logs to finish.
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 time.sleep(1)
                 print('SKY ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
                       file=sys.stderr,
                       flush=True)
-                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
             else:
@@ -410,7 +410,7 @@ class RetryingVmProvisioner(object):
 
         def __init__(self,
                      cluster_name: str,
-                     resources: Resources,
+                     resources: Optional[Resources],
                      num_nodes: int,
                      cluster_exists: bool = False) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
@@ -929,7 +929,7 @@ class RetryingVmProvisioner(object):
                 # cluster will keep running (which may be ok with the semantics
                 # of 'sky launch' twice).
                 # Tracked in https://github.com/ray-project/ray/issues/20402.
-                ['ray', 'up', '-v', '-y', '--no-restart', cluster_config_file],
+                ['ray', 'up', '-y', '--no-restart', cluster_config_file],
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at=start_streaming_at,
@@ -1221,7 +1221,7 @@ class CloudVmRayBackend(backends.Backend):
 
     def provision(self,
                   task: Task,
-                  to_provision: Resources,
+                  to_provision: Optional[Resources],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None):
