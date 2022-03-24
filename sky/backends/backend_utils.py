@@ -1159,10 +1159,11 @@ class JobLibCodeGen(object):
         return cls._build(code)
 
     @classmethod
-    def get_job_status(cls, job_id: int) -> str:
+    def get_job_status(cls, job_id: str) -> str:
+        # Prints "Job <id> <status>" for UX; caller should parse the last token.
         code = [
             f'job_status = job_lib.get_status({job_id})',
-            'print(job_status.value, flush=True)',
+            f'print("Job", {job_id}, job_status.value, flush=True)',
         ]
         return cls._build(code)
 
