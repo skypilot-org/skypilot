@@ -482,7 +482,6 @@ class Optimizer:
         Optimizer.print_optimized_plan(best_plan, total_time, total_cost,
                                        node_to_cost_map, minimize_cost)
         Optimizer._print_candidates(node_to_candidates)
-        exit(-1)
         return dag, best_plan
 
 
