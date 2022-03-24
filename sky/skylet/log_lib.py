@@ -246,6 +246,7 @@ def _follow_job_logs(file,
     line = ''
     status = job_lib.get_status(job_id)
     start_streaming = False
+    wait_last_logs = True
     while True:
         tmp = file.readline()
         if tmp is not None and tmp != '':
@@ -271,6 +272,11 @@ def _follow_job_logs(file,
                 print(
                     f'SKY INFO: Job {job_id} finished (status: {status.value}).'
                 )
+                if wait_last_logs:
+                    # Wait all the logs are printed before exit.
+                    time.sleep(1 + sleep_sec)
+                    wait_last_logs = False
+                    continue
                 return
 
             if sleep_sec:
