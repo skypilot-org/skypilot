@@ -1202,10 +1202,17 @@ def start(clusters: Tuple[str], yes: bool):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--purge',
+              '-p',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Ignore cloud provider errors.')
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
+    purge: bool,
 ):
     """Tear down cluster(s).
 
@@ -1243,11 +1250,15 @@ def down(
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=True,
-                                no_confirm=yes)
+                                no_confirm=yes,
+                                purge=purge)
 
 
-def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
-                                terminate: bool, no_confirm: bool) -> None:
+def _terminate_or_stop_clusters(names: Tuple[str],
+                                apply_to_all: Optional[bool],
+                                terminate: bool,
+                                no_confirm: bool,
+                                purge: bool = False) -> None:
     """Terminates or stops a cluster (or all clusters)."""
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
@@ -1278,6 +1289,11 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         return
 
     if not no_confirm:
+        if purge:
+            click.secho(
+                'WARNING: Purge will likely require you to manually delete '
+                'resources from your cloud provider.',
+                fg='yellow')
         teardown_verb = 'Terminating' if terminate else 'Stopping'
         cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
         cluster_list = ', '.join([r['name'] for r in to_down])
@@ -1302,7 +1318,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             click.echo('  To terminate the cluster, run: ', nl=False)
             click.secho(f'sky down {name}', bold=True)
             continue
-        success = backend.teardown(handle, terminate=terminate)
+        success = backend.teardown(handle, terminate=terminate, purge=purge)
         operation = 'Terminating' if terminate else 'Stopping'
         if success:
             click.secho(f'{operation} cluster {name}...done.', fg='green')

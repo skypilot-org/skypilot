@@ -1928,6 +1928,7 @@ class CloudVmRayBackend(backends.Backend):
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
+                 purge: bool = False,
                  _force: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
@@ -1936,14 +1937,14 @@ class CloudVmRayBackend(backends.Backend):
             # Should only be forced when teardown is called within a
             # locked section of the code (i.e teardown when not enough
             # resources can be provisioned)
-            return self._teardown(handle, terminate)
+            return self._teardown(handle, terminate, purge)
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
             # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(lock_path, _FILELOCK_TIMEOUT_SECONDS):
-                success = self._teardown(handle, terminate)
+                success = self._teardown(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
             return success
@@ -1952,7 +1953,8 @@ class CloudVmRayBackend(backends.Backend):
                          'Check to see if it is still being launched.')
         return False
 
-    def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
+    def _teardown(self, handle: ResourceHandle, terminate: bool,
+                  purge: bool) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -2052,9 +2054,11 @@ class CloudVmRayBackend(backends.Backend):
                                  f'{tpu_stderr}{colorama.Style.RESET_ALL}')
                     return False
 
-        if returncode != 0:
+        if not purge and returncode != 0:
             logger.error(
-                f'{colorama.Fore.RED}Failed to terminate {cluster_name}.\n'
+                f'{colorama.Fore.RED}Failed to terminate {cluster_name}. '
+                f'If you want to ignore this error and remove the cluster '
+                f'from Sky anyways, use sky down --purge.\n'
                 f'**** STDOUT ****\n'
                 f'{stdout}\n'
                 f'**** STDERR ****\n'
