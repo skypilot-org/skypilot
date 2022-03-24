@@ -87,6 +87,7 @@ def test_minimal():
         'minimal',
         [
             'sky launch -y -c test-min examples/minimal.yaml',
+            'sky launch -y -c test-min examples/minimal.yaml',
             'sky logs test-min 1 --status',  # Ensure the job succeeded.
         ],
         'sky down -y test-min',
