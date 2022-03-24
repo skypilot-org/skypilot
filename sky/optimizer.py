@@ -568,7 +568,8 @@ class Optimizer:
                 topo_order, node_to_cost_map, minimize_cost)
         else:
             best_plan, best_total_cost = Optimizer._optimize_by_ilp(
-                list(graph.edges()), topo_order, node_to_cost_map, minimize_cost)
+                list(graph.edges()), topo_order, node_to_cost_map,
+                minimize_cost)
 
         if minimize_cost:
             total_time = Optimizer._compute_total_time(graph, topo_order,
