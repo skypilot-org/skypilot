@@ -1250,7 +1250,8 @@ class CloudVmRayBackend(backends.Backend):
                     global_user_state.get_status_from_cluster_name(cluster_name)
                 )
             try:
-                assert to_provision_config.resources is not None, ('to_provision should not be None', to_provision_config)
+                assert to_provision_config.resources is not None, (
+                    'to_provision should not be None', to_provision_config)
                 config_dict = provisioner.provision_with_retries(
                     task, to_provision_config, dryrun, stream_logs)
             except exceptions.ResourcesUnavailableError as e:
