@@ -500,6 +500,12 @@ def cli():
           'resources and is used for scheduling the task. '
           'Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
+@click.option('--num_nodes',
+              required=False,
+              type=int,
+              help=('Number of nodes to launch and to execute the task on. '
+                    'Overrides the "num_nodes" config in the YAML if both are '
+                    'supplied.'))
 @click.option(
     '--use-spot/--no-use-spot',
     required=False,
@@ -523,10 +529,21 @@ def cli():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
-           detach_run: bool, backend_name: str, workdir: Optional[str],
-           cloud: Optional[str], gpus: Optional[str], use_spot: Optional[bool],
-           name: Optional[str], disk_size: Optional[int], yes: bool):
+def launch(
+    entrypoint: str,
+    cluster: Optional[str],
+    dryrun: bool,
+    detach_run: bool,
+    backend_name: str,
+    workdir: Optional[str],
+    cloud: Optional[str],
+    gpus: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    name: Optional[str],
+    disk_size: Optional[int],
+    yes: bool,
+):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -570,6 +587,8 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
         if disk_size is not None:
             new_resources.disk_size = disk_size
         task.set_resources({new_resources})
+        if num_nodes is not None:
+            task.num_nodes = num_nodes
         if name is not None:
             task.name = name
 
@@ -623,12 +642,18 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
     '--gpus',
     required=False,
     type=str,
-    help=('Task demands: Type and number of GPUs to use. Example values: '
+    help=('Task demand: Type and number of GPUs to use. Example values: '
           '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
           '(fractional counts are supported by the scheduling framework). '
           'This is used for scheduling the task, so it must fit the '
           'cluster\'s total resources. Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
+@click.option('--num_nodes',
+              required=False,
+              type=int,
+              help=('Task demand: Number of nodes to execute the task on. '
+                    'Overrides the "num_nodes" config in the YAML if both are '
+                    'supplied.'))
 @click.option('--name',
               '-n',
               required=False,
@@ -636,8 +661,15 @@ def launch(entrypoint: str, cluster: Optional[str], dryrun: bool,
               help=('Task name. Overrides the "name" '
                     'config in the YAML if both are supplied.'))
 # pylint: disable=redefined-builtin
-def exec(cluster: str, entrypoint: str, detach_run: bool,
-         workdir: Optional[str], gpus: Optional[str], name: Optional[str]):
+def exec(
+    cluster: str,
+    entrypoint: str,
+    detach_run: bool,
+    workdir: Optional[str],
+    gpus: Optional[str],
+    num_nodes: Optional[int],
+    name: Optional[str],
+):
     """Execute a task or a command on a cluster (skip setup).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -646,13 +678,15 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
     \b
     Execution and scheduling behavior:
     \b
-    - If ENTRYPOINT is a YAML, or if it is a command with `--gpus` specified:
-      it is treated as a proper task that will undergo job queue scheduling,
-      respecting its resource requirement. It can be executed on any node of th
-      cluster with enough resources.
-    - Otherwise (if ENTRYPOINT is a command and no `--gpus` specified), it is
-      treated as an inline command, to be executed only on the head node of the
-      cluster.
+    - If ENTRYPOINT is a YAML, or if it is a command with a resource demand
+      flag specified (`--gpus` or `--num_nodes`): it is treated as a proper
+      task that will undergo job queue scheduling, respecting its resource
+      requirement. It can be executed on any node of th cluster with enough
+      resources.
+    - Otherwise (if ENTRYPOINT is a command and no resource demand flag
+      specified), it is treated as an inline command, to be executed only on
+      the head node of the cluster. This is useful for monitoring commands
+      (e.g., gpustat, htop).
 
     In both cases, the commands are run under the task's workdir (if specified).
 
@@ -704,6 +738,7 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
         raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
+    resource_demand_specified = gpus is not None or num_nodes is not None
 
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
@@ -722,7 +757,7 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
                 # Run inline commands directly on head node if the resources are
                 # not set. User should take the responsibility to not overload
                 # the cluster.
-                if gpus is None:
+                if not resource_demand_specified:
                     if workdir is not None:
                         backend.sync_workdir(handle, workdir)
                     backend.run_on_head(
@@ -743,6 +778,8 @@ def exec(cluster: str, entrypoint: str, detach_run: bool,
             copied = copy.deepcopy(list(task.resources)[0])
             copied.accelerators = _parse_accelerator_options(gpus)
             task.set_resources({copied})
+        if num_nodes is not None:
+            task.num_nodes = num_nodes
         if name is not None:
             task.name = name
 
@@ -833,12 +870,10 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     click.secho('Fetching and parsing job queue...', fg='yellow')
     all_jobs = not skip_finished
 
-    codegen = backend_utils.JobLibCodeGen()
     username = getpass.getuser()
     if all_users:
         username = None
-    codegen.show_jobs(username, all_jobs)
-    code = codegen.build()
+    code = backend_utils.JobLibCodeGen.show_jobs(username, all_jobs)
 
     if clusters:
         handles = [
@@ -964,9 +999,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster}...',
                     fg='yellow')
 
-    codegen = backend_utils.JobLibCodeGen()
-    codegen.cancel_jobs(jobs)
-    code = codegen.build()
+    code = backend_utils.JobLibCodeGen.cancel_jobs(jobs)
 
     # FIXME: Assumes a specific backend.
     backend = backends.CloudVmRayBackend()
