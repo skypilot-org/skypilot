@@ -97,7 +97,7 @@ def set_status(job_id: int, status: JobStatus) -> None:
 def get_status(job_id: int) -> JobStatus:
     rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
                            (job_id,))
-    for (status, ) in rows:
+    for (status,) in rows:
         assert status is not None
         return JobStatus[status]
 
@@ -271,7 +271,6 @@ def _show_job_queue(jobs) -> None:
             os.path.join(SKY_LOGS_DIRECTORY, job['run_timestamp']),
         ])
     print(job_table)
-
 
 
 def show_jobs(username: Optional[str], all_jobs: bool) -> None:
