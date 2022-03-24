@@ -320,12 +320,107 @@ class Optimizer:
 
     @staticmethod
     def _optimize_by_ilp(
+        edges: List,
         topo_order: List,
         compute_costs: Dict,
         minimize_cost: bool = True,
     ):
         """Optimizes a general DAG using an ILP solver."""
-        pass
+        import pulp # pylint: disable=import-outside-toplevel
+
+        if minimize_cost:
+            prob = pulp.LpProblem('Sky-Cost-Optimization', pulp.LpMinimize)
+        else:
+            prob = pulp.LpProblem('Sky-Runtime-Optimization', pulp.LpMinimize)
+
+        # Prepare the constants.
+        V = topo_order
+        E = edges
+        k = {
+            node: list(resource_cost_map.values())
+            for node, resource_cost_map in compute_costs.items()
+        }
+        F = collections.defaultdict(dict)
+        for u, v in E:
+            F[u][v] = []
+            for r_u in compute_costs[u].keys():
+                for r_v in compute_costs[v].keys():
+                    F[u][v].append(
+                        Optimizer._egress_cost_or_time(
+                            minimize_cost, u, r_u, v, r_v))
+
+        # Define the decision variables.
+        c = {
+            v: pulp.LpVariable.matrix(
+                v.name, (range(len(k[v])),), cat='Binary')
+            for v in V
+        }
+
+        e = collections.defaultdict(dict)
+        for u, v in E:
+            num_vars = len(c[u]) * len(c[v])
+            e[u][v] = pulp.LpVariable.matrix(
+                f'{u.name},{v.name}', (range(num_vars),), cat='Binary')
+
+        # Formulate the constraints.
+        # 1. c[v] is an one-hot vector.
+        for v in V:
+            prob += pulp.lpSum(c[v]) == 1
+
+        # 2. e[u][v] is an one-hot vector.
+        for u, v in E:
+            prob += pulp.lpSum(e[u][v]) == 1
+
+        # 3. e[u][v] linearizes c[u] x c[v].
+        for u, v in E:
+            e_uv = e[u][v] # 1-d one-hot vector
+            N_u = len(c[u])
+            N_v = len(c[v])
+
+            for row in range(N_u):
+                prob += pulp.lpSum(
+                    e_uv[N_v * row + col] for col in range(N_v)
+                ) == c[u][row]
+
+            for col in range(N_v):
+                prob += pulp.lpSum(
+                    e_uv[N_v * row + col] for row in range(N_u)
+                ) == c[v][col]
+
+        # Formulate the objective.
+        if minimize_cost:
+            obj = 0
+            for v in V:
+                obj += pulp.lpDot(c[v], k[v])
+            for u, v in E:
+                obj += pulp.lpDot(e[u][v], F[u][v])
+        else:
+            # We need additional decision variables.
+            lat = {v: pulp.LpVariable(f'lat({v})', lowBound=0) for v in V}
+            for u, v in E:
+                prob += lat[v] >= (
+                    pulp.lpDot(c[v], k[v])
+                    + lat[u]
+                    + pulp.lpDot(e[u][v], F[u][v])
+                )
+            obj = lat[V[-1]] # latency of the sink node.
+        prob += obj
+
+        # Solve the optimization problem.
+        prob.solve(solver=pulp.PULP_CBC_CMD(msg=False))
+        assert prob.status != pulp.LpStatusInfeasible, \
+            'Cannot solve the optimization problem'
+        best_total_cost = prob.objective.value()
+
+        # Find the best plan for the DAG.
+        # node -> best resources
+        best_plan = {}
+        for node, variables in c.items():
+            selected = [var.value() for var in variables].index(1)
+            best_resources = list(compute_costs[node].keys())[selected]
+            node.best_resources = best_resources
+            best_plan[node] = best_resources
+        return best_plan, best_total_cost
 
     @staticmethod
     def _compute_total_time(graph, topo_order, plan):
@@ -484,12 +579,12 @@ class Optimizer:
                 is_chain = False
 
         if is_chain:
-            opt_algo = Optimizer._optimize_by_dp
+            best_plan, best_total_cost = Optimizer._optimize_by_dp(
+                topo_order, compute_cost, minimize_cost)
         else:
-            opt_algo = Optimizer._optimize_by_ilp
+            best_plan, best_total_cost = Optimizer._optimize_by_ilp(
+                list(graph.edges()), topo_order, compute_cost, minimize_cost)
 
-        best_plan, best_total_cost = opt_algo(topo_order, compute_cost,
-                                              minimize_cost)
         if minimize_cost:
             total_time = Optimizer._compute_total_time(graph, topo_order,
                                                        best_plan)
