@@ -165,8 +165,8 @@ class Optimizer:
         return fn(src_cloud, dst_cloud, nbytes)
 
     @staticmethod
-    def _estimate_compute_cost(
-        topo_order: List,
+    def _per_node_cost_or_time(
+        topo_order: List[Task],
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
         raise_error: bool = False,
@@ -174,7 +174,7 @@ class Optimizer:
         """Estimates the compute cost of feasible task-resource mappings."""
         # Cost of running the task on the resources
         # node -> {resources -> cost}
-        compute_cost = collections.defaultdict(dict)
+        node_to_cost_map = collections.defaultdict(dict)
 
         # If a cloud has multiple instance types with the same accelerators,
         # Sky informs users of the candidates and its decisions.
@@ -185,7 +185,7 @@ class Optimizer:
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
                 # Base case: a special source node.
-                compute_cost[node][list(node.get_resources())[0]] = 0
+                node_to_cost_map[node][list(node.get_resources())[0]] = 0
                 continue
 
             do_print = node_i != len(topo_order) - 1
@@ -255,13 +255,13 @@ class Optimizer:
                             logger.debug(
                                 '  estimated_cost (not incl. egress): ${:.1f}'.
                                 format(estimated_cost))
-                    compute_cost[node][resources] = estimated_cost
-        return compute_cost, node_to_candidates
+                    node_to_cost_map[node][resources] = estimated_cost
+        return node_to_cost_map, node_to_candidates
 
     @staticmethod
     def _optimize_by_dp(
-        topo_order: List,
-        compute_costs: Dict,
+        topo_order: List[Task],
+        node_to_cost_map: Dict[Task, float],
         minimize_cost: bool = True,
     ):
         """Optimizes a chain DAG using a dynamic programming algorithm."""
@@ -282,17 +282,13 @@ class Optimizer:
 
             parent = topo_order[node_i - 1]
             # FIXME: Account for egress costs for multi-node clusters
-            for resources, compute_cost in compute_costs[node].items():
+            for resources, compute_cost in node_to_cost_map[node].items():
                 min_pred_cost_plus_egress = np.inf
                 for parent_resources, parent_cost in \
                     dp_best_cost[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
-                        minimize_cost,
-                        parent,
-                        parent_resources,
-                        node,
-                        resources,
-                    )
+                        minimize_cost, parent, parent_resources, node,
+                        resources)
 
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
@@ -418,7 +414,11 @@ class Optimizer:
         return best_plan, best_total_cost
 
     @staticmethod
-    def _compute_total_time(graph, topo_order, plan):
+    def _compute_total_time(
+        graph,
+        topo_order: List[Task],
+        plan: Dict[Task, Resources],
+    ):
         cache_finish_time = {}
 
         def finish_time(node):
@@ -435,12 +435,7 @@ class Optimizer:
             for pred in graph.predecessors(node):
                 # FIXME: Account for egress time for multi-node clusters
                 egress_time = Optimizer._egress_cost_or_time(
-                    False,
-                    pred,
-                    plan[pred],
-                    node,
-                    resources,
-                )
+                    False, pred, plan[pred], node, resources)
                 pred_finish_times.append(finish_time(pred) + egress_time)
 
             cache_finish_time[node] = compute_time + max(pred_finish_times)
@@ -465,22 +460,17 @@ class Optimizer:
             for pred in graph.predecessors(node):
                 # FIXME: Account for egress costs for multi-node clusters
                 egress_cost = Optimizer._egress_cost_or_time(
-                    True,
-                    pred,
-                    plan[pred],
-                    node,
-                    resources,
-                )
+                    True, pred, plan[pred], node, resources)
                 total_cost += egress_cost
         return total_cost
 
     @staticmethod
     def print_optimized_plan(
-        best_plan,
-        total_time,
-        total_cost,
+        best_plan: Dict[Task, Resources],
+        total_time: float,
+        total_cost: float,
+        node_to_cost_map: Dict[Task, float],
         minimize_cost: bool,
-        compute_costs,
     ):
         if minimize_cost:
             logger.info('Optimizer - plan minimizing cost')
@@ -501,32 +491,32 @@ class Optimizer:
         logger.info(f'\n{message}\n')
 
         # Print the list of resouces that the optimizer considered.
-        should_print = any(len(v) > 1 for v in compute_costs.values())
+        should_print = any(len(v) > 1 for v in node_to_cost_map.values())
         if should_print:
-            compute_costs = {
+            node_to_cost_map = {
                 k: v
-                for k, v in compute_costs.items()
+                for k, v in node_to_cost_map.items()
                 if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
             }
             metric = 'cost ($)' if minimize_cost else 'time (hr)'
-            for k, v in compute_costs.items():
-                compute_costs[k] = {
+            for k, v in node_to_cost_map.items():
+                node_to_cost_map[k] = {
                     resources: round(cost, 2) if minimize_cost \
                         else round(cost / 3600, 2)
                     for resources, cost in v.items()
                 }
 
-            num_tasks = len(compute_costs)
+            num_tasks = len(node_to_cost_map)
             if num_tasks > 1:
                 logger.info(f'Details: task -> {{resources -> {metric}}}')
-                logger.info('%s\n', pprint.pformat(compute_costs))
+                logger.info('%s\n', pprint.pformat(node_to_cost_map))
             elif num_tasks == 1:
                 logger.info(f'Considered resources -> {metric}')
                 logger.info('%s\n',
-                            pprint.pformat(list(compute_costs.values())[0]))
+                            pprint.pformat(list(node_to_cost_map.values())[0]))
 
     @staticmethod
-    def _print_candidates(node_to_candidates):
+    def _print_candidates(node_to_candidates: Dict[Task, set]):
         for node, candidate_set in node_to_candidates.items():
             accelerator = list(node.get_resources())[0].accelerators
             is_multi_instances = False
@@ -561,7 +551,7 @@ class Optimizer:
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
 
-        compute_cost, node_to_candidates = Optimizer._estimate_compute_cost(
+        node_to_cost_map, node_to_candidates = Optimizer._per_node_cost_or_time(
             topo_order,
             minimize_cost,
             blocked_launchable_resources,
@@ -575,10 +565,10 @@ class Optimizer:
 
         if is_chain:
             best_plan, best_total_cost = Optimizer._optimize_by_dp(
-                topo_order, compute_cost, minimize_cost)
+                topo_order, node_to_cost_map, minimize_cost)
         else:
             best_plan, best_total_cost = Optimizer._optimize_by_ilp(
-                list(graph.edges()), topo_order, compute_cost, minimize_cost)
+                list(graph.edges()), topo_order, node_to_cost_map, minimize_cost)
 
         if minimize_cost:
             total_time = Optimizer._compute_total_time(graph, topo_order,
@@ -590,7 +580,7 @@ class Optimizer:
                                                        best_plan)
 
         Optimizer.print_optimized_plan(best_plan, total_time, total_cost,
-                                       minimize_cost, compute_cost)
+                                       node_to_cost_map, minimize_cost)
         Optimizer._print_candidates(node_to_candidates)
         return dag, best_plan
 
