@@ -141,7 +141,7 @@ class LocalDockerBackend(backends.Backend):
 
     def provision(self,
                   task: Task,
-                  to_provision: Resources,
+                  to_provision: Optional[Resources],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None) -> ResourceHandle:

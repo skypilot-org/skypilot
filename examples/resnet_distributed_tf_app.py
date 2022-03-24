@@ -1,7 +1,14 @@
+import getpass
 import subprocess
 from typing import List, Optional
+import uuid
 
 import sky
+
+# (username, mac addr last 4 chars): for uniquefying users on shared-account
+# cloud providers.
+_user_and_mac = f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}'
+cluster = f'test-distributed-tf-{_user_and_mac}'
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
@@ -70,4 +77,4 @@ with sky.Dag() as dag:
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
 
-sky.launch(dag, cluster_name='test-dtf')
+sky.launch(dag, cluster_name=cluster)

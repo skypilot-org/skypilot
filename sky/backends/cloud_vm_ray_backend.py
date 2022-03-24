@@ -382,13 +382,13 @@ class RayCodeGen:
             returncodes = ray.get(futures)
             if sum(returncodes) != 0:
                 # This waits for all streaming logs to finish.
+                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 time.sleep(1)
                 print('SKY ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
                       file=sys.stderr,
                       flush=True)
-                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
             else:
@@ -410,7 +410,7 @@ class RetryingVmProvisioner(object):
 
         def __init__(self,
                      cluster_name: str,
-                     resources: Resources,
+                     resources: Optional[Resources],
                      num_nodes: int,
                      cluster_exists: bool = False) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
@@ -1221,7 +1221,7 @@ class CloudVmRayBackend(backends.Backend):
 
     def provision(self,
                   task: Task,
-                  to_provision: Resources,
+                  to_provision: Optional[Resources],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None):
@@ -1629,7 +1629,7 @@ class CloudVmRayBackend(backends.Backend):
         result = stdout.strip()
         if result == 'None':
             return None
-        return job_lib.JobStatus(result)
+        return job_lib.JobStatus(result.split(' ')[-1])
 
     def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
         code = backend_utils.JobLibCodeGen.get_log_path(job_id)

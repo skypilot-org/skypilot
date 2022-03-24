@@ -186,7 +186,7 @@ class GCP(clouds.Cloud):
             'tpu': None,
             'custom_resources': None,
             'use_spot': r.use_spot,
-            'image_name': 'common-cpu-ubuntu-2004',
+            'image_name': 'common-cpu',
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -206,7 +206,7 @@ class GCP(clouds.Cloud):
                 resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
                 resources_vars['gpu_count'] = acc_count
                 # CUDA driver version 470.103.01, CUDA Library 11.3
-                resources_vars['image_name'] = 'common-cu113-ubuntu-2004'
+                resources_vars['image_name'] = 'common-cu113'
 
         return resources_vars
 
