@@ -275,6 +275,14 @@ def _show_job_queue(jobs) -> None:
     print(job_table)
 
 
+def get_status_by_job_id(job_id: int) -> JobStatus:
+    rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
+                           (job_id,))
+    for row in rows:
+        assert row is not None, row
+        return JobStatus(row[0])
+
+
 def show_jobs(username: Optional[str], all_jobs: bool) -> None:
     """Show the job queue.
 

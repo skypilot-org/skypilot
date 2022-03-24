@@ -244,7 +244,7 @@ def _follow_job_logs(file,
 
     `sleep_sec` is the time to sleep after empty reads. """
     line = ''
-    status = job_lib.query_job_status([job_id])[0]
+    status = job_lib.get_status_by_job_id(job_id)
     start_streaming = False
     while True:
         tmp = file.readline()
@@ -275,7 +275,7 @@ def _follow_job_logs(file,
 
             if sleep_sec:
                 time.sleep(sleep_sec)
-            status = job_lib.query_job_status([job_id])[0]
+            status = job_lib.get_status_by_job_id(job_id)
 
 
 def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
