@@ -269,14 +269,14 @@ def _follow_job_logs(file,
             if status not in [
                     job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
             ]:
-                print(
-                    f'SKY INFO: Job {job_id} finished (status: {status.value}).'
-                )
                 if wait_last_logs:
                     # Wait all the logs are printed before exit.
                     time.sleep(1 + sleep_sec)
                     wait_last_logs = False
                     continue
+                print(
+                    f'SKY INFO: Job {job_id} finished (status: {status.value}).'
+                )
                 return
 
             if sleep_sec:
