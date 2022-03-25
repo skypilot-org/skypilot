@@ -76,7 +76,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     test.echo(f'{outcome}.'
               f'{reason}'
               f'\nLog: less {log_file.name}\n')
-    if test.teardown is not None:
+    if proc.returncode == 0 and test.teardown is not None:
         backend_utils.run(
             test.teardown,
             stdout=log_file,
