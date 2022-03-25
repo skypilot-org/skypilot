@@ -1000,14 +1000,19 @@ class CloudVmRayBackend(backends.Backend):
         def get_cluster_name(self):
             return self.cluster_name
 
-        def get_cluster_region(self):
+        def _find_cluster_region(self):
             config = backend_utils.read_yaml(self.cluster_yaml)
             provider = config['provider']
             cloud = self.launched_resources.cloud
             if type(cloud) in [clouds.Azure]:
-                return provider['location']
+                self.cluster_region = provider['location']
             elif type(cloud) in [clouds.GCP, clouds.AWS]:
-                return provider['region']
+                self.cluster_region = provider['region']
+
+        def get_cluster_region(self):
+            if not hasattr(self, 'cluster_region'):
+                self._find_cluster_region()
+            return self.cluster_region
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()

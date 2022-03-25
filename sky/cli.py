@@ -75,7 +75,6 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              accelerator_args={'tf_version': '2.5.0'},
                              use_spot=False),
 }
-_PRICE_STR = '$ {}'
 
 
 def _truncate_long_string(s: str, max_length: int = 50) -> str:
@@ -785,7 +784,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         if all:
             hourly_cost = handle.launched_resources.get_cost(3600) \
                 * handle.launched_nodes
-            price_str = _PRICE_STR.format(hourly_cost)
+            price_str = f'$ {hourly_cost}'
             region = handle.get_cluster_region()
             print(region)
             row.extend([
