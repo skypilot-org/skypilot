@@ -1207,7 +1207,7 @@ def start(clusters: Tuple[str], yes: bool):
               is_flag=True,
               default=False,
               required=False,
-              help='Ignore cloud provider errors (if any); ' 
+              help='Ignore cloud provider errors (if any); '
               'useful for cleaning up manually deleted cluster(s).')
 def down(
     clusters: Tuple[str],

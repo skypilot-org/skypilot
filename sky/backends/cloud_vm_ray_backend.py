@@ -888,7 +888,7 @@ class RetryingVmProvisioner(object):
                 # launch, gang failed, then we are terminating it here.
                 CloudVmRayBackend().teardown(handle,
                                              terminate=need_terminate,
-                                             _force=True)
+                                             force=True)
 
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
