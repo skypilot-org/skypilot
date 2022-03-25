@@ -131,8 +131,12 @@ def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
                          'falling back to du -shk')
             pass
     return int(
-        subprocess.check_output(['du', '-sh', '-k', path
-                                ]).split()[0].decode('utf-8')) // (2**10)
+        subprocess.check_output([
+            'du',
+            '-sh',
+            '-k',
+            path,
+        ]).split()[0].decode('utf-8')) // (2**10)
 
 
 class RayCodeGen:
@@ -2111,7 +2115,11 @@ class CloudVmRayBackend(backends.Backend):
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
         rsync_command = ['rsync', '-Pavz']
+        # Legend
+        # : per-directory merge-file (i.e., any subdir's .gitignore)
+        # - an exclude pattern
         rsync_command.append('--filter=\':- .gitignore\'')
+        rsync_command.append('--filter=\':- .git/info/exclude\'')
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,
                                            self._ssh_control_name(handle)))
