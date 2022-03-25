@@ -19,6 +19,7 @@ Use editable mode (`-e`) when installing:
 # You can just install the dependencies for
 # certain clouds, e.g., ".[aws,azure,gcp]"
 pip install -e ".[all]"
+pip install -r requirements-dev.txt
 ```
 
 ### Submitting pull requests
@@ -46,7 +47,7 @@ To run smoke tests:
 bash tests/run_smoke_tests.sh
 
 # Run one of the smoke tests
-pytest -s -q tests/test_smoke.py::test_minimal
+bash tests/run_smoke_tests.sh test_minimal
 ```
 
 For profiling code, use:
