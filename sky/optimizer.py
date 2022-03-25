@@ -1,5 +1,6 @@
 """The Sky optimizer: assigns best resources to user tasks."""
 import collections
+from importlib.resources import Resource
 import colorama
 import enum
 import pprint
@@ -170,7 +171,7 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
         raise_error: bool = False,
-    ):
+    ) -> Tuple[Dict[Task, Dict[Resources, float]], Dict[Task, Dict[str, List[Resources]]]]:
         """Estimates the compute cost of feasible task-resource mappings."""
         # Cost of running the task on the resources
         # node -> {resources -> cost}
@@ -261,9 +262,9 @@ class Optimizer:
     @staticmethod
     def _optimize_by_dp(
         topo_order: List[Task],
-        node_to_cost_map: Dict[Task, float],
+        node_to_cost_map: Dict[Task, Dict[Resources, float]],
         minimize_cost: bool = True,
-    ):
+    ) -> Tuple[Dict[Task, Resources], float]:
         """Optimizes a chain DAG using a dynamic programming algorithm."""
         # node -> { resources -> best estimated cost }
         dp_best_cost = collections.defaultdict(dict)
@@ -319,7 +320,7 @@ class Optimizer:
         graph,
         topo_order: List[Task],
         plan: Dict[Task, Resources],
-    ):
+    ) -> float:
         cache_finish_time = {}
 
         def finish_time(node):
@@ -346,7 +347,11 @@ class Optimizer:
         return finish_time(sink_node)
 
     @staticmethod
-    def _compute_total_cost(graph, topo_order, plan):
+    def _compute_total_cost(
+        graph,
+        topo_order: List[Task],
+        plan: Dict[Task, Resources],
+    ) -> float:
         total_cost = 0
         for node in topo_order:
             resources = plan[node]
@@ -370,7 +375,7 @@ class Optimizer:
         best_plan: Dict[Task, Resources],
         total_time: float,
         total_cost: float,
-        node_to_cost_map: Dict[Task, float],
+        node_to_cost_map: Dict[Task, Dict[Resources, float]],
         minimize_cost: bool,
     ):
         if minimize_cost:
@@ -417,7 +422,7 @@ class Optimizer:
                             pprint.pformat(list(node_to_cost_map.values())[0]))
 
     @staticmethod
-    def _print_candidates(node_to_candidates: Dict[Task, set]):
+    def _print_candidates(node_to_candidates: Dict[Task, Dict[str, List[Resources]]]):
         for node, candidate_set in node_to_candidates.items():
             accelerator = list(node.get_resources())[0].accelerators
             is_multi_instances = False
@@ -444,7 +449,7 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
         raise_error: bool = False,
-    ):
+    ) -> Tuple[Dag, Dict[Task, Resources]]:
         import networkx as nx  # pylint: disable=import-outside-toplevel
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
@@ -524,7 +529,7 @@ def _fill_in_launchable_resources(
     task: Task,
     blocked_launchable_resources: Optional[List[Resources]],
     try_fix_with_sky_check: bool = True,
-) -> Tuple[Dict[Resources, List[Resources]], Dict[str, set]]:
+) -> Tuple[Dict[Resources, List[Resources]], Dict[str, List[Resources]]]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_check:
         check.check(quiet=True)
