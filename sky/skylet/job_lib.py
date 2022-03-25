@@ -245,6 +245,17 @@ def update_status() -> None:
             set_status(job['job_id'], status)
 
 
+def is_idle() -> bool:
+    rows = _CURSOR.execute(
+        """\
+        SELECT COUNT(*) FROM jobs
+        WHERE status IN (?, ?)
+        """, (JobStatus.INIT.value, JobStatus.PENDING.value,
+              JobStatus.RUNNING.value))
+    for (count,) in rows:
+        return count == 0
+
+
 def _readable_time_duration(start: Optional[int]) -> str:
     if start is None:
         return '-'
