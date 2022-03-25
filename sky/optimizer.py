@@ -467,8 +467,9 @@ class Optimizer:
 
         is_chain = True
         for node in topo_order[:-1]:
-            if len(list(graph.successors(node))) != 1:
+            if graph.out_degree(node) != 1:
                 is_chain = False
+                break
 
         if is_chain:
             best_plan, best_total_cost = Optimizer._optimize_by_dp(
