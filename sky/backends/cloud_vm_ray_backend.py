@@ -929,7 +929,7 @@ class RetryingVmProvisioner(object):
                 # cluster will keep running (which may be ok with the semantics
                 # of 'sky launch' twice).
                 # Tracked in https://github.com/ray-project/ray/issues/20402.
-                ['ray', 'up', '-v', '-y', '--no-restart', cluster_config_file],
+                ['ray', 'up', '-y', '--no-restart', cluster_config_file],
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at=start_streaming_at,
