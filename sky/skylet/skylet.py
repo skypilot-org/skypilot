@@ -2,10 +2,18 @@
 
 import time
 
-from sky.skylet import job_lib
+from sky import sky_logging
+from sky.skylet import events
 
-timestamp = time.strftime('[%Y-%m-%d %H:%M:%S]', time.localtime())
-print(f'[{timestamp}] skylet started')
+logger = sky_logging.init_logger(__name__)
+logger.info('skylet started')
+
+EVENTS = [
+    events.JobUpdateEvent(),
+    events.AutoStopEvent(),
+]
+
 while True:
-    time.sleep(20)
-    job_lib.update_status()
+    time.sleep(events.EVENT_CHECKING_INTERVAL)
+    for event in EVENTS:
+        event.step()
