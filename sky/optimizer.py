@@ -34,6 +34,7 @@ _PerCloudCandidates = Dict[str, List[Resources]]
 # task -> per-cloud candidates
 _TaskToPerCloudCandidates = Dict[Task, _PerCloudCandidates]
 
+
 # Constants: minimize what target?
 class OptimizeTarget(enum.Enum):
     COST = 0
