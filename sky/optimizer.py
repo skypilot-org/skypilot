@@ -1,6 +1,5 @@
 """The Sky optimizer: assigns best resources to user tasks."""
 import collections
-from importlib.resources import Resource
 import colorama
 import enum
 import pprint
@@ -171,7 +170,8 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
         raise_error: bool = False,
-    ) -> Tuple[Dict[Task, Dict[Resources, float]], Dict[Task, Dict[str, List[Resources]]]]:
+    ) -> Tuple[Dict[Task, Dict[Resources, float]], \
+        Dict[Task, Dict[str, List[Resources]]]]:
         """Estimates the compute cost of feasible task-resource mappings."""
         # Cost of running the task on the resources
         # node -> {resources -> cost}
@@ -422,7 +422,8 @@ class Optimizer:
                             pprint.pformat(list(node_to_cost_map.values())[0]))
 
     @staticmethod
-    def _print_candidates(node_to_candidates: Dict[Task, Dict[str, List[Resources]]]):
+    def _print_candidates(node_to_candidates: Dict[Task,
+                                                   Dict[str, List[Resources]]]):
         for node, candidate_set in node_to_candidates.items():
             accelerator = list(node.get_resources())[0].accelerators
             is_multi_instances = False
