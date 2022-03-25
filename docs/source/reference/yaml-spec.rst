@@ -45,6 +45,10 @@ describe all fields available.
       # If unspecified, Sky will default to on-demand instances.
       use_spot: False
 
+      # Disk size in GB to allocate for OS (mounted at /). Increase this if you
+      # have a large working directory or tasks that write out large outputs.
+      disk_size: 256
+
     # Using Sky Storage, you can specify file mounts (all optional).
     file_mounts:
       # This uses rsync to directly copy files from your machine to the remote
