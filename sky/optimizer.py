@@ -27,6 +27,12 @@ Task = task_lib.Task
 _DUMMY_SOURCE_NAME = 'sky-dummy-source'
 _DUMMY_SINK_NAME = 'sky-dummy-sink'
 
+# task -> resources -> estimated cost or time.
+_TaskToCostMap = Dict[Task, Dict[Resources, float]]
+# cloud -> list of resources that have the same accelerators.
+_PerCloudCandidates = Dict[str, List[Resources]]
+# task -> per-cloud candidates
+_TaskToPerCloudCandidates = Dict[Task, _PerCloudCandidates]
 
 # Constants: minimize what target?
 class OptimizeTarget(enum.Enum):
@@ -170,16 +176,18 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[Resources]] = None,
         raise_error: bool = False,
-    ) -> Tuple[Dict[Task, Dict[Resources, float]], \
-        Dict[Task, Dict[str, List[Resources]]]]:
+    ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
         """Estimates the compute cost of feasible task-resource mappings."""
         # Cost of running the task on the resources
         # node -> {resources -> cost}
         node_to_cost_map = collections.defaultdict(dict)
 
         # If a cloud has multiple instance types with the same accelerators,
-        # Sky informs users of the candidates and its decisions.
-        # node -> cloud candidates
+        # Sky informs users about the candidates and its decision.
+        # For example, 5 of AWS g4dn instance types all provide 1 T4 GPU
+        # but differ in the number of CPU cores and the CPU memory capacity.
+        # In such a case, Sky prints the list at the end of the optimizer msg.
+        # node -> cloud -> list of resources that have the same accelerators.
         node_to_candidates = collections.defaultdict(dict)
 
         # Compute the estimated cost/time for each node
@@ -262,7 +270,7 @@ class Optimizer:
     @staticmethod
     def _optimize_by_dp(
         topo_order: List[Task],
-        node_to_cost_map: Dict[Task, Dict[Resources, float]],
+        node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool = True,
     ) -> Tuple[Dict[Task, Resources], float]:
         """Optimizes a chain DAG using a dynamic programming algorithm."""
@@ -375,7 +383,7 @@ class Optimizer:
         best_plan: Dict[Task, Resources],
         total_time: float,
         total_cost: float,
-        node_to_cost_map: Dict[Task, Dict[Resources, float]],
+        node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool,
     ):
         if minimize_cost:
@@ -422,8 +430,7 @@ class Optimizer:
                             pprint.pformat(list(node_to_cost_map.values())[0]))
 
     @staticmethod
-    def _print_candidates(node_to_candidates: Dict[Task,
-                                                   Dict[str, List[Resources]]]):
+    def _print_candidates(node_to_candidates: _TaskToPerCloudCandidates):
         for node, candidate_set in node_to_candidates.items():
             accelerator = list(node.get_resources())[0].accelerators
             is_multi_instances = False
@@ -531,7 +538,7 @@ def _fill_in_launchable_resources(
     task: Task,
     blocked_launchable_resources: Optional[List[Resources]],
     try_fix_with_sky_check: bool = True,
-) -> Tuple[Dict[Resources, List[Resources]], Dict[str, List[Resources]]]:
+) -> Tuple[Dict[Resources, List[Resources]], _PerCloudCandidates]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_check:
         check.check(quiet=True)
