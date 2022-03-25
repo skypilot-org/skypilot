@@ -1929,11 +1929,11 @@ class CloudVmRayBackend(backends.Backend):
                  handle: ResourceHandle,
                  terminate: bool,
                  purge: bool = False,
-                 _force: bool = False) -> bool:
+                 force: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
 
-        if _force:
+        if force:
             # Should only be forced when teardown is called within a
             # locked section of the code (i.e teardown when not enough
             # resources can be provisioned)
@@ -2054,16 +2054,24 @@ class CloudVmRayBackend(backends.Backend):
                                  f'{tpu_stderr}{colorama.Style.RESET_ALL}')
                     return False
 
-        if not purge and returncode != 0:
-            logger.error(
-                f'{colorama.Fore.RED}Failed to terminate {cluster_name}. '
-                f'If you want to ignore this error and remove the cluster '
-                f'from Sky anyways, use sky down --purge.\n'
-                f'**** STDOUT ****\n'
-                f'{stdout}\n'
-                f'**** STDERR ****\n'
-                f'{stderr}{colorama.Style.RESET_ALL}')
-            return False
+        returncode = 1
+        if returncode != 0:
+            if purge:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}'
+                    'WARNING: Received non-zero exit code from cloud provider. '
+                    'Make sure resources are manually deleted.'
+                    f'{colorama.Style.RESET_ALL}')
+            else:
+                logger.error(
+                    f'{colorama.Fore.RED}Failed to terminate {cluster_name}. '
+                    f'If you want to ignore this error and remove the cluster '
+                    f'from from Sky\'s status table, use `sky down --purge`.\n'
+                    f'**** STDOUT ****\n'
+                    f'{stdout}\n'
+                    f'**** STDERR ****\n'
+                    f'{stderr}{colorama.Style.RESET_ALL}')
+                return False
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         backend_utils.SSHConfigHelper.remove_cluster(cluster_name,

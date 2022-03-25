@@ -1207,7 +1207,8 @@ def start(clusters: Tuple[str], yes: bool):
               is_flag=True,
               default=False,
               required=False,
-              help='Ignore cloud provider errors.')
+              help='Ignore cloud provider errors (if any); ' 
+              'useful for cleaning up manually deleted cluster(s).')
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1289,11 +1290,6 @@ def _terminate_or_stop_clusters(names: Tuple[str],
         return
 
     if not no_confirm:
-        if purge:
-            click.secho(
-                'WARNING: Purge will likely require you to manually delete '
-                'resources from your cloud provider.',
-                fg='yellow')
         teardown_verb = 'Terminating' if terminate else 'Stopping'
         cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
         cluster_list = ', '.join([r['name'] for r in to_down])

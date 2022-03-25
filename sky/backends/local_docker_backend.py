@@ -349,7 +349,7 @@ class LocalDockerBackend(backends.Backend):
                  handle: ResourceHandle,
                  terminate: bool,
                  purge: bool = False,
-                 _force: bool = False) -> bool:
+                 force: bool = False) -> bool:
         """Teardown kills the container."""
         if not terminate:
             logger.warning(
