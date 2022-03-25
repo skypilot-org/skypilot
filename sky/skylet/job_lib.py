@@ -272,6 +272,7 @@ def _show_job_queue(jobs) -> None:
         ])
     print(job_table)
 
+
 def show_jobs(username: Optional[str], all_jobs: bool) -> None:
     """Show the job queue.
 
