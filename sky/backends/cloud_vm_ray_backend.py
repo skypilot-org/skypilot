@@ -1817,10 +1817,10 @@ class CloudVmRayBackend(backends.Backend):
             # Case: task_lib.Task(run, num_nodes=N)
             assert task.num_nodes > 1, task.num_nodes
             self._execute_task_n_nodes(handle, task, job_id, detach_run)
-        # This should be called after the job is submitted, otherwise the
-        # cluster will be stopped immediately after provisioned if the
-        # idle_minutes_to_autostop==0.
-        self.set_autostop(handle, task.idle_minutes_to_autostop)
+        # # This should be called after the job is submitted, otherwise the
+        # # cluster will be stopped immediately after provisioned if the
+        # # idle_minutes_to_autostop==0.
+        # self.set_autostop(handle, task.idle_minutes_to_autostop)
 
     def _execute_task_one_node(self, handle: ResourceHandle,
                                task: task_lib.Task, job_id: int,
