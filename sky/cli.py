@@ -805,6 +805,7 @@ def _readable_time_duration(start_time: int):
               help='Show all information in full.')
 def status(all: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
+    # TODO(zhwu): Update the information for auto-stop clusters.
     show_all = all
     clusters_status = global_user_state.get_clusters()
     cluster_table = util_lib.create_table([
@@ -873,7 +874,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     username = getpass.getuser()
     if all_users:
         username = None
-    code = backend_utils.JobLibCodeGen.show_jobs(username, all_jobs)
+    code = job_lib.JobLibCodeGen.show_jobs(username, all_jobs)
 
     if clusters:
         handles = [
@@ -998,7 +999,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster}...',
                     fg='yellow')
 
-    code = backend_utils.JobLibCodeGen.cancel_jobs(jobs)
+    code = job_lib.JobLibCodeGen.cancel_jobs(jobs)
 
     # FIXME: Assumes a specific backend.
     backend = backends.CloudVmRayBackend()
@@ -1067,6 +1068,64 @@ def stop(
                                 apply_to_all=all,
                                 terminate=False,
                                 no_confirm=yes)
+
+
+@cli.command(cls=_DocumentedCodeCommand)
+@click.argument('clusters', nargs=-1, required=False)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Tear down all existing clusters.')
+@click.option('--idle_minutes',
+              '-i',
+              type=int,
+              default=False,
+              required=False,
+              help='Set the idle minutes before auto-stopping the cluster.')
+@click.option('--cancel',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Cancel the auto-stopping.')
+def autostop(
+        clusters: Tuple[str],
+        all: Optional[bool],  # pylint: disable=redefined-builtin
+        idle_minutes: Optional[int],
+        cancel: bool,  # pylint: disable=redefined-outer-name
+):
+    """Set the auto stopping for cluster(s).
+
+    CLUSTER is the name (or glob pattern) of the cluster to stop.  If both
+    CLUSTER and --all are supplied, the latter takes precedence.
+
+    --idle-minutes is the number of minutes after which the cluster will be
+    stopped automatically.
+
+    --cancel will cancel the autostopping.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Set auto stopping for a specific cluster.
+        sky autostop cluster_name -i 60
+
+        # Cancel auto stopping for a specific cluster.
+        sky autostop cluster_name --cancel
+    .. code-block:: bash
+
+    """
+    if cancel and idle_minutes is not None:
+        raise click.UsageError(
+            'Only one of --idle-minutes and --cancel should be specified.')
+    if cancel:
+        idle_minutes = -1
+    _terminate_or_stop_clusters(clusters,
+                                apply_to_all=all,
+                                terminate=False,
+                                no_confirm=True,
+                                idle_minutes_to_autostop=idle_minutes)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1245,9 +1304,15 @@ def down(
                                 no_confirm=yes)
 
 
-def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
-                                terminate: bool, no_confirm: bool) -> None:
-    """Terminates or stops a cluster (or all clusters)."""
+def _terminate_or_stop_clusters(
+        names: Tuple[str],
+        apply_to_all: Optional[bool],
+        terminate: bool,
+        no_confirm: bool,
+        idle_minutes_to_autostop: Optional[int] = None) -> None:
+    """Terminates or (auto-)stops a cluster (or all clusters)."""
+    assert idle_minutes_to_autostop is None or (not terminate and no_confirm), (
+        idle_minutes_to_autostop, terminate, no_confirm)
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
         raise click.UsageError(
@@ -1301,6 +1366,22 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             click.echo('  To terminate the cluster, run: ', nl=False)
             click.secho(f'sky down {name}', bold=True)
             continue
+
+        if idle_minutes_to_autostop is not None:
+            if not isinstance(backend, backends.CloudVmRayBackend):
+                click.secho(f'Set cluster {name} to auto-stop... skipped, '
+                            'because auto-stopping is only supported by '
+                            'backend: CloudVMRayBackend')
+                continue
+            click.secho(
+                f'Set cluster {name} to auto-stop after '
+                f'{idle_minutes_to_autostop} minutes of inactivity.',
+                fg='green')
+            click.echo('  To cancel the autostop, run: ', nl=False)
+            click.secho(f'sky autostop {name} --cancel', bold=True)
+            backend.set_autostop(handle, idle_minutes_to_autostop)
+            continue
+
         success = backend.teardown(handle, terminate=terminate)
         operation = 'Terminating' if terminate else 'Stopping'
         if success:

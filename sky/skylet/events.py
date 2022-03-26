@@ -1,9 +1,12 @@
 """skylet events"""
 import psutil
+import subprocess
 import time
 import traceback
 
 from sky import sky_logging
+from sky.backends import backend_utils
+from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.skylet import job_lib
 from sky.skylet import configs
 
@@ -69,7 +72,20 @@ class AutostopEvent(SkyletEvent):
         if idle_minutes >= autostop_config.autostop_idle_minutes:
             logger.info(f'idle_minutes {idle_minutes} reached config '
                         f'{autostop_config.autostop_idle_minutes}. Stopping.')
-            self._stop_cluster()
+            self._stop_cluster(autostop_config)
 
-    def _stop_cluster(self):
-        raise NotImplementedError
+    def _stop_cluster(self, autostop_config):
+        if autostop_config.backend == CloudVmRayBackend.NAME:
+            # Destroy the workers first to avoid orphan workers.
+            subprocess.run([
+                'ray', 'down', '--workers-only',
+                backend_utils.SKY_RAY_YAML_REMOTE_PATH
+            ],
+                           check=True)
+            subprocess.run(
+                ['ray', 'down', backend_utils.SKY_RAY_YAML_REMOTE_PATH],
+                check=True)
+
+            pass
+        else:
+            raise NotImplementedError

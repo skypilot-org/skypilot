@@ -70,6 +70,7 @@ class Task:
         run: Optional[CommandOrCommandGen] = None,
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
+        idle_minutes_to_autostop: Optional[int] = None,
         # Advanced:
         docker_image: Optional[str] = None,
     ):
@@ -113,6 +114,10 @@ class Task:
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04')
         self.num_nodes = num_nodes
+
+        # Stop the cluster if idle for this many minutes.
+        self.idle_minutes_to_autostop = idle_minutes_to_autostop
+
         self.inputs = None
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
@@ -197,6 +202,7 @@ class Task:
             workdir=config.get('workdir'),
             setup=config.get('setup'),
             num_nodes=config.get('num_nodes'),
+            idle_minutes_to_autostop=config.get('idle_minutes_to_autostop'),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
