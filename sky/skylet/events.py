@@ -7,7 +7,7 @@ import traceback
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
-from sky.skylet import job_lib
+from sky.skylet import autostop_lib, job_lib
 from sky.skylet import configs
 
 EVENT_CHECKING_INTERVAL = 1
@@ -58,7 +58,9 @@ class AutostopEvent(SkyletEvent):
         self.last_active_time = time.time()
 
     def _run(self):
-        autostop_config = configs.get_autostop_config()
+        autostop_config = configs.get_config(autostop_lib.AUTOSTOP_CONFIG_KEY)
+        if autostop_config is None:
+            autostop_config = autostop_lib.AutostopConfig(-1, -1, None)
         if (autostop_config.autostop_idle_minutes < 0 or
                 autostop_config.boot_time != psutil.boot_time()):
             logger.debug('autostop_config not set. Skipped.')

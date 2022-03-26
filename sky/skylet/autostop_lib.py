@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from sky.skylet import configs
 
-_AUTOSTOP_CONFIG_KEY = 'autostop_config'
+AUTOSTOP_CONFIG_KEY = 'autostop_config'
 
 
 class AutostopConfig:
@@ -20,7 +20,7 @@ class AutostopConfig:
 
 
 def get_autostop_config() -> Optional[AutostopConfig]:
-    config_str = configs.get_config(_AUTOSTOP_CONFIG_KEY)
+    config_str = configs.get_config(AUTOSTOP_CONFIG_KEY)
     if config_str is None:
         return None
     return json.loads(config_str)
@@ -29,7 +29,7 @@ def get_autostop_config() -> Optional[AutostopConfig]:
 def set_autostop(idle_minutes: int, backend: Optional[str]) -> None:
     boot_time = psutil.boot_time()
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend)
-    configs.set_config(_AUTOSTOP_CONFIG_KEY, json.dumps(autostop_config))
+    configs.set_config(AUTOSTOP_CONFIG_KEY, json.dumps(autostop_config))
 
 
 class AutostopCodeGen:
