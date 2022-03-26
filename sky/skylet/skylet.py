@@ -10,7 +10,7 @@ logger.info('skylet started')
 
 EVENTS = [
     events.JobUpdateEvent(),
-    events.AutoStopEvent(),
+    events.AutostopEvent(),
 ]
 
 while True:
