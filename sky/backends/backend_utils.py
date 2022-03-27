@@ -12,7 +12,7 @@ import subprocess
 import sys
 import textwrap
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 
@@ -26,15 +26,15 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import resources
 from sky.adaptors import azure
 from sky.backends import wheel_utils
 from sky.skylet import log_lib
 
+if TYPE_CHECKING:
+    from sky import resources
+
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
-
-Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
@@ -478,7 +478,7 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
-def write_cluster_config(to_provision: Resources,
+def write_cluster_config(to_provision: 'resources.Resources',
                          num_nodes: int,
                          cluster_config_template: str,
                          cluster_name: str,

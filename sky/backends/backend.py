@@ -1,11 +1,10 @@
 """Sky backend interface."""
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
-from sky import resources
-from sky import task as task_lib
+if TYPE_CHECKING:
+    from sky import resources
+    from sky import task as task_lib
 
-Task = task_lib.Task
-Resources = resources.Resources
 Path = str
 
 
@@ -23,8 +22,8 @@ class Backend:
             raise NotImplementedError
 
     def provision(self,
-                  task: Task,
-                  to_provision: Optional[Resources],
+                  task: 'task_lib.Task',
+                  to_provision: Optional['resources.Resources'],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None) -> ResourceHandle:
@@ -41,13 +40,13 @@ class Backend:
     ) -> None:
         raise NotImplementedError
 
-    def setup(self, handle: ResourceHandle, task: Task) -> None:
+    def setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
-    def add_storage_objects(self, task: Task) -> None:
+    def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
-    def execute(self, handle: ResourceHandle, task: Task,
+    def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
                 detach_run: bool) -> None:
         raise NotImplementedError
 
@@ -55,7 +54,7 @@ class Backend:
         """Post execute(): e.g., print helpful inspection messages."""
         raise NotImplementedError
 
-    def teardown_ephemeral_storage(self, task: Task) -> None:
+    def teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
     def teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
