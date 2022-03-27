@@ -1087,7 +1087,7 @@ def stop(
 @click.option('--idle_minutes',
               '-i',
               type=int,
-              default=False,
+              default=None,
               required=False,
               help='Set the idle minutes before auto-stopping the cluster.')
 @click.option('--cancel',
@@ -1125,9 +1125,12 @@ def autostop(
     """
     if cancel and idle_minutes is not None:
         raise click.UsageError(
-            'Only one of --idle-minutes and --cancel should be specified.')
+            'Only one of --idle-minutes and --cancel should be specified. '
+            f'cancel: {cancel}, idle_minutes: {idle_minutes}')
     if cancel:
         idle_minutes = -1
+    elif idle_minutes is None:
+        idle_minutes = 0
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=False,

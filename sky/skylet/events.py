@@ -69,6 +69,7 @@ class AutostopEvent(SkyletEvent):
 
         if (autostop_config.autostop_idle_minutes < 0 or
                 autostop_config.boot_time != psutil.boot_time()):
+            self.last_active_time = time.time()
             logger.debug('autostop_config not set. Skipped.')
             return
 
@@ -95,6 +96,9 @@ class AutostopEvent(SkyletEvent):
             subprocess.run(
                 ['ray', 'up', '-v', '-y', '--restart-only', self.ray_yaml_path],
                 check=True)
+            subprocess.run(
+                ['ray', 'down', '-y', '--workers-only', self.ray_yaml_path],
+                check=True)
             subprocess.run(['ray', 'down', '-y', self.ray_yaml_path],
                            check=True)
 
@@ -105,10 +109,13 @@ class AutostopEvent(SkyletEvent):
     def _update_yaml(self, yaml_path: str):
         with open(yaml_path, 'r') as f:
             yaml_str = f.read()
+        # Update the number of workers to 0.
         yaml_str = self.NUM_WORKER_PATTERN.sub(r'\g<1>_workers: 0', yaml_str)
         yaml_str = self.UPSCALING_PATTERN.sub(r'upscaling_speed: 0', yaml_str)
-        config = yaml.load(yaml_str)
+        config = yaml.safe_load(yaml_str)
+        # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
+        # Empty the file_mounts.
         config['file_mounts'] = dict()
         backend_utils.dump_yaml(yaml_path, config)
         print('Replaced worker num and upscaling speed to 0.')
