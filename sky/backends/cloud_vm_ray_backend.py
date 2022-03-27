@@ -1336,7 +1336,8 @@ class CloudVmRayBackend(backends.Backend):
                                             code,
                                             'Failed to set autostop',
                                             stderr=stderr)
-            # TODO(zhwu): set the autostop in the global state.
+            global_user_state.set_cluster_autostop(handle.cluster_name,
+                                                   idle_minutes_to_autostop)
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
