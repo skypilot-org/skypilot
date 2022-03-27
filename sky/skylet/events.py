@@ -1,6 +1,7 @@
 """skylet events"""
 import os
 import psutil
+import re
 import subprocess
 import time
 import traceback
@@ -53,6 +54,8 @@ class AutostopEvent(SkyletEvent):
     """Skylet event for autostop."""
     EVENT_INTERVAL = 60
 
+    NUM_WORKER_PATTERN = re.compile(r'((?:min|max))_workers: (\d+)')
+
     def __init__(self):
         super().__init__()
         self.last_active_time = time.time()
@@ -75,7 +78,9 @@ class AutostopEvent(SkyletEvent):
         else:
             self.last_active_time = time.time()
             idle_minutes = -1
-            logger.debug('Not idle. Reset idle minutes.')
+            logger.debug(
+                'Not idle. Reset idle minutes.'
+                f'AutoStop config: {autostop_config.autostop_idle_minutes}')
         if idle_minutes >= autostop_config.autostop_idle_minutes:
             logger.info(f'idle_minutes {idle_minutes} reached config '
                         f'{autostop_config.autostop_idle_minutes}. Stopping.')
@@ -83,6 +88,7 @@ class AutostopEvent(SkyletEvent):
 
     def _stop_cluster(self, autostop_config):
         if autostop_config.backend == CloudVmRayBackend.NAME:
+            self._replace_worker_num(self.ray_yaml_path)
             # Destroy the workers first to avoid orphan workers.
             subprocess.run(
                 ['ray', 'down', '-y', '--workers-only', self.ray_yaml_path],
@@ -93,3 +99,11 @@ class AutostopEvent(SkyletEvent):
             pass
         else:
             raise NotImplementedError
+
+    def _replace_worker_num(self, yaml_path: str):
+        with open(yaml_path, 'r') as f:
+            yaml_str = f.read()
+        yaml_str = self.NUM_WORKER_PATTERN.sub(r'\g<1>_workers: 0', yaml_str)
+        with open(yaml_path, 'w') as f:
+            f.write(yaml_str)
+        print('Replaced worker num to 0.')

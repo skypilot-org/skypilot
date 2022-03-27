@@ -227,6 +227,7 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
     if count == 0:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
+
 def set_cluster_autostop(cluster_name: str, idle_minutes: int) -> None:
     _CURSOR.execute('UPDATE clusters SET autostop=(?) WHERE name=(?)', (
         idle_minutes,
@@ -237,6 +238,7 @@ def set_cluster_autostop(cluster_name: str, idle_minutes: int) -> None:
     assert count <= 1, count
     if count == 0:
         raise ValueError(f'Cluster {cluster_name} not found.')
+
 
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')
