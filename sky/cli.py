@@ -679,7 +679,7 @@ def exec(
     Execution and scheduling behavior:
     \b
     - If ENTRYPOINT is a YAML, or if it is a command with a resource demand
-      flag specified (`--gpus` or `--num_nodes`): it is treated as a proper
+      flag specified (`--gpus` or `--num-nodes`): it is treated as a proper
       task that will undergo job queue scheduling, respecting its resource
       requirement. It can be executed on any node of th cluster with enough
       resources.
