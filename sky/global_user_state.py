@@ -51,7 +51,19 @@ _CURSOR.execute("""\
     last_use TEXT,
     status TEXT)""")
 
+def add_column_to_table(table_name: str, column_name: str, column_type: str):
+    for row in _CURSOR.execute(f'PRAGMA table_info({table_name})'):
+        if row[1] == column_name:
+            break
+    else:
+        _CURSOR.execute(f'ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}')
+
+# Add autostop column to clusters table
+add_column_to_table('clusters', 'autostop', 'INTEGER DEFAULT -1')
+
 _CONN.commit()
+
+
 
 
 class ClusterStatus(enum.Enum):
@@ -203,7 +215,7 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')
     records = []
-    for name, launched_at, handle, last_use, status in rows:
+    for name, launched_at, handle, last_use, status, autostop in rows:
         # TODO: use namedtuple instead of dict
         records.append({
             'name': name,
@@ -211,6 +223,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'handle': pickle.loads(handle),
             'last_use': last_use,
             'status': ClusterStatus[status],
+            'autostop': autostop,
         })
     return records
 
@@ -265,7 +278,7 @@ def set_storage_status(storage_name: str, status: StorageStatus) -> None:
     _CONN.commit()
     assert count <= 1, count
     if count == 0:
-        raise ValueError(f'Storage{storage_name} not found.')
+        raise ValueError(f'Storage {storage_name} not found.')
 
 
 def get_storage_status(storage_name: str) -> None:

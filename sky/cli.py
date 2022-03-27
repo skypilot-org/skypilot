@@ -812,8 +812,9 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         'NAME',
         'LAUNCHED',
         'RESOURCES',
-        'COMMAND',
         'STATUS',
+        'AUTOSTOP',
+        'COMMAND',
     ])
 
     for cluster_status in clusters_status:
@@ -833,6 +834,10 @@ def status(all: bool):  # pylint: disable=redefined-builtin
                                  f'{launched_resource_str}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
+        autostop_str = '-'
+        if cluster_status['autostop'] >= 0:
+            # TODO(zhwu): check the status of the autostop cluster.
+            autostop_str = str(cluster_status['autostop']) + ' min'
         cluster_table.add_row([
             # NAME
             cluster_status['name'],
@@ -840,11 +845,13 @@ def status(all: bool):  # pylint: disable=redefined-builtin
             _readable_time_duration(launched_at),
             # RESOURCES
             resources_str,
+            # STATUS
+            cluster_status['status'].value,
+            # AUTOSTOP
+            autostop_str,
             # COMMAND
             cluster_status['last_use']
             if show_all else _truncate_long_string(cluster_status['last_use']),
-            # STATUS
-            cluster_status['status'].value,
         ])
     if clusters_status:
         click.echo(cluster_table)
