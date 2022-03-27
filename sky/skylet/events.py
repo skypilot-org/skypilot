@@ -5,6 +5,7 @@ import re
 import subprocess
 import time
 import traceback
+import yaml
 
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -55,6 +56,7 @@ class AutostopEvent(SkyletEvent):
     EVENT_INTERVAL = 60
 
     NUM_WORKER_PATTERN = re.compile(r'((?:min|max))_workers: (\d+)')
+    UPSCALING_PATTERN = re.compile(r'upscaling_speed: (\d+)')
 
     def __init__(self):
         super().__init__()
@@ -88,10 +90,10 @@ class AutostopEvent(SkyletEvent):
 
     def _stop_cluster(self, autostop_config):
         if autostop_config.backend == CloudVmRayBackend.NAME:
-            self._replace_worker_num(self.ray_yaml_path)
+            self._update_yaml(self.ray_yaml_path)
             # Destroy the workers first to avoid orphan workers.
             subprocess.run(
-                ['ray', 'down', '-y', '--workers-only', self.ray_yaml_path],
+                ['ray', 'up', '-v', '-y', '--restart-only', self.ray_yaml_path],
                 check=True)
             subprocess.run(['ray', 'down', '-y', self.ray_yaml_path],
                            check=True)
@@ -100,10 +102,13 @@ class AutostopEvent(SkyletEvent):
         else:
             raise NotImplementedError
 
-    def _replace_worker_num(self, yaml_path: str):
+    def _update_yaml(self, yaml_path: str):
         with open(yaml_path, 'r') as f:
             yaml_str = f.read()
         yaml_str = self.NUM_WORKER_PATTERN.sub(r'\g<1>_workers: 0', yaml_str)
-        with open(yaml_path, 'w') as f:
-            f.write(yaml_str)
-        print('Replaced worker num to 0.')
+        yaml_str = self.UPSCALING_PATTERN.sub(r'upscaling_speed: 0', yaml_str)
+        config = yaml.load(yaml_str)
+        config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
+        config['file_mounts'] = dict()
+        backend_utils.dump_yaml(yaml_path, config)
+        print('Replaced worker num and upscaling speed to 0.')
