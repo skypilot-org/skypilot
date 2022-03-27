@@ -500,7 +500,7 @@ def cli():
           'resources and is used for scheduling the task. '
           'Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
-@click.option('--num_nodes',
+@click.option('--num-nodes',
               required=False,
               type=int,
               help=('Number of nodes to launch and to execute the task on. '
@@ -648,7 +648,7 @@ def launch(
           'This is used for scheduling the task, so it must fit the '
           'cluster\'s total resources. Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
-@click.option('--num_nodes',
+@click.option('--num-nodes',
               required=False,
               type=int,
               help=('Task demand: Number of nodes to execute the task on. '
