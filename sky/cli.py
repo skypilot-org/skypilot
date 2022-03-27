@@ -500,7 +500,7 @@ def cli():
           'resources and is used for scheduling the task. '
           'Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
-@click.option('--num_nodes',
+@click.option('--num-nodes',
               required=False,
               type=int,
               help=('Number of nodes to launch and to execute the task on. '
@@ -648,7 +648,7 @@ def launch(
           'This is used for scheduling the task, so it must fit the '
           'cluster\'s total resources. Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
-@click.option('--num_nodes',
+@click.option('--num-nodes',
               required=False,
               type=int,
               help=('Task demand: Number of nodes to execute the task on. '
@@ -679,7 +679,7 @@ def exec(
     Execution and scheduling behavior:
     \b
     - If ENTRYPOINT is a YAML, or if it is a command with a resource demand
-      flag specified (`--gpus` or `--num_nodes`): it is treated as a proper
+      flag specified (`--gpus` or `--num-nodes`): it is treated as a proper
       task that will undergo job queue scheduling, respecting its resource
       requirement. It can be executed on any node of th cluster with enough
       resources.
