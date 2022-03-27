@@ -34,7 +34,7 @@ _CURSOR = _CONN.cursor()
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS clusters (
     name TEXT PRIMARY KEY,
-    lauched_at INTEGER,
+    launched_at INTEGER,
     handle BLOB,
     last_use TEXT,
     status TEXT)""")
@@ -46,24 +46,38 @@ _CURSOR.execute("""\
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS storage (
     name TEXT PRIMARY KEY,
-    lauched_at INTEGER,
+    launched_at INTEGER,
     handle BLOB,
     last_use TEXT,
     status TEXT)""")
+
 
 def add_column_to_table(table_name: str, column_name: str, column_type: str):
     for row in _CURSOR.execute(f'PRAGMA table_info({table_name})'):
         if row[1] == column_name:
             break
     else:
-        _CURSOR.execute(f'ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}')
+        _CURSOR.execute(f'ALTER TABLE {table_name} '
+                        f'ADD COLUMN {column_name} {column_type}')
 
+
+def rename_column(table_name: str, old_name: str, new_name: str):
+    for row in _CURSOR.execute(f'PRAGMA table_info({table_name})'):
+        if row[1] == old_name:
+            _CURSOR.execute(f'ALTER TABLE {table_name} '
+                            f'RENAME COLUMN {old_name} to {new_name}')
+            break
+
+
+# For backward compatibility.
+# TODO(zhwu): Remove this function after all users have migrated to
+# the latest version of Sky.
 # Add autostop column to clusters table
 add_column_to_table('clusters', 'autostop', 'INTEGER DEFAULT -1')
+rename_column('clusters', 'lauched_at', 'launched_at')
+rename_column('storage', 'lauched_at', 'launched_at')
 
 _CONN.commit()
-
-
 
 
 class ClusterStatus(enum.Enum):
@@ -135,7 +149,9 @@ def add_or_update_cluster(cluster_name: str,
     last_use = _get_pretty_entry_point()
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _CURSOR.execute(
-        'INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?, ?)',
+        'INSERT OR REPLACE INTO clusters'
+        '(name, launched_at, handle, last_use, status) '
+        'VALUES (?, ?, ?, ?, ?)',
         (cluster_name, cluster_launched_at, handle, last_use, status.value))
     _CONN.commit()
 
@@ -211,6 +227,16 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
     if count == 0:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
+def set_cluster_autostop(cluster_name: str, idle_minutes: int) -> None:
+    _CURSOR.execute('UPDATE clusters SET autostop=(?) WHERE name=(?)', (
+        idle_minutes,
+        cluster_name,
+    ))
+    count = _CURSOR.rowcount
+    _CONN.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
 
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')

@@ -1330,14 +1330,14 @@ def _terminate_or_stop_clusters(
     if len(names) > 0:
         glob_names = []
         for name in names:
-            glob_names.extend(global_user_state.get_glob_cluster_names(name))
+            glob_name = global_user_state.get_glob_cluster_names(name)
+            if len(glob_name) == 0:
+                print(f'Cluster {name} not found.')
+            glob_names.extend(glob_name)
         names = list(set(glob_names))
         for name in names:
             handle = global_user_state.get_handle_from_cluster_name(name)
-            if handle is not None:
-                to_down.append({'name': name, 'handle': handle})
-            else:
-                print(f'Cluster {name} not found.')
+            to_down.append({'name': name, 'handle': handle})
     if apply_to_all:
         to_down = global_user_state.get_clusters()
         if len(names) > 0:
