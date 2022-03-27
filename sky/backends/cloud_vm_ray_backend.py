@@ -1329,9 +1329,13 @@ class CloudVmRayBackend(backends.Backend):
         if idle_minutes_to_autostop is not None:
             code = autostop_lib.AutostopCodeGen.set_autostop(
                 idle_minutes_to_autostop, self.NAME)
-            returncode = self.run_on_head(handle, code)
-            backend_utils.handle_returncode(returncode, code,
-                                            'Failed to set autostop')
+            returncode, _, stderr = self.run_on_head(handle,
+                                                     code,
+                                                     require_outputs=True)
+            backend_utils.handle_returncode(returncode,
+                                            code,
+                                            'Failed to set autostop',
+                                            stderr=stderr)
             # TODO(zhwu): set the autostop in the global state.
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:

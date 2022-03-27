@@ -26,6 +26,6 @@ def get_config(key: str) -> str:
 def set_config(key: str, value: str) -> None:
     _CURSOR.execute(
         """\
-        INSERT OR REPLACE INTO config (?, ?)
+        INSERT OR REPLACE INTO config VALUES (?, ?)
         """, (key, value))
     _CONN.commit()

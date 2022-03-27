@@ -1,5 +1,5 @@
 """Sky autostop utility function."""
-import json
+import pickle
 import psutil
 from typing import List, Optional
 
@@ -22,14 +22,14 @@ class AutostopConfig:
 def get_autostop_config() -> Optional[AutostopConfig]:
     config_str = configs.get_config(AUTOSTOP_CONFIG_KEY)
     if config_str is None:
-        return None
-    return json.loads(config_str)
+        return AutostopConfig(-1, -1, None)
+    return pickle.loads(config_str)
 
 
 def set_autostop(idle_minutes: int, backend: Optional[str]) -> None:
     boot_time = psutil.boot_time()
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend)
-    configs.set_config(AUTOSTOP_CONFIG_KEY, json.dumps(autostop_config))
+    configs.set_config(AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
 
 
 class AutostopCodeGen:

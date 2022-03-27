@@ -249,7 +249,7 @@ def is_idle() -> bool:
     rows = _CURSOR.execute(
         """\
         SELECT COUNT(*) FROM jobs
-        WHERE status IN (?, ?)
+        WHERE status IN (?, ?, ?)
         """, (JobStatus.INIT.value, JobStatus.PENDING.value,
               JobStatus.RUNNING.value))
     for (count,) in rows:
