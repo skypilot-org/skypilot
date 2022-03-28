@@ -484,7 +484,7 @@ def write_cluster_config(to_provision: Resources,
                          cluster_name: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False):
+                         dryrun: bool = False) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -577,6 +577,7 @@ def write_cluster_config(to_provision: Resources,
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
+    config_dict['sky_wheel_path'] = str(local_wheel_path)
     if dryrun:
         return config_dict
     _add_ssh_to_cluster_config(cloud, yaml_path)
