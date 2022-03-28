@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
@@ -1180,3 +1181,24 @@ class JobLibCodeGen(object):
         code = cls._PREFIX + code
         code = ';'.join(code)
         return f'python3 -u -c {code!r}'
+
+
+class ThreadConsole:
+    """An empty class for multi-threaded console.status."""
+    PATTERN = re.compile(r'\[.*?\]')
+
+    def __init__(self, msg: str):
+        self.msg = self.PATTERN.sub('', msg)
+
+    def __enter__(self):
+        print(self.msg)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+def safe_console_status(msg: str):
+    """A wrapper for multi-threaded console.status."""
+    if threading.current_thread() is threading.main_thread():
+        return console.status(msg)
+    return ThreadConsole(msg)

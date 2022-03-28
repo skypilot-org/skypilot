@@ -56,11 +56,10 @@ _CONN.commit()
 
 
 def get_db_connection():
-    thread_conn = _CONN
-    thread_cursor = _CURSOR
-    if threading.current_thread() != threading.main_thread():
-        thread_conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
-        thread_cursor = thread_conn.cursor()
+    if threading.current_thread() is threading.main_thread():
+        return _CONN, _CURSOR
+    thread_conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    thread_cursor = thread_conn.cursor()
     return thread_conn, thread_cursor
 
 
