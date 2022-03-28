@@ -801,11 +801,11 @@ class RetryingVmProvisioner(object):
                 to_provision,
                 num_nodes,
                 _get_cluster_config_template(to_provision.cloud),
+                cluster_name,
                 self._local_wheel_path,
                 region=region,
                 zones=zones,
-                dryrun=dryrun,
-                cluster_name=cluster_name)
+                dryrun=dryrun)
             if dryrun:
                 return
             tpu_name = config_dict.get('tpu_name')
