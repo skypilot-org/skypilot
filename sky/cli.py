@@ -1287,7 +1287,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             abort=True,
             show_default=True)
 
-    for record in to_down:  # TODO: parallelize.
+    def _terminate_or_stop(record):
         name = record['name']
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
@@ -1300,7 +1300,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
                 fg='green')
             click.echo('  To terminate the cluster, run: ', nl=False)
             click.secho(f'sky down {name}', bold=True)
-            continue
+            return
         success = backend.teardown(handle, terminate=terminate)
         operation = 'Terminating' if terminate else 'Stopping'
         if success:
@@ -1313,6 +1313,8 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
                 f'{operation} cluster {name}...failed. '
                 'Please check the logs and try again.',
                 fg='red')
+
+    backend_utils.run_in_parallel(_terminate_or_stop, to_down)
 
 
 @_interactive_node_cli_command

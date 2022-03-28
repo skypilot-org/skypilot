@@ -13,6 +13,7 @@ import pathlib
 import pickle
 import sqlite3
 import sys
+import threading
 import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -27,7 +28,7 @@ _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
-_CONN = sqlite3.connect(_DB_PATH)
+_CONN = sqlite3.connect(_DB_PATH, check_same_thread=False)
 _CURSOR = _CONN.cursor()
 
 # Table for Clusters
@@ -52,6 +53,15 @@ _CURSOR.execute("""\
     status TEXT)""")
 
 _CONN.commit()
+
+
+def get_db_connection():
+    thread_conn = _CONN
+    thread_cursor = _CURSOR
+    if threading.current_thread() != threading.main_thread():
+        thread_conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+        thread_cursor = thread_conn.cursor()
+    return thread_conn, thread_cursor
 
 
 class ClusterStatus(enum.Enum):
@@ -137,8 +147,10 @@ def update_last_use(cluster_name: str):
 
 def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
+    thread_conn, thread_cursor = get_db_connection()
     if terminate:
-        _CURSOR.execute('DELETE FROM clusters WHERE name=(?)', (cluster_name,))
+        thread_cursor.execute('DELETE FROM clusters WHERE name=(?)',
+                              (cluster_name,))
     else:
         handle = get_handle_from_cluster_name(cluster_name)
         if handle is None:
@@ -146,13 +158,13 @@ def remove_cluster(cluster_name: str, terminate: bool):
         # Must invalidate head_ip: otherwise 'sky cpunode' on a stopped cpunode
         # will directly try to ssh, which leads to timeout.
         handle.head_ip = None
-        _CURSOR.execute(
+        thread_cursor.execute(
             'UPDATE clusters SET handle=(?), status=(?) WHERE name=(?)', (
                 pickle.dumps(handle),
                 ClusterStatus.STOPPED.value,
                 cluster_name,
             ))
-    _CONN.commit()
+    thread_conn.commit()
 
 
 def get_handle_from_cluster_name(
@@ -182,8 +194,9 @@ def get_cluster_name_from_handle(
 
 def get_status_from_cluster_name(
         cluster_name: Optional[str]) -> Optional[ClusterStatus]:
-    rows = _CURSOR.execute('SELECT status FROM clusters WHERE name=(?)',
-                           (cluster_name,))
+    _, thread_cursor = get_db_connection()
+    rows = thread_cursor.execute('SELECT status FROM clusters WHERE name=(?)',
+                                 (cluster_name,))
     for (status,) in rows:
         return ClusterStatus[status]
 

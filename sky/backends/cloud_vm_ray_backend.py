@@ -1,5 +1,6 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
+import threading
 import click
 import contextlib
 import enum
@@ -1955,6 +1956,23 @@ class CloudVmRayBackend(backends.Backend):
         return False
 
     def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
+
+        class ThreadConsole:
+            """An empty class for multi-threaded console.status."""
+            PATTERN = re.compile(r'\[.*?\]')
+
+            def __init__(self, msg: str):
+                self.msg = self.PATTERN.sub('', msg)
+
+            def __enter__(self):
+                print(self.msg)
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        console_status = console.status
+        if threading.current_thread() != threading.main_thread():
+            console_status = ThreadConsole
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1993,7 +2011,7 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = (
                     f'aws ec2 terminate-instances --region {region} '
                     f'--instance-ids $({query_cmd})')
-                with console.status(f'[bold cyan]Terminating '
+                with console_status(f'[bold cyan]Terminating '
                                     f'[green]{cluster_name}'):
                     returncode, stdout, stderr = log_lib.run_with_log(
                         terminate_cmd,
@@ -2010,7 +2028,7 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = (
                     f'gcloud compute instances delete --zone={zone} --quiet '
                     f'$({query_cmd})')
-                with console.status(f'[bold cyan]Terminating '
+                with console_status(f'[bold cyan]Terminating '
                                     f'[green]{cluster_name}'):
                     returncode, stdout, stderr = log_lib.run_with_log(
                         terminate_cmd,
@@ -2031,7 +2049,7 @@ class CloudVmRayBackend(backends.Backend):
                 f.flush()
 
                 teardown_verb = 'Terminating' if terminate else 'Stopping'
-                with console.status(f'[bold cyan]{teardown_verb} '
+                with console_status(f'[bold cyan]{teardown_verb} '
                                     f'[green]{cluster_name}'):
                     returncode, stdout, stderr = log_lib.run_with_log(
                         ['ray', 'down', '-y', f.name],
@@ -2040,7 +2058,7 @@ class CloudVmRayBackend(backends.Backend):
                         require_outputs=True)
 
             if handle.tpu_delete_script is not None:
-                with console.status('[bold cyan]Terminating TPU...'):
+                with console_status('[bold cyan]Terminating TPU...'):
                     tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
                         ['bash', handle.tpu_delete_script],
                         log_abs_path,
@@ -2067,7 +2085,7 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.SSHConfigHelper.remove_cluster(cluster_name,
                                                      handle.head_ip,
                                                      auth_config)
-        name = global_user_state.get_cluster_name_from_handle(handle)
+        name = handle.cluster_name
         global_user_state.remove_cluster(name, terminate=terminate)
 
         if terminate:
