@@ -15,6 +15,19 @@ and the commands to run:
   resources:
     accelerators: V100:4
 
+  # Optional: upload a working directory to remote ~/sky_workdir.
+  # Commands in "setup" and "run" will be executed under it.
+  #
+  # workdir: .
+
+  # Optional: upload local files.
+  # Format:
+  #   /remote/path: /local/path
+  #
+  # file_mounts:
+  #   ~/.vimrc: ~/.vimrc
+  #   ~/.netrc: ~/.netrc
+
   setup: |
     set -e  # Exit if any command failed.
     git clone https://github.com/huggingface/transformers/ || true
