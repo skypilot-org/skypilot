@@ -1344,7 +1344,8 @@ class CloudVmRayBackend(backends.Backend):
         fore = colorama.Fore
         style = colorama.Style
         ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes)
+                                             handle.launched_nodes,
+                                             handle=handle)
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
         # These asserts have been validated at Task construction time.
@@ -1414,7 +1415,8 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
 
         ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes)
+                                             handle.launched_nodes,
+                                             handle=handle)
         ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
 
@@ -1589,7 +1591,8 @@ class CloudVmRayBackend(backends.Backend):
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
             ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                                 handle.launched_nodes)
+                                                 handle.launched_nodes,
+                                                 handle=handle)
             ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
 
@@ -1657,7 +1660,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'{style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
 
         ips = backend_utils.get_node_ips(handle.cluster_yaml,
-                                         handle.launched_nodes)
+                                         handle.launched_nodes,
+                                         handle=handle)
 
         def rsync_down(ip: str) -> None:
             from ray.autoscaler import sdk  # pylint: disable=import-outside-toplevel

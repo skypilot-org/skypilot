@@ -500,7 +500,7 @@ def cli():
           'resources and is used for scheduling the task. '
           'Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
-@click.option('--num_nodes',
+@click.option('--num-nodes',
               required=False,
               type=int,
               help=('Number of nodes to launch and to execute the task on. '
@@ -648,7 +648,7 @@ def launch(
           'This is used for scheduling the task, so it must fit the '
           'cluster\'s total resources. Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
-@click.option('--num_nodes',
+@click.option('--num-nodes',
               required=False,
               type=int,
               help=('Task demand: Number of nodes to execute the task on. '
@@ -679,7 +679,7 @@ def exec(
     Execution and scheduling behavior:
     \b
     - If ENTRYPOINT is a YAML, or if it is a command with a resource demand
-      flag specified (`--gpus` or `--num_nodes`): it is treated as a proper
+      flag specified (`--gpus` or `--num-nodes`): it is treated as a proper
       task that will undergo job queue scheduling, respecting its resource
       requirement. It can be executed on any node of th cluster with enough
       resources.
@@ -886,6 +886,9 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
     unsupported_clusters = []
     for cluster, handle in zip(clusters, handles):
+        if handle is None:
+            print(f'Cluster {cluster} was not found. Skipping.')
+            continue
         backend = backend_utils.get_backend_from_handle(handle)
         if isinstance(backend, backends.LocalDockerBackend):
             # LocalDockerBackend does not support job queues
@@ -901,10 +904,6 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
 def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
                                backend: backend_lib.Backend, code: str):
-    if handle is None:
-        print(f'Cluster {cluster} was not found. Skipping.')
-        return
-
     click.echo(f'\nSky Job Queue of Cluster {cluster}')
     if handle.head_ip is None:
         click.echo(
