@@ -1,12 +1,13 @@
 """Service registry."""
 import collections
+import typing
 from typing import List, Optional
 
 import sky
 from sky import clouds
-from sky import resources as resources_lib
 
-Resources = resources_lib.Resources
+if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
 
 _CLOUDS = [
     clouds.AWS(),
@@ -27,8 +28,8 @@ def _filter_out_blocked_clouds(task: sky.Task):
 
 
 def _filter_out_blocked_launchable_resources(
-        launchable_resources: List[Resources],
-        blocked_launchable_resources: List[Resources]):
+        launchable_resources: List['resources_lib.Resources'],
+        blocked_launchable_resources: List['resources_lib.Resources']):
     """Whether the resources are blocked."""
     available_resources = []
     for resources in launchable_resources:
@@ -42,7 +43,7 @@ def _filter_out_blocked_launchable_resources(
 
 def fill_in_launchable_resources(
     task: sky.Task,
-    blocked_launchable_resources: Optional[List[Resources]],
+    blocked_launchable_resources: Optional[List['resources_lib.Resources']],
 ):
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
