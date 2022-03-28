@@ -35,7 +35,7 @@ from sky.skylet import job_lib, log_lib
 
 if typing.TYPE_CHECKING:
     from sky import dag
-    from sky import resources
+    from sky import resources as resources_lib
 
 OptimizeTarget = optimizer.OptimizeTarget
 Path = str
@@ -411,7 +411,7 @@ class RetryingVmProvisioner(object):
 
         def __init__(self,
                      cluster_name: str,
-                     resources: Optional['resources.Resources'],
+                     resources: Optional['resources_lib.Resources'],
                      num_nodes: int,
                      cluster_exists: bool = False) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
@@ -601,7 +601,7 @@ class RetryingVmProvisioner(object):
                 region, zones, stdout, stderr)
         assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, to_provision: 'resources.Resources',
+    def _yield_region_zones(self, to_provision: 'resources_lib.Resources',
                             cluster_name: str, cluster_exists: bool):
         cloud = to_provision.cloud
         region = None
@@ -716,7 +716,7 @@ class RetryingVmProvisioner(object):
         ):
             yield (region, zones)
 
-    def _try_provision_tpu(self, to_provision: 'resources.Resources',
+    def _try_provision_tpu(self, to_provision: 'resources_lib.Resources',
                            config_dict: Dict[str, str]) -> bool:
         """Returns whether the provision is successful."""
         tpu_name = config_dict['tpu_name']
@@ -768,7 +768,7 @@ class RetryingVmProvisioner(object):
             raise e
 
     def _retry_region_zones(self,
-                            to_provision: 'resources.Resources',
+                            to_provision: 'resources_lib.Resources',
                             num_nodes: int,
                             dryrun: bool,
                             stream_logs: bool,
@@ -1115,15 +1115,16 @@ class CloudVmRayBackend(backends.Backend):
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
 
-        def __init__(self,
-                     *,
-                     cluster_name: str,
-                     cluster_yaml: str,
-                     head_ip: Optional[str] = None,
-                     launched_nodes: Optional[int] = None,
-                     launched_resources: Optional['resources.Resources'] = None,
-                     tpu_create_script: Optional[str] = None,
-                     tpu_delete_script: Optional[str] = None) -> None:
+        def __init__(
+                self,
+                *,
+                cluster_name: str,
+                cluster_yaml: str,
+                head_ip: Optional[str] = None,
+                launched_nodes: Optional[int] = None,
+                launched_resources: Optional['resources_lib.Resources'] = None,
+                tpu_create_script: Optional[str] = None,
+                tpu_delete_script: Optional[str] = None) -> None:
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
@@ -1181,7 +1182,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'existing cluster first: sky down {cluster_name}')
 
     def _check_existing_cluster(
-            self, task: task_lib.Task, to_provision: 'resources.Resources',
+            self, task: task_lib.Task, to_provision: 'resources_lib.Resources',
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
@@ -1223,7 +1224,7 @@ class CloudVmRayBackend(backends.Backend):
 
     def provision(self,
                   task: task_lib.Task,
-                  to_provision: Optional['resources.Resources'],
+                  to_provision: Optional['resources_lib.Resources'],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None):
