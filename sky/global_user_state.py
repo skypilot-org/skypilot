@@ -14,7 +14,7 @@ import pickle
 import sqlite3
 import sys
 import time
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from sky import clouds
 
@@ -175,9 +175,11 @@ def remove_cluster(cluster_name: str, terminate: bool):
         # will directly try to ssh, which leads to timeout.
         handle.head_ip = None
         _CURSOR.execute(
-            'UPDATE clusters SET handle=(?), status=(?) WHERE name=(?)', (
+            'UPDATE clusters SET handle=(?), status=(?), autostop=(?) '
+            'WHERE name=(?)', (
                 pickle.dumps(handle),
                 ClusterStatus.STOPPED.value,
+                -1,
                 cluster_name,
             ))
     _CONN.commit()
@@ -208,14 +210,6 @@ def get_cluster_name_from_handle(
         return name
 
 
-def get_status_from_cluster_name(
-        cluster_name: Optional[str]) -> Optional[ClusterStatus]:
-    rows = _CURSOR.execute('SELECT status FROM clusters WHERE name=(?)',
-                           (cluster_name,))
-    for (status,) in rows:
-        return ClusterStatus[status]
-
-
 def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
     _CURSOR.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
         status.value,
@@ -240,19 +234,35 @@ def set_cluster_autostop(cluster_name: str, idle_minutes: int) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_clusters() -> List[Dict[str, Any]]:
-    rows = _CURSOR.execute('select * from clusters')
-    records = []
+def get_cluster_from_name(
+        cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    rows = _CURSOR.execute(
+        'SELECT * FROM clusters WHERE name=(?)', (cluster_name,))
     for name, launched_at, handle, last_use, status, autostop in rows:
-        # TODO: use namedtuple instead of dict
-        records.append({
+        record = {
             'name': name,
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
             'status': ClusterStatus[status],
             'autostop': autostop,
-        })
+        }
+        return record
+
+def get_clusters() -> List[Dict[str, Any]]:
+    rows = _CURSOR.execute('select * from clusters')
+    records = []
+    for name, launched_at, handle, last_use, status, autostop in rows:
+        # TODO: use namedtuple instead of dict
+        record = {
+            'name': name,
+            'launched_at': launched_at,
+            'handle': pickle.loads(handle),
+            'last_use': last_use,
+            'status': ClusterStatus[status],
+            'autostop': autostop,
+        }
+        records.append(record)
     return records
 
 

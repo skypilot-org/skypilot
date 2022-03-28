@@ -80,7 +80,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 }
 
 
-def _truncate_long_string(s: str, max_length: int = 50) -> str:
+def _truncate_long_string(s: str, max_length: int = 35) -> str:
     if len(s) <= max_length:
         return s
     splits = s.split(' ')
@@ -323,7 +323,7 @@ def _create_and_ssh_into_node(
 
         # This handles stopped interactive nodes where they are restarted by
         # skipping sky start and directly calling sky [cpu|tpu|gpu]node.
-        cluster_status = global_user_state.get_status_from_cluster_name(
+        cluster_status = backend_utils.get_status_from_cluster_name(
             cluster_name)
         if cluster_status == global_user_state.ClusterStatus.STOPPED:
             assert handle.launched_resources is not None, handle
@@ -595,7 +595,7 @@ def launch(
     if not yes:
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
         # it exists but is STOPPED.
-        maybe_status = global_user_state.get_status_from_cluster_name(cluster)
+        maybe_status = backend_utils.get_status_from_cluster_name(cluster)
         prompt = None
         if maybe_status is None:
             prompt = 'Launching a new cluster. Proceed?'
@@ -807,7 +807,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
     # TODO(zhwu): Update the information for auto-stop clusters.
     show_all = all
-    clusters_status = global_user_state.get_clusters()
+    clusters_status = backend_utils.get_clusters()
     cluster_table = util_lib.create_table([
         'NAME',
         'LAUNCHED',

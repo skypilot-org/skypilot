@@ -94,7 +94,7 @@ class AutostopEvent(SkyletEvent):
             self._update_yaml(self.ray_yaml_path)
             # Destroy the workers first to avoid orphan workers.
             subprocess.run(
-                ['ray', 'up', '-v', '-y', '--restart-only', self.ray_yaml_path],
+                ['ray', 'up', '-v', '-y', '--no-restart', self.ray_yaml_path],
                 check=True)
             subprocess.run(
                 ['ray', 'down', '-y', '--workers-only', self.ray_yaml_path],

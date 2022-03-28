@@ -24,6 +24,7 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import global_user_state
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import azure
@@ -1043,13 +1044,15 @@ def get_node_ips(cluster_yaml: str,
     out = run(f'ray get-head-ip {yaml_handle}',
               stdout=subprocess.PIPE).stdout.decode().strip()
     head_ip = re.findall(IP_ADDR_REGEX, out)
-    assert 1 == len(head_ip), out
+    if len(head_ip) != 1:
+        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
 
     out = run(f'ray get-worker-ips {yaml_handle}',
               stdout=subprocess.PIPE).stdout.decode()
     worker_ips = re.findall(IP_ADDR_REGEX, out)
-    assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes - 1,
-                                                       out)
+    if len(worker_ips) != expected_num_nodes - 1:
+        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
+
     if return_private_ips:
         os.remove(yaml_handle)
     return head_ip + worker_ips
@@ -1075,6 +1078,35 @@ def get_head_ip(
         head_ip = query_head_ip_with_retries(handle.cluster_yaml, retry_count)
     return head_ip
 
+
+def _update_cluster(record: Dict[str, Any]) -> global_user_state.ClusterStatus:
+    handle = record['handle']
+    # Autostop is disabled for the cluster
+    if record['autostop'] < 0:
+        return record
+    cluster_name = handle.cluster_name
+    try:
+        get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        return record
+    except exceptions.FetchIPError as e:
+        logger.debug(
+            f'Failed to get IPs from cluster {cluster_name}: {e}, set to STOPPED'
+        )
+    except subprocess.CalledProcessError as e:
+        logger.debug(e)
+    global_user_state.remove_cluster(cluster_name, terminate=False)
+    return global_user_state.get_cluster_from_name(cluster_name)
+
+def get_status_from_cluster_name(cluster_name: str) -> global_user_state.ClusterStatus:
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return None
+    record = _update_cluster(record)
+    return record['status']
+
+def get_clusters() -> List[Dict[str, Any]]:
+    records = global_user_state.get_clusters()
+    return [_update_cluster(record) for record in records]
 
 def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""

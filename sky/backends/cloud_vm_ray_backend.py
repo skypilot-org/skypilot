@@ -633,7 +633,7 @@ class RetryingVmProvisioner(object):
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
                 region.set_zones(zones)
             # Get the *previous* cluster status.
-            cluster_status = global_user_state.get_status_from_cluster_name(
+            cluster_status = backend_utils.get_status_from_cluster_name(
                 cluster_name)
             if cluster_status != global_user_state.ClusterStatus.UP:
                 logger.info(
@@ -784,7 +784,7 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         # Get previous cluster status
-        prev_cluster_status = global_user_state.get_status_from_cluster_name(
+        prev_cluster_status = backend_utils.get_status_from_cluster_name(
             cluster_name)
 
         self._clear_blocklist()
@@ -1241,7 +1241,7 @@ class CloudVmRayBackend(backends.Backend):
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status = (
-                    global_user_state.get_status_from_cluster_name(cluster_name)
+                    backend_utils.get_status_from_cluster_name(cluster_name)
                 )
             try:
                 assert to_provision_config.resources is not None, (
@@ -1974,7 +1974,7 @@ class CloudVmRayBackend(backends.Backend):
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
-        prev_status = global_user_state.get_status_from_cluster_name(
+        prev_status = backend_utils.get_status_from_cluster_name(
             handle.cluster_name)
         cluster_name = handle.cluster_name
         if terminate and isinstance(cloud, clouds.Azure):
@@ -2081,8 +2081,8 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.SSHConfigHelper.remove_cluster(cluster_name,
                                                      handle.head_ip,
                                                      auth_config)
-        name = global_user_state.get_cluster_name_from_handle(handle)
-        global_user_state.remove_cluster(name, terminate=terminate)
+        global_user_state.remove_cluster(handle.cluster_name,
+                                         terminate=terminate)
 
         if terminate:
             # Clean up generated config
