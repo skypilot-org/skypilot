@@ -14,11 +14,12 @@ import pickle
 import sqlite3
 import sys
 import time
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+import typing
+from typing import Any, Dict, List, Optional
 
 from sky import clouds
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky import backends
     from sky.data import Storage
 

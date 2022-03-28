@@ -34,6 +34,7 @@ import os
 import shlex
 import sys
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
@@ -48,12 +49,14 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import clouds
 from sky import data
-from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
 from sky.skylet import util_lib
+
+if typing.TYPE_CHECKING:
+    from sky.backends import backend as backend_lib
 
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
@@ -278,7 +281,7 @@ def _create_and_ssh_into_node(
     node_type: str,
     resources: sky.Resources,
     cluster_name: str,
-    backend: Optional[backend_lib.Backend] = None,
+    backend: Optional['backend_lib.Backend'] = None,
     port_forward: Optional[List[int]] = None,
     session_manager: Optional[str] = None,
     user_requested_resources: Optional[bool] = False,
@@ -903,7 +906,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
 
 def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
-                               backend: backend_lib.Backend, code: str):
+                               backend: 'backend_lib.Backend', code: str):
     click.echo(f'\nSky Job Queue of Cluster {cluster}')
     if handle.head_ip is None:
         click.echo(
