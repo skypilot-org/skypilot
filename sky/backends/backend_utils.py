@@ -1089,24 +1089,29 @@ def _update_cluster(record: Dict[str, Any]) -> global_user_state.ClusterStatus:
         get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         return record
     except exceptions.FetchIPError as e:
-        logger.debug(
-            f'Failed to get IPs from cluster {cluster_name}: {e}, set to STOPPED'
-        )
+        # Set the cluster status to STOPPED, even the head node is still alive,
+        # since it will be stopped as soon as the workers are stopped.
+        logger.debug(f'Failed to get IPs from cluster {cluster_name}: {e}, '
+                     'set to STOPPED')
     except subprocess.CalledProcessError as e:
         logger.debug(e)
     global_user_state.remove_cluster(cluster_name, terminate=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
-def get_status_from_cluster_name(cluster_name: str) -> global_user_state.ClusterStatus:
+
+def get_status_from_cluster_name(
+        cluster_name: str) -> global_user_state.ClusterStatus:
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None
     record = _update_cluster(record)
     return record['status']
 
+
 def get_clusters() -> List[Dict[str, Any]]:
     records = global_user_state.get_clusters()
     return [_update_cluster(record) for record in records]
+
 
 def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""

@@ -29,12 +29,14 @@ class CommandError(Exception):
         self.command = command
         self.error_msg = error_msg
 
+
 class FetchIPError(Exception):
     """Raised when fetching the IP fails."""
+
     class Reason(enum.Enum):
         HEAD = 'HEAD'
         WORKER = 'WORKER'
-    
+
     def __init__(self, reason: Reason) -> None:
         super().__init__()
         self.reason = reason

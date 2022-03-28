@@ -14,7 +14,7 @@ import pickle
 import sqlite3
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from sky import clouds
 
@@ -236,8 +236,8 @@ def set_cluster_autostop(cluster_name: str, idle_minutes: int) -> None:
 
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
-    rows = _CURSOR.execute(
-        'SELECT * FROM clusters WHERE name=(?)', (cluster_name,))
+    rows = _CURSOR.execute('SELECT * FROM clusters WHERE name=(?)',
+                           (cluster_name,))
     for name, launched_at, handle, last_use, status, autostop in rows:
         record = {
             'name': name,
@@ -248,6 +248,7 @@ def get_cluster_from_name(
             'autostop': autostop,
         }
         return record
+
 
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _CURSOR.execute('select * from clusters')

@@ -1241,8 +1241,7 @@ class CloudVmRayBackend(backends.Backend):
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status = (
-                    backend_utils.get_status_from_cluster_name(cluster_name)
-                )
+                    backend_utils.get_status_from_cluster_name(cluster_name))
             try:
                 assert to_provision_config.resources is not None, (
                     'to_provision should not be None', to_provision_config)
