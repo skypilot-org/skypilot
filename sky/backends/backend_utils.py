@@ -28,7 +28,6 @@ from sky import exceptions
 from sky import sky_logging
 from sky import resources
 from sky.adaptors import azure
-from sky.backends import wheel_utils
 from sky.skylet import log_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -482,6 +481,7 @@ def write_cluster_config(to_provision: Resources,
                          num_nodes: int,
                          cluster_config_template: str,
                          cluster_name: str,
+                         local_wheel_path: pathlib.Path,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
                          dryrun: bool = False) -> Dict[str, str]:
@@ -545,9 +545,6 @@ def write_cluster_config(to_provision: Resources,
 
     assert cluster_name is not None
 
-    # TODO(suquark): once we have sky on PYPI, we should directly install sky
-    # from PYPI
-    local_wheel_path = wheel_utils.build_sky_wheel()
     credentials = sky_check.get_cloud_credential_file_mounts()
     credential_file_mounts, credential_excludes = credentials
     yaml_path = _fill_template(
@@ -577,7 +574,6 @@ def write_cluster_config(to_provision: Resources,
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
-    config_dict['sky_wheel_path'] = str(local_wheel_path)
     if dryrun:
         return config_dict
     _add_ssh_to_cluster_config(cloud, yaml_path)
