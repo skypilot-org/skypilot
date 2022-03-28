@@ -1250,15 +1250,15 @@ class CloudVmRayBackend(backends.Backend):
                 prev_cluster_status = (
                     global_user_state.get_status_from_cluster_name(cluster_name)
                 )
+            assert to_provision_config.resources is not None, (
+                'to_provision should not be None', to_provision_config)
             # TODO(suquark): once we have sky on PYPI, we should directly
             # install sky from PYPI.
             local_wheel_path = wheel_utils.build_sky_wheel()
-            provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
-                                                self._optimize_target,
-                                                local_wheel_path)
-            assert to_provision_config.resources is not None, (
-                'to_provision should not be None', to_provision_config)
             try:
+                provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
+                                                    self._optimize_target,
+                                                    local_wheel_path)
                 config_dict = provisioner.provision_with_retries(
                     task, to_provision_config, dryrun, stream_logs)
             except exceptions.ResourcesUnavailableError as e:
