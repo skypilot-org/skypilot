@@ -34,7 +34,8 @@ import os
 import shlex
 import sys
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+import typing
+from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
@@ -54,7 +55,7 @@ from sky.clouds import service_catalog
 from sky.skylet import job_lib
 from sky.skylet import util_lib
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 
 logger = sky_logging.init_logger(__name__)

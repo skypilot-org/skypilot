@@ -4,7 +4,8 @@ import colorama
 import enum
 import pprint
 import sys
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+import typing
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import tabulate
@@ -17,7 +18,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)

@@ -3,14 +3,14 @@
 For now this service catalog is manually coded. In the future it should be
 queried from GCP API.
 """
-
-from typing import TYPE_CHECKING, Dict, List, Optional
+import typing
+from typing import Dict, List, Optional
 
 import pandas as pd
 
 from sky.clouds.service_catalog import common
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
 _df = common.read_catalog('gcp.csv')

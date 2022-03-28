@@ -2,7 +2,8 @@
 import inspect
 import os
 import re
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set, Union
+import typing
+from typing import Callable, Dict, List, Optional, Set, Union
 from urllib import parse
 import yaml
 
@@ -10,7 +11,7 @@ import sky
 from sky import clouds
 from sky.data import storage as storage_lib
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 # A lambda generating commands (node rank_i, node addrs -> cmd_i).

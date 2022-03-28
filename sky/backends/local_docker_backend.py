@@ -1,7 +1,8 @@
 """Local docker backend for sky"""
 import subprocess
 import tempfile
-from typing import TYPE_CHECKING, Dict, Optional, Union
+import typing
+from typing import Dict, Optional, Union
 
 import colorama
 from rich import console as rich_console
@@ -13,7 +14,7 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import docker_utils
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky import resources
     from sky import task as task_lib
 

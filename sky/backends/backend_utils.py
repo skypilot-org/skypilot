@@ -12,7 +12,8 @@ import subprocess
 import sys
 import textwrap
 import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+import typing
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 
@@ -30,7 +31,7 @@ from sky.adaptors import azure
 from sky.backends import wheel_utils
 from sky.skylet import log_lib
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky import resources
 
 logger = sky_logging.init_logger(__name__)

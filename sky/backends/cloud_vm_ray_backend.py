@@ -14,7 +14,8 @@ import subprocess
 import tempfile
 import textwrap
 import time
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+import typing
+from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
 import filelock
@@ -32,7 +33,7 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.skylet import job_lib, log_lib
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky import dag
     from sky import resources
 

@@ -1,7 +1,8 @@
 """Sky backend interface."""
-from typing import TYPE_CHECKING, Dict, Optional
+import typing
+from typing import Dict, Optional
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky import resources
     from sky import task as task_lib
 
