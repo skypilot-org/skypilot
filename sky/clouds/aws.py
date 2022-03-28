@@ -3,12 +3,13 @@ import copy
 import json
 import os
 import subprocess
-from typing import Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
+import typing
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
