@@ -1108,8 +1108,10 @@ def get_status_from_cluster_name(
     return record['status']
 
 
-def get_clusters() -> List[Dict[str, Any]]:
+def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
     records = global_user_state.get_clusters()
+    if not refresh:
+        return records
     return [_update_cluster(record) for record in records]
 
 

@@ -803,11 +803,17 @@ def _readable_time_duration(start_time: int):
               is_flag=True,
               required=False,
               help='Show all information in full.')
-def status(all: bool):  # pylint: disable=redefined-builtin
+@click.option('--refresh',
+              '-r',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Refresh the status of the cluster for autostop.')
+def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
     # TODO(zhwu): Update the information for auto-stop clusters.
     show_all = all
-    clusters_status = backend_utils.get_clusters()
+    clusters_status = backend_utils.get_clusters(refresh)
     cluster_table = util_lib.create_table([
         'NAME',
         'LAUNCHED',
