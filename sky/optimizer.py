@@ -402,8 +402,8 @@ class Optimizer:
             logger.info('Optimizer - plan minimizing cost')
         else:
             logger.info('Optimizer - plan minimizing run time')
-        logger.info(f'Estimated run time: ~{total_time / 3600:.1f} hr, '
-                    f'cost: ~${total_cost:.1f}')
+        logger.info(f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
+                    f'total cost: ~${total_cost:.1f}')
 
         # Do not print Source or Sink.
         message_data = [
