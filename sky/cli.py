@@ -746,7 +746,7 @@ def status(all: bool):  # pylint: disable=redefined-builtin
     ]
     if all:
         columns.extend([
-            'HOURLY PRICE',
+            'HOURLY_PRICE',
             'REGION',
         ])
     cluster_table = util_lib.create_table(columns)
@@ -784,9 +784,8 @@ def status(all: bool):  # pylint: disable=redefined-builtin
         if all:
             hourly_cost = handle.launched_resources.get_cost(3600) \
                 * handle.launched_nodes
-            price_str = f'$ {hourly_cost}'
+            price_str = f'$ {hourly_cost:.3f}'
             region = handle.get_cluster_region()
-            print(region)
             row.extend([
                 # HOURLY PRICE
                 price_str,

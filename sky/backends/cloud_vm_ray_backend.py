@@ -570,10 +570,11 @@ class RetryingVmProvisioner(object):
 
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
-                    if type(cloud) in (clouds.AWS, clouds.GCP):
+                    if cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
+                            sky.AWS()):
                         region = config['provider']['region']
                         zones = config['provider']['availability_zone']
-                    elif isinstance(cloud, clouds.Azure):
+                    elif cloud.is_same_cloud(sky.Azure()):
                         region = config['provider']['location']
                         zones = None
                     else:
@@ -985,6 +986,7 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
             self.tpu_delete_script = tpu_delete_script
+            self._find_cluster_region()
 
         def __repr__(self):
             return (f'ResourceHandle('
