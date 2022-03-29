@@ -104,6 +104,14 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
+  # This kills both the service and process that is holding the lock for dpkg.
+  - sudo systemctl stop unattended-upgrades;
+    sudo kill -9 `sudo find /proc/*/fd -ls | grep /var/lib/dpkg/lock-frontend | grep -oP '/proc/\d+' | tail -n 1 | grep -oP '\d+'` || true;
+    sudo pkill -9 apt-get;
+    sudo pkill -9 dpkg;
+    sudo apt-get remove google-cloud-sdk;
+    sudo dpkg --configure -a;
+    sudo apt-get install google-cloud-sdk; 
   - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
 

@@ -73,7 +73,7 @@ rsync_exclude: [
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.
-  # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
+  # This also kills the service that is holding the lock on dpkg.
   - (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
     pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
