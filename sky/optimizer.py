@@ -184,12 +184,11 @@ class Optimizer:
         """Estimates the cost/time of each task-resource mapping in the DAG.
         """
         # Cost of running the task on the resources.
-        # node -> {resources -> cost}, type: _TaskToCostMap
-        node_to_cost_map = collections.defaultdict(dict)
+        # node -> {resources -> cost}
+        node_to_cost_map: _TaskToCostMap = collections.defaultdict(dict)
 
         # node -> cloud -> list of resources that satisfy user's requirements.
-        # type: _TaskToPerCloudCandidates
-        node_to_candidate_map = collections.defaultdict(dict)
+        node_to_candidate_map: _TaskToPerCloudCandidates = {}
 
         # Compute the estimated cost/time for each node.
         for node_i, node in enumerate(topo_order):
@@ -459,7 +458,8 @@ class Optimizer:
     def _optimize_cost(
         dag: 'dag_lib.Dag',
         minimize_cost: bool = True,
-        blocked_launchable_resources: Optional[List[resources_lib.Resources]] = None,
+        blocked_launchable_resources: Optional[List[
+            resources_lib.Resources]] = None,
         raise_error: bool = False,
     ) -> Tuple['dag_lib.Dag', Dict[Task, resources_lib.Resources]]:
         import networkx as nx  # pylint: disable=import-outside-toplevel
@@ -536,7 +536,8 @@ def _fill_in_launchable_resources(
     task: Task,
     blocked_launchable_resources: Optional[List[resources_lib.Resources]],
     try_fix_with_sky_check: bool = True,
-) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]], _PerCloudCandidates]:
+) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
+           _PerCloudCandidates]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_check:
         check.check(quiet=True)
