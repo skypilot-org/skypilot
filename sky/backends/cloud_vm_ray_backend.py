@@ -2059,11 +2059,11 @@ class CloudVmRayBackend(backends.Backend):
                 logger.error(
                     f'{colorama.Fore.RED}Failed to terminate {cluster_name}. '
                     f'If you want to ignore this error and remove the cluster '
-                    f'from from Sky\'s status table, use `sky down --purge`.\n'
+                    f'from from Sky\'s status table, use `sky down --purge`.{colorama.Style.RESET_ALL}\n'
                     f'**** STDOUT ****\n'
                     f'{stdout}\n'
                     f'**** STDERR ****\n'
-                    f'{stderr}{colorama.Style.RESET_ALL}')
+                    f'{stderr}')
                 return False
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
