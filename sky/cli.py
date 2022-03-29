@@ -56,7 +56,6 @@ from sky.skylet import job_lib
 from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
-progress = rich_progress.Progress(transient=True)
 
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -1287,13 +1286,13 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             abort=True,
             show_default=True)
 
+    progress = rich_progress.Progress(transient=True)
     operation = 'Terminating' if terminate else 'Stopping'
     plural = 's' if len(to_down) > 1 else ''
     task = progress.add_task(
         f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
-        total=len(to_down) - 1)
+        total=len(to_down))
     progress.start()
-
     def _terminate_or_stop(record):
         name = record['name']
         handle = record['handle']
@@ -1322,8 +1321,8 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
                     f'{operation} cluster {name}...failed. '
                     'Please check the logs and try again.',
                     fg='red')
-        progress.start()
         progress.update(task, advance=1)
+        progress.start()
 
     backend_utils.run_in_parallel(_terminate_or_stop, to_down)
 
