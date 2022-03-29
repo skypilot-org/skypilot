@@ -1279,10 +1279,18 @@ def start(clusters: Tuple[str], yes: bool):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--purge',
+              '-p',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Ignore cloud provider errors (if any); '
+              'useful for cleaning up manually deleted cluster(s).')
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
+    purge: bool,
 ):
     """Tear down cluster(s).
 
@@ -1320,7 +1328,8 @@ def down(
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=True,
-                                no_confirm=yes)
+                                no_confirm=yes,
+                                purge=purge)
 
 
 def _terminate_or_stop_clusters(
@@ -1328,6 +1337,7 @@ def _terminate_or_stop_clusters(
         apply_to_all: Optional[bool],
         terminate: bool,
         no_confirm: bool,
+        purge: bool = False,
         idle_minutes_to_autostop: Optional[int] = None) -> None:
     """Terminates or (auto-)stops a cluster (or all clusters)."""
     assert idle_minutes_to_autostop is None or (not terminate and no_confirm), (
@@ -1401,7 +1411,7 @@ def _terminate_or_stop_clusters(
             backend.set_autostop(handle, idle_minutes_to_autostop)
             continue
 
-        success = backend.teardown(handle, terminate=terminate)
+        success = backend.teardown(handle, terminate=terminate, purge=purge)
         operation = 'Terminating' if terminate else 'Stopping'
         if success:
             click.secho(f'{operation} cluster {name}...done.', fg='green')

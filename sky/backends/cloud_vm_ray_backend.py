@@ -861,6 +861,9 @@ class RetryingVmProvisioner(object):
 
             # If cluster was previously UP or STOPPED, stop it; otherwise
             # terminate.
+            # FIXME(zongheng): terminating a potentially live cluster is
+            # scary. Say: users have an existing cluster that got into INIT, do
+            # sky launch, somehow failed, then we may be terminating it here.
             need_terminate = prev_cluster_status not in [
                 global_user_state.ClusterStatus.STOPPED,
                 global_user_state.ClusterStatus.UP
@@ -869,10 +872,11 @@ class RetryingVmProvisioner(object):
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
                                                 zones, stdout, stderr)
+                logger.error(
+                    f'*** HEAD_FAILED for {cluster_name} {region.name}')
             else:
-                assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # gang scheduling failed.
-                logger.error('*** Failed provisioning the cluster. ***')
+                assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
                 self._update_blocklist_on_error(
@@ -882,19 +886,22 @@ class RetryingVmProvisioner(object):
                     zones=None,
                     stdout=None,
                     stderr=None)
-                # Only log the error message for gang scheduling failure, since
-                # head_fail may not create any resources.
+
+                # Only log the errors for GANG_FAILED, since HEAD_FAILED may
+                # not have created any resources (it can happen however).
+                logger.error('*** Failed provisioning the cluster. ***')
                 terminate_str = 'Terminating' if need_terminate else 'Stopping'
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
 
-                # There may exists partial nodes (e.g., head node) so we must
-                # terminate before moving on to other regions or stop.
-                # FIXME(zongheng): terminating a potentially live cluster
-                # is scary.  Say: users have an existing cluster, do sky
-                # launch, gang failed, then we are terminating it here.
-                CloudVmRayBackend().teardown(handle,
-                                             terminate=need_terminate,
-                                             _force=True)
+            # There may exists partial nodes (e.g., head node) so we must
+            # terminate or stop before moving on to other regions.
+            #
+            # NOTE: even HEAD_FAILED could've left a live head node there, so
+            # we must terminate/stop here too. E.g., node is up, and ray
+            # autoscaler proceeds to setup commands, which may fail:
+            #   ERR updater.py:138 -- New status: update-failed
+            CloudVmRayBackend().teardown_no_lock(handle,
+                                                 terminate=need_terminate)
 
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -1953,22 +1960,16 @@ class CloudVmRayBackend(backends.Backend):
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
-                 _force: bool = False) -> bool:
+                 purge: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
-
-        if _force:
-            # Should only be forced when teardown is called within a
-            # locked section of the code (i.e teardown when not enough
-            # resources can be provisioned)
-            return self._teardown(handle, terminate)
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
             # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(lock_path, _FILELOCK_TIMEOUT_SECONDS):
-                success = self._teardown(handle, terminate)
+                success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
             return success
@@ -1977,7 +1978,10 @@ class CloudVmRayBackend(backends.Backend):
                          'Check to see if it is still being launched.')
         return False
 
-    def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
+    def teardown_no_lock(self,
+                         handle: ResourceHandle,
+                         terminate: bool,
+                         purge: bool = False) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -2078,13 +2082,23 @@ class CloudVmRayBackend(backends.Backend):
                     return False
 
         if returncode != 0:
-            logger.error(
-                f'{colorama.Fore.RED}Failed to terminate {cluster_name}.\n'
-                f'**** STDOUT ****\n'
-                f'{stdout}\n'
-                f'**** STDERR ****\n'
-                f'{stderr}{colorama.Style.RESET_ALL}')
-            return False
+            if purge:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}'
+                    'WARNING: Received non-zero exit code from cloud provider. '
+                    'Make sure resources are manually deleted.'
+                    f'{colorama.Style.RESET_ALL}')
+            else:
+                logger.error(
+                    f'{colorama.Fore.RED}Failed to terminate {cluster_name}. '
+                    f'If you want to ignore this error and remove the cluster '
+                    f'from from Sky\'s status table, use `sky down --purge`.'
+                    f'{colorama.Style.RESET_ALL}\n'
+                    f'**** STDOUT ****\n'
+                    f'{stdout}\n'
+                    f'**** STDERR ****\n'
+                    f'{stderr}')
+                return False
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         backend_utils.SSHConfigHelper.remove_cluster(cluster_name,
