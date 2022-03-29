@@ -810,7 +810,7 @@ def _readable_time_duration(start_time: int):
               default=False,
               is_flag=True,
               required=False,
-              help='Refresh the status of the cluster for autostop.')
+              help='Query remote clusters for their latest autostop settings.')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
     # TODO(zhwu): Update the information for auto-stop clusters.
