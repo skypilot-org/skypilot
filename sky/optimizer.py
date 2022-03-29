@@ -31,7 +31,7 @@ _DUMMY_SINK_NAME = 'sky-dummy-sink'
 # task -> resources -> estimated cost or time.
 _TaskToCostMap = Dict[Task, Dict[resources_lib.Resources, float]]
 # cloud -> list of resources that have the same accelerators.
-_PerCloudCandidates = Dict[str, List[resources_lib.Resources]]
+_PerCloudCandidates = Dict[clouds.Cloud, List[resources_lib.Resources]]
 # task -> per-cloud candidates
 _TaskToPerCloudCandidates = Dict[Task, _PerCloudCandidates]
 
@@ -174,33 +174,31 @@ class Optimizer:
         return fn(src_cloud, dst_cloud, nbytes)
 
     @staticmethod
-    def _per_node_cost_or_time(
+    def _estimate_nodes_cost_or_time(
         topo_order: List[Task],
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[
             resources_lib.Resources]] = None,
         raise_error: bool = False,
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
-        """Estimates the compute cost of feasible task-resource mappings."""
-        # Cost of running the task on the resources
-        # node -> {resources -> cost}
+        """Estimates the cost/time of each task-resource mapping in the DAG.
+        """
+        # Cost of running the task on the resources.
+        # node -> {resources -> cost}, type: _TaskToCostMap
         node_to_cost_map = collections.defaultdict(dict)
 
-        # If a cloud has multiple instance types with the same accelerators,
-        # Sky informs users about the candidates and its decision.
-        # For example, 5 of AWS g4dn instance types all provide 1 T4 GPU
-        # but differ in the number of CPU cores and the CPU memory capacity.
-        # In such a case, Sky prints the list at the end of the optimizer msg.
-        # node -> cloud -> list of resources that have the same accelerators.
-        node_to_candidates = collections.defaultdict(dict)
+        # node -> cloud -> list of resources that satisfy user's requirements.
+        # type: _TaskToPerCloudCandidates
+        node_to_candidate_map = collections.defaultdict(dict)
 
-        # Compute the estimated cost/time for each node
+        # Compute the estimated cost/time for each node.
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
                 # Base case: a special source node.
                 node_to_cost_map[node][list(node.get_resources())[0]] = 0
                 continue
 
+            # Don't print for the last node, Sink.
             do_print = node_i != len(topo_order) - 1
             if do_print:
                 logger.debug('#### {} ####'.format(node))
@@ -212,7 +210,7 @@ class Optimizer:
                         node,
                         blocked_launchable_resources
                     )
-                node_to_candidates[node] = cloud_candidates
+                node_to_candidate_map[node] = cloud_candidates
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
@@ -269,7 +267,7 @@ class Optimizer:
                                 '  estimated_cost (not incl. egress): ${:.1f}'.
                                 format(estimated_cost))
                     node_to_cost_map[node][resources] = estimated_cost
-        return node_to_cost_map, node_to_candidates
+        return node_to_cost_map, node_to_candidate_map
 
     @staticmethod
     def _optimize_by_dp(
@@ -333,6 +331,7 @@ class Optimizer:
         topo_order: List[Task],
         plan: Dict[Task, resources_lib.Resources],
     ) -> float:
+        """Estimates the total execution time of the DAG with the plan."""
         cache_finish_time = {}
 
         def finish_time(node):
@@ -364,6 +363,7 @@ class Optimizer:
         topo_order: List[Task],
         plan: Dict[Task, resources_lib.Resources],
     ) -> float:
+        """Estimates the total execution cost of the DAG with the plan."""
         total_cost = 0
         for node in topo_order:
             resources = plan[node]
@@ -394,8 +394,8 @@ class Optimizer:
             logger.info('Optimizer - plan minimizing cost')
         else:
             logger.info('Optimizer - plan minimizing run time')
-        logger.info(f'Estimated Run time: ~{total_time / 3600:.1f} hr, '
-                    f'Cost: ~${total_cost:.1f}')
+        logger.info(f'Estimated run time: ~{total_time / 3600:.1f} hr, '
+                    f'cost: ~${total_cost:.1f}')
 
         # Do not print Source or Sink.
         message_data = [
@@ -434,8 +434,8 @@ class Optimizer:
                             pprint.pformat(list(node_to_cost_map.values())[0]))
 
     @staticmethod
-    def _print_candidates(node_to_candidates: _TaskToPerCloudCandidates):
-        for node, candidate_set in node_to_candidates.items():
+    def _print_candidates(node_to_candidate_map: _TaskToPerCloudCandidates):
+        for node, candidate_set in node_to_candidate_map.items():
             accelerator = list(node.get_resources())[0].accelerators
             is_multi_instances = False
             if accelerator:
@@ -469,20 +469,14 @@ class Optimizer:
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
 
-        node_to_cost_map, node_to_candidates = Optimizer._per_node_cost_or_time(
+        node_to_cost_map, node_to_candidate_map = Optimizer._estimate_nodes_cost_or_time(
             topo_order,
             minimize_cost,
             blocked_launchable_resources,
             raise_error,
         )
 
-        is_chain = True
-        for node in topo_order[:-1]:
-            if graph.out_degree(node) != 1:
-                is_chain = False
-                break
-
-        if is_chain:
+        if dag.is_chain():
             best_plan, best_total_cost = Optimizer._optimize_by_dp(
                 topo_order, node_to_cost_map, minimize_cost)
         else:
@@ -499,7 +493,7 @@ class Optimizer:
 
         Optimizer.print_optimized_plan(best_plan, total_time, total_cost,
                                        node_to_cost_map, minimize_cost)
-        Optimizer._print_candidates(node_to_candidates)
+        Optimizer._print_candidates(node_to_candidate_map)
         return dag, best_plan
 
 
