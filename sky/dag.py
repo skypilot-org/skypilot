@@ -71,3 +71,19 @@ class Dag:
 
     def get_graph(self):
         return self.graph
+
+    def is_chain(self) -> bool:
+        is_chain = True
+        visit_sink = False
+        for node in self.graph.nodes:
+            out_degree = self.graph.out_degree(node)
+            if out_degree > 1:
+                is_chain = False
+                break
+            elif out_degree == 0:
+                if visit_sink:
+                    is_chain = False
+                    break
+                else:
+                    visit_sink = True
+        return is_chain
