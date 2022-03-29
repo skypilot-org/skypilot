@@ -245,7 +245,8 @@ def update_status() -> None:
             set_status(job['job_id'], status)
 
 
-def is_idle() -> bool:
+def is_cluster_idle() -> bool:
+    """Returns if the cluster is idle (no in-flight jobs)."""
     rows = _CURSOR.execute(
         """\
         SELECT COUNT(*) FROM jobs

@@ -1110,15 +1110,18 @@ def autostop(
         idle_minutes: Optional[int],
         cancel: bool,  # pylint: disable=redefined-outer-name
 ):
-    """Set the auto stopping for cluster(s).
+    """Schedule or cancel auto-stopping for cluster(s).
 
-    CLUSTER is the name (or glob pattern) of the cluster to stop.  If both
-    CLUSTER and --all are supplied, the latter takes precedence.
+    CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
+    CLUSTERS and --all are supplied, the latter takes precedence.
 
-    --idle-minutes is the number of minutes after which the cluster will be
-    stopped automatically.
+    --idle-minutes is the number of minutes of idleness (no jobs in queue) after
+    which the cluster will be stopped automatically.
 
-    --cancel will cancel the autostopping.
+    --cancel will cancel the autostopping. If the cluster was not scheduled
+    autostop, this will do nothing.
+
+    If --idle-minutes and --cancel are not specified, default to 5 minutes.
 
     Examples:
 
@@ -1139,7 +1142,7 @@ def autostop(
     if cancel:
         idle_minutes = -1
     elif idle_minutes is None:
-        idle_minutes = 0
+        idle_minutes = 5
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=False,
@@ -1397,18 +1400,35 @@ def _terminate_or_stop_clusters(
             continue
 
         if idle_minutes_to_autostop is not None:
-            if not isinstance(backend, backends.CloudVmRayBackend):
-                click.secho(f'Set cluster {name} to auto-stop... skipped, '
-                            'because auto-stopping is only supported by '
-                            'backend: CloudVMRayBackend')
+            cluster_status = backend_utils.get_status_from_cluster_name(name)
+            if cluster_status != global_user_state.ClusterStatus.UP:
+                click.secho(
+                    f'Scheduling autostop for cluster {name} '
+                    f'(status: {cluster_status.value})... skipped',
+                    fg='green')
+                click.echo(
+                    '  Auto-stop can only be scheduled on '
+                    f'{global_user_state.ClusterStatus.UP.value} cluster.')
                 continue
-            click.secho(
-                f'Set cluster {name} to auto-stop after '
-                f'{idle_minutes_to_autostop} minutes of inactivity.',
-                fg='green')
-            click.echo('  To cancel the autostop, run: ', nl=False)
-            click.secho(f'sky autostop {name} --cancel', bold=True)
+            if not isinstance(backend, backends.CloudVmRayBackend):
+                click.secho(
+                    f'Scheduling auto-stop for cluster {name}... skipped',
+                    fg='green')
+                click.echo('  Auto-stopping is only supported by '
+                           'backend: CloudVMRayBackend')
+                continue
+
             backend.set_autostop(handle, idle_minutes_to_autostop)
+            if idle_minutes_to_autostop < 0:
+                click.secho(f'Cancelling auto-stop for cluster {name}...done',
+                            fg='green')
+            else:
+                click.secho(f'Scheduling auto-stop for cluster {name}...done',
+                            fg='green')
+                click.echo(f'  The cluster will be stopped after '
+                           f'{idle_minutes_to_autostop} minutes of idleness.')
+                click.echo('  To cancel the autostop, run: ', nl=False)
+                click.secho(f'sky autostop {name} --cancel', bold=True)
             continue
 
         success = backend.teardown(handle, terminate=terminate, purge=purge)

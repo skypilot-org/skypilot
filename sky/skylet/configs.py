@@ -2,6 +2,7 @@
 import os
 import pathlib
 import sqlite3
+from typing import Optional
 
 _DB_PATH = os.path.expanduser('~/.sky/skylet_config.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
@@ -17,7 +18,7 @@ _CURSOR.execute("""\
 _CONN.commit()
 
 
-def get_config(key: str) -> str:
+def get_config(key: str) -> Optional[str]:
     rows = _CURSOR.execute('SELECT value FROM config WHERE key = ?', (key,))
     for (value,) in rows:
         return value

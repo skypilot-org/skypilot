@@ -1250,7 +1250,8 @@ class CloudVmRayBackend(backends.Backend):
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
-                prev_cluster_status = (backend_utils.get_status_from_cluster_name(cluster_name))
+                prev_cluster_status = (
+                    backend_utils.get_status_from_cluster_name(cluster_name))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
             # TODO(suquark): once we have sky on PYPI, we should directly

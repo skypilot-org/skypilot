@@ -14,6 +14,6 @@ EVENTS = [
 ]
 
 while True:
-    time.sleep(events.EVENT_CHECKING_INTERVAL)
+    time.sleep(events.EVENT_CHECKING_INTERVAL_SECONDS)
     for event in EVENTS:
-        event.step()
+        event.run()

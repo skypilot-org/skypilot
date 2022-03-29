@@ -1046,16 +1046,28 @@ def get_node_ips(
             handle is not None and handle.head_ip is not None):
         return [handle.head_ip]
 
-    out = run(f'ray get-head-ip {yaml_handle}',
-              stdout=subprocess.PIPE).stdout.decode().strip()
-    head_ip = re.findall(IP_ADDR_REGEX, out)
+    try:
+        proc = run(f'ray get-head-ip {yaml_handle}',
+                   stdout=subprocess.PIPE,
+                   stderr=subprocess.PIPE)
+        out = proc.stdout.decode().strip()
+        head_ip = re.findall(IP_ADDR_REGEX, out)
+    except subprocess.CalledProcessError as e:
+        raise exceptions.FetchIPError(
+            exceptions.FetchIPError.Reason.HEAD) from e
     if len(head_ip) != 1:
         raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
 
     if expected_num_nodes > 1:
-        out = run(f'ray get-worker-ips {yaml_handle}',
-                  stdout=subprocess.PIPE).stdout.decode()
-        worker_ips = re.findall(IP_ADDR_REGEX, out)
+        try:
+            proc = run(f'ray get-worker-ips {yaml_handle}',
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+            out = proc.stdout.decode()
+            worker_ips = re.findall(IP_ADDR_REGEX, out)
+        except subprocess.CalledProcessError as e:
+            raise exceptions.FetchIPError(
+                exceptions.FetchIPError.Reason.WORKER) from e
         if len(worker_ips) != expected_num_nodes - 1:
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
     else:
@@ -1100,14 +1112,12 @@ def _update_cluster(record: Dict[str, Any]) -> global_user_state.ClusterStatus:
         # since it will be stopped as soon as the workers are stopped.
         logger.debug(f'Failed to get IPs from cluster {cluster_name}: {e}, '
                      'set to STOPPED')
-    except subprocess.CalledProcessError as e:
-        logger.debug(e)
     global_user_state.remove_cluster(cluster_name, terminate=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
 def get_status_from_cluster_name(
-        cluster_name: str) -> global_user_state.ClusterStatus:
+        cluster_name: str) -> Optional[global_user_state.ClusterStatus]:
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None

@@ -1,4 +1,5 @@
 """skylet events"""
+import math
 import os
 import psutil
 import re
@@ -8,29 +9,31 @@ import traceback
 import yaml
 
 from sky import sky_logging
-from sky.backends import backend_utils
-from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
+from sky.backends import backend_utils, cloud_vm_ray_backend
 from sky.skylet import autostop_lib, job_lib
 
-EVENT_CHECKING_INTERVAL = 1
+EVENT_CHECKING_INTERVAL_SECONDS = 1
 logger = sky_logging.init_logger(__name__)
 
 
 class SkyletEvent:
     """Skylet event.
 
-    Usage: override the EVENT_INTERVAl and _run method in subclass.
+    The event is triggered every EVENT_INTERVAL_SECONDS seconds.
+
+    Usage: override the EVENT_INTERVAL_SECONDS and _run method in subclass.
     """
-    EVENT_INTERVAL = -1
+    EVENT_INTERVAL_SECONDS = -1
 
     def __init__(self):
-        self.event_interval = self.EVENT_INTERVAL
-        self.current_time_stamp = 0
+        self._event_interval = int(
+            math.ceil(self.EVENT_INTERVAL_SECONDS /
+                      EVENT_CHECKING_INTERVAL_SECONDS))
+        self._n = 0
 
-    def step(self):
-        self.current_time_stamp = (self.current_time_stamp +
-                                   1) % self.event_interval
-        if self.current_time_stamp % self.event_interval == 0:
+    def run(self):
+        self._n = (self._n + 1) % self._event_interval
+        if self._n % self._event_interval == 0:
             logger.debug(f'{self.__class__.__name__} triggered')
             try:
                 self._run()
@@ -45,7 +48,7 @@ class SkyletEvent:
 
 class JobUpdateEvent(SkyletEvent):
     """Skylet event for updating job status."""
-    EVENT_INTERVAL = 20
+    EVENT_INTERVAL_SECONDS = 20
 
     def _run(self):
         job_lib.update_status()
@@ -53,7 +56,7 @@ class JobUpdateEvent(SkyletEvent):
 
 class AutostopEvent(SkyletEvent):
     """Skylet event for autostop."""
-    EVENT_INTERVAL = 60
+    EVENT_INTERVAL_SECONDS = 60
 
     NUM_WORKER_PATTERN = re.compile(r'((?:min|max))_workers: (\d+)')
     UPSCALING_PATTERN = re.compile(r'upscaling_speed: (\d+)')
@@ -73,7 +76,7 @@ class AutostopEvent(SkyletEvent):
             logger.debug('autostop_config not set. Skipped.')
             return
 
-        if job_lib.is_idle():
+        if job_lib.is_cluster_idle():
             idle_minutes = (time.time() - self.last_active_time) // 60
             logger.debug(
                 f'Idle minutes: {idle_minutes}, '
@@ -85,28 +88,31 @@ class AutostopEvent(SkyletEvent):
                 'Not idle. Reset idle minutes.'
                 f'AutoStop config: {autostop_config.autostop_idle_minutes}')
         if idle_minutes >= autostop_config.autostop_idle_minutes:
-            logger.info(f'idle_minutes {idle_minutes} reached config '
-                        f'{autostop_config.autostop_idle_minutes}. Stopping.')
+            logger.info(
+                f'{idle_minutes} idle minutes reached; threshold: '
+                f'{autostop_config.autostop_idle_minutes} minutes. Stopping.')
             self._stop_cluster(autostop_config)
 
     def _stop_cluster(self, autostop_config):
-        if autostop_config.backend == CloudVmRayBackend.NAME:
-            self._update_yaml(self.ray_yaml_path)
+        if (autostop_config.backend ==
+                cloud_vm_ray_backend.CloudVmRayBackend.NAME):
+            self._replace_yaml_for_stopping(self.ray_yaml_path)
             # Destroy the workers first to avoid orphan workers.
+            # `ray up`` is required to reset the upscaling speed and min/max
+            # workers. Otherwise, `ray down --workers-only` will continuously
+            # scale down and up.
             subprocess.run(
-                ['ray', 'up', '-v', '-y', '--no-restart', self.ray_yaml_path],
+                ['ray', 'up', '-y', '--restart-only', self.ray_yaml_path],
                 check=True)
             subprocess.run(
                 ['ray', 'down', '-y', '--workers-only', self.ray_yaml_path],
                 check=True)
             subprocess.run(['ray', 'down', '-y', self.ray_yaml_path],
                            check=True)
-
-            pass
         else:
             raise NotImplementedError
 
-    def _update_yaml(self, yaml_path: str):
+    def _replace_yaml_for_stopping(self, yaml_path: str):
         with open(yaml_path, 'r') as f:
             yaml_str = f.read()
         # Update the number of workers to 0.

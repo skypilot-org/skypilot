@@ -37,7 +37,7 @@ class AutostopCodeGen:
 
     Usage:
 
-      >> codegen = JobLibCodeGen.add_job(...)
+      >> codegen = AutostopCodeGen.set_autostop(...)
     """
     _PREFIX = ['from sky.skylet import autostop_lib']
 
