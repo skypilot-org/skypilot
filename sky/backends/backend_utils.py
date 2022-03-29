@@ -1193,7 +1193,7 @@ class JobLibCodeGen(object):
         return f'python3 -u -c {code!r}'
 
 
-class ThreadConsole:
+class NoOpConsole:
     """An empty class for multi-threaded console.status."""
 
     def __enter__(self):
@@ -1207,4 +1207,4 @@ def safe_console_status(msg: str):
     """A wrapper for multi-threaded console.status."""
     if threading.current_thread() is threading.main_thread():
         return console.status(msg)
-    return ThreadConsole()
+    return NoOpConsole()
