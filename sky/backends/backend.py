@@ -58,7 +58,10 @@ class Backend:
     def teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
-    def teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
+    def teardown(self,
+                 handle: ResourceHandle,
+                 terminate: bool,
+                 purge: bool = False) -> bool:
         raise NotImplementedError
 
     def register_info(self, **kwargs) -> None:

@@ -900,9 +900,8 @@ class RetryingVmProvisioner(object):
             # we must terminate/stop here too. E.g., node is up, and ray
             # autoscaler proceeds to setup commands, which may fail:
             #   ERR updater.py:138 -- New status: update-failed
-            CloudVmRayBackend().teardown(handle,
-                                         terminate=need_terminate,
-                                         _force=True)
+            CloudVmRayBackend().teardown_no_lock(handle,
+                                                 terminate=need_terminate)
 
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -1955,22 +1954,16 @@ class CloudVmRayBackend(backends.Backend):
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
-                 _force: bool = False) -> bool:
+                 purge: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
-
-        if _force:
-            # Should only be forced when teardown is called within a
-            # locked section of the code (i.e teardown when not enough
-            # resources can be provisioned)
-            return self._teardown(handle, terminate)
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
             # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(lock_path, _FILELOCK_TIMEOUT_SECONDS):
-                success = self._teardown(handle, terminate)
+                success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
             return success
@@ -1979,7 +1972,10 @@ class CloudVmRayBackend(backends.Backend):
                          'Check to see if it is still being launched.')
         return False
 
-    def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
+    def teardown_no_lock(self,
+                         handle: ResourceHandle,
+                         terminate: bool,
+                         purge: bool = False) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -2080,13 +2076,23 @@ class CloudVmRayBackend(backends.Backend):
                     return False
 
         if returncode != 0:
-            logger.error(
-                f'{colorama.Fore.RED}Failed to terminate {cluster_name}.\n'
-                f'**** STDOUT ****\n'
-                f'{stdout}\n'
-                f'**** STDERR ****\n'
-                f'{stderr}{colorama.Style.RESET_ALL}')
-            return False
+            if purge:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}'
+                    'WARNING: Received non-zero exit code from cloud provider. '
+                    'Make sure resources are manually deleted.'
+                    f'{colorama.Style.RESET_ALL}')
+            else:
+                logger.error(
+                    f'{colorama.Fore.RED}Failed to terminate {cluster_name}. '
+                    f'If you want to ignore this error and remove the cluster '
+                    f'from from Sky\'s status table, use `sky down --purge`.'
+                    f'{colorama.Style.RESET_ALL}\n'
+                    f'**** STDOUT ****\n'
+                    f'{stdout}\n'
+                    f'**** STDERR ****\n'
+                    f'{stderr}')
+                return False
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         backend_utils.SSHConfigHelper.remove_cluster(cluster_name,
