@@ -1293,6 +1293,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
         f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
         total=len(to_down))
     progress.start()
+
     def _terminate_or_stop(record):
         name = record['name']
         handle = record['handle']
