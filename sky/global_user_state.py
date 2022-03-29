@@ -29,16 +29,16 @@ _DB_PATH = os.path.expanduser('~/.sky/state.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
 
-class SQLiteConn(threading.local):
+class _SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
     def __init__(self):
         super().__init__()
         self.conn = sqlite3.connect(_DB_PATH)
         self.cursor = self.conn.cursor()
-        self.create_table()
+        self._create_table()
 
-    def create_table(self):
+    def _create_table(self):
         # Table for Clusters
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS clusters (
@@ -63,7 +63,7 @@ class SQLiteConn(threading.local):
         self.conn.commit()
 
 
-_DB = SQLiteConn()
+_DB = _SQLiteConn()
 
 
 class ClusterStatus(enum.Enum):
