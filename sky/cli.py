@@ -40,7 +40,7 @@ import yaml
 
 import click
 import pendulum
-from rich import console as rich_console
+from rich import progress as rich_progress
 
 import sky
 from sky import backends
@@ -59,7 +59,6 @@ if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
 
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -1384,24 +1383,33 @@ def _terminate_or_stop_clusters(
             abort=True,
             show_default=True)
 
-    for record in to_down:  # TODO: parallelize.
+    progress = rich_progress.Progress(transient=True)
+    operation = 'Terminating' if terminate else 'Stopping'
+    plural = 's' if len(to_down) > 1 else ''
+    task = progress.add_task(
+        f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
+        total=len(to_down))
+    progress.start()
+
+    def _terminate_or_stop(record):
         name = record['name']
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
         if (isinstance(backend, backends.CloudVmRayBackend) and
                 handle.launched_resources.use_spot and not terminate):
+            # Disable spot instances to be stopped.
             # TODO(suquark): enable GCP+spot to be stopped in the future.
+            progress.stop()
             click.secho(
                 f'Stopping cluster {name}... skipped, because spot instances '
                 'may lose attached volumes. ',
                 fg='green')
             click.echo('  To terminate the cluster, run: ', nl=False)
             click.secho(f'sky down {name}', bold=True)
-            continue
-
-        if idle_minutes_to_autostop is not None:
+        elif idle_minutes_to_autostop is not None:
             cluster_status = backend_utils.get_status_from_cluster_name(name)
             if cluster_status != global_user_state.ClusterStatus.UP:
+                progress.stop()
                 click.secho(
                     f'Scheduling autostop for cluster {name} '
                     f'(status: {cluster_status.value})... skipped',
@@ -1409,40 +1417,43 @@ def _terminate_or_stop_clusters(
                 click.echo(
                     '  Auto-stop can only be scheduled on '
                     f'{global_user_state.ClusterStatus.UP.value} cluster.')
-                continue
-            if not isinstance(backend, backends.CloudVmRayBackend):
+            elif not isinstance(backend, backends.CloudVmRayBackend):
+                progress.stop()
                 click.secho(
                     f'Scheduling auto-stop for cluster {name}... skipped',
                     fg='green')
                 click.echo('  Auto-stopping is only supported by '
                            'backend: CloudVMRayBackend')
-                continue
-
-            backend.set_autostop(handle, idle_minutes_to_autostop)
-            if idle_minutes_to_autostop < 0:
-                click.secho(f'Cancelling auto-stop for cluster {name}...done',
-                            fg='green')
             else:
-                click.secho(f'Scheduling auto-stop for cluster {name}...done',
-                            fg='green')
-                click.echo(f'  The cluster will be stopped after '
-                           f'{idle_minutes_to_autostop} minutes of idleness.')
-                click.echo('  To cancel the autostop, run: ', nl=False)
-                click.secho(f'sky autostop {name} --cancel', bold=True)
-            continue
-
-        success = backend.teardown(handle, terminate=terminate, purge=purge)
-        operation = 'Terminating' if terminate else 'Stopping'
-        if success:
-            click.secho(f'{operation} cluster {name}...done.', fg='green')
-            if not terminate:
-                click.echo('  To restart the cluster, run: ', nl=False)
-                click.secho(f'sky start {name}', bold=True)
+                backend.set_autostop(handle, idle_minutes_to_autostop)
+                progress.stop()
+                if idle_minutes_to_autostop < 0:
+                    click.secho(f'Cancelling auto-stop for cluster {name}...done',
+                                fg='green')
+                else:
+                    click.secho(f'Scheduling auto-stop for cluster {name}...done',
+                                fg='green')
+                    click.echo(f'  The cluster will be stopped after '
+                            f'{idle_minutes_to_autostop} minutes of idleness.')
+                    click.echo('  To cancel the autostop, run: ', nl=False)
+                    click.secho(f'sky autostop {name} --cancel', bold=True)
         else:
-            click.secho(
-                f'{operation} cluster {name}...failed. '
-                'Please check the logs and try again.',
-                fg='red')
+            success = backend.teardown(handle, terminate=terminate, purge=purge)
+            progress.stop()
+            if success:
+                click.secho(f'{operation} cluster {name}...done.', fg='green')
+                if not terminate:
+                    click.echo('  To restart the cluster, run: ', nl=False)
+                    click.secho(f'sky start {name}', bold=True)
+            else:
+                click.secho(
+                    f'{operation} cluster {name}...failed. '
+                    'Please check the logs and try again.',
+                    fg='red')
+        progress.update(task, advance=1)
+        progress.start()
+
+    backend_utils.run_in_parallel(_terminate_or_stop, to_down)
 
 
 @_interactive_node_cli_command

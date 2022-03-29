@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -1166,3 +1167,18 @@ def get_backend_from_handle(
         raise NotImplementedError(
             f'Handle type {type(handle)} is not supported yet.')
     return backend
+class NoOpConsole:
+    """An empty class for multi-threaded console.status."""
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+def safe_console_status(msg: str):
+    """A wrapper for multi-threaded console.status."""
+    if threading.current_thread() is threading.main_thread():
+        return console.status(msg)
+    return NoOpConsole()

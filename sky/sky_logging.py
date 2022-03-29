@@ -16,7 +16,7 @@ class NewLineFormatter(logging.Formatter):
         msg = logging.Formatter.format(self, record)
         if record.message != '':
             parts = msg.split(record.message)
-            msg = msg.replace('\n', '\n' + parts[0])
+            msg = msg.replace('\n', '\r\n' + parts[0])
         return msg
 
 
