@@ -2,16 +2,18 @@
 import inspect
 import os
 import re
+import typing
 from typing import Callable, Dict, List, Optional, Set, Union
 from urllib import parse
 import yaml
 
 import sky
 from sky import clouds
-from sky import resources as resources_lib
 from sky.data import storage as storage_lib
 
-Resources = resources_lib.Resources
+if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
+
 # A lambda generating commands (node rank_i, node addrs -> cmd_i).
 CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
@@ -369,7 +371,8 @@ class Task:
     def get_estimated_outputs_size_gigabytes(self):
         return self.estimated_outputs_size_gigabytes
 
-    def set_resources(self, resources: Union[Resources, Set[Resources]]):
+    def set_resources(self, resources: Union['resources_lib.Resources',
+                                             Set['resources_lib.Resources']]):
         """Sets the required resources to execute this task.
 
         Args:
@@ -377,7 +380,7 @@ class Task:
             indicates the user intent "pick any one of these resources" to run
             a task.
         """
-        if isinstance(resources, Resources):
+        if isinstance(resources, sky.Resources):
             resources = {resources}
         self.resources = resources
         return self

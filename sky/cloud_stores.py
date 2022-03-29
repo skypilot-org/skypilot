@@ -39,8 +39,7 @@ class S3CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'aws --version > /dev/null 2>&1 || '
-        'pip3 install awscli==1.22.17',
+        'aws --version >/dev/null 2>&1 || pip3 install awscli',
     ]
 
     def is_directory(self, url: str) -> bool:

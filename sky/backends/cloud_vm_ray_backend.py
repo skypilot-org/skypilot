@@ -8,13 +8,15 @@ import hashlib
 import inspect
 import json
 import os
+import pathlib
 import re
 import sys
 import subprocess
 import tempfile
 import textwrap
 import time
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+import typing
+from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
 import filelock
@@ -30,11 +32,12 @@ from sky import sky_logging
 from sky import optimizer
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.backends import wheel_utils
 from sky.skylet import autostop_lib, job_lib, log_lib
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky import dag
-    from sky import resources
+    from sky import resources as resources_lib
 
 OptimizeTarget = optimizer.OptimizeTarget
 Path = str
@@ -43,7 +46,6 @@ SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
-SKYLET_REMOTE_PATH = backend_utils.SKY_REMOTE_PATH
 
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
@@ -410,7 +412,7 @@ class RetryingVmProvisioner(object):
 
         def __init__(self,
                      cluster_name: str,
-                     resources: Optional['resources.Resources'],
+                     resources: Optional['resources_lib.Resources'],
                      num_nodes: int,
                      cluster_exists: bool = False) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
@@ -428,7 +430,8 @@ class RetryingVmProvisioner(object):
         HEAD_FAILED = 2
 
     def __init__(self, log_dir: str, dag: 'dag.Dag',
-                 optimize_target: OptimizeTarget):
+                 optimize_target: OptimizeTarget,
+                 local_wheel_path: pathlib.Path):
         self._blocked_regions = set()
         self._blocked_zones = set()
         self._blocked_launchable_resources = set()
@@ -436,6 +439,7 @@ class RetryingVmProvisioner(object):
         self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
         self._optimize_target = optimize_target
+        self._local_wheel_path = local_wheel_path
 
         colorama.init()
 
@@ -600,7 +604,7 @@ class RetryingVmProvisioner(object):
                 region, zones, stdout, stderr)
         assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, to_provision: 'resources.Resources',
+    def _yield_region_zones(self, to_provision: 'resources_lib.Resources',
                             cluster_name: str, cluster_exists: bool):
         cloud = to_provision.cloud
         region = None
@@ -715,7 +719,7 @@ class RetryingVmProvisioner(object):
         ):
             yield (region, zones)
 
-    def _try_provision_tpu(self, to_provision: 'resources.Resources',
+    def _try_provision_tpu(self, to_provision: 'resources_lib.Resources',
                            config_dict: Dict[str, str]) -> bool:
         """Returns whether the provision is successful."""
         tpu_name = config_dict['tpu_name']
@@ -767,7 +771,7 @@ class RetryingVmProvisioner(object):
             raise e
 
     def _retry_region_zones(self,
-                            to_provision: 'resources.Resources',
+                            to_provision: 'resources_lib.Resources',
                             num_nodes: int,
                             dryrun: bool,
                             stream_logs: bool,
@@ -799,10 +803,11 @@ class RetryingVmProvisioner(object):
                 to_provision,
                 num_nodes,
                 _get_cluster_config_template(to_provision.cloud),
+                cluster_name,
+                self._local_wheel_path,
                 region=region,
                 zones=zones,
-                dryrun=dryrun,
-                cluster_name=cluster_name)
+                dryrun=dryrun)
             if dryrun:
                 return
             tpu_name = config_dict.get('tpu_name')
@@ -867,7 +872,6 @@ class RetryingVmProvisioner(object):
             else:
                 assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # gang scheduling failed.
-
                 logger.error('*** Failed provisioning the cluster. ***')
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
@@ -1107,15 +1111,16 @@ class CloudVmRayBackend(backends.Backend):
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
 
-        def __init__(self,
-                     *,
-                     cluster_name: str,
-                     cluster_yaml: str,
-                     head_ip: Optional[str] = None,
-                     launched_nodes: Optional[int] = None,
-                     launched_resources: Optional['resources.Resources'] = None,
-                     tpu_create_script: Optional[str] = None,
-                     tpu_delete_script: Optional[str] = None) -> None:
+        def __init__(
+                self,
+                *,
+                cluster_name: str,
+                cluster_yaml: str,
+                head_ip: Optional[str] = None,
+                launched_nodes: Optional[int] = None,
+                launched_resources: Optional['resources_lib.Resources'] = None,
+                tpu_create_script: Optional[str] = None,
+                tpu_delete_script: Optional[str] = None) -> None:
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
@@ -1173,7 +1178,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'existing cluster first: sky down {cluster_name}')
 
     def _check_existing_cluster(
-            self, task: task_lib.Task, to_provision: 'resources.Resources',
+            self, task: task_lib.Task, to_provision: 'resources_lib.Resources',
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
@@ -1215,7 +1220,7 @@ class CloudVmRayBackend(backends.Backend):
 
     def provision(self,
                   task: task_lib.Task,
-                  to_provision: Optional['resources.Resources'],
+                  to_provision: Optional['resources_lib.Resources'],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None):
@@ -1227,8 +1232,6 @@ class CloudVmRayBackend(backends.Backend):
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
-        provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
-                                            self._optimize_target)
 
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
         # TODO(mraheja): remove pylint disabling when filelock version updated
@@ -1240,11 +1243,16 @@ class CloudVmRayBackend(backends.Backend):
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
-                prev_cluster_status = (
-                    backend_utils.get_status_from_cluster_name(cluster_name))
+                prev_cluster_status = (backend_utils.get_status_from_cluster_name(cluster_name))
+            assert to_provision_config.resources is not None, (
+                'to_provision should not be None', to_provision_config)
+            # TODO(suquark): once we have sky on PYPI, we should directly
+            # install sky from PYPI.
+            local_wheel_path = wheel_utils.build_sky_wheel()
             try:
-                assert to_provision_config.resources is not None, (
-                    'to_provision should not be None', to_provision_config)
+                provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
+                                                    self._optimize_target,
+                                                    local_wheel_path)
                 config_dict = provisioner.provision_with_retries(
                     task, to_provision_config, dryrun, stream_logs)
             except exceptions.ResourcesUnavailableError as e:
@@ -1260,6 +1268,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'Relax the task\'s resource requirements:\n '
                     f'{task.num_nodes}x {task.resources}')
                 sys.exit(1)
+            finally:
+                wheel_utils.cleanup_wheels_dir(local_wheel_path)
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -1825,10 +1835,6 @@ class CloudVmRayBackend(backends.Backend):
             # Case: task_lib.Task(run, num_nodes=N)
             assert task.num_nodes > 1, task.num_nodes
             self._execute_task_n_nodes(handle, task, job_id, detach_run)
-        # # This should be called after the job is submitted, otherwise the
-        # # cluster will be stopped immediately after provisioned if the
-        # # idle_minutes_to_autostop==0.
-        # self.set_autostop(handle, task.idle_minutes_to_autostop)
 
     def _execute_task_one_node(self, handle: ResourceHandle,
                                task: task_lib.Task, job_id: int,
