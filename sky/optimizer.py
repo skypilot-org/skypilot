@@ -469,12 +469,12 @@ class Optimizer:
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
 
-        node_to_cost_map, node_to_candidate_map = Optimizer._estimate_nodes_cost_or_time(
-            topo_order,
-            minimize_cost,
-            blocked_launchable_resources,
-            raise_error,
-        )
+        node_to_cost_map, node_to_candidate_map = \
+            Optimizer._estimate_nodes_cost_or_time(
+                topo_order,
+                minimize_cost,
+                blocked_launchable_resources,
+                raise_error)
 
         if dag.is_chain():
             best_plan, best_total_cost = Optimizer._optimize_by_dp(
