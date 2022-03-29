@@ -176,7 +176,6 @@ class Optimizer:
     @staticmethod
     def _per_node_cost_or_time(
         topo_order: List[Task],
-        dag: 'dag_lib.Dag',
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[
             resources_lib.Resources]] = None,
@@ -458,11 +457,11 @@ class Optimizer:
 
     @staticmethod
     def _optimize_cost(
-        dag: dag_lib.Dag,
+        dag: 'dag_lib.Dag',
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[resources_lib.Resources]] = None,
         raise_error: bool = False,
-    ) -> Tuple[dag_lib.Dag, Dict[Task, resources_lib.Resources]]:
+    ) -> Tuple['dag_lib.Dag', Dict[Task, resources_lib.Resources]]:
         import networkx as nx  # pylint: disable=import-outside-toplevel
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
