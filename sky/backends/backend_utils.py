@@ -28,7 +28,6 @@ from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import azure
-from sky.backends import wheel_utils
 from sky.skylet import log_lib
 
 if typing.TYPE_CHECKING:
@@ -483,9 +482,10 @@ def write_cluster_config(to_provision: 'resources.Resources',
                          num_nodes: int,
                          cluster_config_template: str,
                          cluster_name: str,
+                         local_wheel_path: pathlib.Path,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False):
+                         dryrun: bool = False) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -546,9 +546,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
     assert cluster_name is not None
 
-    # TODO(suquark): once we have sky on PYPI, we should directly install sky
-    # from PYPI
-    local_wheel_path = wheel_utils.build_sky_wheel()
     credentials = sky_check.get_cloud_credential_file_mounts()
     credential_file_mounts, credential_excludes = credentials
     yaml_path = _fill_template(
