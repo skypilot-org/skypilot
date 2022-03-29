@@ -182,6 +182,11 @@ class Optimizer:
         raise_error: bool = False,
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
         """Estimates the cost/time of each task-resource mapping in the DAG.
+
+        Note that the egress cost/time is not considered in this function.
+        The estimated run time of a task running on a resource is given by
+        `task.estimate_runtime(resources)` or 1 hour by default.
+        The estimated cost is `task.num_nodes * resources.get_cost(runtime)`.
         """
         # Cost of running the task on the resources.
         # node -> {resources -> cost}
@@ -292,7 +297,7 @@ class Optimizer:
 
             parent = topo_order[node_i - 1]
             # FIXME: Account for egress costs for multi-node clusters
-            for resources, compute_cost in node_to_cost_map[node].items():
+            for resources, execution_cost in node_to_cost_map[node].items():
                 min_pred_cost_plus_egress = np.inf
                 for parent_resources, parent_cost in \
                     dp_best_cost[parent].items():
@@ -306,7 +311,7 @@ class Optimizer:
 
                 dp_point_backs[node][resources] = best_parent_hardware
                 dp_best_cost[node][resources] = \
-                    compute_cost + min_pred_cost_plus_egress
+                    execution_cost + min_pred_cost_plus_egress
 
         # Compute the total cost of the DAG.
         sink_node = topo_order[-1]
@@ -330,7 +335,7 @@ class Optimizer:
         topo_order: List[Task],
         plan: Dict[Task, resources_lib.Resources],
     ) -> float:
-        """Estimates the total execution time of the DAG with the plan."""
+        """Estimates the total time of running the DAG by the plan."""
         cache_finish_time = {}
 
         def finish_time(node):
@@ -339,9 +344,11 @@ class Optimizer:
 
             resources = plan[node]
             if node.time_estimator_func is None:
-                compute_time = 1 * 3600
+                execution_time = 1 * 3600
             else:
-                compute_time = node.estimate_runtime(resources)
+                # The execution time of dummy nodes is always 0,
+                # as they have a time estimator lambda _: 0.
+                execution_time = node.estimate_runtime(resources)
 
             pred_finish_times = [0]
             for pred in graph.predecessors(node):
@@ -350,7 +357,7 @@ class Optimizer:
                     False, pred, plan[pred], node, resources)
                 pred_finish_times.append(finish_time(pred) + egress_time)
 
-            cache_finish_time[node] = compute_time + max(pred_finish_times)
+            cache_finish_time[node] = execution_time + max(pred_finish_times)
             return cache_finish_time[node]
 
         sink_node = topo_order[-1]
@@ -362,16 +369,18 @@ class Optimizer:
         topo_order: List[Task],
         plan: Dict[Task, resources_lib.Resources],
     ) -> float:
-        """Estimates the total execution cost of the DAG with the plan."""
+        """Estimates the total cost of running the DAG by the plan."""
         total_cost = 0
         for node in topo_order:
             resources = plan[node]
             if node.time_estimator_func is None:
-                compute_time = 1 * 3600
+                execution_time = 1 * 3600
             else:
-                compute_time = node.estimate_runtime(resources)
+                # The execution time of dummy nodes is always 0,
+                # as they have a time estimator lambda _: 0.
+                execution_time = node.estimate_runtime(resources)
 
-            cost_per_node = resources.get_cost(compute_time)
+            cost_per_node = resources.get_cost(execution_time)
             total_cost += cost_per_node * node.num_nodes
 
             for pred in graph.predecessors(node):
@@ -462,6 +471,11 @@ class Optimizer:
             resources_lib.Resources]] = None,
         raise_error: bool = False,
     ) -> Tuple['dag_lib.Dag', Dict[Task, resources_lib.Resources]]:
+        """Finds the optimal task-resource mapping for the entire DAG.
+
+        The optimal mapping should consider the egress cost/time so that
+        the total estimated cost/time of the DAG becomes the minimum.
+        """
         import networkx as nx  # pylint: disable=import-outside-toplevel
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
