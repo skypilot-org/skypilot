@@ -1195,13 +1195,9 @@ class JobLibCodeGen(object):
 
 class ThreadConsole:
     """An empty class for multi-threaded console.status."""
-    PATTERN = re.compile(r'\[.*?\]')
-
-    def __init__(self, msg: str):
-        self.msg = self.PATTERN.sub('', msg)
 
     def __enter__(self):
-        print(self.msg)
+        pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
@@ -1211,4 +1207,4 @@ def safe_console_status(msg: str):
     """A wrapper for multi-threaded console.status."""
     if threading.current_thread() is threading.main_thread():
         return console.status(msg)
-    return ThreadConsole(msg)
+    return ThreadConsole()

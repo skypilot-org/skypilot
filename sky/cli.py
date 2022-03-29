@@ -39,7 +39,7 @@ import yaml
 
 import click
 import pendulum
-from rich import console as rich_console
+from rich import progress as rich_progress
 
 import sky
 from sky import backends
@@ -56,7 +56,7 @@ from sky.skylet import job_lib
 from sky.skylet import util_lib
 
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
+progress = rich_progress.Progress(transient=True)
 
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -1287,32 +1287,43 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             abort=True,
             show_default=True)
 
+    operation = 'Terminating' if terminate else 'Stopping'
+    plural = 's' if len(to_down) > 1 else ''
+    task = progress.add_task(
+        f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
+        total=len(to_down) - 1)
+    progress.start()
+
     def _terminate_or_stop(record):
         name = record['name']
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
         if (isinstance(backend, backends.CloudVmRayBackend) and
                 handle.launched_resources.use_spot and not terminate):
+            # Disable spot instances to be stopped.
             # TODO(suquark): enable GCP+spot to be stopped in the future.
+            progress.stop()
             click.secho(
                 f'Stopping cluster {name}... skipped, because spot instances '
                 'may lose attached volumes. ',
                 fg='green')
             click.echo('  To terminate the cluster, run: ', nl=False)
             click.secho(f'sky down {name}', bold=True)
-            return
-        success = backend.teardown(handle, terminate=terminate)
-        operation = 'Terminating' if terminate else 'Stopping'
-        if success:
-            click.secho(f'{operation} cluster {name}...done.', fg='green')
-            if not terminate:
-                click.echo('  To restart the cluster, run: ', nl=False)
-                click.secho(f'sky start {name}', bold=True)
         else:
-            click.secho(
-                f'{operation} cluster {name}...failed. '
-                'Please check the logs and try again.',
-                fg='red')
+            success = backend.teardown(handle, terminate=terminate)
+            progress.stop()
+            if success:
+                click.secho(f'{operation} cluster {name}...done.', fg='green')
+                if not terminate:
+                    click.echo('  To restart the cluster, run: ', nl=False)
+                    click.secho(f'sky start {name}', bold=True)
+            else:
+                click.secho(
+                    f'{operation} cluster {name}...failed. '
+                    'Please check the logs and try again.',
+                    fg='red')
+        progress.start()
+        progress.update(task, advance=1)
 
     backend_utils.run_in_parallel(_terminate_or_stop, to_down)
 
