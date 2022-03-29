@@ -34,6 +34,7 @@ import os
 import shlex
 import sys
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
@@ -48,12 +49,14 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import clouds
 from sky import data
-from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
 from sky.skylet import util_lib
+
+if typing.TYPE_CHECKING:
+    from sky.backends import backend as backend_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -277,7 +280,7 @@ def _create_and_ssh_into_node(
     node_type: str,
     resources: sky.Resources,
     cluster_name: str,
-    backend: Optional[backend_lib.Backend] = None,
+    backend: Optional['backend_lib.Backend'] = None,
     port_forward: Optional[List[int]] = None,
     session_manager: Optional[str] = None,
     user_requested_resources: Optional[bool] = False,
@@ -902,7 +905,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
 
 def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
-                               backend: backend_lib.Backend, code: str):
+                               backend: 'backend_lib.Backend', code: str):
     click.echo(f'\nSky Job Queue of Cluster {cluster}')
     if handle.head_ip is None:
         click.echo(
@@ -1200,10 +1203,18 @@ def start(clusters: Tuple[str], yes: bool):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--purge',
+              '-p',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Ignore cloud provider errors (if any); '
+              'useful for cleaning up manually deleted cluster(s).')
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
+    purge: bool,
 ):
     """Tear down cluster(s).
 
@@ -1241,11 +1252,15 @@ def down(
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=True,
-                                no_confirm=yes)
+                                no_confirm=yes,
+                                purge=purge)
 
 
-def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
-                                terminate: bool, no_confirm: bool) -> None:
+def _terminate_or_stop_clusters(names: Tuple[str],
+                                apply_to_all: Optional[bool],
+                                terminate: bool,
+                                no_confirm: bool,
+                                purge: bool = False) -> None:
     """Terminates or stops a cluster (or all clusters)."""
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
@@ -1310,7 +1325,7 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             click.echo('  To terminate the cluster, run: ', nl=False)
             click.secho(f'sky down {name}', bold=True)
         else:
-            success = backend.teardown(handle, terminate=terminate)
+            success = backend.teardown(handle, terminate=terminate, purge=purge)
             progress.stop()
             if success:
                 click.secho(f'{operation} cluster {name}...done.', fg='green')

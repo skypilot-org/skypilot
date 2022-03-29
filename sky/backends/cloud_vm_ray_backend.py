@@ -8,12 +8,14 @@ import hashlib
 import inspect
 import json
 import os
+import pathlib
 import re
 import sys
 import subprocess
 import tempfile
 import textwrap
 import time
+import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
@@ -23,27 +25,26 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
-from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import optimizer
-from sky import resources as resources_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.backends import wheel_utils
 from sky.skylet import job_lib, log_lib
 
-Dag = dag_lib.Dag
+if typing.TYPE_CHECKING:
+    from sky import dag
+    from sky import resources as resources_lib
+
 OptimizeTarget = optimizer.OptimizeTarget
 Path = str
-Resources = resources_lib.Resources
-Task = task_lib.Task
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
-SKYLET_REMOTE_PATH = backend_utils.SKY_REMOTE_PATH
 
 logger = sky_logging.init_logger(__name__)
 
@@ -82,7 +83,8 @@ def _get_cluster_config_template(cloud):
     return cloud_to_template[type(cloud)]
 
 
-def _get_task_demands_dict(task: Task) -> Optional[Tuple[Optional[str], int]]:
+def _get_task_demands_dict(
+        task: task_lib.Task) -> Optional[Tuple[Optional[str], int]]:
     """Returns the accelerator dict of the task"""
     # TODO: CPU and other memory resources are not supported yet.
     accelerator_dict = None
@@ -408,7 +410,7 @@ class RetryingVmProvisioner(object):
 
         def __init__(self,
                      cluster_name: str,
-                     resources: Optional[Resources],
+                     resources: Optional['resources_lib.Resources'],
                      num_nodes: int,
                      cluster_exists: bool = False) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
@@ -425,7 +427,9 @@ class RetryingVmProvisioner(object):
         GANG_FAILED = 1
         HEAD_FAILED = 2
 
-    def __init__(self, log_dir: str, dag: Dag, optimize_target: OptimizeTarget):
+    def __init__(self, log_dir: str, dag: 'dag.Dag',
+                 optimize_target: OptimizeTarget,
+                 local_wheel_path: pathlib.Path):
         self._blocked_regions = set()
         self._blocked_zones = set()
         self._blocked_launchable_resources = set()
@@ -433,6 +437,7 @@ class RetryingVmProvisioner(object):
         self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
         self._optimize_target = optimize_target
+        self._local_wheel_path = local_wheel_path
 
         colorama.init()
 
@@ -597,8 +602,8 @@ class RetryingVmProvisioner(object):
                 region, zones, stdout, stderr)
         assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, to_provision: Resources, cluster_name: str,
-                            cluster_exists: bool):
+    def _yield_region_zones(self, to_provision: 'resources_lib.Resources',
+                            cluster_name: str, cluster_exists: bool):
         cloud = to_provision.cloud
         region = None
         zones = None
@@ -712,7 +717,7 @@ class RetryingVmProvisioner(object):
         ):
             yield (region, zones)
 
-    def _try_provision_tpu(self, to_provision: Resources,
+    def _try_provision_tpu(self, to_provision: 'resources_lib.Resources',
                            config_dict: Dict[str, str]) -> bool:
         """Returns whether the provision is successful."""
         tpu_name = config_dict['tpu_name']
@@ -765,7 +770,7 @@ class RetryingVmProvisioner(object):
             raise e
 
     def _retry_region_zones(self,
-                            to_provision: Resources,
+                            to_provision: 'resources_lib.Resources',
                             num_nodes: int,
                             dryrun: bool,
                             stream_logs: bool,
@@ -797,10 +802,11 @@ class RetryingVmProvisioner(object):
                 to_provision,
                 num_nodes,
                 _get_cluster_config_template(to_provision.cloud),
+                cluster_name,
+                self._local_wheel_path,
                 region=region,
                 zones=zones,
-                dryrun=dryrun,
-                cluster_name=cluster_name)
+                dryrun=dryrun)
             if dryrun:
                 return
             tpu_name = config_dict.get('tpu_name')
@@ -854,6 +860,9 @@ class RetryingVmProvisioner(object):
 
             # If cluster was previously UP or STOPPED, stop it; otherwise
             # terminate.
+            # FIXME(zongheng): terminating a potentially live cluster is
+            # scary. Say: users have an existing cluster that got into INIT, do
+            # sky launch, somehow failed, then we may be terminating it here.
             need_terminate = prev_cluster_status not in [
                 global_user_state.ClusterStatus.STOPPED,
                 global_user_state.ClusterStatus.UP
@@ -862,11 +871,11 @@ class RetryingVmProvisioner(object):
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
                                                 zones, stdout, stderr)
+                logger.error(
+                    f'*** HEAD_FAILED for {cluster_name} {region.name}')
             else:
-                assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # gang scheduling failed.
-
-                logger.error('*** Failed provisioning the cluster. ***')
+                assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
                 self._update_blocklist_on_error(
@@ -876,19 +885,22 @@ class RetryingVmProvisioner(object):
                     zones=None,
                     stdout=None,
                     stderr=None)
-                # Only log the error message for gang scheduling failure, since
-                # head_fail may not create any resources.
+
+                # Only log the errors for GANG_FAILED, since HEAD_FAILED may
+                # not have created any resources (it can happen however).
+                logger.error('*** Failed provisioning the cluster. ***')
                 terminate_str = 'Terminating' if need_terminate else 'Stopping'
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
 
-                # There may exists partial nodes (e.g., head node) so we must
-                # terminate before moving on to other regions or stop.
-                # FIXME(zongheng): terminating a potentially live cluster
-                # is scary.  Say: users have an existing cluster, do sky
-                # launch, gang failed, then we are terminating it here.
-                CloudVmRayBackend().teardown(handle,
-                                             terminate=need_terminate,
-                                             _force=True)
+            # There may exists partial nodes (e.g., head node) so we must
+            # terminate or stop before moving on to other regions.
+            #
+            # NOTE: even HEAD_FAILED could've left a live head node there, so
+            # we must terminate/stop here too. E.g., node is up, and ray
+            # autoscaler proceeds to setup commands, which may fail:
+            #   ERR updater.py:138 -- New status: update-failed
+            CloudVmRayBackend().teardown_no_lock(handle,
+                                                 terminate=need_terminate)
 
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -1012,7 +1024,7 @@ class RetryingVmProvisioner(object):
 
     def provision_with_retries(
         self,
-        task: Task,
+        task: task_lib.Task,
         to_provision_config: ToProvisionConfig,
         dryrun: bool,
         stream_logs: bool,
@@ -1112,15 +1124,16 @@ class CloudVmRayBackend(backends.Backend):
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
 
-        def __init__(self,
-                     *,
-                     cluster_name: str,
-                     cluster_yaml: str,
-                     head_ip: Optional[str] = None,
-                     launched_nodes: Optional[int] = None,
-                     launched_resources: Optional[Resources] = None,
-                     tpu_create_script: Optional[str] = None,
-                     tpu_delete_script: Optional[str] = None) -> None:
+        def __init__(
+                self,
+                *,
+                cluster_name: str,
+                cluster_yaml: str,
+                head_ip: Optional[str] = None,
+                launched_nodes: Optional[int] = None,
+                launched_resources: Optional['resources_lib.Resources'] = None,
+                tpu_create_script: Optional[str] = None,
+                tpu_delete_script: Optional[str] = None) -> None:
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
@@ -1159,7 +1172,7 @@ class CloudVmRayBackend(backends.Backend):
                                            OptimizeTarget.COST)
 
     def _check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
-                                                   task: Task):
+                                                   task: task_lib.Task):
         """Check if resources requested by the task are available."""
         assert len(task.resources) == 1, task.resources
 
@@ -1178,7 +1191,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'existing cluster first: sky down {cluster_name}')
 
     def _check_existing_cluster(
-            self, task: Task, to_provision: Resources,
+            self, task: task_lib.Task, to_provision: 'resources_lib.Resources',
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
@@ -1219,8 +1232,8 @@ class CloudVmRayBackend(backends.Backend):
                                             'Failed to set TPU_NAME on node.')
 
     def provision(self,
-                  task: Task,
-                  to_provision: Optional[Resources],
+                  task: task_lib.Task,
+                  to_provision: Optional['resources_lib.Resources'],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None):
@@ -1232,8 +1245,6 @@ class CloudVmRayBackend(backends.Backend):
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
-        provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
-                                            self._optimize_target)
 
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
         # TODO(mraheja): remove pylint disabling when filelock version updated
@@ -1248,9 +1259,15 @@ class CloudVmRayBackend(backends.Backend):
                 prev_cluster_status = (
                     global_user_state.get_status_from_cluster_name(cluster_name)
                 )
+            assert to_provision_config.resources is not None, (
+                'to_provision should not be None', to_provision_config)
+            # TODO(suquark): once we have sky on PYPI, we should directly
+            # install sky from PYPI.
+            local_wheel_path = wheel_utils.build_sky_wheel()
             try:
-                assert to_provision_config.resources is not None, (
-                    'to_provision should not be None', to_provision_config)
+                provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
+                                                    self._optimize_target,
+                                                    local_wheel_path)
                 config_dict = provisioner.provision_with_retries(
                     task, to_provision_config, dryrun, stream_logs)
             except exceptions.ResourcesUnavailableError as e:
@@ -1266,6 +1283,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'Relax the task\'s resource requirements:\n '
                     f'{task.num_nodes}x {task.resources}')
                 sys.exit(1)
+            finally:
+                wheel_utils.cleanup_wheels_dir(local_wheel_path)
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -1568,7 +1587,7 @@ class CloudVmRayBackend(backends.Backend):
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
-    def setup(self, handle: ResourceHandle, task: Task) -> None:
+    def setup(self, handle: ResourceHandle, task: task_lib.Task) -> None:
         start = time.time()
         style = colorama.Style
         fore = colorama.Fore
@@ -1797,7 +1816,7 @@ class CloudVmRayBackend(backends.Backend):
     def execute(
         self,
         handle: ResourceHandle,
-        task: Task,
+        task: task_lib.Task,
         detach_run: bool,
     ) -> None:
         # Check the task resources vs the cluster resources. Since `sky exec`
@@ -1819,8 +1838,9 @@ class CloudVmRayBackend(backends.Backend):
         assert task.num_nodes > 1, task.num_nodes
         return self._execute_task_n_nodes(handle, task, job_id, detach_run)
 
-    def _execute_task_one_node(self, handle: ResourceHandle, task: Task,
-                               job_id: int, detach_run: bool) -> None:
+    def _execute_task_one_node(self, handle: ResourceHandle,
+                               task: task_lib.Task, job_id: int,
+                               detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
         log_path = os.path.join(log_dir, 'run.log')
@@ -1850,7 +1870,7 @@ class CloudVmRayBackend(backends.Backend):
                                 executable='python3',
                                 detach_run=detach_run)
 
-    def _execute_task_n_nodes(self, handle: ResourceHandle, task: Task,
+    def _execute_task_n_nodes(self, handle: ResourceHandle, task: task_lib.Task,
                               job_id: int, detach_run: bool) -> None:
         # Strategy:
         #   ray.init(...)
@@ -1925,7 +1945,7 @@ class CloudVmRayBackend(backends.Backend):
             if handle.tpu_delete_script is not None:
                 logger.info('Tip: `sky down` will delete launched TPU(s) too.')
 
-    def teardown_ephemeral_storage(self, task: Task) -> None:
+    def teardown_ephemeral_storage(self, task: task_lib.Task) -> None:
         storage_mounts = task.storage_mounts
         if storage_mounts is not None:
             for _, storage in storage_mounts.items():
@@ -1935,22 +1955,16 @@ class CloudVmRayBackend(backends.Backend):
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
-                 _force: bool = False) -> bool:
+                 purge: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
-
-        if _force:
-            # Should only be forced when teardown is called within a
-            # locked section of the code (i.e teardown when not enough
-            # resources can be provisioned)
-            return self._teardown(handle, terminate)
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
             # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(lock_path, _FILELOCK_TIMEOUT_SECONDS):
-                success = self._teardown(handle, terminate)
+                success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
             return success
@@ -1959,7 +1973,10 @@ class CloudVmRayBackend(backends.Backend):
                          'Check to see if it is still being launched.')
         return False
 
-    def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
+    def teardown_no_lock(self,
+                         handle: ResourceHandle,
+                         terminate: bool,
+                         purge: bool = False) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -2064,13 +2081,23 @@ class CloudVmRayBackend(backends.Backend):
                     return False
 
         if returncode != 0:
-            logger.error(
-                f'{colorama.Fore.RED}Failed to terminate {cluster_name}.\n'
-                f'**** STDOUT ****\n'
-                f'{stdout}\n'
-                f'**** STDERR ****\n'
-                f'{stderr}{colorama.Style.RESET_ALL}')
-            return False
+            if purge:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}'
+                    'WARNING: Received non-zero exit code from cloud provider. '
+                    'Make sure resources are manually deleted.'
+                    f'{colorama.Style.RESET_ALL}')
+            else:
+                logger.error(
+                    f'{colorama.Fore.RED}Failed to terminate {cluster_name}. '
+                    f'If you want to ignore this error and remove the cluster '
+                    f'from from Sky\'s status table, use `sky down --purge`.'
+                    f'{colorama.Style.RESET_ALL}\n'
+                    f'**** STDOUT ****\n'
+                    f'{stdout}\n'
+                    f'**** STDERR ****\n'
+                    f'{stderr}')
+                return False
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         backend_utils.SSHConfigHelper.remove_cluster(cluster_name,

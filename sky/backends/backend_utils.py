@@ -13,6 +13,7 @@ import sys
 import textwrap
 import threading
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
@@ -27,15 +28,14 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import resources
 from sky.adaptors import azure
-from sky.backends import wheel_utils
 from sky.skylet import log_lib
+
+if typing.TYPE_CHECKING:
+    from sky import resources
 
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
-
-Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
@@ -479,13 +479,14 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
-def write_cluster_config(to_provision: Resources,
+def write_cluster_config(to_provision: 'resources.Resources',
                          num_nodes: int,
                          cluster_config_template: str,
                          cluster_name: str,
+                         local_wheel_path: pathlib.Path,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False):
+                         dryrun: bool = False) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -546,9 +547,6 @@ def write_cluster_config(to_provision: Resources,
 
     assert cluster_name is not None
 
-    # TODO(suquark): once we have sky on PYPI, we should directly install sky
-    # from PYPI
-    local_wheel_path = wheel_utils.build_sky_wheel()
     credentials = sky_check.get_cloud_credential_file_mounts()
     credential_file_mounts, credential_excludes = credentials
     yaml_path = _fill_template(

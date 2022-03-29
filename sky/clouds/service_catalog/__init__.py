@@ -1,9 +1,10 @@
 """Service catalog."""
 import collections
 import importlib
-from typing import Dict, List, Optional, Tuple, Union, TYPE_CHECKING
+import typing
+from typing import Dict, List, Optional, Tuple, Union
 
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     from sky.clouds import cloud
     from sky.clouds.service_catalog import common
 
