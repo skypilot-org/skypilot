@@ -1167,6 +1167,8 @@ def get_backend_from_handle(
         raise NotImplementedError(
             f'Handle type {type(handle)} is not supported yet.')
     return backend
+
+
 class NoOpConsole:
     """An empty class for multi-threaded console.status."""
 

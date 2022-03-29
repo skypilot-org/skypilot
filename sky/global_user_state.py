@@ -29,6 +29,7 @@ _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
+
 class _SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
@@ -68,21 +69,21 @@ class _SQLiteConn(threading.local):
         self._rename_column('storage', 'lauched_at', 'launched_at')
 
         self.conn.commit()
-        
-    def _add_column_to_table(self, table_name: str, column_name: str, column_type: str):
+
+    def _add_column_to_table(self, table_name: str, column_name: str,
+                             column_type: str):
         for row in self.cursor.execute(f'PRAGMA table_info({table_name})'):
             if row[1] == column_name:
                 break
         else:
             self.cursor.execute(f'ALTER TABLE {table_name} '
-                            f'ADD COLUMN {column_name} {column_type}')
-
+                                f'ADD COLUMN {column_name} {column_type}')
 
     def _rename_column(self, table_name: str, old_name: str, new_name: str):
         for row in self.cursor.execute(f'PRAGMA table_info({table_name})'):
             if row[1] == old_name:
                 self.cursor.execute(f'ALTER TABLE {table_name} '
-                                f'RENAME COLUMN {old_name} to {new_name}')
+                                    f'RENAME COLUMN {old_name} to {new_name}')
                 break
 
 
@@ -247,7 +248,7 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
-                           (cluster_name,))
+                              (cluster_name,))
     for name, launched_at, handle, last_use, status, autostop in rows:
         record = {
             'name': name,

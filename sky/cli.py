@@ -1385,6 +1385,8 @@ def _terminate_or_stop_clusters(
 
     progress = rich_progress.Progress(transient=True)
     operation = 'Terminating' if terminate else 'Stopping'
+    if idle_minutes_to_autostop is not None:
+        operation = 'Scheduling auto-stop'
     plural = 's' if len(to_down) > 1 else ''
     task = progress.add_task(
         f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
@@ -1428,13 +1430,16 @@ def _terminate_or_stop_clusters(
                 backend.set_autostop(handle, idle_minutes_to_autostop)
                 progress.stop()
                 if idle_minutes_to_autostop < 0:
-                    click.secho(f'Cancelling auto-stop for cluster {name}...done',
-                                fg='green')
+                    click.secho(
+                        f'Cancelling auto-stop for cluster {name}...done',
+                        fg='green')
                 else:
-                    click.secho(f'Scheduling auto-stop for cluster {name}...done',
-                                fg='green')
-                    click.echo(f'  The cluster will be stopped after '
-                            f'{idle_minutes_to_autostop} minutes of idleness.')
+                    click.secho(
+                        f'Scheduling auto-stop for cluster {name}...done',
+                        fg='green')
+                    click.echo(
+                        f'  The cluster will be stopped after '
+                        f'{idle_minutes_to_autostop} minutes of idleness.')
                     click.echo('  To cancel the autostop, run: ', nl=False)
                     click.secho(f'sky autostop {name} --cancel', bold=True)
         else:
