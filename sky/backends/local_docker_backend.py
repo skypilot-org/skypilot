@@ -348,9 +348,9 @@ class LocalDockerBackend(backends.Backend):
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
-                 purge: bool = False,
-                 force: bool = False) -> bool:
+                 purge: bool = False) -> bool:
         """Teardown kills the container."""
+        del purge  # Unused.
         if not terminate:
             logger.warning(
                 'LocalDockerBackend.teardown() will terminate '

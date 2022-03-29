@@ -886,9 +886,8 @@ class RetryingVmProvisioner(object):
                 # FIXME(zongheng): terminating a potentially live cluster
                 # is scary.  Say: users have an existing cluster, do sky
                 # launch, gang failed, then we are terminating it here.
-                CloudVmRayBackend().teardown(handle,
-                                             terminate=need_terminate,
-                                             force=True)
+                CloudVmRayBackend().teardown_no_lock(handle,
+                                                     terminate=need_terminate)
 
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -1928,23 +1927,16 @@ class CloudVmRayBackend(backends.Backend):
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
-                 purge: bool = False,
-                 force: bool = False) -> bool:
+                 purge: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
-
-        if force:
-            # Should only be forced when teardown is called within a
-            # locked section of the code (i.e teardown when not enough
-            # resources can be provisioned)
-            return self._teardown(handle, terminate, purge)
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
             # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(lock_path, _FILELOCK_TIMEOUT_SECONDS):
-                success = self._teardown(handle, terminate, purge)
+                success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
             return success
@@ -1953,8 +1945,10 @@ class CloudVmRayBackend(backends.Backend):
                          'Check to see if it is still being launched.')
         return False
 
-    def _teardown(self, handle: ResourceHandle, terminate: bool,
-                  purge: bool) -> bool:
+    def teardown_no_lock(self,
+                         handle: ResourceHandle,
+                         terminate: bool,
+                         purge: bool = False) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -2054,7 +2048,6 @@ class CloudVmRayBackend(backends.Backend):
                                  f'{tpu_stderr}{colorama.Style.RESET_ALL}')
                     return False
 
-        returncode = 1
         if returncode != 0:
             if purge:
                 logger.warning(

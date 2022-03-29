@@ -61,8 +61,7 @@ class Backend:
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
-                 purge: bool = False,
-                 force: bool = False) -> bool:
+                 purge: bool = False) -> bool:
         raise NotImplementedError
 
     def register_info(self, **kwargs) -> None:
