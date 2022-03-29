@@ -6,7 +6,7 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_DISK_SIZE = 256
+_DEFAULT_DISK_SIZE_GB = 256
 
 
 class Resources:
@@ -87,10 +87,15 @@ class Resources:
         self.use_spot = use_spot if use_spot is not None else False
 
         if disk_size is not None:
-            assert disk_size >= 50, 'OS disk size must be larger than 50GB.'
-            self.disk_size = disk_size
+            if disk_size < 50:
+                raise ValueError(
+                    f'OS disk size must be larger than 50GB. Got: {disk_size}.')
+            if round(disk_size) != disk_size:
+                raise ValueError(
+                    f'OS disk size must be an integer. Got: {disk_size}.')
+            self.disk_size = int(disk_size)
         else:
-            self.disk_size = DEFAULT_DISK_SIZE
+            self.disk_size = _DEFAULT_DISK_SIZE_GB
         self._try_validate_accelerators()
 
     def __repr__(self) -> str:
