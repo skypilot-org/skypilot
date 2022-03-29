@@ -861,6 +861,9 @@ class RetryingVmProvisioner(object):
 
             # If cluster was previously UP or STOPPED, stop it; otherwise
             # terminate.
+            # FIXME(zongheng): terminating a potentially live cluster is
+            # scary. Say: users have an existing cluster that got into INIT, do
+            # sky launch, somehow failed, then we may be terminating it here.
             need_terminate = prev_cluster_status not in [
                 global_user_state.ClusterStatus.STOPPED,
                 global_user_state.ClusterStatus.UP
@@ -869,10 +872,11 @@ class RetryingVmProvisioner(object):
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
                                                 zones, stdout, stderr)
+                logger.error(
+                    f'*** HEAD_FAILED for {cluster_name} {region.name}')
             else:
-                assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # gang scheduling failed.
-                logger.error('*** Failed provisioning the cluster. ***')
+                assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
                 self._update_blocklist_on_error(
@@ -882,19 +886,23 @@ class RetryingVmProvisioner(object):
                     zones=None,
                     stdout=None,
                     stderr=None)
-                # Only log the error message for gang scheduling failure, since
-                # head_fail may not create any resources.
+
+                # Only log the errors for GANG_FAILED, since HEAD_FAILED may
+                # not have created any resources (it can happen however).
+                logger.error('*** Failed provisioning the cluster. ***')
                 terminate_str = 'Terminating' if need_terminate else 'Stopping'
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
 
-                # There may exists partial nodes (e.g., head node) so we must
-                # terminate before moving on to other regions or stop.
-                # FIXME(zongheng): terminating a potentially live cluster
-                # is scary.  Say: users have an existing cluster, do sky
-                # launch, gang failed, then we are terminating it here.
-                CloudVmRayBackend().teardown(handle,
-                                             terminate=need_terminate,
-                                             _force=True)
+            # There may exists partial nodes (e.g., head node) so we must
+            # terminate or stop before moving on to other regions.
+            #
+            # NOTE: even HEAD_FAILED could've left a live head node there, so
+            # we must terminate/stop here too. E.g., node is up, and ray
+            # autoscaler proceeds to setup commands, which may fail:
+            #   ERR updater.py:138 -- New status: update-failed
+            CloudVmRayBackend().teardown(handle,
+                                         terminate=need_terminate,
+                                         _force=True)
 
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
