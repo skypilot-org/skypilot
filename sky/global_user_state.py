@@ -223,7 +223,7 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def set_cluster_autostop(cluster_name: str, idle_minutes: int) -> None:
+def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
     _CURSOR.execute('UPDATE clusters SET autostop=(?) WHERE name=(?)', (
         idle_minutes,
         cluster_name,

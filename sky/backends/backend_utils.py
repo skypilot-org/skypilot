@@ -1098,7 +1098,8 @@ def get_head_ip(
     return head_ip
 
 
-def _update_cluster(record: Dict[str, Any]) -> global_user_state.ClusterStatus:
+def _ping_cluster_or_set_to_stopped(
+        record: Dict[str, Any]) -> global_user_state.ClusterStatus:
     handle = record['handle']
     # Autostop is disabled for the cluster
     if record['autostop'] < 0:
@@ -1121,7 +1122,7 @@ def get_status_from_cluster_name(
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None
-    record = _update_cluster(record)
+    record = _ping_cluster_or_set_to_stopped(record)
     return record['status']
 
 
@@ -1129,7 +1130,7 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
     records = global_user_state.get_clusters()
     if not refresh:
         return records
-    return [_update_cluster(record) for record in records]
+    return [_ping_cluster_or_set_to_stopped(record) for record in records]
 
 
 def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
