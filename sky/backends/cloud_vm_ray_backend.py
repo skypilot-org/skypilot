@@ -8,6 +8,7 @@ import hashlib
 import inspect
 import json
 import os
+import pathlib
 import re
 import sys
 import subprocess
@@ -31,6 +32,7 @@ from sky import sky_logging
 from sky import optimizer
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.backends import wheel_utils
 from sky.skylet import job_lib, log_lib
 
 if typing.TYPE_CHECKING:
@@ -44,7 +46,6 @@ SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
-SKYLET_REMOTE_PATH = backend_utils.SKY_REMOTE_PATH
 
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
@@ -429,7 +430,8 @@ class RetryingVmProvisioner(object):
         HEAD_FAILED = 2
 
     def __init__(self, log_dir: str, dag: 'dag.Dag',
-                 optimize_target: OptimizeTarget):
+                 optimize_target: OptimizeTarget,
+                 local_wheel_path: pathlib.Path):
         self._blocked_regions = set()
         self._blocked_zones = set()
         self._blocked_launchable_resources = set()
@@ -437,6 +439,7 @@ class RetryingVmProvisioner(object):
         self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
         self._optimize_target = optimize_target
+        self._local_wheel_path = local_wheel_path
 
         colorama.init()
 
@@ -800,10 +803,11 @@ class RetryingVmProvisioner(object):
                 to_provision,
                 num_nodes,
                 _get_cluster_config_template(to_provision.cloud),
+                cluster_name,
+                self._local_wheel_path,
                 region=region,
                 zones=zones,
-                dryrun=dryrun,
-                cluster_name=cluster_name)
+                dryrun=dryrun)
             if dryrun:
                 return
             tpu_name = config_dict.get('tpu_name')
@@ -868,7 +872,6 @@ class RetryingVmProvisioner(object):
             else:
                 assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # gang scheduling failed.
-
                 logger.error('*** Failed provisioning the cluster. ***')
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
@@ -1236,8 +1239,6 @@ class CloudVmRayBackend(backends.Backend):
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
-        provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
-                                            self._optimize_target)
 
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
         # TODO(mraheja): remove pylint disabling when filelock version updated
@@ -1252,9 +1253,15 @@ class CloudVmRayBackend(backends.Backend):
                 prev_cluster_status = (
                     global_user_state.get_status_from_cluster_name(cluster_name)
                 )
+            assert to_provision_config.resources is not None, (
+                'to_provision should not be None', to_provision_config)
+            # TODO(suquark): once we have sky on PYPI, we should directly
+            # install sky from PYPI.
+            local_wheel_path = wheel_utils.build_sky_wheel()
             try:
-                assert to_provision_config.resources is not None, (
-                    'to_provision should not be None', to_provision_config)
+                provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
+                                                    self._optimize_target,
+                                                    local_wheel_path)
                 config_dict = provisioner.provision_with_retries(
                     task, to_provision_config, dryrun, stream_logs)
             except exceptions.ResourcesUnavailableError as e:
@@ -1270,6 +1277,8 @@ class CloudVmRayBackend(backends.Backend):
                     f'Relax the task\'s resource requirements:\n '
                     f'{task.num_nodes}x {task.resources}')
                 sys.exit(1)
+            finally:
+                wheel_utils.cleanup_wheels_dir(local_wheel_path)
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
