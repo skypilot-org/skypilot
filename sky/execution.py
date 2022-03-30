@@ -148,12 +148,14 @@ def _execute(dag: sky.Dag,
         traceback.print_exc()
         print()
         backends.backend_utils.run('sky status')
+        print('\x1b[?25h', end='')  # Show cursor.
         status_printed = True
         sys.exit(1)
     finally:
         if not status_printed:
             # Needed because this finally doesn't always get executed on errors.
             backends.backend_utils.run('sky status')
+            print('\x1b[?25h', end='')  # Show cursor.
 
 
 def launch(dag: sky.Dag,

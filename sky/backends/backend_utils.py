@@ -1115,6 +1115,10 @@ def _ping_cluster_or_set_to_stopped(
         logger.debug(f'Failed to get IPs from cluster {cluster_name}: {e}, '
                      'set to STOPPED')
     global_user_state.remove_cluster(cluster_name, terminate=False)
+    auth_config = read_yaml(handle.cluster_yaml)['auth']
+    SSHConfigHelper.remove_cluster(cluster_name,
+                                    handle.head_ip,
+                                    auth_config)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
