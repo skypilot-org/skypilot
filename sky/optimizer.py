@@ -325,7 +325,8 @@ class Optimizer:
         # Compute the total objective value of the DAG.
         sink_node = topo_order[-1]
         total_objective = dp_best_objective[sink_node]
-        assert len(total_objective) == 1, f'Should be DummyCloud: {total_objective}'
+        assert len(total_objective) == 1, \
+            f'Should be DummyCloud: {total_objective}'
         best_resources, best_total_objective = list(total_objective.items())[0]
 
         # Find the best plan for the DAG.
