@@ -8,6 +8,7 @@ import hashlib
 import inspect
 import json
 import os
+import pathlib
 import re
 import sys
 import subprocess
@@ -2116,10 +2117,18 @@ class CloudVmRayBackend(backends.Backend):
         # OS has a default rsync==2.6.9 (16 years old).
         rsync_command = ['rsync', '-Pavz']
         # Legend
-        # : per-directory merge-file (i.e., any subdir's .gitignore)
-        # - an exclude pattern
-        rsync_command.append('--filter=\':- .gitignore\'')
-        rsync_command.append('--filter=\':- .git/info/exclude\'')
+        #   dir-merge: ignore file can appear in any subdir, applies to that
+        #     subdir downwards
+        # Note that "-" is mandatory for rsync and means all patterns in the
+        # ignore files are treated as *exclude* patterns.  Non-exclude
+        # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
+        # allows it.
+        rsync_command.append('--filter=\'dir-merge,- .gitignore\'')
+        git_exclude = '.git/info/exclude'
+        if (pathlib.Path(source) / git_exclude).exists():
+            # Ensure file exists; otherwise, rsync will error out.
+            rsync_command.append('--exclude-from=.git/info/exclude')
+
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,
                                            self._ssh_control_name(handle)))
