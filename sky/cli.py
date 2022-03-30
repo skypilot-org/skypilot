@@ -27,7 +27,6 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
-import colorama
 import copy
 import functools
 import getpass
@@ -40,6 +39,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
+import colorama
 import pendulum
 from rich import progress as rich_progress
 
