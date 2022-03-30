@@ -290,18 +290,18 @@ class Optimizer:
     ) -> Tuple[Dict[Task, resources_lib.Resources], float]:
         """Optimizes a chain DAG using a dynamic programming algorithm."""
         # node -> { resources -> best estimated cost }
-        dp_best_obj = collections.defaultdict(dict)
+        dp_best_objective = collections.defaultdict(dict)
         # node -> { resources -> best parent resources }
         dp_point_backs = collections.defaultdict(dict)
 
-        # Computes dp_best_obj[node][resources]
-        # = my estimated cost + min_phw { dp_best_obj(p, phw) +
+        # Computes dp_best_objective[node][resources]
+        # = my estimated cost + min_phw { dp_best_objective(p, phw) +
         #                                 egress_cost(p, phw, hw) }
         # where p is the parent of the node.
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
                 # Base case: a special source node.
-                dp_best_obj[node][list(node.get_resources())[0]] = 0
+                dp_best_objective[node][list(node.get_resources())[0]] = 0
                 continue
 
             parent = topo_order[node_i - 1]
@@ -309,7 +309,7 @@ class Optimizer:
             for resources, execution_cost in node_to_cost_map[node].items():
                 min_pred_cost_plus_egress = np.inf
                 for parent_resources, parent_cost in \
-                    dp_best_obj[parent].items():
+                    dp_best_objective[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
                         minimize_cost, parent, parent_resources, node,
                         resources)
@@ -319,14 +319,14 @@ class Optimizer:
                         best_parent_hardware = parent_resources
 
                 dp_point_backs[node][resources] = best_parent_hardware
-                dp_best_obj[node][resources] = \
+                dp_best_objective[node][resources] = \
                     execution_cost + min_pred_cost_plus_egress
 
         # Compute the total objective value of the DAG.
         sink_node = topo_order[-1]
-        total_obj = dp_best_obj[sink_node]
-        assert len(total_obj) == 1, f'Should be DummyCloud: {total_obj}'
-        best_resources, best_total_obj = list(total_obj.items())[0]
+        total_objective = dp_best_objective[sink_node]
+        assert len(total_objective) == 1, f'Should be DummyCloud: {total_objective}'
+        best_resources, best_total_objective = list(total_objective.items())[0]
 
         # Find the best plan for the DAG.
         # node -> best resources
@@ -336,7 +336,7 @@ class Optimizer:
             node.best_resources = best_resources
             if node.name != _DUMMY_SOURCE_NAME:
                 best_resources = dp_point_backs[node][best_resources]
-        return best_plan, best_total_obj
+        return best_plan, best_total_objective
 
     @staticmethod
     def _compute_total_time(
@@ -536,7 +536,7 @@ class Optimizer:
                 raise_error)
 
         if dag.is_chain():
-            best_plan, best_total_obj = Optimizer._optimize_by_dp(
+            best_plan, best_total_objective = Optimizer._optimize_by_dp(
                 topo_order, node_to_cost_map, minimize_cost)
         else:
             raise NotImplementedError('Currently Sky only supports chain DAGs.')
@@ -544,9 +544,9 @@ class Optimizer:
         if minimize_cost:
             total_time = Optimizer._compute_total_time(graph, topo_order,
                                                        best_plan)
-            total_cost = best_total_obj
+            total_cost = best_total_objective
         else:
-            total_time = best_total_obj
+            total_time = best_total_objective
             total_cost = Optimizer._compute_total_cost(graph, topo_order,
                                                        best_plan)
 
