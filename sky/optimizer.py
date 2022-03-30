@@ -416,7 +416,8 @@ class Optimizer:
 
             if cost_or_time > 0:
                 if parent.name == _DUMMY_SOURCE_NAME:
-                    egress = f'{child.get_inputs()} ({src_cloud}) -> {child} ({dst_cloud})'
+                    egress = (f'{child.get_inputs()} ({src_cloud}) -> '
+                              f'{child} ({dst_cloud})')
                 else:
                     egress = f'{parent} ({src_cloud}) -> {child} ({dst_cloud})'
                 message_data.append((egress, nbytes, cost_or_time))
