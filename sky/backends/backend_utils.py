@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -234,7 +235,12 @@ class SSHConfigHelper(object):
                                        f'host named {cluster_name}.')
                         host_name = ip
                         logger.warning(f'Using {ip} to identify host instead.')
-                    break
+
+                if line.strip() == f'Host {ip}':
+                    prev_line = config[i - 1] if i - 1 > 0 else ''
+                    if prev_line.strip().startswith(sky_autogen_comment):
+                        overwrite = True
+                        overwrite_begin_idx = i - 1
         else:
             config = ['\n']
             with open(config_path, 'w') as f:
@@ -1188,3 +1194,20 @@ class JobLibCodeGen(object):
         code = cls._PREFIX + code
         code = ';'.join(code)
         return f'python3 -u -c {code!r}'
+
+
+class NoOpConsole:
+    """An empty class for multi-threaded console.status."""
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+def safe_console_status(msg: str):
+    """A wrapper for multi-threaded console.status."""
+    if threading.current_thread() is threading.main_thread():
+        return console.status(msg)
+    return NoOpConsole()

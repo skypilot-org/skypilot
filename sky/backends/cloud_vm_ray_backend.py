@@ -20,7 +20,6 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import colorama
 import filelock
-from rich import console as rich_console
 
 import sky
 from sky import backends
@@ -48,7 +47,6 @@ SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
 
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
 
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
@@ -133,8 +131,12 @@ def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
                          'falling back to du -shk')
             pass
     return int(
-        subprocess.check_output(['du', '-sh', '-k', path
-                                ]).split()[0].decode('utf-8')) // (2**10)
+        subprocess.check_output([
+            'du',
+            '-sh',
+            '-k',
+            path,
+        ]).split()[0].decode('utf-8')) // (2**10)
 
 
 class RayCodeGen:
@@ -726,8 +728,9 @@ class RetryingVmProvisioner(object):
         assert 'tpu-create-script' in config_dict, \
             'Expect TPU provisioning with gcloud.'
         try:
-            with console.status('[bold cyan]Provisioning TPU '
-                                f'[green]{tpu_name}[/]'):
+            with backend_utils.safe_console_status(
+                    '[bold cyan]Provisioning TPU '
+                    f'[green]{tpu_name}[/]'):
                 backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
                                   stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE)
@@ -861,6 +864,9 @@ class RetryingVmProvisioner(object):
 
             # If cluster was previously UP or STOPPED, stop it; otherwise
             # terminate.
+            # FIXME(zongheng): terminating a potentially live cluster is
+            # scary. Say: users have an existing cluster that got into INIT, do
+            # sky launch, somehow failed, then we may be terminating it here.
             need_terminate = prev_cluster_status not in [
                 global_user_state.ClusterStatus.STOPPED,
                 global_user_state.ClusterStatus.UP
@@ -869,10 +875,11 @@ class RetryingVmProvisioner(object):
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
                                                 zones, stdout, stderr)
+                logger.error(
+                    f'*** HEAD_FAILED for {cluster_name} {region.name}')
             else:
-                assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # gang scheduling failed.
-                logger.error('*** Failed provisioning the cluster. ***')
+                assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
                 self._update_blocklist_on_error(
@@ -882,19 +889,22 @@ class RetryingVmProvisioner(object):
                     zones=None,
                     stdout=None,
                     stderr=None)
-                # Only log the error message for gang scheduling failure, since
-                # head_fail may not create any resources.
+
+                # Only log the errors for GANG_FAILED, since HEAD_FAILED may
+                # not have created any resources (it can happen however).
+                logger.error('*** Failed provisioning the cluster. ***')
                 terminate_str = 'Terminating' if need_terminate else 'Stopping'
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
 
-                # There may exists partial nodes (e.g., head node) so we must
-                # terminate before moving on to other regions or stop.
-                # FIXME(zongheng): terminating a potentially live cluster
-                # is scary.  Say: users have an existing cluster, do sky
-                # launch, gang failed, then we are terminating it here.
-                CloudVmRayBackend().teardown(handle,
-                                             terminate=need_terminate,
-                                             _force=True)
+            # There may exists partial nodes (e.g., head node) so we must
+            # terminate or stop before moving on to other regions.
+            #
+            # NOTE: even HEAD_FAILED could've left a live head node there, so
+            # we must terminate/stop here too. E.g., node is up, and ray
+            # autoscaler proceeds to setup commands, which may fail:
+            #   ERR updater.py:138 -- New status: update-failed
+            CloudVmRayBackend().teardown_no_lock(handle,
+                                                 terminate=need_terminate)
 
         message = ('Failed to acquire resources in all regions/zones'
                    f' (requested {to_provision}).'
@@ -1310,7 +1320,8 @@ class CloudVmRayBackend(backends.Backend):
                 # PENDING / RUNNING jobs for the real status, since we do not
                 # know the actual previous status of the cluster.
                 cmd = backend_utils.JobLibCodeGen.update_status()
-                with console.status('[bold cyan]Preparing Job Queue'):
+                with backend_utils.safe_console_status(
+                        '[bold cyan]Preparing Job Queue'):
                     returncode, _, stderr = self.run_on_head(
                         handle, cmd, require_outputs=True)
                 backend_utils.handle_returncode(returncode, cmd,
@@ -1396,7 +1407,7 @@ class CloudVmRayBackend(backends.Backend):
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-        with console.status('[bold cyan]Syncing[/]'):
+        with backend_utils.safe_console_status('[bold cyan]Syncing[/]'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
     def sync_file_mounts(
@@ -1471,7 +1482,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'{fore.CYAN}Syncing (to {num_nodes} node{plural}): '
                         f'{style.BRIGHT}{src}{style.RESET_ALL} -> '
                         f'{style.BRIGHT}{dst}{style.RESET_ALL}')
-            with console.status('[bold cyan]Syncing[/]'):
+            with backend_utils.safe_console_status('[bold cyan]Syncing[/]'):
                 backend_utils.run_in_parallel(_sync_node, ip_list)
 
         # Check the files and warn
@@ -1626,7 +1637,8 @@ class CloudVmRayBackend(backends.Backend):
             plural = 's' if num_nodes > 1 else ''
             logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
                         f'{style.RESET_ALL}')
-            with console.status('[bold cyan]Running setup[/]'):
+            with backend_utils.safe_console_status(
+                    '[bold cyan]Running setup[/]'):
                 backend_utils.run_in_parallel(_setup_node, ip_list)
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
         end = time.time()
@@ -1947,22 +1959,16 @@ class CloudVmRayBackend(backends.Backend):
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
-                 _force: bool = False) -> bool:
+                 purge: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
-
-        if _force:
-            # Should only be forced when teardown is called within a
-            # locked section of the code (i.e teardown when not enough
-            # resources can be provisioned)
-            return self._teardown(handle, terminate)
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
             # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(lock_path, _FILELOCK_TIMEOUT_SECONDS):
-                success = self._teardown(handle, terminate)
+                success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
             return success
@@ -1971,7 +1977,10 @@ class CloudVmRayBackend(backends.Backend):
                          'Check to see if it is still being launched.')
         return False
 
-    def _teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
+    def teardown_no_lock(self,
+                         handle: ResourceHandle,
+                         terminate: bool,
+                         purge: bool = False) -> bool:
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -1985,8 +1994,8 @@ class CloudVmRayBackend(backends.Backend):
             # autoscaler.
             resource_group = config['provider']['resource_group']
             terminate_cmd = f'az group delete -y --name {resource_group}'
-            with console.status(f'[bold cyan]Terminating '
-                                f'[green]{cluster_name}'):
+            with backend_utils.safe_console_status(f'[bold cyan]Terminating '
+                                                   f'[green]{cluster_name}'):
                 returncode, stdout, stderr = log_lib.run_with_log(
                     terminate_cmd,
                     log_abs_path,
@@ -2010,8 +2019,9 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = (
                     f'aws ec2 terminate-instances --region {region} '
                     f'--instance-ids $({query_cmd})')
-                with console.status(f'[bold cyan]Terminating '
-                                    f'[green]{cluster_name}'):
+                with backend_utils.safe_console_status(
+                        f'[bold cyan]Terminating '
+                        f'[green]{cluster_name}'):
                     returncode, stdout, stderr = log_lib.run_with_log(
                         terminate_cmd,
                         log_abs_path,
@@ -2027,8 +2037,9 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = (
                     f'gcloud compute instances delete --zone={zone} --quiet '
                     f'$({query_cmd})')
-                with console.status(f'[bold cyan]Terminating '
-                                    f'[green]{cluster_name}'):
+                with backend_utils.safe_console_status(
+                        f'[bold cyan]Terminating '
+                        f'[green]{cluster_name}'):
                     returncode, stdout, stderr = log_lib.run_with_log(
                         terminate_cmd,
                         log_abs_path,
@@ -2048,8 +2059,9 @@ class CloudVmRayBackend(backends.Backend):
                 f.flush()
 
                 teardown_verb = 'Terminating' if terminate else 'Stopping'
-                with console.status(f'[bold cyan]{teardown_verb} '
-                                    f'[green]{cluster_name}'):
+                with backend_utils.safe_console_status(
+                        f'[bold cyan]{teardown_verb} '
+                        f'[green]{cluster_name}'):
                     returncode, stdout, stderr = log_lib.run_with_log(
                         ['ray', 'down', '-y', f.name],
                         log_abs_path,
@@ -2057,7 +2069,8 @@ class CloudVmRayBackend(backends.Backend):
                         require_outputs=True)
 
             if handle.tpu_delete_script is not None:
-                with console.status('[bold cyan]Terminating TPU...'):
+                with backend_utils.safe_console_status(
+                        '[bold cyan]Terminating TPU...'):
                     tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
                         ['bash', handle.tpu_delete_script],
                         log_abs_path,
@@ -2072,19 +2085,29 @@ class CloudVmRayBackend(backends.Backend):
                     return False
 
         if returncode != 0:
-            logger.error(
-                f'{colorama.Fore.RED}Failed to terminate {cluster_name}.\n'
-                f'**** STDOUT ****\n'
-                f'{stdout}\n'
-                f'**** STDERR ****\n'
-                f'{stderr}{colorama.Style.RESET_ALL}')
-            return False
+            if purge:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}'
+                    'WARNING: Received non-zero exit code from cloud provider. '
+                    'Make sure resources are manually deleted.'
+                    f'{colorama.Style.RESET_ALL}')
+            else:
+                logger.error(
+                    f'{colorama.Fore.RED}Failed to terminate {cluster_name}. '
+                    f'If you want to ignore this error and remove the cluster '
+                    f'from from Sky\'s status table, use `sky down --purge`.'
+                    f'{colorama.Style.RESET_ALL}\n'
+                    f'**** STDOUT ****\n'
+                    f'{stdout}\n'
+                    f'**** STDERR ****\n'
+                    f'{stderr}')
+                return False
 
         auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
         backend_utils.SSHConfigHelper.remove_cluster(cluster_name,
                                                      handle.head_ip,
                                                      auth_config)
-        name = global_user_state.get_cluster_name_from_handle(handle)
+        name = handle.cluster_name
         global_user_state.remove_cluster(name, terminate=terminate)
 
         if terminate:
@@ -2128,7 +2151,19 @@ class CloudVmRayBackend(backends.Backend):
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
         rsync_command = ['rsync', '-Pavz']
-        rsync_command.append('--filter=\':- .gitignore\'')
+        # Legend
+        #   dir-merge: ignore file can appear in any subdir, applies to that
+        #     subdir downwards
+        # Note that "-" is mandatory for rsync and means all patterns in the
+        # ignore files are treated as *exclude* patterns.  Non-exclude
+        # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
+        # allows it.
+        rsync_command.append('--filter=\'dir-merge,- .gitignore\'')
+        git_exclude = '.git/info/exclude'
+        if (pathlib.Path(source) / git_exclude).exists():
+            # Ensure file exists; otherwise, rsync will error out.
+            rsync_command.append('--exclude-from=.git/info/exclude')
+
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,
                                            self._ssh_control_name(handle)))
