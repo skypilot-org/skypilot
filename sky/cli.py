@@ -1014,8 +1014,20 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster}\' not found'
+        raise click.BadParameter(f'Cluster {cluster!r} not found'
                                  ' (see `sky status`).')
+    backend = backend_utils.get_backend_from_handle(handle)
+    if not isinstance(backend, backends.CloudVmRayBackend):
+        raise click.UsageError(
+            'Job cancelling is only supported for '
+            f'{backends.CloudVmRayBackend.NAME}, but cluster {cluster!r} '
+            f'is created by {backend.NAME}.')
+    # Check the status of the cluster.
+    cluster_status = backend_utils.get_status_from_cluster_name(cluster)
+    if cluster_status != global_user_state.ClusterStatus.UP:
+        click.secho(f'Cluster {cluster} (status: {cluster_status}) '
+                    'is not up...skipped.')
+        return
 
     if all:
         click.secho(f'Cancelling all jobs on cluster {cluster}...', fg='yellow')
@@ -1027,8 +1039,6 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
     code = job_lib.JobLibCodeGen.cancel_jobs(jobs)
 
-    # FIXME: Assumes a specific backend.
-    backend = backends.CloudVmRayBackend()
     returncode, _, stderr = backend.run_on_head(handle,
                                                 code,
                                                 stream_logs=False,
