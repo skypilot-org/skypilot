@@ -95,7 +95,7 @@ For more details, see `this example <https://github.com/sky-proj/sky/blob/master
 .. note::
 
     Items listed in a :code:`.gitignore` file (or a ``.git/info/exclude`` file)
-    under any local file_mount source are also ignored (the same behavior as
+    under a local file_mount source are also ignored (the same behavior as
     handling ``workdir``).
 
 Uploading or reusing large files

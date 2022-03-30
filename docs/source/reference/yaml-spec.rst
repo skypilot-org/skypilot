@@ -18,10 +18,8 @@ describe all fields available.
     # files are synced to the remote VM with `rsync`. Please consider using Sky
     # Storage to transfer large datasets and files.
     #
-    # If a .gitignore file (or a .git/info/exclude file) exists anywhere within
-    # the working directory tree, the behavior will match git's behavior for
-    # finding and using gitignore files. Files and directories included in a
-    # .gitignore file will be ignored by Sky.
+    # If a .gitignore file (or a .git/info/exclude file) exists in the working
+    # directory, files and directories listed in those files will be ignored.
     workdir: ~/my-task-code
 
     # Number of nodes (optional) to launch including the head node. If not
