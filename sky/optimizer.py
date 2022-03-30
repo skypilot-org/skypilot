@@ -416,17 +416,18 @@ class Optimizer:
 
             if cost_or_time > 0:
                 if parent.name == _DUMMY_SOURCE_NAME:
-                    egress = f'Data ({src_cloud}) -> {child} ({dst_cloud})'
+                    egress = f'{child.get_inputs()} ({src_cloud}) -> {child} ({dst_cloud})'
                 else:
                     egress = f'{parent} ({src_cloud}) -> {child} ({dst_cloud})'
                 message_data.append((egress, nbytes, cost_or_time))
 
         if message_data:
-            metric = 'cost ($)' if minimize_cost else 'time (s)'
+            metric = 'COST ($)' if minimize_cost else 'TIME (s)'
             message = tabulate.tabulate(
                 reversed(message_data),
-                headers=['Egress', 'Size (GB)', metric],
+                headers=['EGRESS', 'SIZE (GB)', metric],
                 tablefmt='plain',
+                numalign='right',
             )
             logger.info(f'{message}\n')
 
