@@ -189,12 +189,14 @@ def exec(  # pylint: disable=redefined-builtin
 ) -> None:
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
-        raise ValueError(f'Cluster \'{cluster_name}\' not found.  '
-                         'Use `sky launch` to provision first.')
+        logger.error(f'Cluster {cluster_name!r} not found.  '
+                     'Use `sky launch` to provision first.')
+        sys.exit(1)
     status = backends.backend_utils.get_status_from_cluster_name(cluster_name)
     if status != global_user_state.ClusterStatus.UP:
-        raise ValueError(f'Cluster \'{cluster_name}\' is not up.  '
-                         'Use `sky status` to check the status.')
+        logger.error(f'Cluster {cluster_name!r} is not up.  '
+                     'Use `sky status` to check the status.')
+        sys.exit(1)
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,

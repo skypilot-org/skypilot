@@ -966,6 +966,13 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
     if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
         raise click.UsageError('Sky logs is not available with '
                                'LocalDockerBackend.')
+    cluster_status = backend_utils.get_status_from_cluster_name(cluster_name)
+    if cluster_status != global_user_state.ClusterStatus.UP:
+        click.secho(
+            f'Cluster {cluster_name} (status: {cluster_status}) '
+            'is not up.',
+            fg='red')
+        return
     backend = backend_utils.get_backend_from_handle(handle)
 
     if sync_down and status:
