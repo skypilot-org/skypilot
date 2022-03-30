@@ -910,6 +910,10 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
             # LocalDockerBackend does not support job queues
             unsupported_clusters.append(cluster)
             continue
+        cluster_status = backend_utils.get_status_from_cluster_name(cluster)
+        if cluster_status != global_user_state.ClusterStatus.UP:
+            print(f'Cluster {cluster} is not up. Skipping.')
+            continue
         _show_job_queue_on_cluster(cluster, handle, backend, code)
     if unsupported_clusters:
         click.secho(

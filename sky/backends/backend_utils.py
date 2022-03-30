@@ -1102,6 +1102,8 @@ def get_head_ip(
 def _ping_cluster_or_set_to_stopped(
         record: Dict[str, Any]) -> global_user_state.ClusterStatus:
     handle = record['handle']
+    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        return record
     # Autostop is disabled for the cluster
     if record['autostop'] < 0:
         return record
