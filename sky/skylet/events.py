@@ -13,7 +13,7 @@ from sky.backends import backend_utils, cloud_vm_ray_backend
 from sky.skylet import autostop_lib, job_lib
 
 # Seconds of sleep between the processing of skylet events.
-EVENT_CHECKING_INTERVAL_SECONDS = 1
+EVENT_CHECKING_INTERVAL_SECONDS = 20
 logger = sky_logging.init_logger(__name__)
 
 
@@ -24,6 +24,7 @@ class SkyletEvent:
 
     Usage: override the EVENT_INTERVAL_SECONDS and _run method in subclass.
     """
+    # Run this event every this many seconds.
     EVENT_INTERVAL_SECONDS = -1
 
     def __init__(self):

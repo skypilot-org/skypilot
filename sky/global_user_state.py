@@ -37,9 +37,9 @@ class _SQLiteConn(threading.local):
         super().__init__()
         self.conn = sqlite3.connect(_DB_PATH)
         self.cursor = self.conn.cursor()
-        self._create_table()
+        self._create_tables()
 
-    def _create_table(self):
+    def _create_tables(self):
         # Table for Clusters
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS clusters (

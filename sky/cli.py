@@ -1118,11 +1118,11 @@ def autostop(
     CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
     CLUSTERS and --all are supplied, the latter takes precedence.
 
-    --idle-minutes is the number of minutes of idleness (no jobs in queue) after
+    --idle-minutes is the number of minutes of idleness (no pending/running jobs) after
     which the cluster will be stopped automatically.
 
     --cancel will cancel the autostopping. If the cluster was not scheduled
-    autostop, this will do nothing.
+    autostop, this will do nothing to autostop.
 
     If --idle-minutes and --cancel are not specified, default to 5 minutes.
 
@@ -1390,7 +1390,7 @@ def _terminate_or_stop_clusters(
     progress = rich_progress.Progress(transient=True)
     operation = 'Terminating' if terminate else 'Stopping'
     if idle_minutes_to_autostop is not None:
-        operation = 'Scheduling auto-stop'
+        operation = 'Scheduling auto-stop on'
     plural = 's' if len(to_down) > 1 else ''
     task = progress.add_task(
         f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
