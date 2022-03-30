@@ -419,9 +419,7 @@ class Optimizer:
                     egress = f'Data ({src_cloud}) -> {child} ({dst_cloud})'
                 else:
                     egress = f'{parent} ({src_cloud}) -> {child} ({dst_cloud})'
-                message_data.append(
-                    (egress, nbytes, cost_or_time)
-                )
+                message_data.append((egress, nbytes, cost_or_time))
 
         if message_data:
             metric = 'cost ($)' if minimize_cost else 'time (s)'
