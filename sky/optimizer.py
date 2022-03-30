@@ -548,7 +548,6 @@ class Optimizer:
             total_cost = Optimizer._compute_total_cost(graph, topo_order,
                                                        best_plan)
 
-        Optimizer._print_egress_plan(graph, best_plan, minimize_cost)
         Optimizer.print_optimized_plan(graph, best_plan, total_time, total_cost,
                                        node_to_cost_map, minimize_cost)
         Optimizer._print_candidates(node_to_candidate_map)
