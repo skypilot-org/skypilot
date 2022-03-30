@@ -1337,9 +1337,8 @@ def _terminate_or_stop_clusters(names: Tuple[str],
             else:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
-                    f'Please check the logs and try again.'
-                    f'{colorama.Style.RESET_ALL}'
-                )
+                    'Please check the logs and try again.'
+                    f'{colorama.Style.RESET_ALL}')
         progress.stop()
         click.echo(message)
         progress.update(task, advance=1)
