@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
+import colorama
 import pendulum
 from rich import progress as rich_progress
 
@@ -1301,13 +1302,12 @@ def _terminate_or_stop_clusters(names: Tuple[str],
             abort=True,
             show_default=True)
 
-    progress = rich_progress.Progress(transient=True)
     operation = 'Terminating' if terminate else 'Stopping'
     plural = 's' if len(to_down) > 1 else ''
+    progress = rich_progress.Progress(transient=True)
     task = progress.add_task(
         f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
         total=len(to_down))
-    progress.start()
 
     def _terminate_or_stop(record):
         name = record['name']
@@ -1317,30 +1317,36 @@ def _terminate_or_stop_clusters(names: Tuple[str],
                 handle.launched_resources.use_spot and not terminate):
             # Disable spot instances to be stopped.
             # TODO(suquark): enable GCP+spot to be stopped in the future.
-            progress.stop()
-            click.secho(
-                f'Stopping cluster {name}... skipped, because spot instances '
-                'may lose attached volumes. ',
-                fg='green')
-            click.echo('  To terminate the cluster, run: ', nl=False)
-            click.secho(f'sky down {name}', bold=True)
+            message = (
+                f'{colorama.Fore.GREEN}Stopping cluster {name}... skipped.'
+                f'{colorama.Style.RESET_ALL}\n'
+                '  The spot instances may lose attached volumes.\n'
+                '  To terminate the cluster, run: '
+                f'{colorama.Style.BRIGHT}sky down {name}'
+                f'{colorama.Style.RESET_ALL}')
         else:
             success = backend.teardown(handle, terminate=terminate, purge=purge)
-            progress.stop()
             if success:
-                click.secho(f'{operation} cluster {name}...done.', fg='green')
+                message = (
+                    f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
+                    f'{colorama.Style.RESET_ALL}')
                 if not terminate:
-                    click.echo('  To restart the cluster, run: ', nl=False)
-                    click.secho(f'sky start {name}', bold=True)
+                    message += ('\n  To restart the cluster, run: '
+                                f'{colorama.Style.BRIGHT}sky start {name}'
+                                f'{colorama.Style.RESET_ALL}')
             else:
-                click.secho(
-                    f'{operation} cluster {name}...failed. '
-                    'Please check the logs and try again.',
-                    fg='red')
+                message = (
+                    f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
+                    'Please check the logs and try again.'
+                    f'{colorama.Style.RESET_ALL}')
+        progress.stop()
+        click.echo(message)
         progress.update(task, advance=1)
         progress.start()
 
-    backend_utils.run_in_parallel(_terminate_or_stop, to_down)
+    with progress:
+        backend_utils.run_in_parallel(_terminate_or_stop, to_down)
+        progress.live.transient = False
 
 
 @_interactive_node_cli_command
