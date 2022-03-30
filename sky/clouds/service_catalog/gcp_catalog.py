@@ -3,13 +3,15 @@
 For now this service catalog is manually coded. In the future it should be
 queried from GCP API.
 """
-
+import typing
 from typing import Dict, List, Optional
 
 import pandas as pd
 
-from sky.clouds import cloud
 from sky.clouds.service_catalog import common
+
+if typing.TYPE_CHECKING:
+    from sky.clouds import cloud
 
 _df = common.read_catalog('gcp.csv')
 
@@ -93,7 +95,7 @@ def get_region_zones_for_accelerators(
     accelerator: str,
     count: int,
     use_spot: bool = False,
-) -> List[cloud.Region]:
+) -> List['cloud.Region']:
     """Returns a list of regions for a given accelerators."""
     df = _get_accelerator(_df, accelerator, count, region=None)
     return common.get_region_zones(df, use_spot)

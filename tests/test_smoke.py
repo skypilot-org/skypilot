@@ -76,7 +76,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     test.echo(f'{outcome}.'
               f'{reason}'
               f'\nLog: less {log_file.name}\n')
-    if test.teardown is not None:
+    if proc.returncode == 0 and test.teardown is not None:
         backend_utils.run(
             test.teardown,
             stdout=log_file,
@@ -302,12 +302,12 @@ def test_azure_start_stop_two_nodes():
     test = Test(
         'azure-start-stop-two-nodes',
         [
-            f'sky launch --num_nodes=2 -y -c {name} examples/azure_start_stop.yaml',
-            f'sky exec --num_nodes=2 {name} examples/azure_start_stop.yaml',
+            f'sky launch --num-nodes=2 -y -c {name} examples/azure_start_stop.yaml',
+            f'sky exec --num-nodes=2 {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sky start -y {name}',
-            f'sky exec --num_nodes=2 {name} examples/azure_start_stop.yaml',
+            f'sky exec --num-nodes=2 {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',

@@ -11,7 +11,9 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import threading
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
@@ -26,15 +28,14 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import resources
 from sky.adaptors import azure
-from sky.backends import wheel_utils
 from sky.skylet import log_lib
+
+if typing.TYPE_CHECKING:
+    from sky import resources
 
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
-
-Resources = resources.Resources
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
@@ -478,13 +479,14 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
-def write_cluster_config(to_provision: Resources,
+def write_cluster_config(to_provision: 'resources.Resources',
                          num_nodes: int,
                          cluster_config_template: str,
                          cluster_name: str,
+                         local_wheel_path: pathlib.Path,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False):
+                         dryrun: bool = False) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -545,9 +547,6 @@ def write_cluster_config(to_provision: Resources,
 
     assert cluster_name is not None
 
-    # TODO(suquark): once we have sky on PYPI, we should directly install sky
-    # from PYPI
-    local_wheel_path = wheel_utils.build_sky_wheel()
     credentials = sky_check.get_cloud_credential_file_mounts()
     credential_file_mounts, credential_excludes = credentials
     yaml_path = _fill_template(
@@ -1023,9 +1022,11 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def get_node_ips(cluster_yaml: str,
-                 expected_num_nodes: int,
-                 return_private_ips: bool = False) -> List[str]:
+def get_node_ips(
+        cluster_yaml: str,
+        expected_num_nodes: int,
+        return_private_ips: bool = False,
+        handle: Optional[backends.Backend.ResourceHandle] = None) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
     yaml_handle = cluster_yaml
     if return_private_ips:
@@ -1035,16 +1036,24 @@ def get_node_ips(cluster_yaml: str,
         yaml_handle = cluster_yaml + '.tmp'
         dump_yaml(yaml_handle, config)
 
+    # Try optimize for the common case where we have 1 node.
+    if (not return_private_ips and expected_num_nodes == 1 and
+            handle is not None and handle.head_ip is not None):
+        return [handle.head_ip]
+
     out = run(f'ray get-head-ip {yaml_handle}',
               stdout=subprocess.PIPE).stdout.decode().strip()
     head_ip = re.findall(IP_ADDR_REGEX, out)
     assert 1 == len(head_ip), out
 
-    out = run(f'ray get-worker-ips {yaml_handle}',
-              stdout=subprocess.PIPE).stdout.decode()
-    worker_ips = re.findall(IP_ADDR_REGEX, out)
-    assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes - 1,
-                                                       out)
+    if expected_num_nodes > 1:
+        out = run(f'ray get-worker-ips {yaml_handle}',
+                  stdout=subprocess.PIPE).stdout.decode()
+        worker_ips = re.findall(IP_ADDR_REGEX, out)
+        assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes -
+                                                           1, out)
+    else:
+        worker_ips = []
     if return_private_ips:
         os.remove(yaml_handle)
     return head_ip + worker_ips
@@ -1180,3 +1189,20 @@ class JobLibCodeGen(object):
         code = cls._PREFIX + code
         code = ';'.join(code)
         return f'python3 -u -c {code!r}'
+
+
+class NoOpConsole:
+    """An empty class for multi-threaded console.status."""
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+def safe_console_status(msg: str):
+    """A wrapper for multi-threaded console.status."""
+    if threading.current_thread() is threading.main_thread():
+        return console.status(msg)
+    return NoOpConsole()

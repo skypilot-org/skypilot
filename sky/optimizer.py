@@ -4,6 +4,7 @@ import colorama
 import enum
 import pprint
 import sys
+import typing
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -11,17 +12,17 @@ import tabulate
 
 from sky import check
 from sky import clouds
-from sky import dag as dag_lib
 from sky import exceptions
 from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 
+if typing.TYPE_CHECKING:
+    from sky import dag as dag_lib
+
 logger = sky_logging.init_logger(__name__)
 
-Dag = dag_lib.Dag
-Resources = resources_lib.Resources
 Task = task_lib.Task
 
 _DUMMY_SOURCE_NAME = 'sky-dummy-source'
@@ -74,9 +75,10 @@ class Optimizer:
         return egress_time
 
     @staticmethod
-    def optimize(dag: Dag,
+    def optimize(dag: 'dag_lib.Dag',
                  minimize=OptimizeTarget.COST,
-                 blocked_launchable_resources: Optional[List[Resources]] = None,
+                 blocked_launchable_resources: Optional[List[
+                     resources_lib.Resources]] = None,
                  raise_error: bool = False):
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
@@ -90,7 +92,7 @@ class Optimizer:
         return optimized_dag
 
     @staticmethod
-    def _add_dummy_source_sink_nodes(dag: Dag):
+    def _add_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
         """Adds special Source and Sink nodes.
 
         The two special nodes are for conveniently handling cases such as
@@ -131,7 +133,7 @@ class Optimizer:
         return dag
 
     @staticmethod
-    def _remove_dummy_source_sink_nodes(dag: Dag):
+    def _remove_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
         """Removes special Source and Sink nodes."""
         source = [t for t in dag.tasks if t.name == _DUMMY_SOURCE_NAME]
         sink = [t for t in dag.tasks if t.name == _DUMMY_SINK_NAME]
@@ -142,8 +144,8 @@ class Optimizer:
 
     @staticmethod
     def _egress_cost_or_time(minimize_cost: bool, parent: Task,
-                             parent_resources: Resources, node: Task,
-                             resources: Resources):
+                             parent_resources: resources_lib.Resources,
+                             node: Task, resources: resources_lib.Resources):
         """Computes the egress cost or time depending on 'minimize_cost'."""
         if isinstance(parent_resources.cloud, DummyCloud):
             # Special case.  The current 'node' is a real
@@ -166,9 +168,10 @@ class Optimizer:
 
     @staticmethod
     def _optimize_cost(
-        dag: Dag,
+        dag: 'dag_lib.Dag',
         minimize_cost: bool = True,
-        blocked_launchable_resources: Optional[List[Resources]] = None,
+        blocked_launchable_resources: Optional[List[
+            resources_lib.Resources]] = None,
         raise_error: bool = False,
     ):
         import networkx as nx  # pylint: disable=import-outside-toplevel
@@ -379,7 +382,7 @@ class Optimizer:
         return best_plan
 
 
-class DummyResources(Resources):
+class DummyResources(resources_lib.Resources):
     """A dummy Resources that has zero egress cost from/to."""
 
     _REPR = 'DummyCloud'
@@ -401,8 +404,8 @@ def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
 
 
 def _filter_out_blocked_launchable_resources(
-        launchable_resources: List[Resources],
-        blocked_launchable_resources: List[Resources]):
+        launchable_resources: List[resources_lib.Resources],
+        blocked_launchable_resources: List[resources_lib.Resources]):
     """Whether the resources are blocked."""
     available_resources = []
     for resources in launchable_resources:
@@ -416,16 +419,17 @@ def _filter_out_blocked_launchable_resources(
 
 def _fill_in_launchable_resources(
     task: Task,
-    blocked_launchable_resources: Optional[List[Resources]],
+    blocked_launchable_resources: Optional[List[resources_lib.Resources]],
     try_fix_with_sky_check: bool = True,
-) -> Tuple[Dict[Resources, List[Resources]], Dict[str, set]]:
+) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]], Dict[
+        str, set]]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_check:
         check.check(quiet=True)
         return _fill_in_launchable_resources(task, blocked_launchable_resources,
                                              False)
     launchable = collections.defaultdict(list)
-    cloud_candidates = collections.defaultdict(Resources)
+    cloud_candidates = collections.defaultdict(resources_lib.Resources)
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
     for resources in task.get_resources():
