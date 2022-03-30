@@ -1308,6 +1308,7 @@ def _terminate_or_stop_clusters(names: Tuple[str],
     task = progress.add_task(
         f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
         total=len(to_down))
+
     def _terminate_or_stop(record):
         name = record['name']
         handle = record['handle']
@@ -1322,13 +1323,13 @@ def _terminate_or_stop_clusters(names: Tuple[str],
                 '  The spot instances may lose attached volumes.\n'
                 '  To terminate the cluster, run: '
                 f'{colorama.Style.BRIGHT}sky down {name}'
-                f'{colorama.Style.RESET_ALL}'
-            )
+                f'{colorama.Style.RESET_ALL}')
         else:
             success = backend.teardown(handle, terminate=terminate, purge=purge)
             if success:
-                message = (f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
-                           f'{colorama.Style.RESET_ALL}')
+                message = (
+                    f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
+                    f'{colorama.Style.RESET_ALL}')
                 if not terminate:
                     message += ('\n  To restart the cluster, run: '
                                 f'{colorama.Style.BRIGHT}sky start {name}'
@@ -1336,7 +1337,9 @@ def _terminate_or_stop_clusters(names: Tuple[str],
             else:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
-                    f'Please check the logs and try again.{colorama.Style.RESET_ALL}')
+                    f'Please check the logs and try again.'
+                    f'{colorama.Style.RESET_ALL}'
+                )
         progress.stop()
         click.echo(message)
         progress.update(task, advance=1)
