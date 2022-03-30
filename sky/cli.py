@@ -1118,8 +1118,8 @@ def autostop(
     CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
     CLUSTERS and --all are supplied, the latter takes precedence.
 
-    --idle-minutes is the number of minutes of idleness (no pending/running jobs) after
-    which the cluster will be stopped automatically.
+    --idle-minutes is the number of minutes of idleness (no pending/running
+    jobs) after which the cluster will be stopped automatically.
 
     --cancel will cancel the autostopping. If the cluster was not scheduled
     autostop, this will do nothing to autostop.
