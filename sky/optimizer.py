@@ -56,9 +56,6 @@ class Optimizer:
             egress_cost = src_cloud.get_egress_cost(num_gigabytes=gigabytes)
         else:
             egress_cost = 0.0
-        if egress_cost > 0:
-            logger.info(f'  {src_cloud} -> {dst_cloud} egress cost: '
-                        f'${egress_cost} for {gigabytes:.1f} GB')
         return egress_cost
 
     @staticmethod
@@ -75,8 +72,6 @@ class Optimizer:
             # (~128MB per file).
             bandwidth_gbps = 10
             egress_time = gigabytes * 8 / bandwidth_gbps
-            logger.info(f'  {src_cloud} -> {dst_cloud} egress time: '
-                        f'{egress_time} s for {gigabytes:.1f} GB')
         else:
             egress_time = 0.0
         return egress_time
@@ -150,23 +145,37 @@ class Optimizer:
         return dag
 
     @staticmethod
-    def _egress_cost_or_time(minimize_cost: bool, parent: Task,
-                             parent_resources: resources_lib.Resources,
-                             node: Task, resources: resources_lib.Resources):
-        """Computes the egress cost or time depending on 'minimize_cost'."""
+    def _get_egress_info(
+        parent: Task,
+        parent_resources: resources_lib.Resources,
+        node: Task,
+        resources: resources_lib.Resources,
+    ) -> Tuple[clouds.Cloud, clouds.Cloud, float]:
         if isinstance(parent_resources.cloud, DummyCloud):
             # Special case.  The current 'node' is a real
             # source node, and its input may be on a different
             # cloud from 'resources'.
             if node.get_inputs() is None:
                 # A Task may have no inputs specified.
-                return 0
+                return None, None, 0
             src_cloud = node.get_inputs_cloud()
             nbytes = node.get_estimated_inputs_size_gigabytes()
         else:
             src_cloud = parent_resources.cloud
             nbytes = parent.get_estimated_outputs_size_gigabytes()
         dst_cloud = resources.cloud
+        return src_cloud, dst_cloud, nbytes
+
+    @staticmethod
+    def _egress_cost_or_time(minimize_cost: bool, parent: Task,
+                             parent_resources: resources_lib.Resources,
+                             node: Task, resources: resources_lib.Resources):
+        """Computes the egress cost or time depending on 'minimize_cost'."""
+        src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
+            parent, parent_resources, node, resources)
+        if nbytes == 0:
+            return 0
+
         if minimize_cost:
             fn = Optimizer._egress_cost
         else:
@@ -281,18 +290,18 @@ class Optimizer:
     ) -> Tuple[Dict[Task, resources_lib.Resources], float]:
         """Optimizes a chain DAG using a dynamic programming algorithm."""
         # node -> { resources -> best estimated cost }
-        dp_best_cost = collections.defaultdict(dict)
+        dp_best_obj = collections.defaultdict(dict)
         # node -> { resources -> best parent resources }
         dp_point_backs = collections.defaultdict(dict)
 
-        # Computes dp_best_cost[node][resources]
-        # = my estimated cost + min_phw { dp_best_cost(p, phw) +
+        # Computes dp_best_obj[node][resources]
+        # = my estimated cost + min_phw { dp_best_obj(p, phw) +
         #                                 egress_cost(p, phw, hw) }
         # where p is the parent of the node.
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
                 # Base case: a special source node.
-                dp_best_cost[node][list(node.get_resources())[0]] = 0
+                dp_best_obj[node][list(node.get_resources())[0]] = 0
                 continue
 
             parent = topo_order[node_i - 1]
@@ -300,7 +309,7 @@ class Optimizer:
             for resources, execution_cost in node_to_cost_map[node].items():
                 min_pred_cost_plus_egress = np.inf
                 for parent_resources, parent_cost in \
-                    dp_best_cost[parent].items():
+                    dp_best_obj[parent].items():
                     egress_cost = Optimizer._egress_cost_or_time(
                         minimize_cost, parent, parent_resources, node,
                         resources)
@@ -310,14 +319,14 @@ class Optimizer:
                         best_parent_hardware = parent_resources
 
                 dp_point_backs[node][resources] = best_parent_hardware
-                dp_best_cost[node][resources] = \
+                dp_best_obj[node][resources] = \
                     execution_cost + min_pred_cost_plus_egress
 
-        # Compute the total cost of the DAG.
+        # Compute the total objective value of the DAG.
         sink_node = topo_order[-1]
-        total_costs = dp_best_cost[sink_node]
-        assert len(total_costs) == 1, f'Should be DummyCloud: {total_costs}'
-        best_resources, best_total_cost = list(total_costs.items())[0]
+        total_obj = dp_best_obj[sink_node]
+        assert len(total_obj) == 1, f'Should be DummyCloud: {total_obj}'
+        best_resources, best_total_obj = list(total_obj.items())[0]
 
         # Find the best plan for the DAG.
         # node -> best resources
@@ -327,7 +336,7 @@ class Optimizer:
             node.best_resources = best_resources
             if node.name != _DUMMY_SOURCE_NAME:
                 best_resources = dp_point_backs[node][best_resources]
-        return best_plan, best_total_cost
+        return best_plan, best_total_obj
 
     @staticmethod
     def _compute_total_time(
@@ -391,7 +400,41 @@ class Optimizer:
         return total_cost
 
     @staticmethod
+    def _print_egress_plan(graph, plan, minimize_cost):
+        message_data = []
+        for parent, child in graph.edges():
+            src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
+                parent, plan[parent], child, plan[child])
+            if nbytes == 0:
+                continue
+
+            if minimize_cost:
+                fn = Optimizer._egress_cost
+            else:
+                fn = Optimizer._egress_time
+            cost_or_time = fn(src_cloud, dst_cloud, nbytes)
+
+            if cost_or_time > 0:
+                if parent.name == _DUMMY_SOURCE_NAME:
+                    egress = f'Data ({src_cloud}) -> {child} ({dst_cloud})'
+                else:
+                    egress = f'{parent} ({src_cloud}) -> {child} ({dst_cloud})'
+                message_data.append(
+                    (egress, nbytes, cost_or_time)
+                )
+
+        if message_data:
+            metric = 'cost ($)' if minimize_cost else 'time (s)'
+            message = tabulate.tabulate(
+                reversed(message_data),
+                headers=['Egress', 'Size (GB)', metric],
+                tablefmt='plain',
+            )
+            logger.info(f'{message}\n')
+
+    @staticmethod
     def print_optimized_plan(
+        graph,
         best_plan: Dict[Task, resources_lib.Resources],
         total_time: float,
         total_cost: float,
@@ -415,6 +458,8 @@ class Optimizer:
                                     headers=['TASK', 'BEST_RESOURCE'],
                                     tablefmt='plain')
         logger.info(f'\n{message}\n')
+
+        Optimizer._print_egress_plan(graph, best_plan, minimize_cost)
 
         # Print the list of resouces that the optimizer considered.
         should_print = any(len(v) > 1 for v in node_to_cost_map.values())
@@ -491,7 +536,7 @@ class Optimizer:
                 raise_error)
 
         if dag.is_chain():
-            best_plan, best_total_cost = Optimizer._optimize_by_dp(
+            best_plan, best_total_obj = Optimizer._optimize_by_dp(
                 topo_order, node_to_cost_map, minimize_cost)
         else:
             raise NotImplementedError('Currently Sky only supports chain DAGs.')
@@ -499,13 +544,14 @@ class Optimizer:
         if minimize_cost:
             total_time = Optimizer._compute_total_time(graph, topo_order,
                                                        best_plan)
-            total_cost = best_total_cost
+            total_cost = best_total_obj
         else:
-            total_time = best_total_cost
+            total_time = best_total_obj
             total_cost = Optimizer._compute_total_cost(graph, topo_order,
                                                        best_plan)
 
-        Optimizer.print_optimized_plan(best_plan, total_time, total_cost,
+        Optimizer._print_egress_plan(graph, best_plan, minimize_cost)
+        Optimizer.print_optimized_plan(graph, best_plan, total_time, total_cost,
                                        node_to_cost_map, minimize_cost)
         Optimizer._print_candidates(node_to_candidate_map)
         return dag, best_plan
