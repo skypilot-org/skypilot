@@ -37,9 +37,9 @@ class _SQLiteConn(threading.local):
         super().__init__()
         self.conn = sqlite3.connect(_DB_PATH)
         self.cursor = self.conn.cursor()
-        self._create_table()
+        self._create_tables()
 
-    def _create_table(self):
+    def _create_tables(self):
         # Table for Clusters
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS clusters (
@@ -60,8 +60,31 @@ class _SQLiteConn(threading.local):
             handle BLOB,
             last_use TEXT,
             status TEXT)""")
+        # For backward compatibility.
+        # TODO(zhwu): Remove this function after all users have migrated to
+        # the latest version of Sky.
+        # Add autostop column to clusters table
+        self._add_column_to_table('clusters', 'autostop', 'INTEGER DEFAULT -1')
+        self._rename_column('clusters', 'lauched_at', 'launched_at')
+        self._rename_column('storage', 'lauched_at', 'launched_at')
 
         self.conn.commit()
+
+    def _add_column_to_table(self, table_name: str, column_name: str,
+                             column_type: str):
+        for row in self.cursor.execute(f'PRAGMA table_info({table_name})'):
+            if row[1] == column_name:
+                break
+        else:
+            self.cursor.execute(f'ALTER TABLE {table_name} '
+                                f'ADD COLUMN {column_name} {column_type}')
+
+    def _rename_column(self, table_name: str, old_name: str, new_name: str):
+        for row in self.cursor.execute(f'PRAGMA table_info({table_name})'):
+            if row[1] == old_name:
+                self.cursor.execute(f'ALTER TABLE {table_name} '
+                                    f'RENAME COLUMN {old_name} to {new_name}')
+                break
 
 
 _DB = _SQLiteConn()
@@ -136,8 +159,14 @@ def add_or_update_cluster(cluster_name: str,
     last_use = _get_pretty_entry_point()
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
-        'INSERT OR REPLACE INTO clusters VALUES (?, ?, ?, ?, ?)',
-        (cluster_name, cluster_launched_at, handle, last_use, status.value))
+        'INSERT or REPLACE INTO clusters'
+        '(name, launched_at, handle, last_use, status, autostop) '
+        'VALUES (?, ?, ?, ?, ?, '
+        # Keep the old autostop value if it exists, otherwise set it to
+        # default -1.
+        'COALESCE((SELECT autostop FROM clusters WHERE name=?), -1))',
+        (cluster_name, cluster_launched_at, handle, last_use, status.value,
+         cluster_name))
     _DB.conn.commit()
 
 
@@ -161,9 +190,11 @@ def remove_cluster(cluster_name: str, terminate: bool):
         # will directly try to ssh, which leads to timeout.
         handle.head_ip = None
         _DB.cursor.execute(
-            'UPDATE clusters SET handle=(?), status=(?) WHERE name=(?)', (
+            'UPDATE clusters SET handle=(?), status=(?), autostop=(?) '
+            'WHERE name=(?)', (
                 pickle.dumps(handle),
                 ClusterStatus.STOPPED.value,
+                -1,
                 cluster_name,
             ))
     _DB.conn.commit()
@@ -194,14 +225,6 @@ def get_cluster_name_from_handle(
         return name
 
 
-def get_status_from_cluster_name(
-        cluster_name: Optional[str]) -> Optional[ClusterStatus]:
-    rows = _DB.cursor.execute('SELECT status FROM clusters WHERE name=(?)',
-                              (cluster_name,))
-    for (status,) in rows:
-        return ClusterStatus[status]
-
-
 def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
     _DB.cursor.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
         status.value,
@@ -214,18 +237,48 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_clusters() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('select * from clusters')
-    records = []
-    for name, launched_at, handle, last_use, status in rows:
-        # TODO: use namedtuple instead of dict
-        records.append({
+def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
+    _DB.cursor.execute('UPDATE clusters SET autostop=(?) WHERE name=(?)', (
+        idle_minutes,
+        cluster_name,
+    ))
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
+
+
+def get_cluster_from_name(
+        cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
+                              (cluster_name,))
+    for name, launched_at, handle, last_use, status, autostop in rows:
+        record = {
             'name': name,
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
             'status': ClusterStatus[status],
-        })
+            'autostop': autostop,
+        }
+        return record
+
+
+def get_clusters() -> List[Dict[str, Any]]:
+    rows = _DB.cursor.execute('select * from clusters')
+    records = []
+    for name, launched_at, handle, last_use, status, autostop in rows:
+        # TODO: use namedtuple instead of dict
+        record = {
+            'name': name,
+            'launched_at': launched_at,
+            'handle': pickle.loads(handle),
+            'last_use': last_use,
+            'status': ClusterStatus[status],
+            'autostop': autostop,
+        }
+        records.append(record)
     return records
 
 
@@ -279,7 +332,7 @@ def set_storage_status(storage_name: str, status: StorageStatus) -> None:
     _DB.conn.commit()
     assert count <= 1, count
     if count == 0:
-        raise ValueError(f'Storage{storage_name} not found.')
+        raise ValueError(f'Storage {storage_name} not found.')
 
 
 def get_storage_status(storage_name: str) -> None:

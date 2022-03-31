@@ -83,7 +83,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 }
 
 
-def _truncate_long_string(s: str, max_length: int = 50) -> str:
+def _truncate_long_string(s: str, max_length: int = 35) -> str:
     if len(s) <= max_length:
         return s
     splits = s.split(' ')
@@ -326,7 +326,7 @@ def _create_and_ssh_into_node(
 
         # This handles stopped interactive nodes where they are restarted by
         # skipping sky start and directly calling sky [cpu|tpu|gpu]node.
-        cluster_status = global_user_state.get_status_from_cluster_name(
+        cluster_status = backend_utils.get_status_from_cluster_name(
             cluster_name)
         if cluster_status == global_user_state.ClusterStatus.STOPPED:
             assert handle.launched_resources is not None, handle
@@ -598,7 +598,7 @@ def launch(
     if not yes:
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
         # it exists but is STOPPED.
-        maybe_status = global_user_state.get_status_from_cluster_name(cluster)
+        maybe_status = backend_utils.get_status_from_cluster_name(cluster)
         prompt = None
         if maybe_status is None:
             prompt = 'Launching a new cluster. Proceed?'
@@ -806,16 +806,24 @@ def _readable_time_duration(start_time: int):
               is_flag=True,
               required=False,
               help='Show all information in full.')
-def status(all: bool):  # pylint: disable=redefined-builtin
+@click.option('--refresh',
+              '-r',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Query remote clusters for their latest autostop settings.')
+def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
+    # TODO(zhwu): Update the information for auto-stop clusters.
     show_all = all
-    clusters_status = global_user_state.get_clusters()
+    clusters_status = backend_utils.get_clusters(refresh)
     cluster_table = util_lib.create_table([
         'NAME',
         'LAUNCHED',
         'RESOURCES',
-        'COMMAND',
         'STATUS',
+        'AUTOSTOP',
+        'COMMAND',
     ])
 
     for cluster_status in clusters_status:
@@ -835,6 +843,10 @@ def status(all: bool):  # pylint: disable=redefined-builtin
                                  f'{launched_resource_str}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
+        autostop_str = '-'
+        if cluster_status['autostop'] >= 0:
+            # TODO(zhwu): check the status of the autostop cluster.
+            autostop_str = str(cluster_status['autostop']) + ' min'
         cluster_table.add_row([
             # NAME
             cluster_status['name'],
@@ -842,11 +854,13 @@ def status(all: bool):  # pylint: disable=redefined-builtin
             _readable_time_duration(launched_at),
             # RESOURCES
             resources_str,
+            # STATUS
+            cluster_status['status'].value,
+            # AUTOSTOP
+            autostop_str,
             # COMMAND
             cluster_status['last_use']
             if show_all else _truncate_long_string(cluster_status['last_use']),
-            # STATUS
-            cluster_status['status'].value,
         ])
     if clusters_status:
         click.echo(cluster_table)
@@ -876,7 +890,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     username = getpass.getuser()
     if all_users:
         username = None
-    code = backend_utils.JobLibCodeGen.show_jobs(username, all_jobs)
+    code = job_lib.JobLibCodeGen.show_jobs(username, all_jobs)
 
     if clusters:
         handles = [
@@ -896,6 +910,10 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         if isinstance(backend, backends.LocalDockerBackend):
             # LocalDockerBackend does not support job queues
             unsupported_clusters.append(cluster)
+            continue
+        cluster_status = backend_utils.get_status_from_cluster_name(cluster)
+        if cluster_status != global_user_state.ClusterStatus.UP:
+            print(f'Cluster {cluster} is not up. Skipping.')
             continue
         _show_job_queue_on_cluster(cluster, handle, backend, code)
     if unsupported_clusters:
@@ -949,6 +967,13 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
     if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
         raise click.UsageError('Sky logs is not available with '
                                'LocalDockerBackend.')
+    cluster_status = backend_utils.get_status_from_cluster_name(cluster_name)
+    if cluster_status != global_user_state.ClusterStatus.UP:
+        click.secho(
+            f'Cluster {cluster_name} (status: {cluster_status}) '
+            'is not up.',
+            fg='red')
+        return
     backend = backend_utils.get_backend_from_handle(handle)
 
     if sync_down and status:
@@ -990,8 +1015,20 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster}\' not found'
+        raise click.BadParameter(f'Cluster {cluster!r} not found'
                                  ' (see `sky status`).')
+    backend = backend_utils.get_backend_from_handle(handle)
+    if not isinstance(backend, backends.CloudVmRayBackend):
+        raise click.UsageError(
+            'Job cancelling is only supported for '
+            f'{backends.CloudVmRayBackend.NAME}, but cluster {cluster!r} '
+            f'is created by {backend.NAME}.')
+    # Check the status of the cluster.
+    cluster_status = backend_utils.get_status_from_cluster_name(cluster)
+    if cluster_status != global_user_state.ClusterStatus.UP:
+        click.secho(f'Cluster {cluster} (status: {cluster_status}) '
+                    'is not up...skipped.')
+        return
 
     if all:
         click.secho(f'Cancelling all jobs on cluster {cluster}...', fg='yellow')
@@ -1001,10 +1038,8 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster}...',
                     fg='yellow')
 
-    code = backend_utils.JobLibCodeGen.cancel_jobs(jobs)
+    code = job_lib.JobLibCodeGen.cancel_jobs(jobs)
 
-    # FIXME: Assumes a specific backend.
-    backend = backends.CloudVmRayBackend()
     returncode, _, stderr = backend.run_on_head(handle,
                                                 code,
                                                 stream_logs=False,
@@ -1070,6 +1105,70 @@ def stop(
                                 apply_to_all=all,
                                 terminate=False,
                                 no_confirm=yes)
+
+
+@cli.command(cls=_DocumentedCodeCommand)
+@click.argument('clusters', nargs=-1, required=False)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Tear down all existing clusters.')
+@click.option('--idle_minutes',
+              '-i',
+              type=int,
+              default=None,
+              required=False,
+              help='Set the idle minutes before auto-stopping the cluster.')
+@click.option('--cancel',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Cancel the auto-stopping.')
+def autostop(
+        clusters: Tuple[str],
+        all: Optional[bool],  # pylint: disable=redefined-builtin
+        idle_minutes: Optional[int],
+        cancel: bool,  # pylint: disable=redefined-outer-name
+):
+    """Schedule or cancel auto-stopping for cluster(s).
+
+    CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
+    CLUSTERS and --all are supplied, the latter takes precedence.
+
+    --idle-minutes is the number of minutes of idleness (no pending/running
+    jobs) after which the cluster will be stopped automatically.
+
+    --cancel will cancel the autostopping. If the cluster was not scheduled
+    autostop, this will do nothing to autostop.
+
+    If --idle-minutes and --cancel are not specified, default to 5 minutes.
+
+    Examples:
+
+    .. code-block:: bash
+
+        # Set auto stopping for a specific cluster.
+        sky autostop cluster_name -i 60
+
+        # Cancel auto stopping for a specific cluster.
+        sky autostop cluster_name --cancel
+    .. code-block:: bash
+
+    """
+    if cancel and idle_minutes is not None:
+        raise click.UsageError(
+            'Only one of --idle-minutes and --cancel should be specified. '
+            f'cancel: {cancel}, idle_minutes: {idle_minutes}')
+    if cancel:
+        idle_minutes = -1
+    elif idle_minutes is None:
+        idle_minutes = 5
+    _terminate_or_stop_clusters(clusters,
+                                apply_to_all=all,
+                                terminate=False,
+                                no_confirm=True,
+                                idle_minutes_to_autostop=idle_minutes)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1257,12 +1356,16 @@ def down(
                                 purge=purge)
 
 
-def _terminate_or_stop_clusters(names: Tuple[str],
-                                apply_to_all: Optional[bool],
-                                terminate: bool,
-                                no_confirm: bool,
-                                purge: bool = False) -> None:
-    """Terminates or stops a cluster (or all clusters)."""
+def _terminate_or_stop_clusters(
+        names: Tuple[str],
+        apply_to_all: Optional[bool],
+        terminate: bool,
+        no_confirm: bool,
+        purge: bool = False,
+        idle_minutes_to_autostop: Optional[int] = None) -> None:
+    """Terminates or (auto-)stops a cluster (or all clusters)."""
+    assert idle_minutes_to_autostop is None or (not terminate and no_confirm), (
+        idle_minutes_to_autostop, terminate, no_confirm)
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
         raise click.UsageError(
@@ -1273,14 +1376,14 @@ def _terminate_or_stop_clusters(names: Tuple[str],
     if len(names) > 0:
         glob_names = []
         for name in names:
-            glob_names.extend(global_user_state.get_glob_cluster_names(name))
+            glob_name = global_user_state.get_glob_cluster_names(name)
+            if len(glob_name) == 0:
+                print(f'Cluster {name} not found.')
+            glob_names.extend(glob_name)
         names = list(set(glob_names))
         for name in names:
             handle = global_user_state.get_handle_from_cluster_name(name)
-            if handle is not None:
-                to_down.append({'name': name, 'handle': handle})
-            else:
-                print(f'Cluster {name} not found.')
+            to_down.append({'name': name, 'handle': handle})
     if apply_to_all:
         to_down = global_user_state.get_clusters()
         if len(names) > 0:
@@ -1303,6 +1406,8 @@ def _terminate_or_stop_clusters(names: Tuple[str],
             show_default=True)
 
     operation = 'Terminating' if terminate else 'Stopping'
+    if idle_minutes_to_autostop is not None:
+        operation = 'Scheduling auto-stop on'
     plural = 's' if len(to_down) > 1 else ''
     progress = rich_progress.Progress(transient=True)
     task = progress.add_task(
@@ -1324,6 +1429,36 @@ def _terminate_or_stop_clusters(names: Tuple[str],
                 '  To terminate the cluster, run: '
                 f'{colorama.Style.BRIGHT}sky down {name}'
                 f'{colorama.Style.RESET_ALL}')
+        elif idle_minutes_to_autostop is not None:
+            cluster_status = backend_utils.get_status_from_cluster_name(name)
+            if cluster_status != global_user_state.ClusterStatus.UP:
+                message = (
+                    f'{colorama.Fore.GREEN}Scheduling autostop for cluster '
+                    f'{name} (status: {cluster_status.value})... skipped'
+                    f'{colorama.Style.RESET_ALL}\n'
+                    '  Auto-stop can only be scheduled on '
+                    f'{global_user_state.ClusterStatus.UP.value} cluster.')
+            elif not isinstance(backend, backends.CloudVmRayBackend):
+                message = (
+                    f'{colorama.Fore.GREEN}Scheduling auto-stop for cluster '
+                    f'{name}... skipped{colorama.Style.RESET_ALL}\n'
+                    '  Auto-stopping is only supported by backend: '
+                    f'{backends.CloudVmRayBackend.NAME}')
+            else:
+                backend.set_autostop(handle, idle_minutes_to_autostop)
+                if idle_minutes_to_autostop < 0:
+                    message = (
+                        f'{colorama.Fore.GREEN}Cancelling auto-stop for '
+                        f'cluster {name}...done{colorama.Style.RESET_ALL}')
+                else:
+                    message = (
+                        f'{colorama.Fore.GREEN}Scheduling auto-stop for '
+                        f'cluster {name}...done{colorama.Style.RESET_ALL}\n'
+                        f'  The cluster will be stopped after '
+                        f'{idle_minutes_to_autostop} minutes of idleness.\n'
+                        '  To cancel the autostop, run: '
+                        f'{colorama.Style.BRIGHT}sky autostop {name} --cancel'
+                        f'{colorama.Style.RESET_ALL}')
         else:
             success = backend.teardown(handle, terminate=terminate, purge=purge)
             if success:

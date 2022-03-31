@@ -85,8 +85,6 @@ def redirect_process_output(proc,
                     # Unregister the io when EOF reached
                     sel.unregister(key.fileobj)
                     continue
-                # Remove special characters to avoid cursor hidding
-                line = line.replace('\x1b[?25l', '')
                 if replace_crlf and line.endswith('\r\n'):
                     # Replace CRLF with LF to avoid ray logging to the same line
                     # due to separating lines with '\n'.

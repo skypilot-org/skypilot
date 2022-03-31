@@ -30,6 +30,7 @@ Key features:
    examples/syncing-code-artifacts
    examples/auto-failover
    reference/job-queue
+   reference/auto-stop
    examples/grid-search
    examples/distributed-jobs
 .. Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
