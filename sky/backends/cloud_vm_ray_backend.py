@@ -660,7 +660,6 @@ class RetryingVmProvisioner(object):
                     'It is possibly killed by cloud provider or manually '
                     'in the cloud provider console. To remove the cluster '
                     f'please run: sky down {cluster_name}')
-                logger.error(message)
                 # Reset to UP (rather than keeping it at INIT), as INIT
                 # mode will enable failover to other regions, causing
                 # data lose.
@@ -684,7 +683,6 @@ class RetryingVmProvisioner(object):
                     'Failed to acquire resources to restart the stopped '
                     f'cluster {cluster_name} on {region}. Please retry again '
                     'later.')
-                logger.error(message)
 
                 # Reset to STOPPED (rather than keeping it at INIT), because
                 # (1) the cluster is not up (2) it ensures future `sky start`
@@ -875,8 +873,6 @@ class RetryingVmProvisioner(object):
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
                                                 zones, stdout, stderr)
-                logger.error(
-                    f'*** HEAD_FAILED for {cluster_name} {region.name}')
             else:
                 # gang scheduling failed.
                 assert status == self.GangSchedulingStatus.GANG_FAILED, status
@@ -890,12 +886,6 @@ class RetryingVmProvisioner(object):
                     stdout=None,
                     stderr=None)
 
-                # Only log the errors for GANG_FAILED, since HEAD_FAILED may
-                # not have created any resources (it can happen however).
-                logger.error('*** Failed provisioning the cluster. ***')
-                terminate_str = 'Terminating' if need_terminate else 'Stopping'
-                logger.error(f'*** {terminate_str} the failed cluster. ***')
-
             # There may exists partial nodes (e.g., head node) so we must
             # terminate or stop before moving on to other regions.
             #
@@ -903,6 +893,9 @@ class RetryingVmProvisioner(object):
             # we must terminate/stop here too. E.g., node is up, and ray
             # autoscaler proceeds to setup commands, which may fail:
             #   ERR updater.py:138 -- New status: update-failed
+            verb = 'Terminating' if need_terminate else 'Stopping'
+            logger.error(f'Failed provisioning in {to_provision.cloud} '
+                         f'{region.name}. {verb} the live nodes (if any).')
             CloudVmRayBackend().teardown_no_lock(handle,
                                                  terminate=need_terminate)
 
