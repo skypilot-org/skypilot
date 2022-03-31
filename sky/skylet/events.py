@@ -100,7 +100,7 @@ class AutostopEvent(SkyletEvent):
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             self._replace_yaml_for_stopping(self.ray_yaml_path)
             # Destroy the workers first to avoid orphan workers.
-            # `ray up`` is required to reset the upscaling speed and min/max
+            # `ray up` is required to reset the upscaling speed and min/max
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
             subprocess.run(
