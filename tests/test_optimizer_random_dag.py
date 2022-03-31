@@ -101,5 +101,5 @@ if __name__ == '__main__':
 
     sky.optimize(dag, minimize=target)
 
-    objective = find_min_objective(dag, minimize=target)
+    objective = find_min_objective(copy_dag, minimize=target)
     print(f'Min objective: {objective:.1f}')

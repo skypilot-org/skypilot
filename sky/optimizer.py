@@ -345,7 +345,7 @@ class Optimizer:
         topo_order: List[Task],
         node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool = True,
-    ):
+    ) -> Tuple[Dict[Task, resources_lib.Resources], float]:
         """Optimizes a general DAG using an ILP solver.
 
         Notations:
