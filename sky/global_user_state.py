@@ -162,7 +162,8 @@ def add_or_update_cluster(cluster_name: str,
         'INSERT or REPLACE INTO clusters'
         '(name, launched_at, handle, last_use, status, autostop) '
         'VALUES (?, ?, ?, ?, ?, '
-        # Keep the old autostop value if it exists, otherwise set it to default -1.
+        # Keep the old autostop value if it exists, otherwise set it to
+        # default -1.
         'COALESCE((SELECT autostop FROM clusters WHERE name=?), -1))',
         (cluster_name, cluster_launched_at, handle, last_use, status.value,
          cluster_name))
