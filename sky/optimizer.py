@@ -197,8 +197,8 @@ class Optimizer:
         `task.estimate_runtime(resources)` or 1 hour by default.
         The estimated cost is `task.num_nodes * resources.get_cost(runtime)`.
         """
-        # Cost of running the task on the resources.
-        # node -> {resources -> cost}
+        # Cost/time of running the task on the resources.
+        # node -> {resources -> cost/time}
         node_to_cost_map: _TaskToCostMap = collections.defaultdict(dict)
 
         # node -> cloud -> list of resources that satisfy user's requirements.
@@ -267,10 +267,10 @@ class Optimizer:
 
                     if minimize_cost:
                         cost_per_node = resources.get_cost(estimated_runtime)
-                        estimated_cost = cost_per_node * node.num_nodes
+                        estimated_cost_or_time = cost_per_node * node.num_nodes
                     else:
-                        # Minimize run time; overload the term 'cost'.
-                        estimated_cost = estimated_runtime
+                        # Minimize run time.
+                        estimated_cost_or_time = estimated_runtime
                     if do_print:
                         logger.debug(
                             '  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
@@ -278,8 +278,8 @@ class Optimizer:
                         if minimize_cost:
                             logger.debug(
                                 '  estimated_cost (not incl. egress): ${:.1f}'.
-                                format(estimated_cost))
-                    node_to_cost_map[node][resources] = estimated_cost
+                                format(estimated_cost_or_time))
+                    node_to_cost_map[node][resources] = estimated_cost_or_time
         return node_to_cost_map, node_to_candidate_map
 
     @staticmethod
