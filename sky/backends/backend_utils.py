@@ -26,6 +26,7 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import global_user_state
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import azure
@@ -40,6 +41,7 @@ console = rich_console.Console()
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
+SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.10.0'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
@@ -71,8 +73,6 @@ def _fill_template(template_name: str,
         raise FileNotFoundError(f'Template "{template_name}" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
-    template = jinja2.Template(template)
-    content = template.render(**variables)
     if output_path is None:
         assert 'cluster_name' in variables, 'cluster_name is required.'
         cluster_name = variables['cluster_name']
@@ -81,6 +81,12 @@ def _fill_template(template_name: str,
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
     output_path = os.path.abspath(output_path)
+
+    # Add yaml file path to the template variables.
+    variables['sky_ray_yaml_remote_path'] = SKY_RAY_YAML_REMOTE_PATH
+    variables['sky_ray_yaml_local_path'] = output_path
+    template = jinja2.Template(template)
+    content = template.render(**variables)
     with open(output_path, 'w') as fout:
         fout.write(content)
     return output_path
@@ -1046,17 +1052,30 @@ def get_node_ips(
             handle is not None and handle.head_ip is not None):
         return [handle.head_ip]
 
-    out = run(f'ray get-head-ip {yaml_handle}',
-              stdout=subprocess.PIPE).stdout.decode().strip()
-    head_ip = re.findall(IP_ADDR_REGEX, out)
-    assert 1 == len(head_ip), out
+    try:
+        proc = run(f'ray get-head-ip {yaml_handle}',
+                   stdout=subprocess.PIPE,
+                   stderr=subprocess.PIPE)
+        out = proc.stdout.decode().strip()
+        head_ip = re.findall(IP_ADDR_REGEX, out)
+    except subprocess.CalledProcessError as e:
+        raise exceptions.FetchIPError(
+            exceptions.FetchIPError.Reason.HEAD) from e
+    if len(head_ip) != 1:
+        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
 
     if expected_num_nodes > 1:
-        out = run(f'ray get-worker-ips {yaml_handle}',
-                  stdout=subprocess.PIPE).stdout.decode()
-        worker_ips = re.findall(IP_ADDR_REGEX, out)
-        assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes -
-                                                           1, out)
+        try:
+            proc = run(f'ray get-worker-ips {yaml_handle}',
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+            out = proc.stdout.decode()
+            worker_ips = re.findall(IP_ADDR_REGEX, out)
+        except subprocess.CalledProcessError as e:
+            raise exceptions.FetchIPError(
+                exceptions.FetchIPError.Reason.WORKER) from e
+        if len(worker_ips) != expected_num_nodes - 1:
+            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
     else:
         worker_ips = []
     if return_private_ips:
@@ -1083,6 +1102,45 @@ def get_head_ip(
     else:
         head_ip = query_head_ip_with_retries(handle.cluster_yaml, retry_count)
     return head_ip
+
+
+def _ping_cluster_or_set_to_stopped(
+        record: Dict[str, Any]) -> global_user_state.ClusterStatus:
+    handle = record['handle']
+    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        return record
+    # Autostop is disabled for the cluster
+    if record['autostop'] < 0:
+        return record
+    cluster_name = handle.cluster_name
+    try:
+        get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        return record
+    except exceptions.FetchIPError as e:
+        # Set the cluster status to STOPPED, even the head node is still alive,
+        # since it will be stopped as soon as the workers are stopped.
+        logger.debug(f'Failed to get IPs from cluster {cluster_name}: {e}, '
+                     'set to STOPPED')
+    global_user_state.remove_cluster(cluster_name, terminate=False)
+    auth_config = read_yaml(handle.cluster_yaml)['auth']
+    SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
+    return global_user_state.get_cluster_from_name(cluster_name)
+
+
+def get_status_from_cluster_name(
+        cluster_name: str) -> Optional[global_user_state.ClusterStatus]:
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return None
+    record = _ping_cluster_or_set_to_stopped(record)
+    return record['status']
+
+
+def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
+    records = global_user_state.get_clusters()
+    if not refresh:
+        return records
+    return [_ping_cluster_or_set_to_stopped(record) for record in records]
 
 
 def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
@@ -1118,82 +1176,6 @@ def get_backend_from_handle(
         raise NotImplementedError(
             f'Handle type {type(handle)} is not supported yet.')
     return backend
-
-
-class JobLibCodeGen(object):
-    """Code generator for job utility functions.
-
-    Usage:
-
-      >> codegen = JobLibCodeGen.add_job(...)
-    """
-
-    _PREFIX = ['from sky.skylet import job_lib, log_lib']
-
-    @classmethod
-    def add_job(cls, job_name: str, username: str, run_timestamp: str) -> str:
-        if job_name is None:
-            job_name = '-'
-        code = [
-            'job_id = job_lib.add_job('
-            f'{job_name!r}, {username!r}, {run_timestamp!r})',
-            'print(job_id, flush=True)',
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def update_status(cls) -> str:
-        code = [
-            'job_lib.update_status()',
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def show_jobs(cls, username: Optional[str], all_jobs: bool) -> str:
-        code = [f'job_lib.show_jobs({username!r}, {all_jobs})']
-        return cls._build(code)
-
-    @classmethod
-    def cancel_jobs(cls, job_ids: Optional[List[int]]) -> str:
-        code = [f'job_lib.cancel_jobs({job_ids!r})']
-        return cls._build(code)
-
-    @classmethod
-    def fail_all_jobs_in_progress(cls) -> str:
-        # Used only for restarting a cluster.
-        code = ['job_lib.fail_all_jobs_in_progress()']
-        return cls._build(code)
-
-    @classmethod
-    def tail_logs(cls, job_id: int) -> str:
-        code = [
-            f'log_dir = job_lib.log_dir({job_id})',
-            f'log_lib.tail_logs({job_id}, log_dir)',
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def get_job_status(cls, job_id: str) -> str:
-        # Prints "Job <id> <status>" for UX; caller should parse the last token.
-        code = [
-            f'job_status = job_lib.get_status({job_id})',
-            f'print("Job", {job_id}, job_status.value, flush=True)',
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def get_log_path(cls, job_id: int) -> str:
-        code = [
-            f'log_dir = job_lib.log_dir({job_id})',
-            'print(log_dir, flush=True)',
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def _build(cls, code: List[str]) -> str:
-        code = cls._PREFIX + code
-        code = ';'.join(code)
-        return f'python3 -u -c {code!r}'
 
 
 class NoOpConsole:

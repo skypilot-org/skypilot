@@ -296,6 +296,29 @@ def test_azure_start_stop():
     run_one_test(test)
 
 
+# ---------- Testing Autostopping ----------
+# @pytest.mark.slow
+def test_autostop():
+    name = _get_cluster_name()
+    test = Test(
+        'autostop',
+        [
+            f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
+            f'sky autostop {name} -i 0',
+            f'sky status --refresh | grep {name} | grep -q "0 min"',  # Ensure the cluster is STOPPED.
+            'sleep 120',
+            f'sky status --refresh | grep {name} | grep -q STOPPED',  # Ensure the cluster is STOPPED.
+            f'sky start -y {name}',
+            f'sky status | grep {name} | grep -q UP',  # Ensure the cluster is UP.
+            f'sky exec {name} examples/minimal.yaml',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
 @pytest.mark.slow
 def test_azure_start_stop_two_nodes():
     name = _get_cluster_name()
