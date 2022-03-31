@@ -346,7 +346,19 @@ class Optimizer:
         node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool = True,
     ):
-        """Optimizes a general DAG using an ILP solver."""
+        """Optimizes a general DAG using an ILP solver.
+
+        Notations:
+            V: the set of nodes (tasks).
+            E: the set of edges (dependencies).
+            k: node -> [r.cost for r in node.resources].
+            F: (node i, node j) -> the egress cost/time between node i and j.
+            c: node -> one-hot decision vector. c[node][i] = 1 means 
+                the node is assigned to the i-th resource.
+            e: (node i, node j) -> linearization of c[node i] x c[node j].
+              e[node i][node j][a][b] = 1 means node i and node j are assigned
+              to the a-th and the b-th resources, respectively.
+        """
         import pulp  # pylint: disable=import-outside-toplevel
 
         if minimize_cost:
@@ -355,13 +367,13 @@ class Optimizer:
             prob = pulp.LpProblem('Sky-Runtime-Optimization', pulp.LpMinimize)
 
         # Prepare the constants.
-        V = topo_order
-        E = graph.edges()
+        V = topo_order  # pylint: disable=invalid-name
+        E = graph.edges()  # pylint: disable=invalid-name
         k = {
             node: list(resource_cost_map.values())
             for node, resource_cost_map in node_to_cost_map.items()
         }
-        F = collections.defaultdict(dict)
+        F = collections.defaultdict(dict)  # pylint: disable=invalid-name
         for u, v in E:
             F[u][v] = []
             for r_u in node_to_cost_map[u].keys():
@@ -395,8 +407,8 @@ class Optimizer:
         # 3. e[u][v] linearizes c[u] x c[v].
         for u, v in E:
             e_uv = e[u][v]  # 1-d one-hot vector
-            N_u = len(c[u])
-            N_v = len(c[v])
+            N_u = len(c[u])  # pylint: disable=invalid-name
+            N_v = len(c[v])  # pylint: disable=invalid-name
 
             for row in range(N_u):
                 prob += pulp.lpSum(
@@ -408,19 +420,20 @@ class Optimizer:
 
         # Formulate the objective.
         if minimize_cost:
-            obj = 0
+            objective = 0
             for v in V:
-                obj += pulp.lpDot(c[v], k[v])
+                objective += pulp.lpDot(c[v], k[v])
             for u, v in E:
-                obj += pulp.lpDot(e[u][v], F[u][v])
+                objective += pulp.lpDot(e[u][v], F[u][v])
         else:
             # We need additional decision variables.
-            lat = {v: pulp.LpVariable(f'lat({v})', lowBound=0) for v in V}
+            latency = {v: pulp.LpVariable(f'lat({v})', lowBound=0) for v in V}
             for u, v in E:
-                prob += lat[v] >= (pulp.lpDot(c[v], k[v]) + lat[u] +
-                                   pulp.lpDot(e[u][v], F[u][v]))
-            obj = lat[V[-1]]  # latency of the sink node.
-        prob += obj
+                prob += latency[v] >= (pulp.lpDot(c[v], k[v]) + latency[u] +
+                                       pulp.lpDot(e[u][v], F[u][v]))
+            sink_node = V[-1]
+            objective = latency[sink_node]
+        prob += objective
 
         # Solve the optimization problem.
         prob.solve(solver=pulp.PULP_CBC_CMD(msg=False))
@@ -432,7 +445,7 @@ class Optimizer:
         # node -> best resources
         best_plan = {}
         for node, variables in c.items():
-            selected = [var.value() for var in variables].index(1)
+            selected = [variable.value() for variable in variables].index(1)
             best_resources = list(node_to_cost_map[node].keys())[selected]
             node.best_resources = best_resources
             best_plan[node] = best_resources
