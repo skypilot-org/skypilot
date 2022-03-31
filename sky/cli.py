@@ -1114,7 +1114,7 @@ def stop(
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
-@click.option('--idle_minutes',
+@click.option('--idle-minutes',
               '-i',
               type=int,
               default=None,
@@ -1214,6 +1214,13 @@ def start(clusters: Tuple[str], yes: bool):
                 if name == cluster_record['name']:
                     return cluster_record
             return None
+
+        # Get GLOB cluster names
+        glob_clusters = []
+        for cluster in clusters:
+            glob_cluster = global_user_state.get_glob_cluster_names(cluster)
+            glob_clusters.extend(glob_cluster)
+        clusters = list(set(glob_clusters))
 
         all_clusters = global_user_state.get_clusters()
         for name in clusters:
