@@ -13,12 +13,13 @@ describe all fields available.
 
     # Working directory (optional), synced to ~/sky_workdir on the remote cluster
     # each time launch or exec is run with the yaml file.
+    #
     # NOTE: Sky does not currently support large, multi-gigabyte workdirs as the
     # files are synced to the remote VM with `rsync`. Please consider using Sky
-    # Storage to transfer large datasets and files. If a .gitignore exists anywhere
-    # within the working directory tree, the behavior will match git's behavior
-    # for finding and using .gitignore files. Files and directories included in
-    # a .gitignore file will be ignored by Sky.
+    # Storage to transfer large datasets and files.
+    #
+    # If a .gitignore file (or a .git/info/exclude file) exists in the working
+    # directory, files and directories listed in those files will be ignored.
     workdir: ~/my-task-code
 
     # Number of nodes (optional) to launch including the head node. If not
@@ -44,6 +45,10 @@ describe all fields available.
       # Specify whether the cluster should use spot instances or not (optional).
       # If unspecified, Sky will default to on-demand instances.
       use_spot: False
+
+      # Disk size in GB to allocate for OS (mounted at /). Increase this if you
+      # have a large working directory or tasks that write out large outputs.
+      disk_size: 256
 
     # Using Sky Storage, you can specify file mounts (all optional).
     file_mounts:

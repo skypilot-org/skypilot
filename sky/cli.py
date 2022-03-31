@@ -34,12 +34,14 @@ import os
 import shlex
 import sys
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
+import colorama
 import pendulum
-from rich import console as rich_console
+from rich import progress as rich_progress
 
 import sky
 from sky import backends
@@ -48,15 +50,16 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import clouds
 from sky import data
-from sky.backends import backend as backend_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
 from sky.skylet import util_lib
 
+if typing.TYPE_CHECKING:
+    from sky.backends import backend as backend_lib
+
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
 
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -278,7 +281,7 @@ def _create_and_ssh_into_node(
     node_type: str,
     resources: sky.Resources,
     cluster_name: str,
-    backend: Optional[backend_lib.Backend] = None,
+    backend: Optional['backend_lib.Backend'] = None,
     port_forward: Optional[List[int]] = None,
     session_manager: Optional[str] = None,
     user_requested_resources: Optional[bool] = False,
@@ -500,7 +503,7 @@ def cli():
           'resources and is used for scheduling the task. '
           'Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
-@click.option('--num_nodes',
+@click.option('--num-nodes',
               required=False,
               type=int,
               help=('Number of nodes to launch and to execute the task on. '
@@ -648,7 +651,7 @@ def launch(
           'This is used for scheduling the task, so it must fit the '
           'cluster\'s total resources. Overrides the "accelerators" '
           'config in the YAML if both are supplied.'))
-@click.option('--num_nodes',
+@click.option('--num-nodes',
               required=False,
               type=int,
               help=('Task demand: Number of nodes to execute the task on. '
@@ -679,7 +682,7 @@ def exec(
     Execution and scheduling behavior:
     \b
     - If ENTRYPOINT is a YAML, or if it is a command with a resource demand
-      flag specified (`--gpus` or `--num_nodes`): it is treated as a proper
+      flag specified (`--gpus` or `--num-nodes`): it is treated as a proper
       task that will undergo job queue scheduling, respecting its resource
       requirement. It can be executed on any node of th cluster with enough
       resources.
@@ -886,6 +889,9 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
     unsupported_clusters = []
     for cluster, handle in zip(clusters, handles):
+        if handle is None:
+            print(f'Cluster {cluster} was not found. Skipping.')
+            continue
         backend = backend_utils.get_backend_from_handle(handle)
         if isinstance(backend, backends.LocalDockerBackend):
             # LocalDockerBackend does not support job queues
@@ -900,11 +906,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
 
 def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
-                               backend: backend_lib.Backend, code: str):
-    if handle is None:
-        print(f'Cluster {cluster} was not found. Skipping.')
-        return
-
+                               backend: 'backend_lib.Backend', code: str):
     click.echo(f'\nSky Job Queue of Cluster {cluster}')
     if handle.head_ip is None:
         click.echo(
@@ -1202,10 +1204,18 @@ def start(clusters: Tuple[str], yes: bool):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--purge',
+              '-p',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Ignore cloud provider errors (if any); '
+              'useful for cleaning up manually deleted cluster(s).')
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
+    purge: bool,
 ):
     """Tear down cluster(s).
 
@@ -1243,11 +1253,15 @@ def down(
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=True,
-                                no_confirm=yes)
+                                no_confirm=yes,
+                                purge=purge)
 
 
-def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
-                                terminate: bool, no_confirm: bool) -> None:
+def _terminate_or_stop_clusters(names: Tuple[str],
+                                apply_to_all: Optional[bool],
+                                terminate: bool,
+                                no_confirm: bool,
+                                purge: bool = False) -> None:
     """Terminates or stops a cluster (or all clusters)."""
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
@@ -1288,32 +1302,51 @@ def _terminate_or_stop_clusters(names: Tuple[str], apply_to_all: Optional[bool],
             abort=True,
             show_default=True)
 
-    for record in to_down:  # TODO: parallelize.
+    operation = 'Terminating' if terminate else 'Stopping'
+    plural = 's' if len(to_down) > 1 else ''
+    progress = rich_progress.Progress(transient=True)
+    task = progress.add_task(
+        f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
+        total=len(to_down))
+
+    def _terminate_or_stop(record):
         name = record['name']
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
         if (isinstance(backend, backends.CloudVmRayBackend) and
                 handle.launched_resources.use_spot and not terminate):
+            # Disable spot instances to be stopped.
             # TODO(suquark): enable GCP+spot to be stopped in the future.
-            click.secho(
-                f'Stopping cluster {name}... skipped, because spot instances '
-                'may lose attached volumes. ',
-                fg='green')
-            click.echo('  To terminate the cluster, run: ', nl=False)
-            click.secho(f'sky down {name}', bold=True)
-            continue
-        success = backend.teardown(handle, terminate=terminate)
-        operation = 'Terminating' if terminate else 'Stopping'
-        if success:
-            click.secho(f'{operation} cluster {name}...done.', fg='green')
-            if not terminate:
-                click.echo('  To restart the cluster, run: ', nl=False)
-                click.secho(f'sky start {name}', bold=True)
+            message = (
+                f'{colorama.Fore.GREEN}Stopping cluster {name}... skipped.'
+                f'{colorama.Style.RESET_ALL}\n'
+                '  The spot instances may lose attached volumes.\n'
+                '  To terminate the cluster, run: '
+                f'{colorama.Style.BRIGHT}sky down {name}'
+                f'{colorama.Style.RESET_ALL}')
         else:
-            click.secho(
-                f'{operation} cluster {name}...failed. '
-                'Please check the logs and try again.',
-                fg='red')
+            success = backend.teardown(handle, terminate=terminate, purge=purge)
+            if success:
+                message = (
+                    f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
+                    f'{colorama.Style.RESET_ALL}')
+                if not terminate:
+                    message += ('\n  To restart the cluster, run: '
+                                f'{colorama.Style.BRIGHT}sky start {name}'
+                                f'{colorama.Style.RESET_ALL}')
+            else:
+                message = (
+                    f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
+                    'Please check the logs and try again.'
+                    f'{colorama.Style.RESET_ALL}')
+        progress.stop()
+        click.echo(message)
+        progress.update(task, advance=1)
+        progress.start()
+
+    with progress:
+        backend_utils.run_in_parallel(_terminate_or_stop, to_down)
+        progress.live.transient = False
 
 
 @_interactive_node_cli_command
