@@ -131,8 +131,12 @@ def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
                          'falling back to du -shk')
             pass
     return int(
-        subprocess.check_output(['du', '-sh', '-k', path
-                                ]).split()[0].decode('utf-8')) // (2**10)
+        subprocess.check_output([
+            'du',
+            '-sh',
+            '-k',
+            path,
+        ]).split()[0].decode('utf-8')) // (2**10)
 
 
 class RayCodeGen:
@@ -2154,7 +2158,19 @@ class CloudVmRayBackend(backends.Backend):
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
         rsync_command = ['rsync', '-Pavz']
-        rsync_command.append('--filter=\':- .gitignore\'')
+        # Legend
+        #   dir-merge: ignore file can appear in any subdir, applies to that
+        #     subdir downwards
+        # Note that "-" is mandatory for rsync and means all patterns in the
+        # ignore files are treated as *exclude* patterns.  Non-exclude
+        # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
+        # allows it.
+        rsync_command.append('--filter=\'dir-merge,- .gitignore\'')
+        git_exclude = '.git/info/exclude'
+        if (pathlib.Path(source) / git_exclude).exists():
+            # Ensure file exists; otherwise, rsync will error out.
+            rsync_command.append('--exclude-from=.git/info/exclude')
+
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,
                                            self._ssh_control_name(handle)))

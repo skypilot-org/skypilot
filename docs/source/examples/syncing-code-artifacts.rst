@@ -47,7 +47,7 @@ scripts, access checkpoints, etc.).
     For large, multi-gigabyte workdirs, uploading may be slow because the they
     are synced to the remote VM(s) with :code:`rsync`. To exclude large files in
     your workdir from being uploaded, add them to the :code:`.gitignore` file
-    under the workdir.
+    (or a ``.git/info/exclude`` file) under the workdir.
 
 .. note::
 
@@ -94,8 +94,9 @@ For more details, see `this example <https://github.com/sky-proj/sky/blob/master
 
 .. note::
 
-    Items listed in a :code:`.gitignore` file under any local file_mount source
-    are also ignored (the same behavior as handling ``workdir``).
+    Items listed in a :code:`.gitignore` file (or a ``.git/info/exclude`` file)
+    under a local file_mount source are also ignored (the same behavior as
+    handling ``workdir``).
 
 Uploading or reusing large files
 --------------------------------------

@@ -241,7 +241,12 @@ class SSHConfigHelper(object):
                                        f'host named {cluster_name}.')
                         host_name = ip
                         logger.warning(f'Using {ip} to identify host instead.')
-                    break
+
+                if line.strip() == f'Host {ip}':
+                    prev_line = config[i - 1] if i - 1 > 0 else ''
+                    if prev_line.strip().startswith(sky_autogen_comment):
+                        overwrite = True
+                        overwrite_begin_idx = i - 1
         else:
             config = ['\n']
             with open(config_path, 'w') as f:
