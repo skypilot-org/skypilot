@@ -1142,7 +1142,8 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
     if not refresh:
         return records
     updated_records = []
-    for record in rich_progress.track(records, description='Refreshing cluster status'):
+    for record in rich_progress.track(records,
+                                      description='Refreshing cluster status'):
         record = _ping_cluster_or_set_to_stopped(record)
         updated_records.append(record)
     return updated_records
