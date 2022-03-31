@@ -60,8 +60,9 @@ class AutostopEvent(SkyletEvent):
     """Skylet event for autostop."""
     EVENT_INTERVAL_SECONDS = 60
 
-    NUM_WORKER_PATTERN = re.compile(r'((?:min|max))_workers: (\d+)')
-    UPSCALING_PATTERN = re.compile(r'upscaling_speed: (\d+)')
+    _NUM_WORKER_PATTERN = re.compile(r'((?:min|max))_workers: (\d+)')
+    _UPSCALING_PATTERN = re.compile(r'upscaling_speed: (\d+)')
+    _CATCH_NODES = re.compile(r'cache_stopped_nodes: (.*)')
 
     def __init__(self):
         super().__init__()
@@ -99,13 +100,13 @@ class AutostopEvent(SkyletEvent):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             self._replace_yaml_for_stopping(self.ray_yaml_path)
-            # Destroy the workers first to avoid orphan workers.
             # `ray up` is required to reset the upscaling speed and min/max
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
             subprocess.run(
                 ['ray', 'up', '-y', '--restart-only', self.ray_yaml_path],
                 check=True)
+            # Stop the workers first to avoid orphan workers.
             subprocess.run(
                 ['ray', 'down', '-y', '--workers-only', self.ray_yaml_path],
                 check=True)
@@ -118,12 +119,13 @@ class AutostopEvent(SkyletEvent):
         with open(yaml_path, 'r') as f:
             yaml_str = f.read()
         # Update the number of workers to 0.
-        yaml_str = self.NUM_WORKER_PATTERN.sub(r'\g<1>_workers: 0', yaml_str)
-        yaml_str = self.UPSCALING_PATTERN.sub(r'upscaling_speed: 0', yaml_str)
+        yaml_str = self._NUM_WORKER_PATTERN.sub(r'\g<1>_workers: 0', yaml_str)
+        yaml_str = self._UPSCALING_PATTERN.sub(r'upscaling_speed: 0', yaml_str)
+        yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: true', yaml_str)
         config = yaml.safe_load(yaml_str)
         # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
         # Empty the file_mounts.
         config['file_mounts'] = dict()
         backend_utils.dump_yaml(yaml_path, config)
-        print('Replaced worker num and upscaling speed to 0.')
+        logger.debug('Replaced worker num and upscaling speed to 0.')
