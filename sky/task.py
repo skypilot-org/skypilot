@@ -115,6 +115,7 @@ class Task:
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04')
         self.num_nodes = num_nodes
+
         self.inputs = None
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None

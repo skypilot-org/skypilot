@@ -96,6 +96,7 @@ class Resources:
             self.disk_size = int(disk_size)
         else:
             self.disk_size = _DEFAULT_DISK_SIZE_GB
+
         self._try_validate_accelerators()
 
     def __repr__(self) -> str:
