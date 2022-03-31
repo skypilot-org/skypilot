@@ -96,7 +96,7 @@ def find_min_objective(dag, minimize):
 
 if __name__ == '__main__':
     target = sky.OptimizeTarget.COST
-    dag = generate_random_dag(num_tasks=10, seed=0)
+    dag = generate_random_dag(num_tasks=10, seed=2)
     copy_dag = copy.deepcopy(dag)
 
     sky.optimize(dag, minimize=target)
