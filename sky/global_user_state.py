@@ -159,10 +159,13 @@ def add_or_update_cluster(cluster_name: str,
     last_use = _get_pretty_entry_point()
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
-        'INSERT OR REPLACE INTO clusters'
-        '(name, launched_at, handle, last_use, status) '
-        'VALUES (?, ?, ?, ?, ?)',
-        (cluster_name, cluster_launched_at, handle, last_use, status.value))
+        'INSERT or REPLACE INTO clusters'
+        '(name, launched_at, handle, last_use, status, autostop) '
+        'VALUES (?, ?, ?, ?, ?, '
+        # Keep the old autostop value if it exists, otherwise set it to default -1.
+        'COALESCE((SELECT autostop FROM clusters WHERE name=?), -1))',
+        (cluster_name, cluster_launched_at, handle, last_use, status.value,
+         cluster_name))
     _DB.conn.commit()
 
 
