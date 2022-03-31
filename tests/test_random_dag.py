@@ -65,6 +65,7 @@ def generate_random_dag(num_tasks, seed):
 
 
 def find_min_objective(dag, minimize):
+    """Manually finds the minimum objective value."""
     dag = sky.Optimizer._add_dummy_source_sink_nodes(dag)
     graph = dag.get_graph()
     topo_order = dag.tasks
@@ -95,7 +96,7 @@ def find_min_objective(dag, minimize):
 
 if __name__ == '__main__':
     target = sky.OptimizeTarget.COST
-    dag = generate_random_dag(num_tasks=10, seed=0)
+    dag = generate_random_dag(num_tasks=100, seed=0)
     copy_dag = copy.deepcopy(dag)
 
     sky.optimize(dag, minimize=target)
