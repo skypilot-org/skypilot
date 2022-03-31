@@ -12,7 +12,10 @@ CLOUDS = {
 }
 
 GCP_INSTANCE_TYPES = list(sky.GCP._ON_DEMAND_PRICES.keys())
-DUMMY_NODES = [sky.optimizer._DUMMY_SOURCE_NAME, sky.optimizer._DUMMY_SINK_NAME]
+DUMMY_NODES = [
+    sky.optimizer._DUMMY_SOURCE_NAME,
+    sky.optimizer._DUMMY_SINK_NAME,
+]
 
 
 def generate_random_dag(num_tasks, seed):
@@ -51,7 +54,8 @@ def generate_random_dag(num_tasks, seed):
             op.set_resources({
                 sky.Resources(
                     cloud=CLOUDS[candidate.cloud],
-                    instance_type=candidate.instance_type if candidate.cloud != 'GCP' \
+                    instance_type=candidate.instance_type \
+                        if candidate.cloud != 'GCP' \
                         else random.choice(GCP_INSTANCE_TYPES),
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count},
@@ -90,10 +94,10 @@ def find_min_objective(dag, minimize):
 
 if __name__ == '__main__':
     target = sky.OptimizeTarget.COST
-    dag = generate_random_dag(num_tasks=10, seed=1)
+    dag = generate_random_dag(num_tasks=10, seed=0)
     copy_dag = copy.deepcopy(dag)
 
     sky.optimize(dag, minimize=target)
 
     objective = find_min_objective(dag, minimize=target)
-    print(objective)
+    print(f'Min objective: {objective:.1f}')
