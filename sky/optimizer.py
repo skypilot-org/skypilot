@@ -85,7 +85,7 @@ class Optimizer:
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
-        optimized_dag, unused_best_plan = Optimizer._optimize_cost(
+        optimized_dag, unused_best_plan = Optimizer._optimize_objective(
             dag,
             minimize_cost=minimize == OptimizeTarget.COST,
             blocked_launchable_resources=blocked_launchable_resources,
@@ -609,7 +609,7 @@ class Optimizer:
                     f'To list more details, run \'sky show-gpus {acc_name}\'.')
 
     @staticmethod
-    def _optimize_cost(
+    def _optimize_objective(
         dag: 'dag_lib.Dag',
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[
