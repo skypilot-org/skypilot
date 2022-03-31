@@ -353,7 +353,7 @@ class Optimizer:
             E: the set of edges (dependencies).
             k: node -> [r.cost for r in node.resources].
             F: (node i, node j) -> the egress cost/time between node i and j.
-            c: node -> one-hot decision vector. c[node][i] = 1 means 
+            c: node -> one-hot decision vector. c[node][i] = 1 means
                 the node is assigned to the i-th resource.
             e: (node i, node j) -> linearization of c[node i] x c[node j].
               e[node i][node j][a][b] = 1 means node i and node j are assigned
