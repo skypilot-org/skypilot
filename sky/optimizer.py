@@ -341,9 +341,9 @@ class Optimizer:
 
     @staticmethod
     def _optimize_by_ilp(
-        edges: List,
-        topo_order: List,
-        compute_costs: Dict,
+        graph,
+        topo_order: List[Task],
+        node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool = True,
     ):
         """Optimizes a general DAG using an ILP solver."""
@@ -356,16 +356,16 @@ class Optimizer:
 
         # Prepare the constants.
         V = topo_order
-        E = edges
+        E = graph.edges()
         k = {
             node: list(resource_cost_map.values())
-            for node, resource_cost_map in compute_costs.items()
+            for node, resource_cost_map in node_to_cost_map.items()
         }
         F = collections.defaultdict(dict)
         for u, v in E:
             F[u][v] = []
-            for r_u in compute_costs[u].keys():
-                for r_v in compute_costs[v].keys():
+            for r_u in node_to_cost_map[u].keys():
+                for r_v in node_to_cost_map[v].keys():
                     F[u][v].append(
                         Optimizer._egress_cost_or_time(minimize_cost, u, r_u, v,
                                                        r_v))
@@ -433,7 +433,7 @@ class Optimizer:
         best_plan = {}
         for node, variables in c.items():
             selected = [var.value() for var in variables].index(1)
-            best_resources = list(compute_costs[node].keys())[selected]
+            best_resources = list(node_to_cost_map[node].keys())[selected]
             node.best_resources = best_resources
             best_plan[node] = best_resources
         return best_plan, best_total_objective
@@ -640,8 +640,7 @@ class Optimizer:
                 topo_order, node_to_cost_map, minimize_cost)
         else:
             best_plan, best_total_objective = Optimizer._optimize_by_ilp(
-                list(graph.edges()), topo_order, node_to_cost_map,
-                minimize_cost)
+                graph, topo_order, node_to_cost_map, minimize_cost)
 
         if minimize_cost:
             total_time = Optimizer._compute_total_time(graph, topo_order,
