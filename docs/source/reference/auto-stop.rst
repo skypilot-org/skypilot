@@ -30,12 +30,12 @@ To view the status of the cluster:
    # Show a cluster's jobs (IDs, statuses).
    sky status
    NAME         LAUNCHED   RESOURCES           STATUS  AUTOSTOP  COMMAND
-   mucluster    1 min ago  2x AWS(m4.2xlarge)  UP      0 min     sky launch -y -d -c ...
+   mucluster    1 min ago  2x AWS(m4.2xlarge)  UP      0 min     sky launch -d -c ...
 
    # Refresh the status for auto-stopping
    sky status --refresh
    NAME         LAUNCHED   RESOURCES           STATUS  AUTOSTOP  COMMAND
-   mucluster    1 min ago  2x AWS(m4.2xlarge)  STOPPED -         sky launch -y -d -c ...
+   mucluster    1 min ago  2x AWS(m4.2xlarge)  STOPPED -         sky launch -d -c ...
 
 
 The cluster status in :code:`sky status` shows the cached status of the cluster, which can be out-dated for clusters with auto-stopping scheduled. To view a real status of the cluster with auto-stopping scheduled, use :code:`sky status --refresh`.
