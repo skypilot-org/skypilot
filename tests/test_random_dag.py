@@ -4,7 +4,6 @@ import random
 import numpy as np
 import sky
 
-
 CLOUDS = {
     'AWS': sky.AWS(),
     'GCP': sky.GCP(),
@@ -49,8 +48,8 @@ def generate_random_dag(num_tasks, seed):
             op.set_outputs('CLOUD', random.randint(0, 1000))
 
             num_candidates = random.randint(1, 5)
-            candidate_instance_types = random.choices(
-                instance_types, k=num_candidates)
+            candidate_instance_types = random.choices(instance_types,
+                                                      k=num_candidates)
             op.set_resources({
                 sky.Resources(
                     cloud=CLOUDS[candidate.cloud],
@@ -79,10 +78,12 @@ def find_min_objective(dag, minimize):
             assert task.name in DUMMY_NODES or resources.is_launchable()
             plan[task] = resources
             if len(tasks) == 1:
-                if minimize== sky.OptimizeTarget.COST:
-                    objective = sky.Optimizer._compute_total_cost(graph, topo_order, plan)
+                if minimize == sky.OptimizeTarget.COST:
+                    objective = sky.Optimizer._compute_total_cost(
+                        graph, topo_order, plan)
                 else:
-                    objective = sky.Optimizer._compute_total_time(graph, topo_order, plan)
+                    objective = sky.Optimizer._compute_total_time(
+                        graph, topo_order, plan)
             else:
                 objective = _optimize_by_brute_force(tasks[1:], plan)
             if objective < min_objective:
