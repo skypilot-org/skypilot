@@ -1438,32 +1438,30 @@ def _terminate_or_stop_clusters(
                 f'{colorama.Style.RESET_ALL}')
         elif idle_minutes_to_autostop is not None:
             cluster_status = backend_utils.get_status_from_cluster_name(name)
-            if cluster_status != global_user_state.ClusterStatus.UP:
-                message = (
-                    f'{colorama.Fore.GREEN}Scheduling autostop for cluster '
-                    f'{name} (status: {cluster_status.value})... skipped'
-                    f'{colorama.Style.RESET_ALL}\n'
-                    '  Auto-stop can only be scheduled on '
-                    f'{global_user_state.ClusterStatus.UP.value} cluster.')
-            elif not isinstance(backend, backends.CloudVmRayBackend):
+            if not isinstance(backend, backends.CloudVmRayBackend):
                 message = (
                     f'{colorama.Fore.GREEN}Scheduling auto-stop for cluster '
                     f'{name}... skipped{colorama.Style.RESET_ALL}\n'
                     '  Auto-stopping is only supported by backend: '
                     f'{backends.CloudVmRayBackend.NAME}')
             else:
+                verb = 'Scheduling'if idle_minutes_to_autostop >= 0 else 'Cancelling'
+                if cluster_status != global_user_state.ClusterStatus.UP:
+                    message = (
+                        f'{colorama.Fore.GREEN}{verb} autostop for cluster '
+                        f'{name} (status: {cluster_status.value})... skipped'
+                        f'{colorama.Style.RESET_ALL}\n'
+                        '  Auto-stop can only be run on '
+                        f'{global_user_state.ClusterStatus.UP.value} cluster.')
                 backend.set_autostop(handle, idle_minutes_to_autostop)
-                if idle_minutes_to_autostop < 0:
-                    message = (
-                        f'{colorama.Fore.GREEN}Cancelling auto-stop for '
-                        f'cluster {name}...done{colorama.Style.RESET_ALL}')
-                else:
-                    message = (
-                        f'{colorama.Fore.GREEN}Scheduling auto-stop for '
-                        f'cluster {name}...done{colorama.Style.RESET_ALL}\n'
-                        f'  The cluster will be stopped after '
-                        f'{idle_minutes_to_autostop} minutes of idleness.\n'
-                        '  To cancel the autostop, run: '
+                message = (
+                    f'{colorama.Fore.GREEN}{verb} auto-stop for '
+                    f'cluster {name}...done{colorama.Style.RESET_ALL}')
+                if idle_minutes_to_autostop >= 0:
+                    message += (
+                        f'\n  The cluster will be stopped after '
+                        f'{idle_minutes_to_autostop} minutes of idleness.'
+                        '\n  To cancel the autostop, run: '
                         f'{colorama.Style.BRIGHT}sky autostop {name} --cancel'
                         f'{colorama.Style.RESET_ALL}')
         else:
