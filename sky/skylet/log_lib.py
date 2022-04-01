@@ -66,8 +66,8 @@ def redirect_process_output(
                         # Unregister the io when EOF reached
                         sel.unregister(key.fileobj)
                         continue
-                    # TODO: Put replace_crlf, skip_lines, and start_streaming_at
-                    # logic in line_processor.process_line(line)
+                    # TODO(zhwu,gmittal): Put replace_crlf, skip_lines, and
+                    # start_streaming_at logic in processor.process_line(line)
                     if replace_crlf and line.endswith('\r\n'):
                         # Replace CRLF with LF to avoid ray logging to the same
                         # line due to separating lines with '\n'.

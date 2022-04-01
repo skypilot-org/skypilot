@@ -56,6 +56,10 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 _LOCK_FILENAME = '~/.sky/.{}.lock'
 _FILELOCK_TIMEOUT_SECONDS = 10
 
+_RSYNC_DISPLAY_OPTION = '-Pavz'
+_RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
+_RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
+
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
     """Errors out on invalid cluster names not supported by cloud providers.
@@ -104,10 +108,10 @@ def _path_size_megabytes(path: str) -> int:
     """Returns the size of 'path' (directory or file) in megabytes."""
     git_exclude_filter = ''
     if (pathlib.Path(path) / '.git/info/exclude').exists():
-        git_exclude_filter = ' --exclude-from=.git/info/exclude'
+        git_exclude_filter = f' {_RSYNC_EXCLUDE_OPTION}'
     rsync_output = str(
         subprocess.check_output(
-            f'rsync -Pavz --filter=\'dir-merge,- .gitignore\''
+            f'rsync {_RSYNC_DISPLAY_OPTION} {_RSYNC_FILTER_OPTION}'
             f'{git_exclude_filter} --dry-run {path}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
@@ -2124,7 +2128,7 @@ class CloudVmRayBackend(backends.Backend):
         # shooting a lot of messages to the output. --info=progress2 is used
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', '-Pavz']
+        rsync_command = ['rsync', _RSYNC_DISPLAY_OPTION]
         # Legend
         #   dir-merge: ignore file can appear in any subdir, applies to that
         #     subdir downwards
@@ -2132,11 +2136,11 @@ class CloudVmRayBackend(backends.Backend):
         # ignore files are treated as *exclude* patterns.  Non-exclude
         # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
         # allows it.
-        rsync_command.append('--filter=\'dir-merge,- .gitignore\'')
+        rsync_command.append(_RSYNC_FILTER_OPTION)
         git_exclude = '.git/info/exclude'
         if (pathlib.Path(source) / git_exclude).exists():
             # Ensure file exists; otherwise, rsync will error out.
-            rsync_command.append('--exclude-from=.git/info/exclude')
+            rsync_command.append(_RSYNC_EXCLUDE_OPTION)
 
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,
