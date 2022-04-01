@@ -108,11 +108,11 @@ def test_optimizer(dag: sky.Dag, minimize_cost: bool):
 
     _, optimizer_plan = sky.Optimizer._optimize_objective(dag, minimize_cost)
     if minimize_cost:
-        objective = sky.Optimizer._compute_total_cost(
-            dag.get_graph(), dag.tasks, optimizer_plan)
+        objective = sky.Optimizer._compute_total_cost(dag.get_graph(),
+                                                      dag.tasks, optimizer_plan)
     else:
-        objective = sky.Optimizer._compute_total_time(
-            dag.get_graph(), dag.tasks, optimizer_plan)
+        objective = sky.Optimizer._compute_total_time(dag.get_graph(),
+                                                      dag.tasks, optimizer_plan)
 
     min_objective = find_min_objective(copy_dag, minimize_cost)
     assert objective == min_objective
