@@ -32,7 +32,7 @@ from sky import optimizer
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
-from sky.skylet import autostop_lib, job_lib, log_lib
+from sky.skylet import autostop_lib, job_lib, log_lib, log_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -55,6 +55,10 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 
 _LOCK_FILENAME = '~/.sky/.{}.lock'
 _FILELOCK_TIMEOUT_SECONDS = 10
+
+_RSYNC_DISPLAY_OPTION = '-Pavz'
+_RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
+_RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -100,43 +104,18 @@ def _get_task_demands_dict(
     return accelerator_dict
 
 
-def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
-    """Returns the size of 'path' (directory or file) in megabytes.
-
-    Args:
-        path: The path to check.
-        exclude_gitignore: If True, excludes files matched in .gitignore.
-
-    Returns:
-        The size of 'path' in megabytes.
-    """
-    if exclude_gitignore:
-        try:
-            # FIXME: add git index size (du -hsc .git) in this computation.
-            awk_program = '{ sum += $1 } END { print sum }'
-            return int(
-                subprocess.check_output(
-                    f'( git status --short {path} | '
-                    'grep "^?" | cut -d " " -f2- '
-                    f'&& git ls-files {path} ) | '
-                    'xargs -n 1000 du -hsk | '
-                    f'awk {awk_program!r}',
-                    shell=True,
-                    stderr=subprocess.DEVNULL)) // (2**10)
-        except (subprocess.CalledProcessError, ValueError):
-            # If git is not installed, or if the user is not in a git repo.
-            # Fall back to du -shk if it is not a git repo (size does not
-            # consider .gitignore).
-            logger.debug('Failed to get size with .gitignore exclusion, '
-                         'falling back to du -shk')
-            pass
-    return int(
-        subprocess.check_output([
-            'du',
-            '-sh',
-            '-k',
-            path,
-        ]).split()[0].decode('utf-8')) // (2**10)
+def _path_size_megabytes(path: str) -> int:
+    """Returns the size of 'path' (directory or file) in megabytes."""
+    git_exclude_filter = ''
+    if (pathlib.Path(path) / '.git/info/exclude').exists():
+        git_exclude_filter = f' {_RSYNC_EXCLUDE_OPTION}'
+    rsync_output = str(
+        subprocess.check_output(
+            f'rsync {_RSYNC_DISPLAY_OPTION} {_RSYNC_FILTER_OPTION}'
+            f'{git_exclude_filter} --dry-run {path}',
+            shell=True).splitlines()[-1])
+    total_bytes = rsync_output.split(' ')[3].replace(',', '')
+    return int(total_bytes) // 10**6
 
 
 class RayCodeGen:
@@ -201,7 +180,7 @@ class RayCodeGen:
             import ray
             import ray.util as ray_util
 
-            from sky.skylet import job_lib
+            from sky.skylet import job_lib, log_utils
 
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
@@ -946,7 +925,7 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at=start_streaming_at,
-                parse_ray_up_logs=True,
+                line_processor=log_utils.RayUpLineProcessor(),
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'),
@@ -1397,15 +1376,13 @@ class CloudVmRayBackend(backends.Backend):
             workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
 
         # Raise warning if directory is too large
-        dir_size = _path_size_megabytes(full_workdir, exclude_gitignore=True)
+        dir_size = _path_size_megabytes(full_workdir)
         if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
             logger.warning(
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
                 f'is {dir_size} MB. Try to keep workdir small or use '
-                '.gitignore to exclude large files, as '
-                'large sizes will slow down rsync. If you use .gitignore but '
-                'the path is not initialized in git, you can ignore this '
-                f'warning.{style.RESET_ALL}')
+                '.gitignore to exclude large files, as large sizes will slow '
+                'down rsync. {style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
@@ -1512,16 +1489,13 @@ class CloudVmRayBackend(backends.Backend):
                 full_src = os.path.abspath(os.path.expanduser(src))
                 # Checked during Task.set_file_mounts().
                 assert os.path.exists(full_src), f'{full_src} does not exist.'
-                src_size = _path_size_megabytes(full_src,
-                                                exclude_gitignore=True)
+                src_size = _path_size_megabytes(full_src)
                 if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src!r} '
                         f'is {src_size} MB. Try to keep src small or use '
-                        '.gitignore to exclude large files, as '
-                        'large sizes will slow down rsync. If you use '
-                        '.gitignore but the path is not initialized in git, you'
-                        f' can ignore this warning.{style.RESET_ALL}')
+                        '.gitignore to exclude large files, as large sizes '
+                        f'will slow down rsync. {style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(
                         f'{fore.YELLOW}Source path {src!r} is a symlink. '
@@ -2171,7 +2145,7 @@ class CloudVmRayBackend(backends.Backend):
         # shooting a lot of messages to the output. --info=progress2 is used
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', '-Pavz']
+        rsync_command = ['rsync', _RSYNC_DISPLAY_OPTION]
         # Legend
         #   dir-merge: ignore file can appear in any subdir, applies to that
         #     subdir downwards
@@ -2179,11 +2153,11 @@ class CloudVmRayBackend(backends.Backend):
         # ignore files are treated as *exclude* patterns.  Non-exclude
         # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
         # allows it.
-        rsync_command.append('--filter=\'dir-merge,- .gitignore\'')
+        rsync_command.append(_RSYNC_FILTER_OPTION)
         git_exclude = '.git/info/exclude'
         if (pathlib.Path(source) / git_exclude).exists():
             # Ensure file exists; otherwise, rsync will error out.
-            rsync_command.append('--exclude-from=.git/info/exclude')
+            rsync_command.append(_RSYNC_EXCLUDE_OPTION)
 
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,
