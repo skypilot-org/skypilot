@@ -452,12 +452,11 @@ class Optimizer:
         else:
             # We need additional decision variables.
             finish_time = {
-                v: pulp.LpVariable(f'lat({v})', lowBound=0)
-                for v in V
+                v: pulp.LpVariable(f'lat({v})', lowBound=0) for v in V
             }
             for u, v in E:
-                prob += finish_time[v] >= (pulp.lpDot(c[v], k[v]) +
-                    finish_time[u] + pulp.lpDot(e[u][v], F[u][v]))
+                prob += finish_time[v] >= (pulp.lpDot(
+                    c[v], k[v]) + finish_time[u] + pulp.lpDot(e[u][v], F[u][v]))
             sink_node = V[-1]
             objective = finish_time[sink_node]
         prob += objective
