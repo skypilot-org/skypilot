@@ -380,8 +380,8 @@ class Optimizer:
                                        e[u][v]^T @ F[u][v]
                      for each u, v in E
             The first term indicates the execution time of the task v,
-            and the other terms indicate the task starts executing no sooner
-            then its parent tasks are finished and its input data has arrived.
+            and the other terms indicate the task v starts executing no sooner
+            than its parent tasks are finished and its input data has arrived.
         """
         import pulp  # pylint: disable=import-outside-toplevel
 
