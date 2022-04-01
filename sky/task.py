@@ -266,6 +266,7 @@ class Task:
         if len(config) > 0:
             raise ValueError(f'Unknown fields in in YAML: {config.keys()}')
         task.set_resources({resources})
+        assert config == {}, f'Invalid task args: {config.keys()}'
         return task
 
     def to_yaml_config(self) -> Dict[str, Any]:
