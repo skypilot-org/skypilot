@@ -109,6 +109,8 @@ def redirect_process_output(
                         # Unregister the io when EOF reached
                         sel.unregister(key.fileobj)
                         continue
+                    # TODO: Put replace_crlf, skip_lines, and start_streaming_at
+                    # logic in line_processor.process_line(line)
                     # Remove special characters to avoid cursor hidding
                     line = line.replace('\x1b[?25l', '')
                     if replace_crlf and line.endswith('\r\n'):

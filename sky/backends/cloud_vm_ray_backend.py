@@ -102,9 +102,13 @@ def _get_task_demands_dict(
 
 def _path_size_megabytes(path: str) -> int:
     """Returns the size of 'path' (directory or file) in megabytes."""
+    git_exclude_filter = ''
+    if (pathlib.Path(path) / '.git/info/exclude').exists():
+        git_exclude_filter = ' --exclude-from=.git/info/exclude'
     rsync_output = str(
         subprocess.check_output(
-            f'rsync -Pavz --filter=\':- .gitignore\' --dry-run {path}',
+            f'rsync -Pavz --filter=\'dir-merge,- .gitignore\''
+            f'{git_exclude_filter} --dry-run {path}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
     return int(total_bytes) // 10**6
