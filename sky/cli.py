@@ -123,6 +123,7 @@ def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
             f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
     return clouds.CLOUD_REGISTRY.get(cloud)
 
+
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
