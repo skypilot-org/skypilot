@@ -886,6 +886,13 @@ class RetryingVmProvisioner(object):
                     stdout=None,
                     stderr=None)
 
+                # Only log the errors for GANG_FAILED, since HEAD_FAILED may
+                # not have created any resources (it can happen however) and
+                # HEAD_FAILED can happen in "normal" failover cases.
+                logger.error('*** Failed provisioning the cluster. ***')
+                terminate_str = 'Terminating' if need_terminate else 'Stopping'
+                logger.error(f'*** {terminate_str} the failed cluster. ***')
+
             # There may exists partial nodes (e.g., head node) so we must
             # terminate or stop before moving on to other regions.
             #
@@ -893,9 +900,6 @@ class RetryingVmProvisioner(object):
             # we must terminate/stop here too. E.g., node is up, and ray
             # autoscaler proceeds to setup commands, which may fail:
             #   ERR updater.py:138 -- New status: update-failed
-            verb = 'Terminating' if need_terminate else 'Stopping'
-            logger.error(f'Failed provisioning in {to_provision.cloud} '
-                         f'{region.name}. {verb} the live nodes (if any).')
             CloudVmRayBackend().teardown_no_lock(handle,
                                                  terminate=need_terminate)
 
