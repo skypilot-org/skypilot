@@ -1008,7 +1008,8 @@ class CloudVmRayBackend(backends.Backend):
             cloud = self.launched_resources.cloud
             if cloud.is_same_cloud(sky.Azure()):
                 self.cluster_region = provider['location']
-            elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(sky.AWS()):
+            elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
+                    sky.AWS()):
                 self.cluster_region = provider['region']
 
         def get_cluster_region(self):
