@@ -621,10 +621,11 @@ class RetryingVmProvisioner(object):
 
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
-                    if type(cloud) in (clouds.AWS, clouds.GCP):
+                    if cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
+                            sky.AWS()):
                         region = config['provider']['region']
                         zones = config['provider']['availability_zone']
-                    elif isinstance(cloud, clouds.Azure):
+                    elif cloud.is_same_cloud(sky.Azure()):
                         region = config['provider']['location']
                         zones = None
                     else:
@@ -1135,6 +1136,7 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
             self.tpu_delete_script = tpu_delete_script
+            self._find_cluster_region()
 
         def __repr__(self):
             return (f'ResourceHandle('
@@ -1149,6 +1151,21 @@ class CloudVmRayBackend(backends.Backend):
 
         def get_cluster_name(self):
             return self.cluster_name
+
+        def _find_cluster_region(self):
+            config = backend_utils.read_yaml(self.cluster_yaml)
+            provider = config['provider']
+            cloud = self.launched_resources.cloud
+            if cloud.is_same_cloud(sky.Azure()):
+                self.cluster_region = provider['location']
+            elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
+                    sky.AWS()):
+                self.cluster_region = provider['region']
+
+        def get_cluster_region(self):
+            if not hasattr(self, 'cluster_region'):
+                self._find_cluster_region()
+            return self.cluster_region
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()

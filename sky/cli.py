@@ -828,14 +828,22 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     # TODO(zhwu): Update the information for auto-stop clusters.
     show_all = all
     clusters_status = backend_utils.get_clusters(refresh)
-    cluster_table = util_lib.create_table([
+    columns = [
         'NAME',
         'LAUNCHED',
         'RESOURCES',
         'STATUS',
         'AUTOSTOP',
         'COMMAND',
-    ])
+    ]
+
+    if all:
+        columns.extend([
+            'HOURLY_PRICE',
+            'REGION',
+        ])
+
+    cluster_table = util_lib.create_table(columns)
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
@@ -858,7 +866,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
         if cluster_status['autostop'] >= 0:
             # TODO(zhwu): check the status of the autostop cluster.
             autostop_str = str(cluster_status['autostop']) + ' min'
-        cluster_table.add_row([
+        row = [
             # NAME
             cluster_status['name'],
             # LAUNCHED
@@ -872,7 +880,19 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
             # COMMAND
             cluster_status['last_use']
             if show_all else _truncate_long_string(cluster_status['last_use']),
-        ])
+        ]
+        if all:
+            hourly_cost = handle.launched_resources.get_cost(3600) \
+                * handle.launched_nodes
+            price_str = f'$ {hourly_cost:.3f}'
+            region = handle.get_cluster_region()
+            row.extend([
+                # HOURLY PRICE
+                price_str,
+                # REGION
+                region,
+            ])
+        cluster_table.add_row(row)
     if clusters_status:
         click.echo(cluster_table)
     else:
