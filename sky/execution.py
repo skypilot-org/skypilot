@@ -96,7 +96,8 @@ def _execute(dag: sky.Dag,
                 # would directly error out ('No cloud is enabled...').  Fix by
                 # moving `sky check` checks out of optimize()?
                 dag = sky.optimize(dag, minimize=optimize_target)
-            task = dag.tasks[0]  # Keep: dag may have been deep-copied.
+                task = dag.tasks[0]  # Keep: dag may have been deep-copied.
+                assert task.best_resources is not None, task
 
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
@@ -147,12 +148,14 @@ def _execute(dag: sky.Dag,
         traceback.print_exc()
         print()
         backends.backend_utils.run('sky status')
+        print('\x1b[?25h', end='')  # Show cursor.
         status_printed = True
         sys.exit(1)
     finally:
         if not status_printed:
             # Needed because this finally doesn't always get executed on errors.
             backends.backend_utils.run('sky status')
+            print('\x1b[?25h', end='')  # Show cursor.
 
 
 def launch(dag: sky.Dag,
@@ -176,18 +179,24 @@ def launch(dag: sky.Dag,
 
 def exec(  # pylint: disable=redefined-builtin
     dag: sky.Dag,
+    cluster_name: str,
     dryrun: bool = False,
     teardown: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
-    cluster_name: Optional[str] = None,
     detach_run: bool = False,
 ) -> None:
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
-        raise ValueError(f'Cluster \'{cluster_name}\' not found.  '
-                         'Use `sky launch` to provision first.')
+        logger.error(f'Cluster {cluster_name!r} not found.  '
+                     'Use `sky launch` to provision first.')
+        sys.exit(1)
+    status = backends.backend_utils.get_status_from_cluster_name(cluster_name)
+    if status != global_user_state.ClusterStatus.UP:
+        logger.error(f'Cluster {cluster_name!r} is not up.  '
+                     'Use `sky status` to check the status.')
+        sys.exit(1)
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,

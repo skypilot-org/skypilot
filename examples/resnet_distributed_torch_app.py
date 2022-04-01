@@ -49,5 +49,5 @@ with sky.Dag() as dag:
         # sky.Resources(sky.AWS(), accelerators='V100'),
     })
 
-sky.launch(dag, cluster_name='dtf')
-# sky.exec(dag, cluster_name='dtf')
+sky.launch(dag, cluster_name='dth')
+# sky.exec(dag, cluster_name='dth')

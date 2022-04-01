@@ -1,7 +1,6 @@
 """Utils for building sky pip wheels."""
 from typing import Optional
 
-import getpass
 import os
 import pathlib
 import shutil
@@ -11,9 +10,13 @@ import tempfile
 import sky
 
 
-def _cleanup_wheels_dir(wheel_dir: pathlib.Path,
-                        latest_wheel: Optional[pathlib.Path]):
-    # cleanup older wheels
+def cleanup_wheels_dir(wheel_dir: pathlib.Path,
+                       latest_wheel: Optional[pathlib.Path] = None) -> None:
+    if latest_wheel is None:
+        # Remove the entire dir.
+        shutil.rmtree(wheel_dir, ignore_errors=True)
+        return
+    # Cleanup older wheels.
     for f in wheel_dir.iterdir():
         if f != latest_wheel:
             if f.is_dir() and not f.is_symlink():
@@ -23,20 +26,21 @@ def _cleanup_wheels_dir(wheel_dir: pathlib.Path,
 
 
 def build_sky_wheel() -> pathlib.Path:
-    """Build a wheel for sky. This works correctly only when sky is installed
-    with development/editable mode."""
-    # check if sky is installed under development mode.
-    package_root = pathlib.Path(sky.__file__).parent.parent
-    username = getpass.getuser()
-    wheel_dir = pathlib.Path(tempfile.gettempdir()) / f'sky_wheels_{username}'
+    """Build a wheel for Sky at a newly made temporary path.
 
-    if not wheel_dir.exists():
-        wheel_dir.mkdir()
-    # cleanup the directory
+    This works correctly only when sky is installed with development/editable
+    mode.
+
+    Caller is responsible for removing the wheel.
+    """
     # TODO(suquark): Cache built wheels to prevent rebuilding.
     # This may not be necessary because it's fast to build the wheel.
-    _cleanup_wheels_dir(wheel_dir, None)
-
+    # check if sky is installed under development mode.
+    package_root = pathlib.Path(sky.__file__).parent.parent
+    # Use a newly made, unique temporary dir because there may be many
+    # concurrent 'sky launch' happening.
+    tempdir = tempfile.mkdtemp()
+    wheel_dir = pathlib.Path(tempdir)
     # prepare files
     (wheel_dir / 'sky').symlink_to(package_root / 'sky',
                                    target_is_directory=True)
@@ -45,12 +49,12 @@ def build_sky_wheel() -> pathlib.Path:
         if f.is_file():
             shutil.copy(str(f), str(wheel_dir))
 
-    # It is important to normalize the path, otherwise 'pip wheel' would treat
-    # the directory as a file and generate an empty wheel.
+    # It is important to normalize the path, otherwise 'pip wheel' would
+    # treat the directory as a file and generate an empty wheel.
     norm_path = str(wheel_dir) + os.sep
     try:
-        # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture of
-        # the output.
+        # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
+        # of the output.
         subprocess.run([
             'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
             str(wheel_dir)
@@ -65,7 +69,7 @@ def build_sky_wheel() -> pathlib.Path:
         latest_wheel = max(wheel_dir.glob('sky-*.whl'), key=os.path.getctime)
     except ValueError:
         raise FileNotFoundError('Could not find built Sky wheels.') from None
-    _cleanup_wheels_dir(wheel_dir, latest_wheel)
+    cleanup_wheels_dir(wheel_dir, latest_wheel)
     return wheel_dir.absolute()
 
 

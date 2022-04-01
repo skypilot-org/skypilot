@@ -3,21 +3,10 @@ from typing import Dict, Optional, Union
 
 from sky import clouds
 from sky import sky_logging
-from sky.clouds import service_catalog
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_DISK_SIZE = 256
-
-
-def _get_name_from_catalog(accelerator: str) -> str:
-    """Returns the matched accelerator name in the catalog."""
-    acc_names = list(service_catalog.list_accelerators(gpus_only=False).keys())
-    try:
-        index = [n.casefold() for n in acc_names].index(accelerator.casefold())
-    except ValueError:
-        raise ValueError(f'Invalid accelerator name: {accelerator}') from None
-    return acc_names[index]
+_DEFAULT_DISK_SIZE_GB = 256
 
 
 class Resources:
@@ -91,17 +80,23 @@ class Resources:
                                 ' default (2.5.0)')
                     accelerator_args['tf_version'] = '2.5.0'
 
-        self._accelerators = self._rename_accelerators(accelerators)
+        self._accelerators = accelerators
         self.accelerator_args = accelerator_args
 
         self._use_spot_specified = use_spot is not None
         self.use_spot = use_spot if use_spot is not None else False
 
         if disk_size is not None:
-            assert disk_size >= 50, 'OS disk size must be larger than 50GB.'
-            self.disk_size = disk_size
+            if disk_size < 50:
+                raise ValueError(
+                    f'OS disk size must be larger than 50GB. Got: {disk_size}.')
+            if round(disk_size) != disk_size:
+                raise ValueError(
+                    f'OS disk size must be an integer. Got: {disk_size}.')
+            self.disk_size = int(disk_size)
         else:
-            self.disk_size = DEFAULT_DISK_SIZE
+            self.disk_size = _DEFAULT_DISK_SIZE_GB
+
         self._try_validate_accelerators()
 
     def __repr__(self) -> str:
@@ -144,17 +139,6 @@ class Resources:
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
 
-    def _rename_accelerators(
-        self,
-        accelerators: Union[None, Dict[str, int]],
-    ) -> Optional[Dict[str, int]]:
-        """Renames the accelerators in a case-sensitive manner."""
-        if accelerators is not None:
-            return {_get_name_from_catalog(name): cnt \
-                    for name, cnt in accelerators.items()}
-        else:
-            return None
-
     @property
     def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
@@ -172,7 +156,7 @@ class Resources:
 
     @accelerators.setter
     def accelerators(self, accelerators: Union[None, Dict[str, int]]) -> None:
-        self._accelerators = self._rename_accelerators(accelerators)
+        self._accelerators = accelerators
 
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""

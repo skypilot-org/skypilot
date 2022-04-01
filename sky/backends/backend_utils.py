@@ -11,32 +11,38 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import threading
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 import yaml
 
 import jinja2
+import rich.console as rich_console
+import rich.progress as rich_progress
 
 import sky
 from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import global_user_state
 from sky import exceptions
 from sky import sky_logging
-from sky import resources
 from sky.adaptors import azure
-from sky.backends import wheel_utils
 from sky.skylet import log_lib
 
-logger = sky_logging.init_logger(__name__)
+if typing.TYPE_CHECKING:
+    from sky import resources
 
-Resources = resources.Resources
+logger = sky_logging.init_logger(__name__)
+console = rich_console.Console()
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
+SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.10.0'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
@@ -48,6 +54,7 @@ RESET_BOLD = '\033[0m'
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
+_LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
@@ -67,8 +74,6 @@ def _fill_template(template_name: str,
         raise FileNotFoundError(f'Template "{template_name}" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
-    template = jinja2.Template(template)
-    content = template.render(**variables)
     if output_path is None:
         assert 'cluster_name' in variables, 'cluster_name is required.'
         cluster_name = variables['cluster_name']
@@ -77,6 +82,12 @@ def _fill_template(template_name: str,
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
     output_path = os.path.abspath(output_path)
+
+    # Add yaml file path to the template variables.
+    variables['sky_ray_yaml_remote_path'] = SKY_RAY_YAML_REMOTE_PATH
+    variables['sky_ray_yaml_local_path'] = output_path
+    template = jinja2.Template(template)
+    content = template.render(**variables)
     with open(output_path, 'w') as fout:
         fout.write(content)
     return output_path
@@ -165,6 +176,7 @@ class SSHConfigHelper(object):
     """Helper for handling local SSH configuration."""
 
     ssh_conf_path = '~/.ssh/config'
+    ssh_multinode_path = '~/.sky/generated/ssh/{}'
 
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
@@ -186,7 +198,7 @@ class SSHConfigHelper(object):
     def add_cluster(
         cls,
         cluster_name: str,
-        ip: str,
+        ips: List[str],
         auth_config: Dict[str, str],
     ):
         """Add authentication information for cluster to local SSH config file.
@@ -201,16 +213,17 @@ class SSHConfigHelper(object):
 
         Args:
             cluster_name: Cluster name (see `sky status`)
-            ip: IP address of head node associated with the cluster
+            ips: List of IP addresses in the cluster. First IP is head node.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
-        sky_autogen_comment = '# Added by sky (use `sky stop/down' + \
-                            f'-c {cluster_name}` to remove)'
+        sky_autogen_comment = '# Added by sky (use `sky stop/down ' + \
+                            f'{cluster_name}` to remove)'
         overwrite = False
         overwrite_begin_idx = None
+        ip = ips[0]
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if os.path.exists(config_path):
@@ -229,7 +242,12 @@ class SSHConfigHelper(object):
                                        f'host named {cluster_name}.')
                         host_name = ip
                         logger.warning(f'Using {ip} to identify host instead.')
-                    break
+
+                if line.strip() == f'Host {ip}':
+                    prev_line = config[i - 1] if i - 1 > 0 else ''
+                    if prev_line.strip().startswith(sky_autogen_comment):
+                        overwrite = True
+                        overwrite_begin_idx = i - 1
         else:
             config = ['\n']
             with open(config_path, 'w') as f:
@@ -246,28 +264,149 @@ class SSHConfigHelper(object):
                    len(updated_lines)] = updated_lines
             with open(config_path, 'w') as f:
                 f.write(''.join(config).strip())
-                f.write('\n')
+                f.write('\n' * 2)
         else:
             with open(config_path, 'a') as f:
-                if len(config) > 0 and not config[-1].endswith('\n'):
-                    # Add trailing newline if it doesn't exist.
+                if len(config) > 0 and config[-1] != '\n':
                     f.write('\n')
-                f.write('\n')
                 f.write(codegen)
+                f.write('\n')
+
+        with open(config_path, 'r+') as f:
+            config = f.readlines()
+            if config[-1] != '\n':
+                f.write('\n')
+
+        if len(ips) > 1:
+            SSHConfigHelper._add_multinode_config(cluster_name, ips[1:],
+                                                  auth_config)
 
     @classmethod
-    def remove_cluster(cls, ip: str, auth_config: Dict[str, str]):
+    def _add_multinode_config(
+        cls,
+        cluster_name: str,
+        worker_ips: List[str],
+        auth_config: Dict[str, str],
+    ):
+        username = auth_config['ssh_user']
+        key_path = os.path.expanduser(auth_config['ssh_private_key'])
+        host_name = cluster_name
+        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
+                               f'{cluster_name}` to remove)')
+
+        overwrites = [False] * len(worker_ips)
+        overwrite_begin_idxs = [None] * len(worker_ips)
+        codegens = [None] * len(worker_ips)
+        worker_names = []
+        extra_path_name = cls.ssh_multinode_path.format(cluster_name)
+
+        for idx in range(len(worker_ips)):
+            worker_names.append(cluster_name + f'-worker{idx+1}')
+
+        config_path = os.path.expanduser(cls.ssh_conf_path)
+        with open(config_path) as f:
+            config = f.readlines()
+
+        extra_config_path = os.path.expanduser(extra_path_name)
+        os.makedirs(os.path.dirname(extra_config_path), exist_ok=True)
+        if not os.path.exists(extra_config_path):
+            extra_config = ['\n']
+            with open(extra_config_path, 'w') as f:
+                f.writelines(extra_config)
+        else:
+            with open(extra_config_path) as f:
+                extra_config = f.readlines()
+
+        # Handle Include on top of Config file
+        include_str = f'Include {extra_config_path}'
+        for i, line in enumerate(config):
+            config_str = line.strip()
+            if config_str == include_str:
+                break
+            # Did not find Include string
+            if 'Host' in config_str:
+                with open(config_path, 'w') as f:
+                    config.insert(0, '\n')
+                    config.insert(0, include_str + '\n')
+                    config.insert(0, sky_autogen_comment + '\n')
+                    f.write(''.join(config).strip())
+                    f.write('\n' * 2)
+                break
+
+        with open(config_path) as f:
+            config = f.readlines()
+
+        # Check if ~/.ssh/config contains existing names
+        host_lines = [f'Host {c_name}' for c_name in worker_names]
+        for i, line in enumerate(config):
+            if line.strip() in host_lines:
+                idx = host_lines.index(line.strip())
+                prev_line = config[i - 1] if i > 0 else ''
+                logger.warning(f'{cls.ssh_conf_path} contains '
+                               f'host named {worker_names[idx]}.')
+                host_name = worker_ips[idx]
+                logger.warning(f'Using {host_name} to identify host instead.')
+                codegens[idx] = cls._get_generated_config(
+                    sky_autogen_comment, host_name, worker_ips[idx], username,
+                    key_path)
+
+        # All workers go to ~/.sky/generated/ssh/{cluster_name}
+        for i, line in enumerate(extra_config):
+            if line.strip() in host_lines:
+                idx = host_lines.index(line.strip())
+                prev_line = extra_config[i - 1] if i > 0 else ''
+                if prev_line.strip().startswith(sky_autogen_comment):
+                    host_name = worker_names[idx]
+                    overwrites[idx] = True
+                    overwrite_begin_idxs[idx] = i - 1
+                codegens[idx] = cls._get_generated_config(
+                    sky_autogen_comment, host_name, worker_ips[idx], username,
+                    key_path)
+
+        # This checks if all codegens have been created.
+        for idx, ip in enumerate(worker_ips):
+            if not codegens[idx]:
+                codegens[idx] = cls._get_generated_config(
+                    sky_autogen_comment, worker_names[idx], ip, username,
+                    key_path)
+
+        for idx in range(len(worker_ips)):
+            # Add (or overwrite) the new config.
+            overwrite = overwrites[idx]
+            overwrite_begin_idx = overwrite_begin_idxs[idx]
+            codegen = codegens[idx]
+            if overwrite:
+                assert overwrite_begin_idx is not None
+                updated_lines = codegen.splitlines(keepends=True) + ['\n']
+                extra_config[overwrite_begin_idx:overwrite_begin_idx +
+                             len(updated_lines)] = updated_lines
+                with open(extra_config_path, 'w') as f:
+                    f.write(''.join(extra_config).strip())
+                    f.write('\n' * 2)
+            else:
+                with open(extra_config_path, 'a') as f:
+                    f.write(codegen)
+                    f.write('\n')
+
+        # Add trailing new line at the end of the file if it doesn't exit
+        with open(extra_config_path, 'r+') as f:
+            extra_config = f.readlines()
+            if extra_config[-1] != '\n':
+                f.write('\n')
+
+    @classmethod
+    def remove_cluster(cls, cluster_name: str, ip: str, auth_config: Dict[str,
+                                                                          str]):
         """Remove authentication information for cluster from local SSH config.
 
         If no existing host matching the provided specification is found, then
         nothing is removed.
 
         Args:
-            ip: IP address of a cluster's head node.
+            ip: Head node's IP address.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
         username = auth_config['ssh_user']
-
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if not os.path.exists(config_path):
             return
@@ -275,8 +414,8 @@ class SSHConfigHelper(object):
         with open(config_path) as f:
             config = f.readlines()
 
-        # Scan the config for the cluster name.
         start_line_idx = None
+        # Scan the config for the cluster name.
         for i, line in enumerate(config):
             next_line = config[i + 1] if i + 1 < len(config) else ''
             if line.strip() == f'HostName {ip}' and next_line.strip(
@@ -310,17 +449,56 @@ class SSHConfigHelper(object):
         ] if end_line_idx is not None else []
         with open(config_path, 'w') as f:
             f.write(''.join(config).strip())
-            f.write('\n')
+            f.write('\n' * 2)
+
+        SSHConfigHelper._remove_multinode_config(cluster_name)
+
+    @classmethod
+    def _remove_multinode_config(
+        cls,
+        cluster_name: str,
+    ):
+        config_path = os.path.expanduser(cls.ssh_conf_path)
+        if not os.path.exists(config_path):
+            return
+
+        extra_path_name = cls.ssh_multinode_path.format(cluster_name)
+        extra_config_path = os.path.expanduser(extra_path_name)
+        if os.path.exists(extra_config_path):
+            os.remove(extra_config_path)
+
+        # Delete include statement
+        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
+                               f'{cluster_name}` to remove)')
+        with open(config_path) as f:
+            config = f.readlines()
+
+        for i, line in enumerate(config):
+            config_str = line.strip()
+            if f'Include {extra_config_path}' in config_str:
+                with open(config_path, 'w') as f:
+                    if i < len(config) - 1 and config[i + 1] == '\n':
+                        del config[i + 1]
+                    # Delete Include string
+                    del config[i]
+                    # Delete Sky Autogen Comment
+                    if i > 0 and sky_autogen_comment in config[i - 1].strip():
+                        del config[i - 1]
+                    f.write(''.join(config))
+                break
+            if 'Host' in config_str:
+                break
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
-def write_cluster_config(to_provision: Resources,
+def write_cluster_config(to_provision: 'resources.Resources',
                          num_nodes: int,
                          cluster_config_template: str,
                          cluster_name: str,
+                         local_wheel_path: pathlib.Path,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
-                         dryrun: bool = False):
+                         dryrun: bool = False) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -355,7 +533,8 @@ def write_cluster_config(to_provision: Resources,
 
     aws_default_ami = None
     if isinstance(cloud, clouds.AWS):
-        aws_default_ami = cloud.get_default_ami(region)
+        instance_type = resources_vars['instance_type']
+        aws_default_ami = cloud.get_default_ami(region, instance_type)
 
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
@@ -380,9 +559,6 @@ def write_cluster_config(to_provision: Resources,
 
     assert cluster_name is not None
 
-    # TODO(suquark): once we have sky on PYPI, we should directly install sky
-    # from PYPI
-    local_wheel_path = wheel_utils.build_sky_wheel()
     credentials = sky_check.get_cloud_credential_file_mounts()
     credential_file_mounts, credential_excludes = credentials
     yaml_path = _fill_template(
@@ -499,69 +675,90 @@ def wait_until_ray_cluster_ready(
     # Manually fetching head ip instead of using `ray exec` to avoid the bug
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
-    head_ip = query_head_ip_with_retries(
-        cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
-
-    expected_worker_count = num_nodes - 1
+    try:
+        head_ip = query_head_ip_with_retries(
+            cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
+    except RuntimeError as e:
+        logger.error(e)
+        return False  # failed
 
     ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
-    last_workers_so_far = 0
+    last_nodes_so_far = 0
     start = time.time()
-    while True:
-        rc, output, stderr = run_command_on_ip_via_ssh(head_ip,
-                                                       'ray status',
-                                                       ssh_user=ssh_user,
-                                                       ssh_private_key=ssh_key,
-                                                       log_path=log_path,
-                                                       stream_logs=False,
-                                                       require_outputs=True)
+    with console.status('[bold cyan]Waiting for workers...') as worker_status:
+        while True:
+            rc, output, stderr = run_command_on_ip_via_ssh(
+                head_ip,
+                'ray status',
+                ssh_user=ssh_user,
+                ssh_private_key=ssh_key,
+                log_path=log_path,
+                stream_logs=False,
+                require_outputs=True)
+            handle_returncode(rc, 'ray status',
+                              'Failed to run ray status on head node.', stderr)
+            logger.debug(output)
 
-        handle_returncode(rc, 'ray status',
-                          'Failed to run ray status on head node.', stderr)
-        logger.info(output)
+            # Workers that are ready
+            result = _LAUNCHED_WORKER_PATTERN.findall(output)
+            ready_workers = 0
+            if result:
+                assert len(result) == 1, result
+                ready_workers = int(result[0])
 
-        # Workers that are ready
-        result = _LAUNCHED_WORKER_PATTERN.findall(output)
-        ready_workers = 0
-        if result:
-            assert len(result) == 1, result
-            ready_workers = int(result[0])
+            result = _LAUNCHED_HEAD_PATTERN.findall(output)
+            ready_head = 0
+            if result:
+                assert len(result) == 1, result
+                ready_head = int(result[0])
+                assert ready_head <= 1, ready_head
 
-        if ready_workers == expected_worker_count:
-            # All workers are up.
-            break
+            worker_status.update('[bold cyan]'
+                                 f'{ready_workers} out of {num_nodes - 1} '
+                                 'workers ready')
 
-        # Pending workers that have been launched by ray up.
-        found_ips = _LAUNCHING_IP_PATTERN.findall(output)
-        pending_workers = len(found_ips)
+            if ready_head + ready_workers == num_nodes:
+                # All nodes are up.
+                break
 
-        workers_so_far = ready_workers + pending_workers
+            # Pending workers that have been launched by ray up.
+            found_ips = _LAUNCHING_IP_PATTERN.findall(output)
+            pending_workers = len(found_ips)
 
-        # Check the number of nodes that are fetched. Timeout if no new
-        # nodes fetched in a while (nodes_launching_progress_timeout), though
-        # number of workers_so_far is still not as expected.
-        if workers_so_far != last_workers_so_far:
-            # Reset the start time if the number of launching nodes
-            # changes, i.e. new nodes are launched.
-            logger.debug('Reset start time, as new nodes are launched. '
-                         f'({last_workers_so_far} -> {workers_so_far})')
-            start = time.time()
-            last_workers_so_far = workers_so_far
-        elif (nodes_launching_progress_timeout is not None and
-              time.time() - start > nodes_launching_progress_timeout and
-              workers_so_far != expected_worker_count):
-            logger.error(
-                'Timed out when waiting for workers to be provisioned.')
-            return False  # failed
+            # TODO(zhwu): Handle the case where the following occurs, where ray
+            # cluster is not correctly started on the cluster.
+            # Pending:
+            #  172.31.9.121: ray.worker.default, uninitialized
+            nodes_so_far = ready_head + ready_workers + pending_workers
 
-        if '(no pending nodes)' in output and '(no failures)' in output:
-            # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes that
-            # GCP can satisfy only by half, the worker node would be forgotten.
-            # The correct behavior should be for it to error out.
-            logger.error('Failed to launch multiple nodes on '
-                         'GCP due to a nondeterministic bug in ray autoscaler.')
-            return False  # failed
-        time.sleep(10)
+            # Check the number of nodes that are fetched. Timeout if no new
+            # nodes fetched in a while (nodes_launching_progress_timeout),
+            # though number of nodes_so_far is still not as expected.
+            if nodes_so_far > last_nodes_so_far:
+                # Reset the start time if the number of launching nodes
+                # changes, i.e. new nodes are launched.
+                logger.debug('Reset start time, as new nodes are launched. '
+                             f'({last_nodes_so_far} -> {nodes_so_far})')
+                start = time.time()
+                last_nodes_so_far = nodes_so_far
+            elif (nodes_launching_progress_timeout is not None and
+                  time.time() - start > nodes_launching_progress_timeout and
+                  nodes_so_far != num_nodes):
+                worker_status.stop()
+                logger.error(
+                    'Timed out when waiting for workers to be provisioned.')
+                return False  # failed
+
+            if '(no pending nodes)' in output and '(no failures)' in output:
+                # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
+                # that GCP can satisfy only by half, the worker node would be
+                # forgotten. The correct behavior should be for it to error out.
+                worker_status.stop()
+                logger.error(
+                    'Failed to launch multiple nodes on '
+                    'GCP due to a nondeterministic bug in ray autoscaler.')
+                return False  # failed
+            time.sleep(10)
     return True  # success
 
 
@@ -601,7 +798,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
             # sky.launch().
             'ControlMaster': 'auto',
             'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
-            'ControlPersist': '30s',
+            'ControlPersist': '120s',
         })
     ssh_key_option = [
         '-i',
@@ -837,9 +1034,11 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def get_node_ips(cluster_yaml: str,
-                 expected_num_nodes: int,
-                 return_private_ips: bool = False) -> List[str]:
+def get_node_ips(
+        cluster_yaml: str,
+        expected_num_nodes: int,
+        return_private_ips: bool = False,
+        handle: Optional[backends.Backend.ResourceHandle] = None) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
     yaml_handle = cluster_yaml
     if return_private_ips:
@@ -849,16 +1048,37 @@ def get_node_ips(cluster_yaml: str,
         yaml_handle = cluster_yaml + '.tmp'
         dump_yaml(yaml_handle, config)
 
-    out = run(f'ray get-head-ip {yaml_handle}',
-              stdout=subprocess.PIPE).stdout.decode().strip()
-    head_ip = re.findall(IP_ADDR_REGEX, out)
-    assert 1 == len(head_ip), out
+    # Try optimize for the common case where we have 1 node.
+    if (not return_private_ips and expected_num_nodes == 1 and
+            handle is not None and handle.head_ip is not None):
+        return [handle.head_ip]
 
-    out = run(f'ray get-worker-ips {yaml_handle}',
-              stdout=subprocess.PIPE).stdout.decode()
-    worker_ips = re.findall(IP_ADDR_REGEX, out)
-    assert expected_num_nodes - 1 == len(worker_ips), (expected_num_nodes - 1,
-                                                       out)
+    try:
+        proc = run(f'ray get-head-ip {yaml_handle}',
+                   stdout=subprocess.PIPE,
+                   stderr=subprocess.PIPE)
+        out = proc.stdout.decode().strip()
+        head_ip = re.findall(IP_ADDR_REGEX, out)
+    except subprocess.CalledProcessError as e:
+        raise exceptions.FetchIPError(
+            exceptions.FetchIPError.Reason.HEAD) from e
+    if len(head_ip) != 1:
+        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+
+    if expected_num_nodes > 1:
+        try:
+            proc = run(f'ray get-worker-ips {yaml_handle}',
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+            out = proc.stdout.decode()
+            worker_ips = re.findall(IP_ADDR_REGEX, out)
+        except subprocess.CalledProcessError as e:
+            raise exceptions.FetchIPError(
+                exceptions.FetchIPError.Reason.WORKER) from e
+        if len(worker_ips) != expected_num_nodes - 1:
+            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
+    else:
+        worker_ips = []
     if return_private_ips:
         os.remove(yaml_handle)
     return head_ip + worker_ips
@@ -885,6 +1105,50 @@ def get_head_ip(
     return head_ip
 
 
+def _ping_cluster_or_set_to_stopped(
+        record: Dict[str, Any]) -> global_user_state.ClusterStatus:
+    handle = record['handle']
+    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        return record
+    # Autostop is disabled for the cluster
+    if record['autostop'] < 0:
+        return record
+    cluster_name = handle.cluster_name
+    try:
+        get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        return record
+    except exceptions.FetchIPError as e:
+        # Set the cluster status to STOPPED, even the head node is still alive,
+        # since it will be stopped as soon as the workers are stopped.
+        logger.debug(f'Failed to get IPs from cluster {cluster_name}: {e}, '
+                     'set to STOPPED')
+    global_user_state.remove_cluster(cluster_name, terminate=False)
+    auth_config = read_yaml(handle.cluster_yaml)['auth']
+    SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
+    return global_user_state.get_cluster_from_name(cluster_name)
+
+
+def get_status_from_cluster_name(
+        cluster_name: str) -> Optional[global_user_state.ClusterStatus]:
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return None
+    record = _ping_cluster_or_set_to_stopped(record)
+    return record['status']
+
+
+def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
+    records = global_user_state.get_clusters()
+    if not refresh:
+        return records
+    updated_records = []
+    for record in rich_progress.track(records,
+                                      description='Refreshing cluster status'):
+        record = _ping_cluster_or_set_to_stopped(record)
+        updated_records.append(record)
+    return updated_records
+
+
 def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""
     for i in range(retry_count):
@@ -897,7 +1161,7 @@ def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
             break
         except subprocess.CalledProcessError as e:
             if i == retry_count - 1:
-                raise e
+                raise RuntimeError('Failed to get head ip') from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
             time.sleep(5)
@@ -920,50 +1184,18 @@ def get_backend_from_handle(
     return backend
 
 
-class JobLibCodeGen(object):
-    """Code generator for job utility functions.
+class NoOpConsole:
+    """An empty class for multi-threaded console.status."""
 
-    Usage:
+    def __enter__(self):
+        pass
 
-      >> codegen = JobLibCodeGen()
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
-      >> codegen.show_jobs(...)
-      >> codegen.add_job(...)
-      >> codegen.<method>(...)
 
-      >> code = codegen.build()
-    """
-
-    def __init__(self) -> None:
-        self._code = ['from sky.skylet import job_lib, log_lib']
-
-    def add_job(self, job_name: str, username: str, run_timestamp: str) -> None:
-        if job_name is None:
-            job_name = '-'
-        self._code += [
-            'job_id = job_lib.add_job('
-            f'{job_name!r}, {username!r}, {run_timestamp!r})',
-            'print(job_id, flush=True)',
-        ]
-
-    def show_jobs(self, username: Optional[str], all_jobs: bool) -> None:
-        self._code.append(f'job_lib.show_jobs({username!r}, {all_jobs})')
-
-    def cancel_jobs(self, job_ids: Optional[List[int]]) -> None:
-        self._code.append(f'job_lib.cancel_jobs({job_ids!r})')
-
-    def tail_logs(self, job_id: str) -> None:
-        self._code += [
-            f'log_dir = job_lib.log_dir({job_id})',
-            f'log_lib.tail_logs({job_id}, log_dir)',
-        ]
-
-    def get_log_path(self, job_id: int) -> None:
-        self._code += [
-            f'log_dir = job_lib.log_dir({job_id})',
-            'print(log_dir, flush=True)',
-        ]
-
-    def build(self) -> str:
-        code = ';'.join(self._code)
-        return f'python3 -u -c {code!r}'
+def safe_console_status(msg: str):
+    """A wrapper for multi-threaded console.status."""
+    if threading.current_thread() is threading.main_thread():
+        return console.status(msg)
+    return NoOpConsole()

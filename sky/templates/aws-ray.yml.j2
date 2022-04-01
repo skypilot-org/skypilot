@@ -58,6 +58,7 @@ head_node_type: ray.head.default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
   "{{sky_remote_path}}": "{{sky_local_path}}",
 {%- for remote_path, local_path in credentials.items() %}
   "{{remote_path}}": "{{local_path}}",
@@ -74,25 +75,30 @@ rsync_exclude: [
 setup_commands:
   # This AMI's system Python is version 2+.
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
-  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+  - (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
+    (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
+    pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    which conda > /dev/null 2>&1 && conda init > /dev/null && conda config --set auto_activate_base false;
     sudo systemctl stop unattended-upgrades;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
-  - printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
   # Set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/guide.html?highlight=ulimit#system-configuration
   # Solution from https://discuss.ray.io/t/setting-ulimits-on-ec2-instances/590
   # This line is intentionally separated from the next line to reload the session after the ulimit is set.
-  - sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;'
+  - sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;';
+    (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
+  - (ps aux | grep "-m sky.skylet.skylet" | grep -q python3) || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 & # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
   - ray stop; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;'
+  - sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;';
+    (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config
   - ray stop; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
 {%- endif %}

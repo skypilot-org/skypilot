@@ -17,6 +17,10 @@ only have access to certain clouds, use any combination of
 :code:`".[aws,azure,gcp]"` (e.g., :code:`".[aws,gcp]"`) to reduce the
 dependencies installed.
 
+.. note::
+
+    For Macs, macOS >= 10.15 is required to install Sky. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio` prior to installing Sky.
+
 Cloud account setup
 -------------------
 
@@ -24,7 +28,7 @@ Configure access to at least one cloud:
 
 **AWS**
 
-To get the **AWS Access Key** required by :code:`aws configure`, please refer to the `AWS manual <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_. The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
+To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`_). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
 .. code-block:: console
 
@@ -58,6 +62,8 @@ If running :code:`conda install -c conda-forge google-cloud-sdk` produces the er
   $ az login
   $ # Set the subscription to use
   $ az account set -s <subscription_id>
+
+Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
 **Verifying cloud setup**
 

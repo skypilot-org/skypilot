@@ -1,4 +1,12 @@
+import getpass
+import uuid
+
 import sky
+
+# (username, mac addr last 4 chars): for uniquefying users on shared-account
+# cloud providers.
+_user_and_mac = f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}'
+cluster = f'test-multi-echo-{_user_and_mac}'
 
 # Create the cluster.
 with sky.Dag() as dag:
@@ -6,7 +14,7 @@ with sky.Dag() as dag:
     task = sky.Task().set_resources(cluster_resources)
 # `detach_run` will only detach the `run` command. The provision and `setup` are
 # still blocking.
-sky.launch(dag, cluster_name='multi-echo', detach_run=True)
+sky.launch(dag, cluster_name=cluster, detach_run=True)
 
 # Run the multiple tasks.
 for i in range(16):
@@ -14,4 +22,4 @@ for i in range(16):
         task = sky.Task(run=f'echo {i}; sleep 15')
         resources = sky.Resources(accelerators={'K80': 0.1})
         task.set_resources(resources)
-    sky.exec(dag, cluster_name='multi-echo', detach_run=True)
+    sky.exec(dag, cluster_name=cluster, detach_run=True)

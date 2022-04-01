@@ -1,7 +1,14 @@
+import getpass
 import subprocess
 from typing import List, Optional
+import uuid
 
 import sky
+
+# (username, mac addr last 4 chars): for uniquefying users on shared-account
+# cloud providers.
+_user_and_mac = f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}'
+cluster = f'test-distributed-tf-{_user_and_mac}'
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
@@ -17,12 +24,13 @@ with sky.Dag() as dag:
     num_nodes = 2
 
     # The setup command.  Will be run under the working directory.
-    setup = 'pip3 install --upgrade pip && \
-           pip3 install ray[default] awscli botocore boto3 && \
-           conda create -n resnet python=3.7 -y && \
-           conda activate resnet && \
-           pip install tensorflow==2.4.0 pyyaml && \
-           cd models && pip install -e .'
+    setup = """
+            conda create -n resnet python=3.7 -y
+            conda activate resnet
+            conda install cudatoolkit=11.0 -y
+            pip install tensorflow==2.4.0 pyyaml
+            cd models && pip install -e .
+            """
 
     # The command to run.  Will be run under the working directory.
     # If a str, run the same command on all nodes.
@@ -69,6 +77,4 @@ with sky.Dag() as dag:
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
 
-# sky.launch(dag, dryrun=True)
-sky.launch(dag, cluster_name='dtf')
-# sky.exec(dag, cluster_name='dtf')
+sky.launch(dag, cluster_name=cluster)

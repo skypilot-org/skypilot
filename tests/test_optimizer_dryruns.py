@@ -174,3 +174,12 @@ def test_parse_accelerators_from_yaml():
     with pytest.raises(ValueError) as e:
         _test_parse_accelerators(spec, None)
         assert 'The "accelerators" field as a str ' in str(e.value)
+
+
+def test_invalid_num_nodes():
+    for invalid_value in (-1, 2.2, 1.0):
+        with pytest.raises(ValueError) as e:
+            with sky.Dag():
+                task = sky.Task()
+                task.num_nodes = invalid_value
+            assert 'num_nodes should be a positive int' in str(e.value)

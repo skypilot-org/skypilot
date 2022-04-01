@@ -20,9 +20,11 @@ SKY_LOGS_DIRECTORY = '~/sky_logs'
 
 class JobStatus(enum.Enum):
     """Job status"""
+    # 3 in-flux states: each can transition to any state below it.
     INIT = 'INIT'
     PENDING = 'PENDING'
     RUNNING = 'RUNNING'
+    # 3 terminal states below: once reached, they do not transition.
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
     CANCELLED = 'CANCELLED'
@@ -90,6 +92,14 @@ def set_status(job_id: int, status: JobStatus) -> None:
     _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
                     (status.value, job_id))
     _CONN.commit()
+
+
+def get_status(job_id: int) -> JobStatus:
+    rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
+                           (job_id,))
+    for (status,) in rows:
+        assert status is not None
+        return JobStatus[status]
 
 
 def set_job_started(job_id: int) -> None:
@@ -197,11 +207,8 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
             # The job may be stale, when the instance is restarted (the ray
             # redis is volatile). We need to reset the status of the task to
             # FAILED if its original status is RUNNING or PENDING.
-            rows = _CURSOR.execute('SELECT * FROM jobs WHERE job_id=(?)',
-                                   (job_id,))
-            for row in rows:
-                status = JobStatus[row[JobInfoLoc.STATUS.value]]
-            if status in [JobStatus.RUNNING, JobStatus.PENDING]:
+            status = get_status(job_id)
+            if status in [JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING]:
                 status = JobStatus.FAILED
         else:
             ray_status = res.rpartition(' ')[-1]
@@ -210,15 +217,44 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
     return job_status_list
 
 
-def _update_status() -> None:
-    running_jobs = _get_jobs(username=None, status_list=[JobStatus.RUNNING])
+def fail_all_jobs_in_progress() -> None:
+    in_progress_status = [
+        JobStatus.INIT.value, JobStatus.PENDING.value, JobStatus.RUNNING.value
+    ]
+    _CURSOR.execute(
+        f"""\
+        UPDATE jobs SET status=(?)
+        WHERE status IN ({','.join(['?'] * len(in_progress_status))})
+        """, (JobStatus.FAILED.value, *in_progress_status))
+    _CONN.commit()
+
+
+def update_status() -> None:
+    running_jobs = _get_jobs(
+        username=None,
+        status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
     running_job_ids = [job['job_id'] for job in running_jobs]
 
     job_status = query_job_status(running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
+        # Do not update the status if the ray job status is RUNNING,
+        # because it could be pending for resources instead. The
+        # RUNNING status will be set by our generated ray program.
         if status != JobStatus.RUNNING:
             set_status(job['job_id'], status)
+
+
+def is_cluster_idle() -> bool:
+    """Returns if the cluster is idle (no in-flight jobs)."""
+    rows = _CURSOR.execute(
+        """\
+        SELECT COUNT(*) FROM jobs
+        WHERE status IN (?, ?, ?)
+        """, (JobStatus.INIT.value, JobStatus.PENDING.value,
+              JobStatus.RUNNING.value))
+    for (count,) in rows:
+        return count == 0
 
 
 def _readable_time_duration(start: Optional[int]) -> str:
@@ -256,7 +292,6 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
         username: The username to show jobs for. Show all the users if None.
         all_jobs: Whether to show all jobs, not just the pending/running ones.
     """
-    _update_status()
     status_list = [JobStatus.PENDING, JobStatus.RUNNING]
     if all_jobs:
         status_list = None
@@ -271,14 +306,15 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
     Args:
         jobs: The job ids to cancel. If None, cancel all the jobs.
     """
-    # Update the status of the jobs to avoid setting the status of staled
+    # Update the status of the jobs to avoid setting the status of stale
     # jobs to CANCELLED.
-    _update_status()
     if jobs is None:
         job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
     else:
         job_records = _get_jobs_by_ids(jobs)
     jobs = [job['job_id'] for job in job_records]
+    # TODO(zhwu): `ray job stop` will wait for the jobs to be killed, but
+    # when the memory is not enough, this will keep waiting.
     cancel_cmd = [
         f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
     ]
@@ -300,3 +336,79 @@ def log_dir(job_id: int) -> Optional[str]:
         return None, None
     run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
     return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
+
+
+class JobLibCodeGen:
+    """Code generator for job utility functions.
+
+    Usage:
+
+      >> codegen = JobLibCodeGen.add_job(...)
+    """
+
+    _PREFIX = ['from sky.skylet import job_lib, log_lib']
+
+    @classmethod
+    def add_job(cls, job_name: str, username: str, run_timestamp: str) -> str:
+        if job_name is None:
+            job_name = '-'
+        code = [
+            'job_id = job_lib.add_job('
+            f'{job_name!r}, {username!r}, {run_timestamp!r})',
+            'print(job_id, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def update_status(cls) -> str:
+        code = [
+            'job_lib.update_status()',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def show_jobs(cls, username: Optional[str], all_jobs: bool) -> str:
+        code = [f'job_lib.show_jobs({username!r}, {all_jobs})']
+        return cls._build(code)
+
+    @classmethod
+    def cancel_jobs(cls, job_ids: Optional[List[int]]) -> str:
+        code = [f'job_lib.cancel_jobs({job_ids!r})']
+        return cls._build(code)
+
+    @classmethod
+    def fail_all_jobs_in_progress(cls) -> str:
+        # Used only for restarting a cluster.
+        code = ['job_lib.fail_all_jobs_in_progress()']
+        return cls._build(code)
+
+    @classmethod
+    def tail_logs(cls, job_id: int) -> str:
+        code = [
+            f'log_dir = job_lib.log_dir({job_id})',
+            f'log_lib.tail_logs({job_id}, log_dir)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def get_job_status(cls, job_id: str) -> str:
+        # Prints "Job <id> <status>" for UX; caller should parse the last token.
+        code = [
+            f'job_status = job_lib.get_status({job_id})',
+            f'print("Job", {job_id}, job_status.value, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def get_log_path(cls, job_id: int) -> str:
+        code = [
+            f'log_dir = job_lib.log_dir({job_id})',
+            'print(log_dir, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def _build(cls, code: List[str]) -> str:
+        code = cls._PREFIX + code
+        code = ';'.join(code)
+        return f'python3 -u -c {code!r}'

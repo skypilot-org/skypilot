@@ -2,16 +2,18 @@
 import inspect
 import os
 import re
+import typing
 from typing import Callable, Dict, List, Optional, Set, Union
 from urllib import parse
 import yaml
 
 import sky
 from sky import clouds
-from sky import resources as resources_lib
 from sky.data import storage as storage_lib
 
-Resources = resources_lib.Resources
+if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
+
 # A lambda generating commands (node rank_i, node addrs -> cmd_i).
 CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
@@ -110,10 +112,10 @@ class Task:
         self.storage_plans = {}
         self.setup = setup
         self.workdir = workdir
-        self.docker_image = docker_image if docker_image \
-            else 'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'
-        self._explicit_num_nodes = num_nodes  # Used as a scheduling constraint.
-        self.num_nodes = 1 if num_nodes is None else num_nodes
+        self.docker_image = (docker_image if docker_image else
+                             'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04')
+        self.num_nodes = num_nodes
+
         self.inputs = None
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
@@ -323,9 +325,18 @@ class Task:
         task.set_resources({resources})
         return task
 
-    def validate_config(self):
-        if self.num_nodes <= 0:
-            raise ValueError('Must set Task.num_nodes to >0.')
+    @property
+    def num_nodes(self) -> int:
+        return self._num_nodes
+
+    @num_nodes.setter
+    def num_nodes(self, num_nodes: Optional[int]) -> None:
+        if num_nodes is None:
+            num_nodes = 1
+        if not isinstance(num_nodes, int) or num_nodes <= 0:
+            raise ValueError(
+                f'num_nodes should be a positive int. Got: {num_nodes}')
+        self._num_nodes = num_nodes
 
     # E.g., 's3://bucket', 'gs://bucket', or None.
     def set_inputs(self, inputs, estimated_size_gigabytes):
@@ -360,7 +371,8 @@ class Task:
     def get_estimated_outputs_size_gigabytes(self):
         return self.estimated_outputs_size_gigabytes
 
-    def set_resources(self, resources: Union[Resources, Set[Resources]]):
+    def set_resources(self, resources: Union['resources_lib.Resources',
+                                             Set['resources_lib.Resources']]):
         """Sets the required resources to execute this task.
 
         Args:
@@ -368,7 +380,7 @@ class Task:
             indicates the user intent "pick any one of these resources" to run
             a task.
         """
-        if isinstance(resources, Resources):
+        if isinstance(resources, sky.Resources):
             resources = {resources}
         self.resources = resources
         return self

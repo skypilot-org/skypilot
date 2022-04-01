@@ -1,0 +1,19 @@
+# Runs a docker container as a sky task.
+#
+# This demo can be run using the --docker flag, demonstrating the
+# docker-in-docker (dind) capabilities of sky docker mode.
+#
+# Usage:
+#   sky launch --docker -c dind docker_in_docker.yaml
+#   sky down dind
+
+name: dind
+
+resources:
+  cloud: aws
+
+setup: |
+  echo "No setup required!"
+
+run: |
+  docker run --rm hello-world

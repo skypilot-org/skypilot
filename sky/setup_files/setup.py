@@ -5,9 +5,22 @@ and its resource requirements, and Sky will automatically execute it on AWS,
 Google Cloud Platform or Microsoft Azure."""
 
 import os
+import platform
 import setuptools
+import warnings
 
 ROOT_DIR = os.path.dirname(__file__)
+
+system = platform.system()
+if system == 'Darwin':
+    mac_version = platform.mac_ver()[0]
+    mac_major, mac_minor = mac_version.split('.')[:2]
+    mac_major = int(mac_major)
+    mac_minor = int(mac_minor)
+    if mac_major < 10 or (mac_major == 10 and mac_minor >= 15):
+        warnings.warn(
+            f"\'Detected MacOS version {mac_version}. MacOS version >=10.15 "
+            "is required to install ray>=1.9\'")
 
 install_requires = [
     'wheel',
@@ -26,6 +39,7 @@ install_requires = [
     'ray[default]>=1.9.0',
     'rich',
     'tabulate',
+    'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
@@ -33,7 +47,7 @@ install_requires = [
 ]
 
 extras_require = {
-    'aws': ['awscli==1.22.17', 'boto3'],
+    'aws': ['awscli', 'boto3'],
     'azure': ['azure-cli==2.30.0'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],

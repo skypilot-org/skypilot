@@ -19,6 +19,7 @@ Use editable mode (`-e`) when installing:
 # You can just install the dependencies for
 # certain clouds, e.g., ".[aws,azure,gcp]"
 pip install -e ".[all]"
+pip install -r requirements-dev.txt
 ```
 
 ### Submitting pull requests
@@ -39,3 +40,19 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
   * Use `class MyClass:` instead of `class MyClass(object):`. The later one was a workaround for python2.x.
   * Use `abc` module for abstract classes to ensure all abstract methods are implemented.
   * Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.
+
+### Testing
+To run smoke tests:
+```
+bash tests/run_smoke_tests.sh
+
+# Run one of the smoke tests
+bash tests/run_smoke_tests.sh test_minimal
+```
+
+For profiling code, use:
+```
+pip install tuna # Tuna for viz
+python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
+tuna sky.prof
+```

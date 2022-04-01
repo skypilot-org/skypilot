@@ -2,12 +2,22 @@
 import copy
 import json
 import os
+import subprocess
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from google import auth
 
 from sky import clouds
 from sky.clouds import service_catalog
+
+
+def _run_output(cmd):
+    proc = subprocess.run(cmd,
+                          shell=True,
+                          check=True,
+                          stderr=subprocess.PIPE,
+                          stdout=subprocess.PIPE)
+    return proc.stdout.decode('ascii')
 
 
 class GCP(clouds.Cloud):
@@ -176,6 +186,7 @@ class GCP(clouds.Cloud):
             'tpu': None,
             'custom_resources': None,
             'use_spot': r.use_spot,
+            'image_name': 'common-cpu',
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -194,30 +205,42 @@ class GCP(clouds.Cloud):
                 # https://cloud.google.com/compute/docs/gpus
                 resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
                 resources_vars['gpu_count'] = acc_count
+                # CUDA driver version 470.103.01, CUDA Library 11.3
+                resources_vars['image_name'] = 'common-cu113'
 
         return resources_vars
 
     def get_feasible_launchable_resources(self, resources):
+        fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            return [resources]
+            return ([resources], fuzzy_candidate_list)
+        accelerator_match = None
         if resources.accelerators is not None:
+            # TODO: Refactor below implementation with pandas
             available_accelerators = service_catalog.list_accelerators(
                 gpus_only=False, clouds='gcp')
             for acc, acc_count in resources.accelerators.items():
-                if acc not in available_accelerators or not any(
-                        acc_count == info.accelerator_count
-                        for info in available_accelerators[acc]):
-                    return []
+                for acc_avail, infos in available_accelerators.items():
+                    # case-insenstive matching
+                    if acc.upper() == acc_avail.upper() and any(
+                            acc_count == info.accelerator_count
+                            for info in infos):
+                        accelerator_match = {acc_avail: acc_count}
+                        break
+                if accelerator_match is None:
+                    return ([], fuzzy_candidate_list)
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
         r = copy.deepcopy(resources)
         r.cloud = GCP()
         r.instance_type = GCP.get_default_instance_type()
-        return [r]
+        r.accelerators = accelerator_match
+        return ([r], fuzzy_candidate_list)
 
+    @classmethod
     def get_accelerators_from_instance_type(
-        self,
+        cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
         # GCP handles accelerators separately from regular instance types,
@@ -238,18 +261,22 @@ class GCP(clouds.Cloud):
             # Calling `auth.default()` ensures the GCP client library works,
             # which is used by Ray Autoscaler to launch VMs.
             auth.default()
-        except (AssertionError, auth.exceptions.DefaultCredentialsError):
+            # Check the installation of google-cloud-sdk.
+            _run_output('gcloud --version')
+        except (AssertionError, auth.exceptions.DefaultCredentialsError,
+                subprocess.CalledProcessError):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
-                'GCP credentials not set. Run the following commands:\n    '
+                'GCP tools are not installed or credentials are not set. '
+                'Run the following commands:\n    '
                 # Install the Google Cloud SDK:
-                '$ pip install google-api-python-client\n    '
-                '$ conda install -c conda-forge google-cloud-sdk\n    '
+                '  $ pip install google-api-python-client\n    '
+                '  $ conda install -c conda-forge google-cloud-sdk\n    '
                 # This authenticates the CLI to make `gsutil` work:
-                '$ gcloud init\n    '
+                '  $ gcloud init\n    '
                 # This will generate
                 # ~/.config/gcloud/application_default_credentials.json.
-                '$ gcloud auth application-default login\n    '
+                '  $ gcloud auth application-default login\n    '
                 'For more info: '
                 'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )

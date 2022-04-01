@@ -3,5 +3,7 @@ export PROJECT_ID=intercloud-320520
 
 gcloud config set project $PROJECT_ID
 
-gcloud compute tpus delete {{tpu_name}} \
---zone={{zones}} -q --async
+# Do not use --async, because if launching tpu again with the same name while
+# the tpu is asynchronously being deleted, some race condition happens.  (Can
+# repro with tpu_app.)
+gcloud compute tpus delete {{tpu_name}} --zone={{zones}} -q
