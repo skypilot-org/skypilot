@@ -1006,9 +1006,9 @@ class CloudVmRayBackend(backends.Backend):
             config = backend_utils.read_yaml(self.cluster_yaml)
             provider = config['provider']
             cloud = self.launched_resources.cloud
-            if type(cloud) in [clouds.Azure]:
+            if cloud.is_same_cloud(sky.Azure()):
                 self.cluster_region = provider['location']
-            elif type(cloud) in [clouds.GCP, clouds.AWS]:
+            elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(sky.AWS()):
                 self.cluster_region = provider['region']
 
         def get_cluster_region(self):
