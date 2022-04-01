@@ -103,7 +103,7 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
     return _optimize_by_brute_force(topo_order, {})
 
 
-def test_optimizer(dag: sky.Dag, minimize_cost: bool):
+def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     copy_dag = copy.deepcopy(dag)
 
     _, optimizer_plan = sky.Optimizer._optimize_objective(dag, minimize_cost)
@@ -118,7 +118,7 @@ def test_optimizer(dag: sky.Dag, minimize_cost: bool):
     assert objective == min_objective
 
 
-if __name__ == '__main__':
+def test_optimizer():
     dag = generate_random_dag(num_tasks=10, seed=0)
     dag = sky.Optimizer._add_dummy_source_sink_nodes(dag)
 
