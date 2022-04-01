@@ -20,6 +20,7 @@ import yaml
 
 import jinja2
 import rich.console as rich_console
+import rich.progress as rich_progress
 
 import sky
 from sky import authentication as auth
@@ -1140,7 +1141,12 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
     records = global_user_state.get_clusters()
     if not refresh:
         return records
-    return [_ping_cluster_or_set_to_stopped(record) for record in records]
+    updated_records = []
+    for record in rich_progress.track(records,
+                                      description='Refreshing cluster status'):
+        record = _ping_cluster_or_set_to_stopped(record)
+        updated_records.append(record)
+    return updated_records
 
 
 def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:

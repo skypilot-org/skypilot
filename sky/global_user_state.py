@@ -164,9 +164,11 @@ def add_or_update_cluster(cluster_name: str,
         'VALUES (?, ?, ?, ?, ?, '
         # Keep the old autostop value if it exists, otherwise set it to
         # default -1.
-        'COALESCE((SELECT autostop FROM clusters WHERE name=?), -1))',
+        'COALESCE('
+        '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1)'
+        ')',  # VALUES
         (cluster_name, cluster_launched_at, handle, last_use, status.value,
-         cluster_name))
+         cluster_name, ClusterStatus.STOPPED.value))
     _DB.conn.commit()
 
 
@@ -190,11 +192,10 @@ def remove_cluster(cluster_name: str, terminate: bool):
         # will directly try to ssh, which leads to timeout.
         handle.head_ip = None
         _DB.cursor.execute(
-            'UPDATE clusters SET handle=(?), status=(?), autostop=(?) '
+            'UPDATE clusters SET handle=(?), status=(?) '
             'WHERE name=(?)', (
                 pickle.dumps(handle),
                 ClusterStatus.STOPPED.value,
-                -1,
                 cluster_name,
             ))
     _DB.conn.commit()
