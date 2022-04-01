@@ -9,6 +9,7 @@ CLOUDS = {
     'GCP': sky.GCP(),
     'Azure': sky.Azure(),
 }
+ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
 GCP_INSTANCE_TYPES = list(sky.GCP._ON_DEMAND_PRICES.keys())
 
 DUMMY_NODES = [
@@ -17,23 +18,32 @@ DUMMY_NODES = [
 ]
 
 
-def generate_random_dag(num_tasks, seed):
+def generate_random_dag(
+    num_tasks: int,
+    seed: int = 0,
+    max_num_nodes: int = 10,
+    max_num_parents: int = 5,
+    max_num_candidate_resources: int = 5,
+    max_task_runtime: int = 3600,
+    max_data_size: int = 1000,
+) -> sky.Dag:
     """Generates a random Sky DAG to test Sky optimizer."""
-    instance_types = list(sky.list_accelerators(gpus_only=True).values())
-    instance_types = sum(instance_types, [])
     random.seed(seed)
-
     with sky.Dag() as dag:
         for i in range(num_tasks):
             op = sky.Task(name=f'task{i}')
-            execution_time = random.random() * 3600
-            op.set_time_estimator(lambda _: execution_time)
-            op.num_nodes = random.randint(1, 8)
+            task_runtime = random.random() * max_task_runtime
+            op.set_time_estimator(lambda _: task_runtime)
+            op.num_nodes = random.randint(1, max_num_nodes)
 
-            num_parents = random.randint(0, min(i, 5)) if i > 0 else 0
+            if i == 0:
+                num_parents = 0
+            else:
+                num_parents = random.randint(0, min(i, max_num_parents))
+
             if num_parents == 0:
                 src_cloud = random.choice(['s3:', 'gs:', None])
-                src_volume = random.randint(0, 1000)
+                src_volume = random.randint(0, max_data_size)
             else:
                 parents = random.choices(dag.tasks[:-1], k=num_parents)
                 for parent in parents:
@@ -45,10 +55,10 @@ def generate_random_dag(num_tasks, seed):
 
             if src_cloud is not None:
                 op.set_inputs(src_cloud, src_volume)
-            op.set_outputs('CLOUD', random.randint(0, 1000))
+            op.set_outputs('CLOUD', random.randint(0, max_data_size))
 
-            num_candidates = random.randint(1, 5)
-            candidate_instance_types = random.choices(instance_types,
+            num_candidates = random.randint(1, max_num_candidate_resources)
+            candidate_instance_types = random.choices(ALL_INSTANCE_TYPES,
                                                       k=num_candidates)
             op.set_resources({
                 sky.Resources(
@@ -64,9 +74,8 @@ def generate_random_dag(num_tasks, seed):
     return dag
 
 
-def find_min_objective(dag, minimize):
+def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
     """Manually finds the minimum objective value."""
-    dag = sky.Optimizer._add_dummy_source_sink_nodes(dag)
     graph = dag.get_graph()
     topo_order = dag.tasks
 
@@ -79,7 +88,7 @@ def find_min_objective(dag, minimize):
             assert task.name in DUMMY_NODES or resources.is_launchable()
             plan[task] = resources
             if len(tasks) == 1:
-                if minimize == sky.OptimizeTarget.COST:
+                if minimize_cost:
                     objective = sky.Optimizer._compute_total_cost(
                         graph, topo_order, plan)
                 else:
@@ -94,12 +103,24 @@ def find_min_objective(dag, minimize):
     return _optimize_by_brute_force(topo_order, {})
 
 
-if __name__ == '__main__':
-    target = sky.OptimizeTarget.COST
-    dag = generate_random_dag(num_tasks=10, seed=2)
+def test_optimizer(dag: sky.Dag, minimize_cost: bool):
     copy_dag = copy.deepcopy(dag)
 
-    sky.optimize(dag, minimize=target)
+    _, optimizer_plan = sky.Optimizer._optimize_objective(dag, minimize_cost)
+    if minimize_cost:
+        objective = sky.Optimizer._compute_total_cost(
+            dag.get_graph(), dag.tasks, optimizer_plan)
+    else:
+        objective = sky.Optimizer._compute_total_time(
+            dag.get_graph(), dag.tasks, optimizer_plan)
 
-    objective = find_min_objective(copy_dag, minimize=target)
-    print(f'Min objective: {objective:.1f}')
+    min_objective = find_min_objective(copy_dag, minimize_cost)
+    assert objective == min_objective
+
+
+if __name__ == '__main__':
+    dag = generate_random_dag(num_tasks=10, seed=0)
+    dag = sky.Optimizer._add_dummy_source_sink_nodes(dag)
+
+    test_optimizer(dag, minimize_cost=True)
+    test_optimizer(dag, minimize_cost=False)
