@@ -358,6 +358,30 @@ class Optimizer:
             e: (node i, node j) -> linearization of c[node i] x c[node j].
               e[node i][node j][a][b] = 1 means node i and node j are assigned
               to the a-th and the b-th resources, respectively.
+
+        Objective:
+            For cost optimization,
+                minimize sum(c[v]^T @ k[v] for each v in V) +
+                         sum(c[u]^T @ F[u][v] @ c[v] for each u, v in E)
+            which is equivalent (linearized) to,
+                minimize sum(c[v]^T @ k[v] for each v in V) +
+                         sum(e[u][v]^T @ F[u][v] for each u, v in E)
+            The first term indicates the execution cost of the task v,
+            and the second term indicates the egress cost of the task u to v.
+
+            For time optimization,
+                minimize finish_time[sink_node]
+                s.t. finish_time[v] >= c[v]^T @ k[v] + finish_time[u] +
+                                       c[u]^T @ F[u][v] @ c[v]
+                     for each u, v in E
+            which is equivalent (linearized) to,
+                minimize finish_time[sink_node]
+                s.t. finish_time[v] >= c[v]^T @ k[v] + finish_time[u] +
+                                       e[u][v]^T @ F[u][v]
+                     for each u, v in E
+            The first term indicates the execution time of the task v,
+            and the other terms indicate the task starts executing no sooner
+            then its parent tasks are finished and its input data has arrived.
         """
         import pulp  # pylint: disable=import-outside-toplevel
 
@@ -427,12 +451,15 @@ class Optimizer:
                 objective += pulp.lpDot(e[u][v], F[u][v])
         else:
             # We need additional decision variables.
-            latency = {v: pulp.LpVariable(f'lat({v})', lowBound=0) for v in V}
+            finish_time = {
+                v: pulp.LpVariable(f'lat({v})', lowBound=0)
+                for v in V
+            }
             for u, v in E:
-                prob += latency[v] >= (pulp.lpDot(c[v], k[v]) + latency[u] +
-                                       pulp.lpDot(e[u][v], F[u][v]))
+                prob += finish_time[v] >= (pulp.lpDot(c[v], k[v]) +
+                    finish_time[u] + pulp.lpDot(e[u][v], F[u][v]))
             sink_node = V[-1]
-            objective = latency[sink_node]
+            objective = finish_time[sink_node]
         prob += objective
 
         # Solve the optimization problem.
