@@ -122,5 +122,5 @@ def test_optimizer():
     dag = generate_random_dag(num_tasks=10, seed=0)
     dag = sky.Optimizer._add_dummy_source_sink_nodes(dag)
 
-    test_optimizer(dag, minimize_cost=True)
-    test_optimizer(dag, minimize_cost=False)
+    compare_optimization_results(dag, minimize_cost=True)
+    compare_optimization_results(dag, minimize_cost=False)
