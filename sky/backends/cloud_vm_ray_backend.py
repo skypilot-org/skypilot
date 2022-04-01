@@ -32,7 +32,7 @@ from sky import optimizer
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
-from sky.skylet import autostop_lib, job_lib, log_lib
+from sky.skylet import autostop_lib, job_lib, log_lib, log_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -920,7 +920,7 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at=start_streaming_at,
-                line_processor=log_lib.RayUpLineProcessor(),
+                line_processor=log_utils.RayUpLineProcessor(),
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'),

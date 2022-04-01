@@ -1,8 +1,7 @@
-"""Sky logging utils.
+"""Sky logging library.
 
 This is a remote utility module that provides logging functionality.
 """
-import enum
 import io
 import os
 import selectors
@@ -14,9 +13,8 @@ import tempfile
 from typing import Iterator, List, Optional, Tuple, Union
 
 import colorama
-import rich.status
 
-from sky.skylet import job_lib
+from sky.skylet import job_lib, log_utils
 from sky import sky_logging
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
@@ -24,63 +22,22 @@ SKY_REMOTE_WORKDIR = '~/sky_workdir'
 logger = sky_logging.init_logger(__name__)
 
 
-class LineProcessor(object):
-    """A processor for log lines."""
-
-    def __enter__(self):
-        pass
-
-    def process_line(self, log_line):
-        pass
-
-    def __exit__(self, except_type, except_value, traceback):
-        del except_type, except_value, traceback  # unused
-        pass
-
-
-class RayUpLineProcessor(LineProcessor):
-    """A processor for `ray up` log lines."""
-
-    class ProvisionStatus(enum.Enum):
-        LAUNCH = 0
-        RUNTIME_SETUP = 1
-
-    def __enter__(self):
-        self.state = self.ProvisionStatus.LAUNCH
-        self.status_display = rich.status.Status('[bold cyan]Launching')
-        self.status_display.start()
-
-    def process_line(self, log_line):
-        if ('Shared connection to' in log_line and
-                self.state == self.ProvisionStatus.LAUNCH):
-            self.status_display.stop()
-            logger.info(f'{colorama.Fore.GREEN}Head node is up.'
-                        f'{colorama.Style.RESET_ALL}')
-            self.status_display.start()
-            self.status_display.update(
-                '[bold cyan]Launching - Preparing Sky runtime')
-            self.state = self.ProvisionStatus.RUNTIME_SETUP
-
-    def __exit__(self, except_type, except_value, traceback):
-        del except_type, except_value, traceback  # unused
-        self.status_display.stop()
-
-
 def redirect_process_output(
-        proc,
-        log_path: str,
-        stream_logs: bool,
-        start_streaming_at: str = '',
-        skip_lines: Optional[List[str]] = None,
-        replace_crlf: bool = False,
-        line_processor: Optional[LineProcessor] = None) -> Tuple[str, str]:
+    proc,
+    log_path: str,
+    stream_logs: bool,
+    start_streaming_at: str = '',
+    skip_lines: Optional[List[str]] = None,
+    replace_crlf: bool = False,
+    line_processor: Optional[log_utils.LineProcessor] = None
+) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
 
     if line_processor is None:
-        line_processor = LineProcessor()
+        line_processor = log_utils.LineProcessor()
 
     sel = selectors.DefaultSelector()
     out_io = io.TextIOWrapper(proc.stdout,
@@ -111,8 +68,6 @@ def redirect_process_output(
                         continue
                     # TODO: Put replace_crlf, skip_lines, and start_streaming_at
                     # logic in line_processor.process_line(line)
-                    # Remove special characters to avoid cursor hidding
-                    line = line.replace('\x1b[?25l', '')
                     if replace_crlf and line.endswith('\r\n'):
                         # Replace CRLF with LF to avoid ray logging to the same
                         # line due to separating lines with '\n'.
@@ -147,7 +102,7 @@ def run_with_log(
     shell: bool = False,
     with_ray: bool = False,
     redirect_stdout_stderr: bool = True,
-    line_processor: Optional[LineProcessor] = None,
+    line_processor: Optional[log_utils.LineProcessor] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
