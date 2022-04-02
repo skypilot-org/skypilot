@@ -85,7 +85,7 @@ class Optimizer:
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         dag = Optimizer._add_dummy_source_sink_nodes(dag)
-        optimized_dag, unused_best_plan = Optimizer._optimize_cost(
+        optimized_dag, unused_best_plan = Optimizer._optimize_objective(
             dag,
             minimize_cost=minimize == OptimizeTarget.COST,
             blocked_launchable_resources=blocked_launchable_resources,
@@ -340,6 +340,154 @@ class Optimizer:
         return best_plan, best_total_objective
 
     @staticmethod
+    def _optimize_by_ilp(
+        graph,
+        topo_order: List[Task],
+        node_to_cost_map: _TaskToCostMap,
+        minimize_cost: bool = True,
+    ) -> Tuple[Dict[Task, resources_lib.Resources], float]:
+        """Optimizes a general DAG using an ILP solver.
+
+        Notations:
+            V: the set of nodes (tasks).
+            E: the set of edges (dependencies).
+            k: node -> [r.cost for r in node.resources].
+            F: (node i, node j) -> the egress cost/time between node i and j.
+            c: node -> one-hot decision vector. c[node][i] = 1 means
+                the node is assigned to the i-th resource.
+            e: (node i, node j) -> linearization of c[node i] x c[node j].
+              e[node i][node j][a][b] = 1 means node i and node j are assigned
+              to the a-th and the b-th resources, respectively.
+
+        Objective:
+            For cost optimization,
+                minimize_{c} sum(c[v]^T @ k[v] for each v in V) +
+                             sum(c[u]^T @ F[u][v] @ c[v] for each u, v in E)
+                s.t. sum(c[v] == 1) for each v in V
+            which is equivalent (linearized) to,
+                minimize_{c, e} sum(c[v]^T @ k[v] for each v in V) +
+                                sum(e[u][v]^T @ F[u][v] for each u, v in E)
+                s.t. sum(c[v] == 1) for each v in V (i.e., c is one-hot)
+                     sum(e[u][v] == 1) for each u, v in E (i.e., e is one-hot)
+                     e[u][v] = flatten(c[u] @ c[v]^T) for each u, v in E
+            The first term of the objective indicates the execution cost
+            of the task v, and the second term indicates the egress cost
+            of the parent task u to the task v.
+
+            For time optimization,
+                minimize_{c} finish_time[sink_node]
+                s.t. finish_time[v] >= c[v]^T @ k[v] + finish_time[u] +
+                                       c[u]^T @ F[u][v] @ c[v]
+                     for each u, v in E
+                     sum(c[v] == 1) for each v in V
+            which is equivalent (linearized) to,
+                minimize_{c, e} finish_time[sink_node]
+                s.t. finish_time[v] >= c[v]^T @ k[v] + finish_time[u] +
+                                       e[u][v]^T @ F[u][v]
+                     for each u, v in E
+                     sum(c[v] == 1) for each v in V (i.e., c is one-hot)
+                     sum(e[u][v] == 1) for each u, v in E (i.e., e is one-hot)
+                     e[u][v] = flatten(c[u] @ c[v]^T) for each u, v in E
+            The first term of the objective indicates the execution time
+            of the task v, and the other two terms indicate that the task v
+            starts executing no sooner than its parent tasks are finished and
+            the output data from the parents has arrived to the task v.
+        """
+        import pulp  # pylint: disable=import-outside-toplevel
+
+        if minimize_cost:
+            prob = pulp.LpProblem('Sky-Cost-Optimization', pulp.LpMinimize)
+        else:
+            prob = pulp.LpProblem('Sky-Runtime-Optimization', pulp.LpMinimize)
+
+        # Prepare the constants.
+        V = topo_order  # pylint: disable=invalid-name
+        E = graph.edges()  # pylint: disable=invalid-name
+        k = {
+            node: list(resource_cost_map.values())
+            for node, resource_cost_map in node_to_cost_map.items()
+        }
+        F = collections.defaultdict(dict)  # pylint: disable=invalid-name
+        for u, v in E:
+            F[u][v] = []
+            for r_u in node_to_cost_map[u].keys():
+                for r_v in node_to_cost_map[v].keys():
+                    F[u][v].append(
+                        Optimizer._egress_cost_or_time(minimize_cost, u, r_u, v,
+                                                       r_v))
+
+        # Define the decision variables.
+        c = {
+            v: pulp.LpVariable.matrix(v.name, (range(len(k[v])),), cat='Binary')
+            for v in V
+        }
+
+        e = collections.defaultdict(dict)
+        for u, v in E:
+            num_vars = len(c[u]) * len(c[v])
+            e[u][v] = pulp.LpVariable.matrix(f'({u.name}->{v.name})',
+                                             (range(num_vars),),
+                                             cat='Binary')
+
+        # Formulate the constraints.
+        # 1. c[v] is an one-hot vector.
+        for v in V:
+            prob += pulp.lpSum(c[v]) == 1
+
+        # 2. e[u][v] is an one-hot vector.
+        for u, v in E:
+            prob += pulp.lpSum(e[u][v]) == 1
+
+        # 3. e[u][v] linearizes c[u] x c[v].
+        for u, v in E:
+            e_uv = e[u][v]  # 1-d one-hot vector
+            N_u = len(c[u])  # pylint: disable=invalid-name
+            N_v = len(c[v])  # pylint: disable=invalid-name
+
+            for row in range(N_u):
+                prob += pulp.lpSum(
+                    e_uv[N_v * row + col] for col in range(N_v)) == c[u][row]
+
+            for col in range(N_v):
+                prob += pulp.lpSum(
+                    e_uv[N_v * row + col] for row in range(N_u)) == c[v][col]
+
+        # Formulate the objective.
+        if minimize_cost:
+            objective = 0
+            for v in V:
+                objective += pulp.lpDot(c[v], k[v])
+            for u, v in E:
+                objective += pulp.lpDot(e[u][v], F[u][v])
+        else:
+            # We need additional decision variables.
+            finish_time = {
+                v: pulp.LpVariable(f'lat({v})', lowBound=0) for v in V
+            }
+            for u, v in E:
+                prob += finish_time[v] >= (pulp.lpDot(
+                    c[v], k[v]) + finish_time[u] + pulp.lpDot(e[u][v], F[u][v]))
+            sink_node = V[-1]
+            objective = finish_time[sink_node]
+        prob += objective
+
+        # Solve the optimization problem.
+        prob.solve(solver=pulp.PULP_CBC_CMD(msg=False))
+        assert prob.status != pulp.LpStatusInfeasible, \
+            'Cannot solve the optimization problem'
+        best_total_objective = prob.objective.value()
+
+        # Find the best plan for the DAG.
+        # node -> best resources
+        best_plan = {}
+        for node, variables in c.items():
+            selected = [variable.value() for variable in variables].index(1)
+            best_resources = list(node_to_cost_map[node].keys())[selected]
+            node.best_resources = best_resources
+            best_plan[node] = best_resources
+        return best_plan, best_total_objective
+
+    @staticmethod
     def _compute_total_time(
         graph,
         topo_order: List[Task],
@@ -510,7 +658,7 @@ class Optimizer:
                     f'To list more details, run \'sky show-gpus {acc_name}\'.')
 
     @staticmethod
-    def _optimize_cost(
+    def _optimize_objective(
         dag: 'dag_lib.Dag',
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[
@@ -540,7 +688,8 @@ class Optimizer:
             best_plan, best_total_objective = Optimizer._optimize_by_dp(
                 topo_order, node_to_cost_map, minimize_cost)
         else:
-            raise NotImplementedError('Currently Sky only supports chain DAGs.')
+            best_plan, best_total_objective = Optimizer._optimize_by_ilp(
+                graph, topo_order, node_to_cost_map, minimize_cost)
 
         if minimize_cost:
             total_time = Optimizer._compute_total_time(graph, topo_order,
