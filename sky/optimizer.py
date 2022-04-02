@@ -361,25 +361,33 @@ class Optimizer:
 
         Objective:
             For cost optimization,
-                minimize sum(c[v]^T @ k[v] for each v in V) +
-                         sum(c[u]^T @ F[u][v] @ c[v] for each u, v in E)
+                minimize_{c} sum(c[v]^T @ k[v] for each v in V) +
+                             sum(c[u]^T @ F[u][v] @ c[v] for each u, v in E)
+                s.t. sum(c[v] == 1) for each v in V
             which is equivalent (linearized) to,
-                minimize sum(c[v]^T @ k[v] for each v in V) +
-                         sum(e[u][v]^T @ F[u][v] for each u, v in E)
-            The first term indicates the execution cost of the task v,
+                minimize_{c, e} sum(c[v]^T @ k[v] for each v in V) +
+                                sum(e[u][v]^T @ F[u][v] for each u, v in E)
+                s.t. sum(c[v] == 1) for each v in V (i.e., c is one-hot)
+                     sum(e[u][v] == 1) for each u, v in E (i.e., e is one-hot)
+                     e[u][v] = flatten(c[u] @ c[v]^T) for each u, v in E
+            The first term of the objective indicates the execution cost of the task v,
             and the second term indicates the egress cost of the task u to v.
 
             For time optimization,
-                minimize finish_time[sink_node]
+                minimize_{c} finish_time[sink_node]
                 s.t. finish_time[v] >= c[v]^T @ k[v] + finish_time[u] +
                                        c[u]^T @ F[u][v] @ c[v]
                      for each u, v in E
+                     sum(c[v] == 1) for each v in V
             which is equivalent (linearized) to,
-                minimize finish_time[sink_node]
+                minimize_{c, e} finish_time[sink_node]
                 s.t. finish_time[v] >= c[v]^T @ k[v] + finish_time[u] +
                                        e[u][v]^T @ F[u][v]
                      for each u, v in E
-            The first term indicates the execution time of the task v,
+                     sum(c[v] == 1) for each v in V (i.e., c is one-hot)
+                     sum(e[u][v] == 1) for each u, v in E (i.e., e is one-hot)
+                     e[u][v] = flatten(c[u] @ c[v]^T) for each u, v in E
+            The first term of the objective indicates the execution time of the task v,
             and the other terms indicate the task v starts executing no sooner
             than its parent tasks are finished and its input data has arrived.
         """
