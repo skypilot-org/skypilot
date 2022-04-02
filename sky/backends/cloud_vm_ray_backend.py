@@ -1687,9 +1687,7 @@ class CloudVmRayBackend(backends.Backend):
                                                         require_outputs=True)
         backend_utils.handle_returncode(returncode, code,
                                         'Failed to sync logs.', stderr)
-
         log_dirs = ast.literal_eval(log_dirs)
-
         job_ids = [log_dir[0] for log_dir in log_dirs]
         local_log_dirs = [
             os.path.expanduser(log_dir[1]) for log_dir in log_dirs
