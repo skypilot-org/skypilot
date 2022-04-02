@@ -370,8 +370,9 @@ class Optimizer:
                 s.t. sum(c[v] == 1) for each v in V (i.e., c is one-hot)
                      sum(e[u][v] == 1) for each u, v in E (i.e., e is one-hot)
                      e[u][v] = flatten(c[u] @ c[v]^T) for each u, v in E
-            The first term of the objective indicates the execution cost of the task v,
-            and the second term indicates the egress cost of the task u to v.
+            The first term of the objective indicates the execution cost
+            of the task v, and the second term indicates the egress cost
+            of the parent task u to the task v.
 
             For time optimization,
                 minimize_{c} finish_time[sink_node]
@@ -387,9 +388,10 @@ class Optimizer:
                      sum(c[v] == 1) for each v in V (i.e., c is one-hot)
                      sum(e[u][v] == 1) for each u, v in E (i.e., e is one-hot)
                      e[u][v] = flatten(c[u] @ c[v]^T) for each u, v in E
-            The first term of the objective indicates the execution time of the task v,
-            and the other terms indicate the task v starts executing no sooner
-            than its parent tasks are finished and its input data has arrived.
+            The first term of the objective indicates the execution time
+            of the task v, and the other two terms indicate that the task v
+            starts executing no sooner than its parent tasks are finished and
+            the output data from the parents has arrived to the task v.
         """
         import pulp  # pylint: disable=import-outside-toplevel
 
