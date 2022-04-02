@@ -1682,32 +1682,35 @@ class CloudVmRayBackend(backends.Backend):
     def sync_down_logs(self, handle: ResourceHandle, job_ids: str) -> None:
         code = job_lib.JobLibCodeGen.get_log_path_with_globbing(job_ids)
         returncode, log_dirs, stderr = self.run_on_head(handle,
-                                                       code,
-                                                       stream_logs=False,
-                                                       require_outputs=True)
+                                                        code,
+                                                        stream_logs=False,
+                                                        require_outputs=True)
         backend_utils.handle_returncode(returncode, code,
                                         'Failed to sync logs.', stderr)
-        
+
         log_dirs = ast.literal_eval(log_dirs)
-        
+
         job_ids = [log_dir[0] for log_dir in log_dirs]
-        local_log_dirs = [os.path.expanduser(log_dir[1]) for log_dir in log_dirs]
+        local_log_dirs = [
+            os.path.expanduser(log_dir[1]) for log_dir in log_dirs
+        ]
         remote_log_dirs = [log_dir[1] for log_dir in log_dirs]
 
         style = colorama.Style
         fore = colorama.Fore
         logger.info(f'{fore.CYAN}Logs Directories: {style.RESET_ALL}')
-        for job_id,log_dir in zip(job_ids, local_log_dirs):
+        for job_id, log_dir in zip(job_ids, local_log_dirs):
             logger.info(f'{fore.CYAN}'
                         f'{style.BRIGHT}Job ID: {style.NORMAL}{job_id}'
                         f' {style.BRIGHT}Path: {style.NORMAL}{log_dir}'
-                        f'{style.RESET_ALL}')        
+                        f'{style.RESET_ALL}')
 
         ips = backend_utils.get_node_ips(handle.cluster_yaml,
                                          handle.launched_nodes,
                                          handle=handle)
 
-        def rsync_down(ip: str, local_log_dir: str, remote_log_dir: str) -> None:
+        def rsync_down(ip: str, local_log_dir: str,
+                       remote_log_dir: str) -> None:
             from ray.autoscaler import sdk  # pylint: disable=import-outside-toplevel
             sdk.rsync(
                 handle.cluster_yaml,
@@ -1720,21 +1723,25 @@ class CloudVmRayBackend(backends.Backend):
             )
 
         # Call the ray sdk to rsync the logs back to local.
-        for job_id, local_log_dir, remote_log_dir in zip(job_ids, local_log_dirs, remote_log_dirs):
+        for job_id, local_log_dir, remote_log_dir in zip(
+                job_ids, local_log_dirs, remote_log_dirs):
             for i, ip in enumerate(ips):
                 try:
                     # Disable the output of rsync.
-                    with open('/dev/null', 'a') as f, contextlib.redirect_stdout(
-                            f), contextlib.redirect_stderr(f):
+                    with open('/dev/null',
+                              'a') as f, contextlib.redirect_stdout(
+                                  f), contextlib.redirect_stderr(f):
                         rsync_down(ip, local_log_dir, remote_log_dir)
                         pass
-                    logger.info(f'{fore.CYAN}Job {job_id} logs: Downloaded from '
-                                f'node-{i} ({ip}){style.RESET_ALL}')
+                    logger.info(
+                        f'{fore.CYAN}Job {job_id} logs: Downloaded from '
+                        f'node-{i} ({ip}){style.RESET_ALL}')
                 except click.exceptions.ClickException as e:
                     # Raised by rsync_down. Remote log dir may not exist, since
                     # the job can be run on some part of the nodes.
                     if 'SSH command failed' in str(e):
-                        logger.debug(f'node-{i} ({ip}) does not have the tasks/*.')
+                        logger.debug(
+                            f'node-{i} ({ip}) does not have the tasks/*.')
                     else:
                         raise e
 

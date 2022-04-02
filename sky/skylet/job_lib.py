@@ -337,6 +337,7 @@ def log_dir(job_id: int) -> Optional[str]:
     run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
     return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
 
+
 def log_dirs_with_globbing(job_id: int) -> Optional[str]:
     """Returns the relative paths to the log files for job with globbing."""
     _CURSOR.execute(
