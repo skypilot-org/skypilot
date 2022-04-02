@@ -1,0 +1,29 @@
+resources:
+  accelerators: V100:2
+
+setup: |
+  # Download the detectron2 repo
+  sudo apt update
+  git clone https://github.com/Michaelvll/detectron2.git
+  cd detectron2/docker
+  # Build:
+  docker build --build-arg USER_ID=$UID -t detectron2:v0 .
+
+run: |
+  # Launch (require GPUs):
+  cd detectron2
+  docker run -a stdout -a stderr --gpus=all --pid=host --rm \
+    --shm-size=8gb --env="DISPLAY" \
+    --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
+    --volume="`pwd`:/home/appuser/detectron2_repo:rw" \
+    detectron2:v0 /bin/bash -c \
+    "wget http://images.cocodataset.org/val2017/000000439715.jpg -O input.jpg && \
+    nvidia-smi && \
+    echo $CUDA_VISIBLE_DEVICES && \
+    mkdir -p outputs && \
+    python3 demo/demo.py  \
+      --config-file configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml \
+      --input input.jpg --output outputs/ \
+      --opts MODEL.WEIGHTS detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl && \
+    echo waiting 1200s && \
+    sleep 12000"

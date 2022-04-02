@@ -7,5 +7,6 @@ proc_pid=$2
 while kill -s 0 ${parent_pid}; do sleep 1; done 
 
 pkill -TERM -P ${proc_pid}
+# Wait the processes to gracefully exit
 sleep 5
 kill -9 ${proc_pid}
