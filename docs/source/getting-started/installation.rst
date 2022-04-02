@@ -12,6 +12,9 @@ Install Sky using pip:
   $ cd sky
   $ pip install ".[all]"
 
+  $ # To install AWS dependencies only:
+  $ # pip install ".[aws]"
+
 Sky currently supports three major cloud providers: AWS, GCP, and Azure.  If you
 only have access to certain clouds, use any combination of
 :code:`".[aws,azure,gcp]"` (e.g., :code:`".[aws,gcp]"`) to reduce the
@@ -83,3 +86,13 @@ This will produce a summary like:
     Azure: enabled
 
   Sky will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
+
+Requesting quotas for first time users
+-------------------
+
+If your cloud account has not been used to launch instances before, the
+respective quotas are likely set to zero or a low limit.  This is especially
+true for GPU instances.
+
+Please follow :ref:`Requesting Quota Increase` to check quotas and request quota
+increases before proceeding.

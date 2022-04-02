@@ -78,6 +78,20 @@ Use :code:`sky exec mycluster task.yaml` to submit this task, which will be sche
 
 See :ref:`Distributed Jobs on Many VMs` for more details.
 
+Using ``CUDA_VISIBLE_DEVICES``
+--------------------------------
+
+The environment variable ``CUDA_VISIBLE_DEVICES`` will be automatically set to
+the devices allocated to each task on each node. This variable is set
+when a task's ``run`` commands are invoked.
+
+For example, ``task.yaml`` above launches a 4-GPU task on each node that has 8
+GPUs, so the task's ``run`` commands will be invoked with
+``CUDA_VISIBLE_DEVICES`` populated with 4 device IDs.
+
+If using ``docker run`` to invoke the program, pass ``--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES``.
+
+
 Scheduling behavior
 --------------------------------
 
