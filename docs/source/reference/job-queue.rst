@@ -89,7 +89,9 @@ For example, ``task.yaml`` above launches a 4-GPU task on each node that has 8
 GPUs, so the task's ``run`` commands will be invoked with
 ``CUDA_VISIBLE_DEVICES`` populated with 4 device IDs.
 
-If using ``docker run`` to invoke the program, pass ``--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES``.
+If your ``run`` commands use Docker/``docker run``, simply pass ``--gpus=all``
+as the correct environment variable is made available to the container (only the
+allocated device IDs will be set).
 
 
 Scheduling behavior
