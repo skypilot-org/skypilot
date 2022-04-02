@@ -124,6 +124,17 @@ def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
     return clouds.CLOUD_REGISTRY.get(cloud)
 
 
+def _get_glob_clusters(clusters: List[str]) -> List[str]:
+    """Returns a list of clusters that match the glob pattern."""
+    glob_clusters = []
+    for cluster in clusters:
+        glob_cluster = global_user_state.get_glob_cluster_names(cluster)
+        if len(glob_cluster) == 0:
+            print(f'Cluster {cluster} not found.')
+        glob_clusters.extend(glob_cluster)
+    return list(set(glob_clusters))
+
+
 def _interactive_node_cli_command(cli_func):
     """Click command decorator for interactive node commands."""
     assert cli_func.__name__ in _INTERACTIVE_NODE_TYPES, cli_func.__name__
@@ -817,14 +828,22 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     # TODO(zhwu): Update the information for auto-stop clusters.
     show_all = all
     clusters_status = backend_utils.get_clusters(refresh)
-    cluster_table = util_lib.create_table([
+    columns = [
         'NAME',
         'LAUNCHED',
         'RESOURCES',
         'STATUS',
         'AUTOSTOP',
         'COMMAND',
-    ])
+    ]
+
+    if all:
+        columns.extend([
+            'HOURLY_PRICE',
+            'REGION',
+        ])
+
+    cluster_table = util_lib.create_table(columns)
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
@@ -847,7 +866,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
         if cluster_status['autostop'] >= 0:
             # TODO(zhwu): check the status of the autostop cluster.
             autostop_str = str(cluster_status['autostop']) + ' min'
-        cluster_table.add_row([
+        row = [
             # NAME
             cluster_status['name'],
             # LAUNCHED
@@ -861,7 +880,19 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
             # COMMAND
             cluster_status['last_use']
             if show_all else _truncate_long_string(cluster_status['last_use']),
-        ])
+        ]
+        if all:
+            hourly_cost = handle.launched_resources.get_cost(3600) \
+                * handle.launched_nodes
+            price_str = f'$ {hourly_cost:.3f}'
+            region = handle.get_cluster_region()
+            row.extend([
+                # HOURLY PRICE
+                price_str,
+                # REGION
+                region,
+            ])
+        cluster_table.add_row(row)
     if clusters_status:
         click.echo(cluster_table)
     else:
@@ -893,6 +924,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     code = job_lib.JobLibCodeGen.show_jobs(username, all_jobs)
 
     if clusters:
+        clusters = _get_glob_clusters(clusters)
         handles = [
             global_user_state.get_handle_from_cluster_name(c) for c in clusters
         ]
@@ -1216,11 +1248,7 @@ def start(clusters: Tuple[str], yes: bool):
             return None
 
         # Get GLOB cluster names
-        glob_clusters = []
-        for cluster in clusters:
-            glob_cluster = global_user_state.get_glob_cluster_names(cluster)
-            glob_clusters.extend(glob_cluster)
-        clusters = list(set(glob_clusters))
+        clusters = _get_glob_clusters(clusters)
 
         all_clusters = global_user_state.get_clusters()
         for name in clusters:
@@ -1381,13 +1409,7 @@ def _terminate_or_stop_clusters(
 
     to_down = []
     if len(names) > 0:
-        glob_names = []
-        for name in names:
-            glob_name = global_user_state.get_glob_cluster_names(name)
-            if len(glob_name) == 0:
-                print(f'Cluster {name} not found.')
-            glob_names.extend(glob_name)
-        names = list(set(glob_names))
+        names = _get_glob_clusters(names)
         for name in names:
             handle = global_user_state.get_handle_from_cluster_name(name)
             to_down.append({'name': name, 'handle': handle})
