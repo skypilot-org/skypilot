@@ -4,7 +4,7 @@ resources:
 setup: |
   # Download the detectron2 repo
   sudo apt update
-  git clone https://github.com/Michaelvll/detectron2.git
+  git clone https://github.com/facebookresearch/detectron2.git
   cd detectron2/docker
   # Build:
   docker build --build-arg USER_ID=$UID -t detectron2:v0 .
@@ -15,7 +15,6 @@ run: |
   docker run -a stdout -a stderr --gpus=all --pid=host --rm \
     --shm-size=8gb --env="DISPLAY" \
     --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
-    --volume="`pwd`:/home/appuser/detectron2_repo:rw" \
     detectron2:v0 /bin/bash -c \
     "wget http://images.cocodataset.org/val2017/000000439715.jpg -O input.jpg && \
     nvidia-smi && \
