@@ -1,61 +1,71 @@
-from sky.data import storage
+# Playground scripts for experimenting with storage
+# These are not exhaustive tests. Actual Tests are in tests/test_storage.py and
+# tests/test_smoke.py.
+
+from sky.data import storage, StoreType
+
+
+def get_args():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-b', '--bucket-name', default='sky-play-bucket')
+    parser.add_argument('-l', '--local-source', default='/home/romilb/tmp')
+    return parser.parse_args()
 
 
 def test_bucket_creation():
-    storage_1 = storage.Storage(name='mluo-data', source='~/Downloads/temp/')
-    storage_1.get_or_copy_to_s3()  # Transfers data from local to S3
-    storage_1.get_or_copy_to_gcs()  # Transfers data from local to GCS
+    print("Running test_bucket_creation")
+    storage_1 = storage.Storage(name=TEST_BUCKET_NAME, source=LOCAL_SOURCE_PATH)
+    storage_1.add_store(StoreType.S3)  # Transfers data from local to S3
+    storage_1.add_store(StoreType.GCS)  # Transfers data from local to GCS
 
 
 def test_bucket_deletion():
-    storage_1 = storage.Storage(name='mluo-data', source='~/Downloads/temp/')
-    storage_1.get_or_copy_to_s3()
-    storage_1.get_or_copy_to_gcs()
+    print("Running test_bucket_deletion")
+    storage_1 = storage.Storage(name=TEST_BUCKET_NAME, source=LOCAL_SOURCE_PATH)
+    storage_1.add_store(StoreType.S3)
+    storage_1.add_store(StoreType.GCS)
     storage_1.delete()  # Deletes Data
 
 
 def test_bucket_transfer():
+    print("Running test_bucket_transfer")
     # First time upload to s3
-    storage_1 = storage.Storage(name='mluo-data', source='~/Downloads/temp/')
-    bucket_path = storage_1.get_or_copy_to_s3(
-    )  # Transfers data from local to S3
-
-    storage_2 = storage.Storage(name='mluo-data', source=bucket_path)
-    storage_2.get_or_copy_to_s3()
-    storage_2.get_or_copy_to_gcs()  # Transfer data from S3 to Gs bucket
+    storage_1 = storage.Storage(name=TEST_BUCKET_NAME, source=LOCAL_SOURCE_PATH)
+    store = storage_1.add_store(StoreType.S3)  # Transfers local to S3
+    storage_2 = storage.Storage(source="s3://" + TEST_BUCKET_NAME)
+    storage_2.add_store(StoreType.GCS)  # Transfer data from S3 to GCS bucket
 
 
 def test_public_bucket_aws():
-    # Public Dataset: https://registry.opendata.aws/tcga/#usageexamples
-    storage_1 = storage.Storage(name='tcga-2-open', source='s3://tcga-2-open')
-
-    storage_2 = storage.Storage(name='tcga-2-open', source='~/Downloads/temp/')
+    print("Running test_public_bucket_aws")
     try:
         # This should fail as you can't write to a public bucket
-        storage_2.get_or_copy_to_s3()
+        storage_2 = storage.Storage(name='tcga-2-open',
+                                    source=LOCAL_SOURCE_PATH)
     except Exception:
-        pass
+        print("Uploading to public bucket failed successfully.")
     storage_2.delete()
 
 
 def test_public_bucket_gcp():
-    # Public Dataset: https://registry.opendata.aws/tcga/#usageexamples
-    storage_1 = storage.Storage(name='cloud-tpu-test-datasets',
-                                source='gs://cloud-tpu-test-datasets')
-
-    storage_2 = storage.Storage(name='cloud-tpu-test-datasets',
-                                source='~/Downloads/temp/')
+    print("Running test_public_bucket_gcp")
     try:
         # This should fail as you can't write to a public bucket
-        storage_2.get_or_copy_to_gcs()
+        storage_2 = storage.Storage(name='cloud-tpu-test-datasets',
+                                    source=LOCAL_SOURCE_PATH)
+        storage_2.add_store(StoreType.GCS)
     except Exception:
-        pass
+        print("Uploading to public bucket failed successfully.")
     storage_2.delete()
 
 
 if __name__ == '__main__':
+    args = get_args()
+    TEST_BUCKET_NAME = args.bucket_name
+    LOCAL_SOURCE_PATH = args.local_source
     test_bucket_creation()
-    test_bucket_deletion()
     test_bucket_transfer()
     test_public_bucket_aws()
     test_public_bucket_gcp()
+    test_bucket_deletion()

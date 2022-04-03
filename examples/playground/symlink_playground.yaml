@@ -18,7 +18,7 @@ file_mounts:
   /datasets-storage:
     name: mluo-data
     source: ~/Downloads/temp1
-    force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
+    store: s3 # Could be [s3, gcs] default: None
     persistent: True  # Defaults to True, can be set to false.
 
   /datasets-s3: s3://mluo-data

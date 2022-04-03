@@ -28,6 +28,10 @@ logger = sky_logging.init_logger(__name__)
 S3Store = Any
 GcsStore = Any
 
+DEFAULT_GCS_CREDENTIALS_PATH = os.path.expanduser(
+    '~/.config/gcloud/'
+    'application_default_credentials.json')
+
 
 def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
@@ -39,17 +43,29 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     """
     from oauth2client.client import GoogleCredentials  # pylint: disable=import-outside-toplevel
 
-    credentials = GoogleCredentials.get_application_default()
+    oauth_credentials = GoogleCredentials.get_application_default()
     storagetransfer = gcp.build('storagetransfer',
                                 'v1',
-                                credentials=credentials)
+                                credentials=oauth_credentials)
 
     session = aws.session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
 
-    with open(os.environ['GOOGLE_APPLICATION_CREDENTIALS'], 'r') as fp:
+    if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
+        gcp_credential_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+    else:
+        gcp_credential_path = DEFAULT_GCS_CREDENTIALS_PATH
+    if not os.path.exists(gcp_credential_path):
+        raise FileNotFoundError(f'No GCP credentials found at '
+                                f'{gcp_credential_path}. Please set the '
+                                f'GOOGLE_APPLICATION_CREDENTIALS '
+                                f'environment variable to point to '
+                                f'the path of your credentials file.')
+
+    with open(gcp_credential_path, 'r') as fp:
         gcp_credentials = json.load(fp)
-    project_id = gcp_credentials['project_id']
+    project_id = gcp_credentials.get('quota_project_id',
+                                     None) or gcp_credentials['project_id']
 
     # Update cloud bucket IAM role to allow for data transfer
     storage_account = storagetransfer.googleServiceAccounts().get(

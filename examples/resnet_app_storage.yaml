@@ -13,65 +13,10 @@ outputs: {
   resnet-model-dir: 0.1,
 }
 
-# storage: List[sky.Storage]
-#
-# Storage represents an abstract data store containing large data files
-# required by the task. Compared to file_mounts, storage is faster and
-# can persist across runs, requiring fewer uploads from your local machine.
-# A storage object is used by "mounting" it to a task. On mounting, the data
-# specified in the source becomes available at the destination mount_path.
-# Please note that sky.Storage does not guarantee preservation of file
-# permissions - you may need to set file permissions during task execution.
-#
-# Behind the scenes, storage automatically uploads all data in the source
-# to a backing object store in a particular cloud (S3/GCS/Azure Blob).
-#
-# Fields:
-#   sky.Storage.name: str
-#     Identifier for the storage object, used as reference in storage_mount
-#
-#   sky.Storage.source: str
-#     The source attribute specifies the local path or existing remote storage
-#     that must be made available in the storage object.
-#
-#     If it is a local path, the data is uploaded to the cloud to an
-#     appropriate object store (s3 or gcs). This upload is a one-way
-#     destructive sync, i.e. unmodified files which already exist on
-#     the remote cloud store are not uploaded again, and any local
-#     deletes are replicated on the remote store.
-#
-#     If it is a remote path (s3://, gs://), it is mounted directly when the
-#     task is run.
-#
-#   sky.Storage.force_stores: List[str]
-#     If you wish to force sky.Storage to be backed by specific cloud object
-#     stores, you can specify them here. If the Storage object does not already
-#     exist there, it will be replicated onto those clouds.
-#
-#   sky.Storage.persistent: str
-#     Whether the remote backing stores in the cloud should be deleted after
-#     execution of this task or not. Set to True to avoid uploading files again
-#     in subsequent runs (at the cost of storing your data in the cloud).
-storage:
-  - name: imagenet-bucket
+file_mounts:
+  /tmp/imagenet:
     source: s3://imagenet-bucket
-    #force_stores: [s3] # Could be [s3, gcs], [gcs] default: None
-    persistent: True
-
-# storage_mounts: List[sky.storage_mounts]
-#
-# Storage mounts specify where the storage objects defined above should be
-# mounted when the task is run.
-#
-# Fields:
-#   sky.storage_mounts.storage: str
-#     Name of the storage object to be mounted
-#
-#   sky.storage_mounts.mount_path: str
-#     Path to mount the storage at. Do not include trailing slashes!
-storage_mounts:
-  - storage: imagenet-bucket
-    mount_path: /tmp/imagenet
+    mode: MOUNT
 
 setup: |
   . $(conda info --base)/etc/profile.d/conda.sh
