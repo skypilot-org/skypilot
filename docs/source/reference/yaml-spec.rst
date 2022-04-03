@@ -8,84 +8,84 @@ describe all fields available.
 
 .. code-block:: yaml
 
-    # Task name (optional), used in the job queue.
+    # Task name (optional), used for display purposes.
     name: my-task
 
     # Working directory (optional), synced to ~/sky_workdir on the remote cluster
     # each time launch or exec is run with the yaml file.
     #
-    # NOTE: Sky does not currently support large, multi-gigabyte workdirs as the
-    # files are synced to the remote VM with `rsync`. Please consider using Sky
-    # Storage to transfer large datasets and files.
+    # Commands in "setup" and "run" will be executed under it.
     #
     # If a .gitignore file (or a .git/info/exclude file) exists in the working
-    # directory, files and directories listed in those files will be ignored.
+    # directory, files and directories listed in it will be excluded from syncing.
     workdir: ~/my-task-code
 
-    # Number of nodes (optional) to launch including the head node. If not
-    # specified, defaults to 1. The specified resource requirements are identical
-    # across all nodes.
+    # Number of nodes (optional; defaults to 1) to launch including the head node.
+    #
+    # A task can set this to a smaller value than the size of a cluster.
     num_nodes: 4
 
     # Per-node resource requirements (optional).
     resources:
-      cloud: aws  # A cloud (optional) can be specified, if desired.
+      cloud: aws  # The cloud to use (optional).
 
-      # Accelerator requirements (optional) can be specified, use `sky show-gpus`
-      # to view available accelerator configurations.
-      # This specifies the accelerator type and the count per node. Format:
-      # <name>:<cnt> or <name> (short for a count of 1).
+      # Accelerator name and count per node (optional).
+      #
+      # Use `sky show-gpus` to view available accelerator configurations.
+      #
+      # Format: <name>:<count> (or simply <name>, short for a count of 1).
       accelerators: V100:4
 
-      # Accelerator arguments (optional) provides additional metadata for some
-      # accelerators, such as the TensorFlow version for TPUs.
-      accelerator_args:
-        tf_version: 2.5.0
+      # Instance type to use (optional). If 'accelerators' is specified,
+      # the corresponding instance type is automatically inferred.
+      instance_type: p3.8xlarge
 
-      # Specify whether the cluster should use spot instances or not (optional).
-      # If unspecified, Sky will default to on-demand instances.
+      # Whether the cluster should use spot instances (optional).
+      # If unspecified, defaults to False (on-demand instances).
       use_spot: False
 
       # Disk size in GB to allocate for OS (mounted at /). Increase this if you
       # have a large working directory or tasks that write out large outputs.
       disk_size: 256
 
-    # Using Sky Storage, you can specify file mounts (all optional).
+      # Additional accelerator metadata (optional); only used for TPUs.
+      accelerator_args:
+        tf_version: 2.5.0
+        tpu_name: mytpu
+
     file_mounts:
-      # This uses rsync to directly copy files from your machine to the remote
-      # VM at /remote/path/datasets. Rsync will copy symlinks as symlinks. The
-      # symlink targets must also be synced using file_mounts to ensure they are
-      # functional.
+      # Uses rsync to copy local files to all nodes of the cluster.
+      #
+      # If symlinks are present, they are copied as symlinks, and their targets
+      # must also be synced using file_mounts to ensure correctness.
       /remote/path/datasets: /local/path/datasets
 
-      # This uses Sky Storage to first create a S3 bucket named sky-dataset,
-      # copies the contents of /local/path/datasets to the remote bucket and makes the
-      # bucket persistent (i.e., the bucket is not deleted after the completion of
-      # this sky task, and future invocations of this bucket will be much faster).
-      # The bucket is mounted at /datasets-storage. Symlink contents are copied over.
+      # Uses Sky Storage to create a S3 bucket named sky-dataset, uploads the
+      # contents of /local/path/datasets to the bucket, and marks the bucket
+      # as persistent (it will not be deleted after the completion of this task).
+      # Symlink contents are copied over.
+      #
+      # Mounts the bucket at /datasets-storage on every node of the cluster.
       /datasets-storage:
         name: sky-dataset
         source: /local/path/datasets
-        force_stores: [s3]  # Could be [s3, gcs], [gcs] default: None
-        persistent: True  # Defaults to True, can be set to false.
+        force_stores: [s3]  # Could be [s3, gcs], [gcs]; default: None
+        persistent: True  # Defaults to True; can be set to false
 
-      # This re-uses a predefined bucket (sky-dataset, defined above) and mounts it
-      # directly at datasets-s3.
-      /datasets-s3: s3://sky-dataset
+      # Copies a cloud object store URI to the cluster. Can be private buckets.
+      /datasets-s3: s3://my-awesome-dataset
 
-    # A setup script (optional) can be provided to run when a cluster is provisioned or a
-    # task is launched. Alternatively, a single setup command can be provided by removing |
-    # and using the following syntax:
-    # setup: pip install -r requirements.txt
+    # Setup script (optional) to execute on every `sky launch`.
+    # This is executed before the 'run' commands.
+    #
+    # The '|' separator indicates a multiline string. To specify a single command:
+    #   setup: pip install -r requirements.txt
     setup: |
       echo "Begin setup."
       pip install -r requirements.txt
       echo "Setup complete."
 
-    # A task script (optional, but recommended) is the main script to run on the
-    # cluster. Alternatively, a single run command can be provided by removing |
-    # and using the following syntax:
-    # run: python train.py
+    # Main program (optional, but recommended) to run on every node of the cluster.
     run: |
       echo "Beginning task."
       python train.py

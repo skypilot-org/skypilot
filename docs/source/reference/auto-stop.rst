@@ -2,12 +2,13 @@
 Auto-stopping
 =========
 
-Sky's **auto-stopping** can automatically stop a cluster after a few minutes of idleness.
+Sky's **auto-stopping** automatically stops a cluster after it becomes idle.
+
 With auto-stopping, users can simply submit jobs and leave their laptops, while
 **ensuring no unnecessary spending occurs**: after jobs have finished, the
-cluster(s) used will be automatically stopped (and restarted later).
+cluster(s) used will be automatically stopped (which can be restarted later).
 
-To setup auto-stopping for a cluster, use :code:`sky autostop`:
+To schedule auto-stopping for a cluster, use :code:`sky autostop`:
 
 .. code-block:: bash
 
@@ -40,7 +41,7 @@ To view the status of the cluster, use ``sky status [--refresh]``:
    # Refresh the status for auto-stopping
    sky status --refresh
    NAME         LAUNCHED    RESOURCES            STATUS   AUTOSTOP  COMMAND
-   mycluster    11 min ago  2x AWS(m4.2xlarge)   STOPPED  -         sky launch -d -c ...
+   mycluster    11 min ago  2x AWS(m4.2xlarge)   STOPPED  10 min    sky launch -d -c ...
 
 
 :code:`sky status` shows the cached statuses, which can be outdated for clusters with auto-stopping scheduled. To query the real statuses of clusters with auto-stopping scheduled, use :code:`sky status --refresh`.

@@ -5,17 +5,18 @@ Iteratively Developing a Project
 This page shows a typical workflow for iteratively developing and running a
 project on Sky.
 
-Provisioning a VM
+Getting an interactive node
 ------------------
-To provision a GPU-based :ref:`interactive node <interactive-nodes>` named :code:`dev`, run
+:ref:`Interactive nodes <interactive-nodes>` are easy-to-spin-up VMs that enable **fast development and interactive debugging**.
+
+To provision a GPU interactive node named :code:`dev`, run
 
 .. code-block:: console
 
   $ # Provisions/reuses an interactive node with a single K80 GPU.
   $ sky gpunode -c dev --gpus K80
 
-Interactive nodes are easy-to-spin-up VMs that allow for fast development and interactive debugging.
-See the :ref:`CLI reference <sky-gpunode>` for all configuration options.
+See the :ref:`CLI reference <sky-gpunode>` for all flags such as changing the GPU type and count.
 
 Running code
 --------------------
