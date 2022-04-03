@@ -752,8 +752,8 @@ class S3Store(AbstractStore):
                     if self.source.startswith('s3://'):
                         raise exceptions.StorageBucketGetError(
                             'Attempted to connect to a non-existent bucket: '
-                            f'{self.source}. Consider using aws s3 ls '
-                            f'{self.source} to debug.') from e
+                            f'{self.source}. Consider using `aws s3 ls '
+                            f'{self.source}` to debug.') from e
                     else:
                         bucket = self._create_s3_bucket(self.name)
                         return bucket, True
@@ -766,7 +766,7 @@ class S3Store(AbstractStore):
                     'Failed to connect to an existing bucket. \n'
                     'Check if the 1) the bucket name is taken and/or '
                     '2) the bucket permissions are not setup correctly. '
-                    f'Consider using aws s3 ls {self.name} to debug.')
+                    f'Consider using `aws s3 ls {self.name}` to debug.')
                 logger.error(ex)
                 raise ex from e
 
@@ -792,19 +792,19 @@ class S3Store(AbstractStore):
         script = textwrap.dedent(f"""
             #!/usr/bin/env bash
             set -e
-            
+
             S3_SOURCE={self.bucket.name}
             MOUNT_PATH={mount_path}
             STAT_CACHE_TTL={self._STAT_CACHE_TTL}
             TYPE_CACHE_TTL={self._TYPE_CACHE_TTL}
-            
+
             # Check if path is already mounted
             if ! [ "$(grep -q $MOUNT_PATH /proc/mounts)" ] ; then
                 echo "Path already mounted - unmounting..."
                 fusermount -u "$MOUNT_PATH"
                 echo "Successfully unmounted $MOUNT_PATH."
             fi
-            
+
             # Install goofys if not already installed
             if ! [ -x "$(command -v goofys)" ]; then
               echo "Installing goofys..."
@@ -813,7 +813,7 @@ class S3Store(AbstractStore):
             else
               echo "Goofys already installed. Proceeding..."
             fi
-            
+
             # Check if mount path exists
             if [ ! -d "$MOUNT_PATH" ]; then
               echo "Mount path $MOUNT_PATH does not exist. Creating..."
@@ -1042,7 +1042,7 @@ class GcsStore(AbstractStore):
                     f'Failed to connect to external bucket {self.name} \n'
                     'Check if the 1) the bucket name is taken and/or '
                     '2) the bucket permissions are not setup correctly. '
-                    f'Consider using gsutil ls gs://{self.name} to debug.')
+                    f'Consider using `gsutil ls gs://{self.name}` to debug.')
                 logger.error(ex)
                 raise ex from e
             except ValueError as e:
@@ -1050,7 +1050,7 @@ class GcsStore(AbstractStore):
                     f'Attempted to access a private external bucket {self.name}'
                     '\nCheck if the 1) the bucket name is taken and/or '
                     '2) the bucket permissions are not setup correctly. '
-                    f'Consider using gsutil ls gs://{self.name} to debug.')
+                    f'Consider using `gsutil ls gs://{self.name}` to debug.')
                 logger.error(ex)
                 raise ex from e
 

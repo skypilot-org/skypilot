@@ -1,14 +1,20 @@
+# Steps to run this example:
+#
+# (1) Run the following commands locally to get the example input jpeg files.
+#       mkdir -p ~/Downloads/detectron-inputs
+#       wget http://images.cocodataset.org/val2017/000000439715.jpg -O ~/Downloads/detectron-inputs/input.jpg
+#
+# (2) Change L16 to a unique bucket name to create a private bucket.
+
 resources:
   accelerators: V100:4
 
 file_mounts:
-  # Run the following commands locally to get the example input jpeg files.
-  # mkdir -p ~/Downloads/detectron-inputs
-  # wget http://images.cocodataset.org/val2017/000000439715.jpg -O ~/Downloads/detectron-inputs/input.jpg
+  # TODO: run the download commands above first.
   /inputs: ~/Downloads/detectron-inputs
   /detectron2: ./examples/docker/detectron2
   /outputs:
-    # Change the name to your own bucket name.
+    # TODO: Change the name to your own bucket name (e.g., append your user name).
     name: sky-detectron2-outputs
     mode: MOUNT
 
