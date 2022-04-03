@@ -14,7 +14,7 @@ AWS
 
 1. Go to the `EC2 Quotas console <https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas>`_.
 2. **Select a region** on the top right.
-3. Choose an EC2 instance type from the list (e.g, ``Running On-Demand P instances``). Use ``sky show-gpus --cloud aws --all`` or check `here <https://aws.amazon.com/ec2/instance-types/>`_ for more instance types.
+3. Choose an EC2 instance type from the list (e.g, ``Running On-Demand P instances`` or ``All P Spot Instance Requests``). Use ``sky show-gpus --cloud aws --all`` or check `here <https://aws.amazon.com/ec2/instance-types/>`_ for more instance types.
 4. Click the quota name, and then choose **Request quota increase**.
 5. For **Change quota value**, enter the new value.
 6. Choose **Request**.
