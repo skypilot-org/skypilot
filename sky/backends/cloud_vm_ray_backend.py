@@ -30,9 +30,11 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import optimizer
 from sky import task as task_lib
+from sky.data import data_utils
+from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
-from sky.skylet import autostop_lib, job_lib, log_lib
+from sky.skylet import autostop_lib, job_lib, log_lib, log_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -55,6 +57,10 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 
 _LOCK_FILENAME = '~/.sky/.{}.lock'
 _FILELOCK_TIMEOUT_SECONDS = 10
+
+_RSYNC_DISPLAY_OPTION = '-Pavz'
+_RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
+_RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
 
 
 def _check_cluster_name_is_valid(cluster_name: str) -> None:
@@ -100,43 +106,18 @@ def _get_task_demands_dict(
     return accelerator_dict
 
 
-def _path_size_megabytes(path: str, exclude_gitignore: bool = False) -> int:
-    """Returns the size of 'path' (directory or file) in megabytes.
-
-    Args:
-        path: The path to check.
-        exclude_gitignore: If True, excludes files matched in .gitignore.
-
-    Returns:
-        The size of 'path' in megabytes.
-    """
-    if exclude_gitignore:
-        try:
-            # FIXME: add git index size (du -hsc .git) in this computation.
-            awk_program = '{ sum += $1 } END { print sum }'
-            return int(
-                subprocess.check_output(
-                    f'( git status --short {path} | '
-                    'grep "^?" | cut -d " " -f2- '
-                    f'&& git ls-files {path} ) | '
-                    'xargs -n 1000 du -hsk | '
-                    f'awk {awk_program!r}',
-                    shell=True,
-                    stderr=subprocess.DEVNULL)) // (2**10)
-        except (subprocess.CalledProcessError, ValueError):
-            # If git is not installed, or if the user is not in a git repo.
-            # Fall back to du -shk if it is not a git repo (size does not
-            # consider .gitignore).
-            logger.debug('Failed to get size with .gitignore exclusion, '
-                         'falling back to du -shk')
-            pass
-    return int(
-        subprocess.check_output([
-            'du',
-            '-sh',
-            '-k',
-            path,
-        ]).split()[0].decode('utf-8')) // (2**10)
+def _path_size_megabytes(path: str) -> int:
+    """Returns the size of 'path' (directory or file) in megabytes."""
+    git_exclude_filter = ''
+    if (pathlib.Path(path) / '.git/info/exclude').exists():
+        git_exclude_filter = f' {_RSYNC_EXCLUDE_OPTION}'
+    rsync_output = str(
+        subprocess.check_output(
+            f'rsync {_RSYNC_DISPLAY_OPTION} {_RSYNC_FILTER_OPTION}'
+            f'{git_exclude_filter} --dry-run {path}',
+            shell=True).splitlines()[-1])
+    total_bytes = rsync_output.split(' ')[3].replace(',', '')
+    return int(total_bytes) // 10**6
 
 
 class RayCodeGen:
@@ -201,7 +182,7 @@ class RayCodeGen:
             import ray
             import ray.util as ray_util
 
-            from sky.skylet import job_lib
+            from sky.skylet import job_lib, log_utils
 
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
@@ -621,10 +602,11 @@ class RetryingVmProvisioner(object):
 
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
-                    if type(cloud) in (clouds.AWS, clouds.GCP):
+                    if cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
+                            sky.AWS()):
                         region = config['provider']['region']
                         zones = config['provider']['availability_zone']
-                    elif isinstance(cloud, clouds.Azure):
+                    elif cloud.is_same_cloud(sky.Azure()):
                         region = config['provider']['location']
                         zones = None
                     else:
@@ -660,7 +642,6 @@ class RetryingVmProvisioner(object):
                     'It is possibly killed by cloud provider or manually '
                     'in the cloud provider console. To remove the cluster '
                     f'please run: sky down {cluster_name}')
-                logger.error(message)
                 # Reset to UP (rather than keeping it at INIT), as INIT
                 # mode will enable failover to other regions, causing
                 # data lose.
@@ -684,7 +665,6 @@ class RetryingVmProvisioner(object):
                     'Failed to acquire resources to restart the stopped '
                     f'cluster {cluster_name} on {region}. Please retry again '
                     'later.')
-                logger.error(message)
 
                 # Reset to STOPPED (rather than keeping it at INIT), because
                 # (1) the cluster is not up (2) it ensures future `sky start`
@@ -875,8 +855,6 @@ class RetryingVmProvisioner(object):
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
                                                 zones, stdout, stderr)
-                logger.error(
-                    f'*** HEAD_FAILED for {cluster_name} {region.name}')
             else:
                 # gang scheduling failed.
                 assert status == self.GangSchedulingStatus.GANG_FAILED, status
@@ -891,7 +869,8 @@ class RetryingVmProvisioner(object):
                     stderr=None)
 
                 # Only log the errors for GANG_FAILED, since HEAD_FAILED may
-                # not have created any resources (it can happen however).
+                # not have created any resources (it can happen however) and
+                # HEAD_FAILED can happen in "normal" failover cases.
                 logger.error('*** Failed provisioning the cluster. ***')
                 terminate_str = 'Terminating' if need_terminate else 'Stopping'
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
@@ -948,7 +927,7 @@ class RetryingVmProvisioner(object):
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at=start_streaming_at,
-                parse_ray_up_logs=True,
+                line_processor=log_utils.RayUpLineProcessor(),
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'),
@@ -1138,6 +1117,7 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
             self.tpu_delete_script = tpu_delete_script
+            self._find_cluster_region()
 
         def __repr__(self):
             return (f'ResourceHandle('
@@ -1152,6 +1132,21 @@ class CloudVmRayBackend(backends.Backend):
 
         def get_cluster_name(self):
             return self.cluster_name
+
+        def _find_cluster_region(self):
+            config = backend_utils.read_yaml(self.cluster_yaml)
+            provider = config['provider']
+            cloud = self.launched_resources.cloud
+            if cloud.is_same_cloud(sky.Azure()):
+                self.cluster_region = provider['location']
+            elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
+                    sky.AWS()):
+                self.cluster_region = provider['region']
+
+        def get_cluster_region(self):
+            if not hasattr(self, 'cluster_region'):
+                self._find_cluster_region()
+            return self.cluster_region
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
@@ -1383,15 +1378,13 @@ class CloudVmRayBackend(backends.Backend):
             workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
 
         # Raise warning if directory is too large
-        dir_size = _path_size_megabytes(full_workdir, exclude_gitignore=True)
+        dir_size = _path_size_megabytes(full_workdir)
         if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
             logger.warning(
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
                 f'is {dir_size} MB. Try to keep workdir small or use '
-                '.gitignore to exclude large files, as '
-                'large sizes will slow down rsync. If you use .gitignore but '
-                'the path is not initialized in git, you can ignore this '
-                f'warning.{style.RESET_ALL}')
+                '.gitignore to exclude large files, as large sizes will slow '
+                'down rsync. {style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
@@ -1421,93 +1414,166 @@ class CloudVmRayBackend(backends.Backend):
         self,
         handle: ResourceHandle,
         all_file_mounts: Dict[Path, Path],
-        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Dict[Path, storage_lib.Storage],
     ) -> None:
         """Mounts all user files to the remote nodes."""
-        # File mounts handling for remote paths possibly without write access:
-        #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
-        #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
-        start = time.time()
-        del cloud_to_remote_file_mounts  # Unused.
-        mounts = all_file_mounts
-        symlink_commands = []
-        if mounts is None or not mounts:
+        self._execute_file_mounts(handle, all_file_mounts)
+        self._execute_storage_mounts(handle, storage_mounts)
+
+    def _execute_storage_mounts(self, handle: ResourceHandle,
+                                storage_mounts: Dict[Path,
+                                                     storage_lib.Storage]):
+        """Executes storage mounts - installing mounting tools and mounting"""
+
+        # Process only mount mode objects here. COPY mode objects have been
+        # converted to regular copy file mounts and thus have been handled
+        # in the '_execute_file_mounts' method.
+        storage_mounts = {
+            path: storage_mount
+            for path, storage_mount in storage_mounts.items()
+            if storage_mount.mode == storage_lib.StorageMode.MOUNT
+        }
+
+        if not storage_mounts:
             return
         fore = colorama.Fore
         style = colorama.Style
-        logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
-
+        plural = 's' if len(storage_mounts) > 1 else ''
+        logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
+                    f'storage mount{plural}.{style.RESET_ALL}')
+        start = time.time()
         ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
                                              handle.launched_nodes,
                                              handle=handle)
         ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
+        log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
+        for dst, storage_obj in storage_mounts.items():
+            if not os.path.isabs(dst) and not dst.startswith('~/'):
+                dst = f'~/{dst}'
+            # Get the first store and use it to mount
+            store = list(storage_obj.stores.values())[0]
+            mount_cmd = store.mount_command(dst)
+            src_print = (storage_obj.source
+                         if storage_obj.source else storage_obj.name)
+            self._run_and_rsync_on_all(src=src_print,
+                                       dst=dst,
+                                       ssh_user=ssh_user,
+                                       ssh_key=ssh_key,
+                                       ip_list=ip_list,
+                                       handle=handle,
+                                       action_message='Mounting',
+                                       log_path=log_path,
+                                       command=mount_cmd,
+                                       run_rsync=False)
+        end = time.time()
+        logger.debug(f'Storage mount sync took {end - start} seconds.')
+
+    def _run_and_rsync_on_all(self,
+                              src: str,
+                              dst: str,
+                              ssh_user: str,
+                              ssh_key: str,
+                              ip_list: List[str],
+                              handle: ResourceHandle,
+                              action_message: str,
+                              log_path: str,
+                              command: Optional[str] = None,
+                              run_rsync: Optional[bool] = False) -> None:
+        """Runs a command on all nodes and optionally runs rsync from src->dst.
+
+        Args:
+            src: str; Source for rsync on local node
+            dst: str; Destination on remote node for rsync
+            ssh_user: str; SSH username
+            ssh_key: str; SSH key
+            ip_list: List[str]; IP addresses of nodes to run and rsync on
+            handle: ResourceHandle; Resource handle to the cluster
+            action_message: str; Message to be printed while the command runs
+            log_path: str; Path to the log file
+            command: str; Command to be executed on all nodes
+            run_rsync: bool;
+        """
+        # TODO: This needs a cleaner refactor into run command + rsync.
+        fore = colorama.Fore
+        style = colorama.Style
+        if run_rsync:
+            # Do this for local src paths, not for cloud store URIs
+            # (otherwise we have '<abs path to cwd>/gs://.../object/').
+            full_src = os.path.abspath(os.path.expanduser(src))
+            if not os.path.islink(full_src) and not os.path.isfile(full_src):
+                src = os.path.join(src, '')  # Adds trailing / if needed.
+
+        def _sync_node(ip):
+            if command is not None:
+                returncode = backend_utils.run_command_on_ip_via_ssh(
+                    ip,
+                    command,
+                    ssh_user=ssh_user,
+                    ssh_private_key=ssh_key,
+                    log_path=log_path,
+                    stream_logs=False,
+                    ssh_control_name=self._ssh_control_name(handle))
+                backend_utils.handle_returncode(
+                    returncode,
+                    command,
+                    f'Failed to sync {src} to {dst}.',
+                    raise_error=True)
+
+            if run_rsync:
+                # TODO(zhwu): Optimize for large amount of files.
+                # zip / transfer/ unzip
+                self._rsync_up(handle,
+                               ip=ip,
+                               source=src,
+                               target=dst,
+                               log_path=log_path,
+                               stream_logs=False,
+                               raise_error=True)
+
+        num_nodes = handle.launched_nodes
+        plural = 's' if num_nodes > 1 else ''
+        logger.info(f'{fore.CYAN}{action_message} (to {num_nodes} node{plural})'
+                    f': {style.BRIGHT}{src}{style.RESET_ALL} -> '
+                    f'{style.BRIGHT}{dst}{style.RESET_ALL}')
+        with backend_utils.safe_console_status(
+                f'[bold cyan]{action_message}[/]'):
+            backend_utils.run_in_parallel(_sync_node, ip_list)
+
+    def _execute_file_mounts(self, handle: ResourceHandle,
+                             file_mounts: Dict[Path, Path]):
+        """Executes file mounts - rsyncing local files and
+        copying from remote stores."""
+        # File mounts handling for remote paths possibly without write access:
+        #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
+        #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
+        if file_mounts is None or not file_mounts:
+            return
+        symlink_commands = []
+        fore = colorama.Fore
+        style = colorama.Style
+        logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
+        start = time.time()
+        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
+                                             handle.launched_nodes)
+        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
-        def sync_to_all_nodes(src: str,
-                              dst: str,
-                              command: Optional[str] = None,
-                              run_rsync: Optional[bool] = False):
-            if run_rsync:
-                # Do this for local src paths, not for cloud store URIs
-                # (otherwise we have '<abs path to cwd>/gs://.../object/').
-                full_src = os.path.abspath(os.path.expanduser(src))
-                if not os.path.islink(full_src) and not os.path.isfile(
-                        full_src):
-                    src = os.path.join(src, '')  # Adds trailing / if needed.
-
-            def _sync_node(ip):
-                if command is not None:
-                    returncode = backend_utils.run_command_on_ip_via_ssh(
-                        ip,
-                        command,
-                        ssh_user=ssh_user,
-                        ssh_private_key=ssh_key,
-                        log_path=log_path,
-                        stream_logs=False,
-                        ssh_control_name=self._ssh_control_name(handle))
-                    backend_utils.handle_returncode(
-                        returncode,
-                        command,
-                        f'Failed to sync {src} to {dst}.',
-                        raise_error=True)
-
-                if run_rsync:
-                    # TODO(zhwu): Optimize for large amount of files.
-                    # zip / transfer/ unzip
-                    self._rsync_up(handle,
-                                   ip=ip,
-                                   source=src,
-                                   target=dst,
-                                   log_path=log_path,
-                                   stream_logs=False,
-                                   raise_error=True)
-
-            num_nodes = handle.launched_nodes
-            plural = 's' if num_nodes > 1 else ''
-            logger.info(f'{fore.CYAN}Syncing (to {num_nodes} node{plural}): '
-                        f'{style.BRIGHT}{src}{style.RESET_ALL} -> '
-                        f'{style.BRIGHT}{dst}{style.RESET_ALL}')
-            with backend_utils.safe_console_status('[bold cyan]Syncing[/]'):
-                backend_utils.run_in_parallel(_sync_node, ip_list)
-
         # Check the files and warn
-        for dst, src in mounts.items():
-            if not task_lib.is_cloud_store_url(src):
+        for dst, src in file_mounts.items():
+            if not data_utils.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
                 # Checked during Task.set_file_mounts().
                 assert os.path.exists(full_src), f'{full_src} does not exist.'
-                src_size = _path_size_megabytes(full_src,
-                                                exclude_gitignore=True)
+                src_size = _path_size_megabytes(full_src)
                 if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src!r} '
                         f'is {src_size} MB. Try to keep src small or use '
-                        '.gitignore to exclude large files, as '
-                        'large sizes will slow down rsync. If you use '
-                        '.gitignore but the path is not initialized in git, you'
-                        f' can ignore this warning.{style.RESET_ALL}')
+                        '.gitignore to exclude large files, as large sizes '
+                        f'will slow down rsync. {style.RESET_ALL}')
                 if os.path.islink(full_src):
                     logger.warning(
                         f'{fore.YELLOW}Source path {src!r} is a symlink. '
@@ -1517,7 +1583,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
-        for dst, src in mounts.items():
+        for dst, src in file_mounts.items():
             # TODO: room for improvement.  Here there are many moving parts
             # (download gsutil on remote, run gsutil on remote).  Consider
             # alternatives (smart_open, each provider's own sdk), a
@@ -1534,7 +1600,7 @@ class CloudVmRayBackend(backends.Backend):
                     source=dst, target=wrapped_dst)
                 symlink_commands.append(cmd)
 
-            if not task_lib.is_cloud_store_url(src):
+            if not data_utils.is_cloud_store_url(src):
                 full_src = os.path.abspath(os.path.expanduser(src))
 
                 if os.path.isfile(full_src):
@@ -1544,10 +1610,16 @@ class CloudVmRayBackend(backends.Backend):
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
 
                 # TODO(mluo): Fix method so that mkdir and rsync run together
-                sync_to_all_nodes(src=src,
-                                  dst=wrapped_dst,
-                                  command=mkdir_for_wrapped_dst,
-                                  run_rsync=True)
+                self._run_and_rsync_on_all(src=src,
+                                           dst=wrapped_dst,
+                                           ssh_user=ssh_user,
+                                           ssh_key=ssh_key,
+                                           ip_list=ip_list,
+                                           handle=handle,
+                                           action_message='Syncing',
+                                           log_path=log_path,
+                                           command=mkdir_for_wrapped_dst,
+                                           run_rsync=True)
                 continue
 
             storage = cloud_stores.get_storage_from_path(src)
@@ -1571,30 +1643,36 @@ class CloudVmRayBackend(backends.Backend):
             ]
             command = ' && '.join(download_target_commands)
             # dst is only used for message printing.
-            sync_to_all_nodes(src, dst, command)
-
+            self._run_and_rsync_on_all(src=src,
+                                       dst=dst,
+                                       ssh_user=ssh_user,
+                                       ssh_key=ssh_key,
+                                       ip_list=ip_list,
+                                       handle=handle,
+                                       action_message='Syncing',
+                                       log_path=log_path,
+                                       command=command,
+                                       run_rsync=False)
         # (2) Run the commands to create symlinks on all the nodes.
         symlink_command = ' && '.join(symlink_commands)
-        if not symlink_command:
-            return
+        if symlink_command:
 
-        def _symlink_node(ip):
-            returncode = backend_utils.run_command_on_ip_via_ssh(
-                ip,
-                symlink_command,
-                ssh_user=ssh_user,
-                ssh_private_key=ssh_key,
-                log_path=log_path,
-                ssh_control_name=self._ssh_control_name(handle))
-            backend_utils.handle_returncode(
-                returncode,
-                symlink_command,
-                'Failed to create symlinks. The target destination '
-                'may already exist',
-                raise_error=True)
+            def _symlink_node(ip):
+                returncode = backend_utils.run_command_on_ip_via_ssh(
+                    ip,
+                    symlink_command,
+                    ssh_user=ssh_user,
+                    ssh_private_key=ssh_key,
+                    log_path=log_path,
+                    ssh_control_name=self._ssh_control_name(handle))
+                backend_utils.handle_returncode(
+                    returncode,
+                    symlink_command,
+                    'Failed to create symlinks. The target destination '
+                    'may already exist',
+                    raise_error=True)
 
-        backend_utils.run_in_parallel(_symlink_node, ip_list)
-
+            backend_utils.run_in_parallel(_symlink_node, ip_list)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
@@ -2157,7 +2235,7 @@ class CloudVmRayBackend(backends.Backend):
         # shooting a lot of messages to the output. --info=progress2 is used
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', '-Pavz']
+        rsync_command = ['rsync', _RSYNC_DISPLAY_OPTION]
         # Legend
         #   dir-merge: ignore file can appear in any subdir, applies to that
         #     subdir downwards
@@ -2165,11 +2243,11 @@ class CloudVmRayBackend(backends.Backend):
         # ignore files are treated as *exclude* patterns.  Non-exclude
         # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
         # allows it.
-        rsync_command.append('--filter=\'dir-merge,- .gitignore\'')
+        rsync_command.append(_RSYNC_FILTER_OPTION)
         git_exclude = '.git/info/exclude'
         if (pathlib.Path(source) / git_exclude).exists():
             # Ensure file exists; otherwise, rsync will error out.
-            rsync_command.append('--exclude-from=.git/info/exclude')
+            rsync_command.append(_RSYNC_EXCLUDE_OPTION)
 
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,

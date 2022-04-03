@@ -124,6 +124,17 @@ def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
     return clouds.CLOUD_REGISTRY.get(cloud)
 
 
+def _get_glob_clusters(clusters: List[str]) -> List[str]:
+    """Returns a list of clusters that match the glob pattern."""
+    glob_clusters = []
+    for cluster in clusters:
+        glob_cluster = global_user_state.get_glob_cluster_names(cluster)
+        if len(glob_cluster) == 0:
+            print(f'Cluster {cluster} not found.')
+        glob_clusters.extend(glob_cluster)
+    return list(set(glob_clusters))
+
+
 def _interactive_node_cli_command(cli_func):
     """Click command decorator for interactive node commands."""
     assert cli_func.__name__ in _INTERACTIVE_NODE_TYPES, cli_func.__name__
@@ -817,14 +828,22 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     # TODO(zhwu): Update the information for auto-stop clusters.
     show_all = all
     clusters_status = backend_utils.get_clusters(refresh)
-    cluster_table = util_lib.create_table([
+    columns = [
         'NAME',
         'LAUNCHED',
         'RESOURCES',
         'STATUS',
         'AUTOSTOP',
         'COMMAND',
-    ])
+    ]
+
+    if all:
+        columns.extend([
+            'HOURLY_PRICE',
+            'REGION',
+        ])
+
+    cluster_table = util_lib.create_table(columns)
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
@@ -847,7 +866,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
         if cluster_status['autostop'] >= 0:
             # TODO(zhwu): check the status of the autostop cluster.
             autostop_str = str(cluster_status['autostop']) + ' min'
-        cluster_table.add_row([
+        row = [
             # NAME
             cluster_status['name'],
             # LAUNCHED
@@ -861,7 +880,19 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
             # COMMAND
             cluster_status['last_use']
             if show_all else _truncate_long_string(cluster_status['last_use']),
-        ])
+        ]
+        if all:
+            hourly_cost = handle.launched_resources.get_cost(3600) \
+                * handle.launched_nodes
+            price_str = f'$ {hourly_cost:.3f}'
+            region = handle.get_cluster_region()
+            row.extend([
+                # HOURLY PRICE
+                price_str,
+                # REGION
+                region,
+            ])
+        cluster_table.add_row(row)
     if clusters_status:
         click.echo(cluster_table)
     else:
@@ -893,6 +924,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     code = job_lib.JobLibCodeGen.show_jobs(username, all_jobs)
 
     if clusters:
+        clusters = _get_glob_clusters(clusters)
         handles = [
             global_user_state.get_handle_from_cluster_name(c) for c in clusters
         ]
@@ -1114,7 +1146,7 @@ def stop(
               default=None,
               is_flag=True,
               help='Tear down all existing clusters.')
-@click.option('--idle_minutes',
+@click.option('--idle-minutes',
               '-i',
               type=int,
               default=None,
@@ -1214,6 +1246,9 @@ def start(clusters: Tuple[str], yes: bool):
                 if name == cluster_record['name']:
                     return cluster_record
             return None
+
+        # Get GLOB cluster names
+        clusters = _get_glob_clusters(clusters)
 
         all_clusters = global_user_state.get_clusters()
         for name in clusters:
@@ -1374,13 +1409,7 @@ def _terminate_or_stop_clusters(
 
     to_down = []
     if len(names) > 0:
-        glob_names = []
-        for name in names:
-            glob_name = global_user_state.get_glob_cluster_names(name)
-            if len(glob_name) == 0:
-                print(f'Cluster {name} not found.')
-            glob_names.extend(glob_name)
-        names = list(set(glob_names))
+        names = _get_glob_clusters(names)
         for name in names:
             handle = global_user_state.get_handle_from_cluster_name(name)
             to_down.append({'name': name, 'handle': handle})
@@ -1407,7 +1436,8 @@ def _terminate_or_stop_clusters(
 
     operation = 'Terminating' if terminate else 'Stopping'
     if idle_minutes_to_autostop is not None:
-        operation = 'Scheduling auto-stop on'
+        verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
+        operation = f'{verb} auto-stop on'
     plural = 's' if len(to_down) > 1 else ''
     progress = rich_progress.Progress(transient=True)
     task = progress.add_task(
@@ -1431,34 +1461,32 @@ def _terminate_or_stop_clusters(
                 f'{colorama.Style.RESET_ALL}')
         elif idle_minutes_to_autostop is not None:
             cluster_status = backend_utils.get_status_from_cluster_name(name)
-            if cluster_status != global_user_state.ClusterStatus.UP:
-                message = (
-                    f'{colorama.Fore.GREEN}Scheduling autostop for cluster '
-                    f'{name} (status: {cluster_status.value})... skipped'
-                    f'{colorama.Style.RESET_ALL}\n'
-                    '  Auto-stop can only be scheduled on '
-                    f'{global_user_state.ClusterStatus.UP.value} cluster.')
-            elif not isinstance(backend, backends.CloudVmRayBackend):
-                message = (
-                    f'{colorama.Fore.GREEN}Scheduling auto-stop for cluster '
-                    f'{name}... skipped{colorama.Style.RESET_ALL}\n'
-                    '  Auto-stopping is only supported by backend: '
-                    f'{backends.CloudVmRayBackend.NAME}')
+            if not isinstance(backend, backends.CloudVmRayBackend):
+                message = (f'{colorama.Fore.GREEN}{operation} cluster '
+                           f'{name}... skipped{colorama.Style.RESET_ALL}'
+                           '\n  Auto-stopping is only supported by backend: '
+                           f'{backends.CloudVmRayBackend.NAME}')
             else:
-                backend.set_autostop(handle, idle_minutes_to_autostop)
-                if idle_minutes_to_autostop < 0:
+                if cluster_status != global_user_state.ClusterStatus.UP:
                     message = (
-                        f'{colorama.Fore.GREEN}Cancelling auto-stop for '
-                        f'cluster {name}...done{colorama.Style.RESET_ALL}')
+                        f'{colorama.Fore.GREEN}{operation} cluster '
+                        f'{name} (status: {cluster_status.value})... skipped'
+                        f'{colorama.Style.RESET_ALL}'
+                        '\n  Auto-stop can only be run on '
+                        f'{global_user_state.ClusterStatus.UP.value} cluster.')
                 else:
+                    backend.set_autostop(handle, idle_minutes_to_autostop)
                     message = (
-                        f'{colorama.Fore.GREEN}Scheduling auto-stop for '
-                        f'cluster {name}...done{colorama.Style.RESET_ALL}\n'
-                        f'  The cluster will be stopped after '
-                        f'{idle_minutes_to_autostop} minutes of idleness.\n'
-                        '  To cancel the autostop, run: '
-                        f'{colorama.Style.BRIGHT}sky autostop {name} --cancel'
-                        f'{colorama.Style.RESET_ALL}')
+                        f'{colorama.Fore.GREEN}{operation} '
+                        f'cluster {name}...done{colorama.Style.RESET_ALL}')
+                    if idle_minutes_to_autostop >= 0:
+                        message += (
+                            f'\n  The cluster will be stopped after '
+                            f'{idle_minutes_to_autostop} minutes of idleness.'
+                            '\n  To cancel the autostop, run: '
+                            f'{colorama.Style.BRIGHT}'
+                            f'sky autostop {name} --cancel'
+                            f'{colorama.Style.RESET_ALL}')
         else:
             success = backend.teardown(handle, terminate=terminate, purge=purge)
             if success:
@@ -1842,7 +1870,7 @@ def storage_ls():
     storage_table = util_lib.create_table([
         'NAME',
         'CREATED',
-        'STORES',
+        'STORE',
         'COMMAND',
         'STATUS',
     ])
@@ -1855,7 +1883,7 @@ def storage_ls():
             # LAUNCHED
             _readable_time_duration(launched_at),
             # CLOUDS
-            ', '.join(row['handle'].clouds),
+            ', '.join([s.value for s in row['handle'].sky_stores.keys()]),
             # COMMAND
             row['last_use'],
             # STATUS
@@ -1895,7 +1923,8 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         storages = global_user_state.get_storage()
         for row in storages:
             store_object = data.Storage(name=row['name'],
-                                        source=row['handle'].source)
+                                        source=row['handle'].source,
+                                        sync_on_reconstruction=False)
             store_object.delete()
     elif name:
         for n in name:
@@ -1905,7 +1934,8 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
             else:
                 click.echo(f'Deleting storage object {n}...')
                 store_object = data.Storage(name=handle.storage_name,
-                                            source=handle.source)
+                                            source=handle.source,
+                                            sync_on_reconstruction=False)
                 store_object.delete()
     else:
         raise click.ClickException(

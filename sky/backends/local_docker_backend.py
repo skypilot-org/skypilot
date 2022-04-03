@@ -13,6 +13,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import docker_utils
+from sky.data import storage as storage_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -186,10 +187,10 @@ class LocalDockerBackend(backends.Backend):
         self,
         handle: ResourceHandle,
         all_file_mounts: Dict[Path, Path],
-        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Dict[Path, storage_lib.Storage],
     ) -> None:
         """File mounts in Docker are implemented with volume mounts (-v)."""
-        assert not cloud_to_remote_file_mounts, \
+        assert not storage_mounts, \
             'Only local file mounts are supported with LocalDockerBackend.'
         docker_mounts = {}
 

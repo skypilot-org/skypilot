@@ -5,6 +5,7 @@ from typing import Dict, Optional
 if typing.TYPE_CHECKING:
     from sky import resources
     from sky import task as task_lib
+    from sky.data import storage as storage_lib
 
 Path = str
 
@@ -37,7 +38,7 @@ class Backend:
         self,
         handle: ResourceHandle,
         all_file_mounts: Dict[Path, Path],
-        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Dict[Path, 'storage_lib.Storage'],
     ) -> None:
         raise NotImplementedError
 
