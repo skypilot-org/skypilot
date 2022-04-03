@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         os: ["ubuntu-latest", "macos-latest"]
-        python-version: ["3.6", "3.9"]
+        python-version: [3.6]
         test-path:
           - tests/test_cli.py
           - tests/test_global_user_state.py
