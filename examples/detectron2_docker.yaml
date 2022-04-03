@@ -1,10 +1,10 @@
 # Steps to run this example:
 #
-# (1) Run the following commands locally to get the example input jpeg files.
+# (1) Run the following commands locally to get the example input image.
 #       mkdir -p ~/Downloads/detectron-inputs
 #       wget http://images.cocodataset.org/val2017/000000439715.jpg -O ~/Downloads/detectron-inputs/input.jpg
 #
-# (2) Change L16 to a unique bucket name to create a private bucket.
+# (2) Change L18 to a unique bucket name to create a private bucket.
 
 resources:
   accelerators: V100:4
