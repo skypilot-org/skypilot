@@ -14,7 +14,6 @@ provider:
   module: sky.skylet.providers.gcp.GCPNodeProvider
   region: {{region}}
   availability_zone: {{zones}}
-  project_id: intercloud-320520  # Globally unique project id
   # Keep (otherwise cannot reuse when re-provisioning).
   # teardown(terminate=True) will override this.
   cache_stopped_nodes: True

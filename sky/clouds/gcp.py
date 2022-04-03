@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from google import auth
 
+from sky import authentication as sky_auth
 from sky import clouds
 from sky.clouds import service_catalog
 
@@ -258,13 +259,15 @@ class GCP(clouds.Cloud):
                     '~/.config/gcloud/credentials.db'
             ]:
                 assert os.path.isfile(os.path.expanduser(file))
+            # Check if application default credentials are set.
+            sky_auth.get_gcp_subscription_id()
             # Calling `auth.default()` ensures the GCP client library works,
             # which is used by Ray Autoscaler to launch VMs.
             auth.default()
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
         except (AssertionError, auth.exceptions.DefaultCredentialsError,
-                subprocess.CalledProcessError):
+                subprocess.CalledProcessError, FileNotFoundError, KeyError):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
                 'GCP tools are not installed or credentials are not set. '
