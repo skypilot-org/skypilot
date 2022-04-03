@@ -844,8 +844,8 @@ class S3Store(AbstractStore):
         # While these commands are run sequentially for each storage object,
         # we add random int to be on the safer side and avoid collisions.
         script_path = f'~/.sky/mount_{random.randint(0,1000000)}.sh'
-
-        command = (rf'(cat <<-\EOF > {script_path}'
+        first_line = r'(cat <<-\EOF > {}'.format(script_path)
+        command = (f'{first_line}'
                    f'{script}'
                    f') && chmod +x {script_path}'
                    f' && bash {script_path}'
