@@ -88,7 +88,7 @@ This will produce a summary like:
   Sky will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 
 Requesting quotas for first time users
--------------------
+--------------------------------------
 
 If your cloud account has not been used to launch instances before, the
 respective quotas are likely set to zero or a low limit.  This is especially
