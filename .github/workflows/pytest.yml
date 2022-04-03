@@ -11,10 +11,18 @@ on:
 jobs:
   test:
     strategy:
-      fail-fast: true
       matrix:
         os: ["ubuntu-latest", "macos-latest"]
         python-version: ["3.6", "3.9"]
+        test-path:
+          - tests/test_cli.py
+          - tests/test_global_user_state.py
+          - tests/test_list_accelerators.py
+          - tests/test_optimizer_dryruns.py
+          - tests/test_optimizer_random_dag.py
+          - tests/test_pycryptodome_version.py
+          - tests/test_storage.py
+          - tests/test_wheels.py
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
@@ -32,4 +40,4 @@ jobs:
           pip install pytest
 
       - name: Run tests with pytest
-        run: pytest --ignore=tests/test_smoke.py
+        run: pytest ${{ matrix.test-path }}
