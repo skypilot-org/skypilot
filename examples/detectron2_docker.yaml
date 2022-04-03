@@ -28,9 +28,9 @@ run: |
   # Launch (require GPUs):
   docker run -a stdout -a stderr --gpus=all --pid=host --rm \
     --shm-size=8gb \
-    --volume=$HOME/.torch/fvcore_cache/detectron2:/tmp:rw \
+    --volume=$HOME/.torch/fvcore_cache:/tmp:rw \
     --volume="/inputs:/inputs:ro" \
-    --mount type=bind,src=/outputs,dst=/outputs \
+    --volume="/outputs:/outputs:rw" \
     detectron2:v0 /bin/bash -c \
     "echo CUDA_VISIBLE_DEVICES $CUDA_VISIBLE_DEVICES && \
     sudo chmod -R 777 /tmp && \
