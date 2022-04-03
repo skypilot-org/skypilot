@@ -69,7 +69,7 @@ describe all fields available.
       /datasets-storage:
         name: sky-dataset  # Name of storage, optional when source is bucket URI
         source: /local/path/datasets  # Source path, can be local or s3/gcs URL. Optional, do not specify to create an empty bucket.
-        store: s3  # Could be either 's3' or 'gcs'; default: 's3'. Optional.
+        store: s3  # Could be either 's3' or 'gcs'; default: None. Optional.
         persistent: True  # Defaults to True; can be set to false. Optional.
         mode: MOUNT  # Either MOUNT or COPY. Optional.
 
