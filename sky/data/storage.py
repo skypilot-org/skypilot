@@ -827,7 +827,7 @@ class S3Store(AbstractStore):
               fi
             fi
             echo "Mounting $S3_SOURCE to $MOUNT_PATH with goofys..."
-            goofys --stat-cache-ttl $STAT_CACHE_TTL --type-cache-ttl $TYPE_CACHE_TTL $S3_SOURCE $MOUNT_PATH
+            goofys -o allow_other --stat-cache-ttl $STAT_CACHE_TTL --type-cache-ttl $TYPE_CACHE_TTL $S3_SOURCE $MOUNT_PATH
             echo "Mounting done."
         """)
 

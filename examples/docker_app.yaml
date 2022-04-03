@@ -7,6 +7,11 @@ file_mounts:
   # wget http://images.cocodataset.org/val2017/000000439715.jpg -O ~/Downloads/detectron-inputs/input.jpg
   /inputs: ~/Downloads/detectron-inputs
   /detectron2: ./examples/docker/detectron2
+  /outputs:
+    # Change the name to your own bucket name.
+    name: sky-detectron2-outputs
+    mode: MOUNT
+
 
 setup: |
   # Build:
@@ -17,15 +22,15 @@ run: |
   # Launch (require GPUs):
   docker run -a stdout -a stderr --gpus=all --pid=host --rm \
     --shm-size=8gb \
-    --volume=$HOME/.torch/fvcore_cache/detectron2:/tmp/detectron2:rw \
+    --volume=$HOME/.torch/fvcore_cache/detectron2:/tmp:rw \
     --volume="/inputs:/inputs:ro" \
-    --volume="$HOME/outputs:/tmp/outputs:rw" \
+    --mount type=bind,src=/outputs,dst=/outputs \
     detectron2:v0 /bin/bash -c \
     "echo CUDA_VISIBLE_DEVICES $CUDA_VISIBLE_DEVICES && \
     sudo chmod -R 777 /tmp && \
     python3 demo/demo.py  \
       --config-file configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml \
-      --input /inputs/input.jpg --output /tmp/outputs \
+      --input /inputs/input.jpg --output /outputs \
       --opts MODEL.WEIGHTS detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl && \
     echo waiting 1200s && \
     sleep 12000"
