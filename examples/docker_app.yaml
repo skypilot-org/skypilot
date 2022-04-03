@@ -17,7 +17,7 @@ run: |
   # Launch (require GPUs):
   docker run -a stdout -a stderr --gpus=all --pid=host --rm \
     --shm-size=8gb --env="DISPLAY" \
-    --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
+    --volume=$HOME/.torch/fvcore_cache:/tmp:rw \
     --volume="/inputs:/inputs:ro" \
     detectron2:v0 /bin/bash -c \
     "nvidia-smi && \
