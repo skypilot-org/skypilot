@@ -12,12 +12,11 @@ setup: |
   # Build:
   sudo apt update
   docker build --build-arg USER_ID=$UID -t detectron2:v0 /detectron2
-  mkdir -p ~/outputs
 
 run: |
   # Launch (require GPUs):
   docker run -a stdout -a stderr --gpus=all --pid=host --rm \
-    --shm-size=8gb --env="DISPLAY" \
+    --shm-size=8gb \
     --volume=$HOME/.torch/fvcore_cache/detectron2:/tmp/detectron2:rw \
     --volume="/inputs:/inputs:ro" \
     --volume="$HOME/outputs:/tmp/outputs:rw" \
