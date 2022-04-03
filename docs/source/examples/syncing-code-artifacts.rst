@@ -130,13 +130,13 @@ mount like so in your task YAML:
         store: s3
         mode: MOUNT
 
-This :code:`file_mount` will fetch :code:`s3://my-sky-outputs/` the bucket if exists or
-create a new bucket (if the name is available), and mount it at :code:`/outputs`.
-Note that this is specified with :code:`mode: MOUNT`, so any files written to
-:code:`/outputs` will also be written to :code:`s3://my-sky-outputs/` bucket.
+This :code:`file_mount` will mount the bucket :code:`s3://my-sky-outputs/`
+(creating it if it doesn't exist) at :code:`/outputs`. Since this is specified
+with :code:`mode: MOUNT`, any files written to :code:`/outputs` will also be
+automatically written to the :code:`s3://my-sky-outputs/` bucket.
 
-Thus, if you point your code to produce files at :code:`/output/`, they
-will be available on the S3 bucket when they are written to :code:`/output/`.
+Thus, if you point your code to produce files at :code:`/outputs/`, they
+will be available on the S3 bucket when they are written to :code:`/outputs/`.
 You can then fetch those files either using the `S3 web console <https://s3.console.aws.amazon.com/s3/buckets>`_ or aws-cli
 (e.g., :code:`aws s3 ls my-sky-outputs`).
 
