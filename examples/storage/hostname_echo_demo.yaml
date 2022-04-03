@@ -1,0 +1,40 @@
+# Demo to show mounted files being shared across workers.
+#
+# Each worker echos its hostname to a file on the shared path every second for
+# 100 seconds, and then prints the ls of the dir. Users can see files being
+# created by running aws s3 ls locally on their laptop.
+#
+# Usage:
+#   sky launch -c hostecho hostname_echo_demo.yaml
+
+name: hostecho-demo
+
+resources:
+  cloud: aws
+  instance_type: m5.2xlarge
+
+num_nodes: 2
+
+file_mounts:
+  # Mount a private bucket called romil-fs-test to /sharedfs/
+  /sharedfs:
+    name: romil-fs-test
+    mode: MOUNT
+
+setup: |
+  echo Hello
+
+run: |
+  echo This is hostname: $(hostname)
+  
+  for ((i=1;i<=100;i++)); 
+    do 
+      # Run example write
+      echo ${i}
+      echo File ${i}, My hostname: $(hostname) > /sharedfs/$(hostname)_${i}.txt
+      sleep 1
+    done
+  
+  
+  # ls and exit
+  ls -la /sharedfs

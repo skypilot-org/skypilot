@@ -112,23 +112,17 @@ class ClusterStatus(enum.Enum):
 class StorageStatus(enum.Enum):
     """Storage status as recorded in table 'storage'."""
 
-    # Initializing Storage Class
+    # Initializing and uploading storage
     INIT = 'INIT'
 
-    # Uploading to AWS
-    UPLOAD_AWS = 'UPLOAD_AWS'
-
-    # Uploading to GCP
-    UPLOAD_GCP = 'UPLOAD_GCP'
-
-    # Uploading to AWS
-    UPLOAD_AZURE = 'UPLOAD_AZURE'
+    # Initialization failed
+    INIT_FAILED = 'INIT_FAILED'
 
     # Failed to Upload to Cloud
-    UPLOAD_FAIL = 'UPLOAD_FAIL'
+    UPLOAD_FAILED = 'UPLOAD_FAILED'
 
     # Finished uploading, in terminal state
-    DONE = 'DONE'
+    READY = 'READY'
 
 
 def _get_pretty_entry_point() -> str:
