@@ -188,7 +188,7 @@ and use mount mode when attaching it to your tasks like so:
 .. code-block:: yaml
 
     file_mounts:
-    /sharedfs:
+      /sharedfs:
         name: my-sky-sharedfs
         mode: MOUNT
 
