@@ -105,7 +105,8 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app
+  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf; # This is needed for `-o allow_other` option for `goofys`;
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
 
 # Command to start ray on the head node. You don't need to change this.
@@ -115,7 +116,6 @@ head_start_ray_commands:
   # This line is intentionally separated from the next line to reload the session after the ulimit is set.
   - sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;';
     (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
-    sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf; # This is needed for `-o allow_other` option for `goofys`
   - (ps aux | grep "-m sky.skylet.skylet" | grep -q python3) || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 & # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
   - ray stop; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
 
