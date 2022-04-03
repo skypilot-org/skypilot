@@ -20,7 +20,7 @@ import json
 import os
 from typing import Any
 
-from sky import authentication as auth
+from sky import clouds
 from sky import sky_logging
 from sky.adaptors import aws, gcp
 
@@ -48,7 +48,7 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     session = aws.session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
 
-    project_id = auth.get_gcp_subscription_id()
+    project_id = clouds.GCP.get_project_id()
 
     # Update cloud bucket IAM role to allow for data transfer
     storage_account = storagetransfer.googleServiceAccounts().get(

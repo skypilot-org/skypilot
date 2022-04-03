@@ -7,9 +7,12 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from google import auth
 
-from sky import authentication as sky_auth
 from sky import clouds
 from sky.clouds import service_catalog
+
+DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
+    '~/.config/gcloud/'
+    'application_default_credentials.json')
 
 
 def _run_output(cmd):
@@ -260,7 +263,7 @@ class GCP(clouds.Cloud):
             ]:
                 assert os.path.isfile(os.path.expanduser(file))
             # Check if application default credentials are set.
-            sky_auth.get_gcp_subscription_id()
+            self.get_project_id()
             # Calling `auth.default()` ensures the GCP client library works,
             # which is used by Ray Autoscaler to launch VMs.
             auth.default()
@@ -293,3 +296,22 @@ class GCP(clouds.Cloud):
         # TODO(zhwu): rsync_exclude here is unsafe as it may exclude the folder
         # from other file_mounts as well in ray yaml.
         return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
+
+    @classmethod
+    def get_project_id(cls):
+        if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
+            gcp_credential_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+        else:
+            gcp_credential_path = DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
+        if not os.path.exists(gcp_credential_path):
+            raise FileNotFoundError(f'No GCP credentials found at '
+                                    f'{gcp_credential_path}. Please set the '
+                                    f'GOOGLE_APPLICATION_CREDENTIALS '
+                                    f'environment variable to point to '
+                                    f'the path of your credentials file.')
+
+        with open(gcp_credential_path, 'r') as fp:
+            gcp_credentials = json.load(fp)
+        project_id = gcp_credentials.get('quota_project_id',
+                                         None) or gcp_credentials['project_id']
+        return project_id

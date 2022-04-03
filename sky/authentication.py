@@ -2,7 +2,6 @@
 import copy
 import functools
 import hashlib
-import json
 import os
 import pathlib
 import time
@@ -13,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from Crypto.PublicKey import RSA
 
+from sky import clouds
 from sky.adaptors import aws, gcp
 
 # TODO: Should tolerate if gcloud is not installed. Also,
@@ -22,9 +22,7 @@ from sky.adaptors import aws, gcp
 
 MAX_TRIALS = 64
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
-DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
-    '~/.config/gcloud/'
-    'application_default_credentials.json')
+
 
 def generate_rsa_key_pair():
     key = rsa.generate_private_key(backend=default_backend(),
@@ -154,7 +152,7 @@ def setup_gcp_authentication(config):
     public_key_path = get_public_key_path(private_key_path)
     config = copy.deepcopy(config)
 
-    project_id = get_gcp_subscription_id()
+    project_id = clouds.GCP.get_project_id()
     config['provider']['project_id'] = project_id
     compute = gcp.build('compute',
                         'v1',
@@ -203,25 +201,6 @@ def setup_gcp_authentication(config):
                 body=project['commonInstanceMetadata']).execute()
             time.sleep(5)
     return config
-
-
-def get_gcp_subscription_id():
-    if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
-        gcp_credential_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-    else:
-        gcp_credential_path = DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
-    if not os.path.exists(gcp_credential_path):
-        raise FileNotFoundError(f'No GCP credentials found at '
-                                f'{gcp_credential_path}. Please set the '
-                                f'GOOGLE_APPLICATION_CREDENTIALS '
-                                f'environment variable to point to '
-                                f'the path of your credentials file.')
-
-    with open(gcp_credential_path, 'r') as fp:
-        gcp_credentials = json.load(fp)
-    project_id = gcp_credentials.get('quota_project_id',
-                                     None) or gcp_credentials['project_id']
-    return project_id
 
 
 def _unexpand_user(path):
