@@ -1,5 +1,9 @@
-import click
 import pytest
+import tempfile
+import textwrap
+
+import click
+from click import testing as cli_testing
 
 import sky
 import sky.cli as cli
@@ -135,3 +139,37 @@ def test_infer_cloud_resource_check():
                                                 resources,
                                                 launched_resources,
                                                 user_requested_resources=True)
+
+
+def test_accelerator_mismatch():
+    """Test the specified accelerator does not match the instance_type."""
+    spec = textwrap.dedent("""\
+        resources:
+          cloud: aws
+          instance_type: p3.2xlarge""")
+    cli_runner = cli_testing.CliRunner()
+
+    def _capture_mismatch_gpus_spec(file_path, gpus: str):
+        result = cli_runner.invoke(cli.launch,
+                                   [file_path, '--gpus', gpus, '--dryrun'])
+        assert isinstance(result.exception, ValueError)
+        assert 'Infeasible resource demands found:' in str(result.exception)
+
+    def _capture_match_gpus_spec(file_path, gpus: str):
+        result = cli_runner.invoke(cli.launch,
+                                   [file_path, '--gpus', gpus, '--dryrun'])
+        assert not result.exit_code
+
+    with tempfile.NamedTemporaryFile('w', suffix='.yml') as f:
+        f.write(spec)
+        f.flush()
+
+        _capture_mismatch_gpus_spec(f.name, 'T4:1')
+        _capture_mismatch_gpus_spec(f.name, 'T4:0.5')
+        _capture_mismatch_gpus_spec(f.name, 'V100:2')
+        _capture_mismatch_gpus_spec(f.name, 'v100:2')
+
+        _capture_match_gpus_spec(f.name, 'V100:1')
+        _capture_match_gpus_spec(f.name, 'v100:1')
+        _capture_match_gpus_spec(f.name, 'V100:0.5')
+        _capture_match_gpus_spec(f.name, 'V100')
