@@ -39,15 +39,16 @@ install_requires = [
     'ray[default]>=1.9.0',
     'rich',
     'tabulate',
-    'filelock',  #TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
+    'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
-    'grpcio<=1.43.0'
+    'grpcio<=1.43.0',
+    'pulp',
 ]
 
 extras_require = {
-    'aws': ['awscli==1.22.17', 'boto3'],
+    'aws': ['awscli', 'boto3'],
     'azure': ['azure-cli==2.30.0'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],

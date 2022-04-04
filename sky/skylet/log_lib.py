@@ -1,8 +1,7 @@
-"""Sky logging utils.
+"""Sky logging library.
 
 This is a remote utility module that provides logging functionality.
 """
-import enum
 import io
 import os
 import selectors
@@ -14,9 +13,8 @@ import tempfile
 from typing import Iterator, List, Optional, Tuple, Union
 
 import colorama
-import rich.status
 
-from sky.skylet import job_lib
+from sky.skylet import job_lib, log_utils
 from sky import sky_logging
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
@@ -24,36 +22,22 @@ SKY_REMOTE_WORKDIR = '~/sky_workdir'
 logger = sky_logging.init_logger(__name__)
 
 
-class ProvisionStatus(enum.Enum):
-    LAUNCH = 0
-    RUNTIME_SETUP = 1
-
-
-def _update_ray_up_status(log_line, ray_up_state: str,
-                          status_display: rich.status.Status) -> None:
-    if 'Shared connection to' in log_line and ray_up_state[
-            'state'] == ProvisionStatus.LAUNCH:
-        status_display.stop()
-        logger.info(f'{colorama.Fore.GREEN}Head node is up.'
-                    f'{colorama.Style.RESET_ALL}')
-        status_display.start()
-        status_display.update('[bold cyan] Preparing Sky runtime')
-        ray_up_state['state'] = ProvisionStatus.RUNTIME_SETUP
-
-
-def redirect_process_output(proc,
-                            log_path: str,
-                            stream_logs: bool,
-                            start_streaming_at: str = '',
-                            skip_lines: Optional[List[str]] = None,
-                            parse_ray_up_logs: bool = False,
-                            replace_crlf: bool = False) -> Tuple[str, str]:
+def redirect_process_output(
+    proc,
+    log_path: str,
+    stream_logs: bool,
+    start_streaming_at: str = '',
+    skip_lines: Optional[List[str]] = None,
+    replace_crlf: bool = False,
+    line_processor: Optional[log_utils.LineProcessor] = None
+) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
-    # FIXME(gmittal): Remove hard-coded `parse_ray_up_logs` flag and add general
-    # LineParser: https://github.com/sky-proj/sky/pull/565#discussion_r826615923
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
+
+    if line_processor is None:
+        line_processor = log_utils.LineProcessor()
 
     sel = selectors.DefaultSelector()
     out_io = io.TextIOWrapper(proc.stdout,
@@ -72,46 +56,40 @@ def redirect_process_output(proc,
     stderr = ''
 
     start_streaming_flag = False
-    if parse_ray_up_logs:
-        ray_up_state = {'state': ProvisionStatus.LAUNCH}
-        provision_status = rich.status.Status('[bold cyan]Launching')
-        provision_status.start()
-    with open(log_path, 'a') as fout:
-        while len(sel.get_map()) > 0:
-            events = sel.select()
-            for key, _ in events:
-                line = key.fileobj.readline()
-                if not line:
-                    # Unregister the io when EOF reached
-                    sel.unregister(key.fileobj)
-                    continue
-                # Remove special characters to avoid cursor hidding
-                line = line.replace('\x1b[?25l', '')
-                if replace_crlf and line.endswith('\r\n'):
-                    # Replace CRLF with LF to avoid ray logging to the same line
-                    # due to separating lines with '\n'.
-                    line = line[:-2] + '\n'
-                if (skip_lines is not None and
-                        any(skip in line for skip in skip_lines)):
-                    continue
-                if start_streaming_at in line:
-                    start_streaming_flag = True
-                if key.fileobj is out_io:
-                    stdout += line
-                    out_stream = sys.stdout
-                else:
-                    stderr += line
-                    out_stream = sys.stderr
-                if stream_logs and start_streaming_flag:
-                    out_stream.write(line)
-                    out_stream.flush()
-                if log_path != '/dev/null':
-                    fout.write(line)
-                    fout.flush()
-                if parse_ray_up_logs:
-                    _update_ray_up_status(line, ray_up_state, provision_status)
-    if parse_ray_up_logs:
-        provision_status.stop()
+    with line_processor:
+        with open(log_path, 'a') as fout:
+            while len(sel.get_map()) > 0:
+                events = sel.select()
+                for key, _ in events:
+                    line = key.fileobj.readline()
+                    if not line:
+                        # Unregister the io when EOF reached
+                        sel.unregister(key.fileobj)
+                        continue
+                    # TODO(zhwu,gmittal): Put replace_crlf, skip_lines, and
+                    # start_streaming_at logic in processor.process_line(line)
+                    if replace_crlf and line.endswith('\r\n'):
+                        # Replace CRLF with LF to avoid ray logging to the same
+                        # line due to separating lines with '\n'.
+                        line = line[:-2] + '\n'
+                    if (skip_lines is not None and
+                            any(skip in line for skip in skip_lines)):
+                        continue
+                    if start_streaming_at in line:
+                        start_streaming_flag = True
+                    if key.fileobj is out_io:
+                        stdout += line
+                        out_stream = sys.stdout
+                    else:
+                        stderr += line
+                        out_stream = sys.stderr
+                    if stream_logs and start_streaming_flag:
+                        out_stream.write(line)
+                        out_stream.flush()
+                    if log_path != '/dev/null':
+                        fout.write(line)
+                        fout.flush()
+                    line_processor.process_line(line)
     return stdout, stderr
 
 
@@ -124,7 +102,7 @@ def run_with_log(
     shell: bool = False,
     with_ray: bool = False,
     redirect_stdout_stderr: bool = True,
-    parse_ray_up_logs: bool = False,
+    line_processor: Optional[log_utils.LineProcessor] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -183,7 +161,7 @@ def run_with_log(
                     'bash: cannot set terminal process group',
                     'bash: no job control in this shell',
                 ],
-                parse_ray_up_logs=parse_ray_up_logs,
+                line_processor=line_processor,
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
             )

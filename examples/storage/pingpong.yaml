@@ -1,0 +1,30 @@
+# sharedfs-pingpong - a demo to illustrate sky.Storage's mounting feature.
+#
+# This program implements coordination between processes using a shared file
+# system they can access. Each process reads data from <process-id>.txt, prints
+# it, and writes to <process-id + 1>.txt. This creates a synchronization between
+# processes where process i continues only after process i-1 has written it's
+# output.
+#
+# Usage:
+#   sky launch -c pingpong pingpong.yaml
+
+name: pingpong
+
+num_nodes: 5
+
+resources:
+  cloud: aws
+
+file_mounts:
+    /sharedfs:
+        name: sky-sharedfs-romilb2
+        mode: MOUNT
+
+setup: |
+  rm -rf sharedfs-pingpong
+  git clone https://github.com/romilbhardwaj/sharedfs-pingpong.git
+
+run: |
+  num_nodes=`echo "$SKY_NODE_IPS" | wc -l`
+  python -u sharedfs-pingpong/main.py --process-id ${SKY_NODE_RANK} --shared-path /sharedfs/ --num-processes $num_nodes

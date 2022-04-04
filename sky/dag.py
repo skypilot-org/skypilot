@@ -71,3 +71,20 @@ class Dag:
 
     def get_graph(self):
         return self.graph
+
+    def is_chain(self) -> bool:
+        # NOTE: this method assumes that the graph has no cycle.
+        is_chain = True
+        visited_zero_out_degree = False
+        for node in self.graph.nodes:
+            out_degree = self.graph.out_degree(node)
+            if out_degree > 1:
+                is_chain = False
+                break
+            elif out_degree == 0:
+                if visited_zero_out_degree:
+                    is_chain = False
+                    break
+                else:
+                    visited_zero_out_degree = True
+        return is_chain

@@ -245,6 +245,18 @@ def update_status() -> None:
             set_status(job['job_id'], status)
 
 
+def is_cluster_idle() -> bool:
+    """Returns if the cluster is idle (no in-flight jobs)."""
+    rows = _CURSOR.execute(
+        """\
+        SELECT COUNT(*) FROM jobs
+        WHERE status IN (?, ?, ?)
+        """, (JobStatus.INIT.value, JobStatus.PENDING.value,
+              JobStatus.RUNNING.value))
+    for (count,) in rows:
+        return count == 0
+
+
 def _readable_time_duration(start: Optional[int]) -> str:
     if start is None:
         return '-'
@@ -324,3 +336,79 @@ def log_dir(job_id: int) -> Optional[str]:
         return None, None
     run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
     return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
+
+
+class JobLibCodeGen:
+    """Code generator for job utility functions.
+
+    Usage:
+
+      >> codegen = JobLibCodeGen.add_job(...)
+    """
+
+    _PREFIX = ['from sky.skylet import job_lib, log_lib']
+
+    @classmethod
+    def add_job(cls, job_name: str, username: str, run_timestamp: str) -> str:
+        if job_name is None:
+            job_name = '-'
+        code = [
+            'job_id = job_lib.add_job('
+            f'{job_name!r}, {username!r}, {run_timestamp!r})',
+            'print(job_id, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def update_status(cls) -> str:
+        code = [
+            'job_lib.update_status()',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def show_jobs(cls, username: Optional[str], all_jobs: bool) -> str:
+        code = [f'job_lib.show_jobs({username!r}, {all_jobs})']
+        return cls._build(code)
+
+    @classmethod
+    def cancel_jobs(cls, job_ids: Optional[List[int]]) -> str:
+        code = [f'job_lib.cancel_jobs({job_ids!r})']
+        return cls._build(code)
+
+    @classmethod
+    def fail_all_jobs_in_progress(cls) -> str:
+        # Used only for restarting a cluster.
+        code = ['job_lib.fail_all_jobs_in_progress()']
+        return cls._build(code)
+
+    @classmethod
+    def tail_logs(cls, job_id: int) -> str:
+        code = [
+            f'log_dir = job_lib.log_dir({job_id})',
+            f'log_lib.tail_logs({job_id}, log_dir)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def get_job_status(cls, job_id: str) -> str:
+        # Prints "Job <id> <status>" for UX; caller should parse the last token.
+        code = [
+            f'job_status = job_lib.get_status({job_id})',
+            f'print("Job", {job_id}, job_status.value, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def get_log_path(cls, job_id: int) -> str:
+        code = [
+            f'log_dir = job_lib.log_dir({job_id})',
+            'print(log_dir, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def _build(cls, code: List[str]) -> str:
+        code = cls._PREFIX + code
+        code = ';'.join(code)
+        return f'python3 -u -c {code!r}'

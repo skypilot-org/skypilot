@@ -10,7 +10,6 @@ TODO:
 import subprocess
 import urllib.parse
 
-from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.adaptors import aws
 
@@ -40,8 +39,7 @@ class S3CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'aws --version > /dev/null 2>&1 || '
-        'pip3 install awscli==1.22.17',
+        'aws --version >/dev/null 2>&1 || pip3 install awscli',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -116,7 +114,11 @@ class GcsCloudStorage(CloudStorage):
         commands = list(self._GET_GSUTIL)
         commands.append(f'{self._GSUTIL} ls -d {url}')
         command = ' && '.join(commands)
-        p = backend_utils.run(command, stdout=subprocess.PIPE)
+        p = subprocess.run(command,
+                           stdout=subprocess.PIPE,
+                           shell=True,
+                           check=True,
+                           executable='/bin/bash')
         out = p.stdout.decode().strip()
         # Edge Case: Gcloud command is run for first time #437
         out = out.split('\n')[-1]

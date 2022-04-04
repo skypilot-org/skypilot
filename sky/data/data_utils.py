@@ -1,6 +1,7 @@
 """Miscellaneous Utils for Sky Data
 """
 from typing import Any, Tuple
+import urllib.parse
 
 from sky.adaptors import aws, gcp
 
@@ -62,3 +63,9 @@ def verify_gcs_bucket(name: str) -> bool:
         return True
     except gcp.not_found_exception():
         return False
+
+
+def is_cloud_store_url(url):
+    result = urllib.parse.urlsplit(url)
+    # '' means non-cloud URLs.
+    return result.netloc

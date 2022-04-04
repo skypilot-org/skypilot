@@ -1,6 +1,7 @@
 """Local docker backend for sky"""
 import subprocess
 import tempfile
+import typing
 from typing import Dict, Optional, Union
 
 import colorama
@@ -10,13 +11,14 @@ from sky import backends
 from sky.adaptors import docker
 from sky import global_user_state
 from sky import sky_logging
-from sky import resources
-from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import docker_utils
+from sky.data import storage as storage_lib
 
-Task = task_lib.Task
-Resources = resources.Resources
+if typing.TYPE_CHECKING:
+    from sky import resources
+    from sky import task as task_lib
+
 Path = str
 
 console = rich_console.Console()
@@ -140,8 +142,8 @@ class LocalDockerBackend(backends.Backend):
             self.containers[c.name] = c
 
     def provision(self,
-                  task: Task,
-                  to_provision: Optional[Resources],
+                  task: 'task_lib.Task',
+                  to_provision: Optional['resources.Resources'],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None) -> ResourceHandle:
@@ -185,10 +187,10 @@ class LocalDockerBackend(backends.Backend):
         self,
         handle: ResourceHandle,
         all_file_mounts: Dict[Path, Path],
-        cloud_to_remote_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Dict[Path, storage_lib.Storage],
     ) -> None:
         """File mounts in Docker are implemented with volume mounts (-v)."""
-        assert not cloud_to_remote_file_mounts, \
+        assert not storage_mounts, \
             'Only local file mounts are supported with LocalDockerBackend.'
         docker_mounts = {}
 
@@ -204,7 +206,7 @@ class LocalDockerBackend(backends.Backend):
                 }
         self.volume_mounts[handle] = docker_mounts
 
-    def setup(self, handle: ResourceHandle, task: Task) -> None:
+    def setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
         """
         Launches a container and runs a sleep command on it.
 
@@ -262,7 +264,7 @@ class LocalDockerBackend(backends.Backend):
                                                 cluster_handle=handle,
                                                 ready=True)
 
-    def execute(self, handle: ResourceHandle, task: Task,
+    def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
                 detach_run: bool) -> None:
         """ Launches the container."""
 
@@ -283,7 +285,7 @@ class LocalDockerBackend(backends.Backend):
         self._execute_task_one_node(handle, task)
 
     def _execute_task_one_node(self, handle: ResourceHandle,
-                               task: task_lib.Task) -> None:
+                               task: 'task_lib.Task') -> None:
         container = self.containers[handle]
         _, image_metadata = self.images[handle]
         with tempfile.NamedTemporaryFile(mode='w') as temp_file:
@@ -345,8 +347,12 @@ class LocalDockerBackend(backends.Backend):
             f'task run command, run {style.BRIGHT}docker run -it '
             f'{container.image.tags[0]} /bin/bash{style.RESET_ALL}')
 
-    def teardown(self, handle: ResourceHandle, terminate: bool) -> bool:
+    def teardown(self,
+                 handle: ResourceHandle,
+                 terminate: bool,
+                 purge: bool = False) -> bool:
         """Teardown kills the container."""
+        del purge  # Unused.
         if not terminate:
             logger.warning(
                 'LocalDockerBackend.teardown() will terminate '

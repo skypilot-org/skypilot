@@ -29,6 +29,9 @@ Core
    :prog: sky status
    :nested: full
 
+.. click:: sky.cli:autostop
+   :prog: sky autostop
+   :nested: full
 
 Interactive Nodes
 ------------

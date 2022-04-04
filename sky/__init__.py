@@ -10,7 +10,7 @@ from sky.execution import launch, exec  # pylint: disable=redefined-builtin
 from sky.resources import Resources
 from sky.task import Task
 from sky.optimizer import Optimizer, OptimizeTarget
-from sky.data import Storage, StorageType
+from sky.data import Storage, StoreType
 
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
@@ -36,5 +36,5 @@ __all__ = [
     'list_accelerators',
     '__root_dir__',
     'Storage',
-    'StorageType',
+    'StoreType',
 ]
