@@ -12,7 +12,7 @@ jobs:
   test:
     strategy:
       matrix:
-        os: ["ubuntu-latest", "macos-latest"]
+        os: ["ubuntu-latest"]
         python-version: [3.6]
         test-path:
           - tests/test_cli.py
@@ -32,6 +32,16 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        if: startsWith(runner.os, 'Linux')
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-pytest-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip-pytest-${{ matrix.python-version }}
+
 
       - name: Install dependencies
         run: |
