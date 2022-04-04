@@ -29,3 +29,18 @@ Then, any Sky clusters launched from this machine would be able to clone private
       git clone git@github.com:your-proj/your-repo.git
 
 Note: currently, cloning private repositories in the ``run`` commands is not supported yet.
+
+Can I file mounts to a repository cloned in a task's ``setup`` commands?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Yes, you can use symlink to link the mounted files/folders to the repository cloned in the ``setup`` commands. For example:
+
+.. code-block:: yaml
+
+    # your_task.yaml
+    file_mounts:
+      /tmp/dst: /local/src
+
+    setup: |
+      git clone git@github.com:your-proj/your-repo.git
+      ln -s /tmp/dst ./your-repo/dst
