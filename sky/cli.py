@@ -568,6 +568,19 @@ def launch(
     """
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
+
+    if not yes:
+        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
+        # it exists but is STOPPED.
+        maybe_status = backend_utils.get_status_from_cluster_name(cluster)
+        prompt = None
+        if maybe_status is None:
+            prompt = 'Launching a new cluster. Proceed?'
+        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
+            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
+
     entrypoint = ' '.join(entrypoint)
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
@@ -605,18 +618,6 @@ def launch(
             task.num_nodes = num_nodes
         if name is not None:
             task.name = name
-
-    if not yes:
-        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
-        maybe_status = backend_utils.get_status_from_cluster_name(cluster)
-        prompt = None
-        if maybe_status is None:
-            prompt = 'Launching a new cluster. Proceed?'
-        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
-            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
 
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
