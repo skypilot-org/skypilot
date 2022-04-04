@@ -151,9 +151,14 @@ def test_accelerator_mismatch():
 
     def _capture_mismatch_gpus_spec(file_path, gpus: str):
         result = cli_runner.invoke(cli.launch,
-                                   [f.name, '--gpus', gpus, '--dryrun'])
+                                   [file_path, '--gpus', gpus, '--dryrun'])
         assert isinstance(result.exception, ValueError)
         assert 'Infeasible resource demands found:' in str(result.exception)
+
+    def _capture_match_gpus_spec(file_path, gpus: str):
+        result = cli_runner.invoke(cli.launch,
+                                   [file_path, '--gpus', gpus, '--dryrun'])
+        assert not result.exit_code
 
     with tempfile.NamedTemporaryFile('w', suffix='.yml') as f:
         f.write(spec)
@@ -163,14 +168,6 @@ def test_accelerator_mismatch():
         _capture_mismatch_gpus_spec(f.name, 'T4:0.5')
         _capture_mismatch_gpus_spec(f.name, 'V100:2')
 
-        result = cli_runner.invoke(cli.launch,
-                                   [f.name, '--gpus', 'V100:0.5', '--dryrun'])
-        assert not result.return_value
-
-        result = cli_runner.invoke(cli.launch,
-                                   [f.name, '--gpus', 'V100', '--dryrun'])
-        assert not result.return_value
-
-        result = cli_runner.invoke(cli.launch,
-                                   [f.name, '--gpus', 'V100:1', '--dryrun'])
-        assert not result.return_value
+        _capture_match_gpus_spec(f.name, 'V100:1')
+        _capture_match_gpus_spec(f.name, 'V100:0.5')
+        _capture_match_gpus_spec(f.name, 'V100')
