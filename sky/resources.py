@@ -227,15 +227,23 @@ class Resources:
             return False
         # self.instance_type <= other.instance_type
 
+        # For case insensitive comparison.
+        # TODO(wei-lin): This is a hack. We may need to use our catalog to
+        # handle this.
         other_accelerators = other.accelerators
+        if other_accelerators is not None:
+            other_accelerators = {
+                acc.upper(): num_acc
+                for acc, num_acc in other_accelerators.items()
+            }
         if self.accelerators is not None and other_accelerators is None:
             return False
 
         if self.accelerators is not None:
             for acc in self.accelerators:
-                if acc not in other_accelerators:
+                if acc.upper() not in other_accelerators:
                     return False
-                if self.accelerators[acc] > other_accelerators[acc]:
+                if self.accelerators[acc] > other_accelerators[acc.upper()]:
                     return False
         # self.accelerators <= other.accelerators
 
