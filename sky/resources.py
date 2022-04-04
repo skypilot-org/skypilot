@@ -48,40 +48,6 @@ class Resources:
         self.instance_type = instance_type
         assert not (instance_type is not None and cloud is None), \
             'If instance_type is specified, must specify the cloud'
-        if accelerators is not None:
-            if isinstance(accelerators, str):  # Convert to Dict[str, int].
-                if ':' not in accelerators:
-                    accelerators = {accelerators: 1}
-                else:
-                    splits = accelerators.split(':')
-                    parse_error = ('The "accelerators" field as a str '
-                                   'should be <name> or <name>:<cnt>. '
-                                   f'Found: {accelerators!r}')
-                    if len(splits) != 2:
-                        raise ValueError(parse_error)
-                    try:
-                        accelerators = {splits[0]: int(splits[1])}
-                    except ValueError:
-                        try:
-                            accelerators = {splits[0]: float(splits[1])}
-                        except ValueError:
-                            raise ValueError(parse_error) from None
-            assert len(accelerators) == 1, accelerators
-
-            acc, _ = list(accelerators.items())[0]
-            if 'tpu' in acc.lower():
-                if cloud is None:
-                    cloud = clouds.GCP()
-                assert cloud.is_same_cloud(clouds.GCP()), 'Cloud must be GCP.'
-                if accelerator_args is None:
-                    accelerator_args = {}
-                if 'tf_version' not in accelerator_args:
-                    logger.info('Missing tf_version in accelerator_args, using'
-                                ' default (2.5.0)')
-                    accelerator_args['tf_version'] = '2.5.0'
-
-        self._accelerators = accelerators
-        self.accelerator_args = accelerator_args
 
         self._use_spot_specified = use_spot is not None
         self.use_spot = use_spot if use_spot is not None else False
@@ -97,7 +63,7 @@ class Resources:
         else:
             self.disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self._try_validate_accelerators()
+        self.set_accelerators(accelerators, accelerator_args)
 
     def __repr__(self) -> str:
         accelerators = ''
@@ -111,6 +77,50 @@ class Resources:
             use_spot = '[Spot]'
         return (f'{self.cloud}({self.instance_type}{use_spot}'
                 f'{accelerators}{accelerator_args})')
+
+    def set_accelerators(
+            self, accelerators: Union[None, str, Dict[str, int]],
+            accelerator_args: Optional[Dict[str, str]] = None) -> None:
+        """Sets accelerators.
+
+        Args:
+            accelerators: A string or a dict of accelerator types to counts.
+            accelerator_args: A dict of accelerator types to args.
+        """
+        if accelerators is not None:
+            if isinstance(accelerators, str):  # Convert to Dict[str, int].
+                if ':' not in accelerators:
+                    accelerators = {accelerators: 1}
+                else:
+                    splits = accelerators.split(':')
+                    parse_error = ('The "accelerators" field as a str '
+                                   'should be <name> or <name>:<cnt>. '
+                                   f'Found: {accelerators!r}')
+                    if len(splits) != 2:
+                        raise ValueError(parse_error)
+                    try:
+                        num = float(splits[1])
+                        num = int(num) if num.is_integer() else num
+                        accelerators = {splits[0]: num}
+                    except ValueError:
+                        raise ValueError(parse_error) from None
+            assert len(accelerators) == 1, accelerators
+
+            acc, _ = list(accelerators.items())[0]
+            if 'tpu' in acc.lower():
+                if self.cloud is None:
+                    self.cloud = clouds.GCP()
+                assert self.cloud.is_same_cloud(clouds.GCP()), 'Cloud must be GCP.'
+                if accelerator_args is None:
+                    accelerator_args = {}
+                if 'tf_version' not in accelerator_args:
+                    logger.info('Missing tf_version in accelerator_args, using'
+                                ' default (2.5.0)')
+                    accelerator_args['tf_version'] = '2.5.0'
+
+        self._accelerators = accelerators
+        self.accelerator_args = accelerator_args
+        self._try_validate_accelerators()
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self.instance_type is not None
