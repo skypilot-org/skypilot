@@ -35,7 +35,7 @@ import shlex
 import sys
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 import yaml
 
 import click
@@ -97,22 +97,6 @@ def _truncate_long_string(s: str, max_length: int = 35) -> str:
         if total >= max_length:
             break
     return ' '.join(splits[:i]) + ' ...'
-
-
-def _parse_accelerator_options(accelerator_options: str) -> Dict[str, float]:
-    """Parses accelerator options: e.g., V100:8 into {'V100': 8}."""
-    accelerators = {}
-    accelerator_options = accelerator_options.split(':')
-    if len(accelerator_options) == 1:
-        accelerator_type = accelerator_options[0]
-        accelerators[accelerator_type] = 1
-    elif len(accelerator_options) == 2:
-        accelerator_type = accelerator_options[0]
-        accelerator_count = float(accelerator_options[1])
-        accelerators[accelerator_type] = accelerator_count
-    else:
-        raise ValueError(f'Invalid accelerator option: {accelerator_options}')
-    return accelerators
 
 
 def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
