@@ -50,7 +50,6 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import clouds
 from sky import data
-from sky import resources
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
@@ -114,6 +113,7 @@ def _parse_accelerator_options(accelerator_options: str) -> Dict[str, float]:
     else:
         raise ValueError(f'Invalid accelerator option: {accelerator_options}')
     return accelerators
+
 
 def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
     """Check if cloud is registered and return cloud object."""

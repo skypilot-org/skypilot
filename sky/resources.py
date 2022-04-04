@@ -79,7 +79,8 @@ class Resources:
                 f'{accelerators}{accelerator_args})')
 
     def set_accelerators(
-            self, accelerators: Union[None, str, Dict[str, int]],
+            self,
+            accelerators: Union[None, str, Dict[str, int]],
             accelerator_args: Optional[Dict[str, str]] = None) -> None:
         """Sets accelerators.
 
@@ -110,7 +111,8 @@ class Resources:
             if 'tpu' in acc.lower():
                 if self.cloud is None:
                     self.cloud = clouds.GCP()
-                assert self.cloud.is_same_cloud(clouds.GCP()), 'Cloud must be GCP.'
+                assert self.cloud.is_same_cloud(
+                    clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
                 if 'tf_version' not in accelerator_args:
