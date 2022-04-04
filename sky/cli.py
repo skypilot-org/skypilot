@@ -548,7 +548,7 @@ def launch(
     cluster: Optional[str],
     dryrun: bool,
     detach_run: bool,
-    backend_name: str,
+    backend_name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     gpus: Optional[str],
