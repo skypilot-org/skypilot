@@ -85,6 +85,7 @@ def _get_cluster_config_template(cloud):
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
+        clouds.Local: 'local-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
