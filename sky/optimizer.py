@@ -665,7 +665,7 @@ class Optimizer:
                         logger.info(
                             f'Multiple {cloud} instances satisfy '
                             f'{acc_name}:{int(acc_count)}. '
-                            f'The cheapest {candidate_list[0]!r} is considered '
+                            f'The cheapest {candidate_list[0]!r} is picked '
                             f'among:\n{instance_list}.\n')
             if is_multi_instances:
                 logger.info(
