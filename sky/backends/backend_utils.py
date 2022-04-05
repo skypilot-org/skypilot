@@ -55,12 +55,16 @@ RESET_BOLD = '\033[0m'
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
+_LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) local[._]cluster[._]node')
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
+_LAUNCHING_LOCAL_IP_PATTERN = re.compile(
+    r'({}): local[._]cluster[._]node'.format(IP_ADDR_REGEX))
+_LOCAL_RAY_INIT_CMD = 'eval "$(conda shell.bash hook)" && conda activate sky-ray-env && '
 WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 
 
@@ -498,6 +502,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                          local_wheel_path: pathlib.Path,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
+                         auth_config: Optional[Dict[str, str]] = None,
                          dryrun: bool = False) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -518,8 +523,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
         region = cloud.get_default_region()
         zones = region.zones
     else:
-        assert isinstance(
-            cloud, clouds.Azure
+        assert isinstance(cloud, clouds.Azure) or isinstance(
+            cloud, clouds.Local
         ) or zones is not None, 'Set either both or neither for: region, zones.'
     region = region.name
     if isinstance(cloud, clouds.AWS):
@@ -590,6 +595,12 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
+                # Local IP Handling.
+                'head_ip': '169.229.48.124',
+                'worker_ips': ['169.229.48.125'],
+                # Authentication (optional).
+                'ssh_user': auth_config['ssh_user'],
+                'ssh_private_key': auth_config['ssh_private_key'],
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -671,10 +682,12 @@ def get_run_timestamp() -> str:
 
 
 def wait_until_ray_cluster_ready(
-        cluster_config_file: str,
-        num_nodes: int,
-        log_path: str,
-        nodes_launching_progress_timeout: Optional[int] = None) -> bool:
+    cluster_config_file: str,
+    num_nodes: int,
+    log_path: str,
+    cloud: clouds.Cloud,
+    nodes_launching_progress_timeout: Optional[int] = None,
+) -> bool:
     """Returns whether the entire ray cluster is ready."""
     if num_nodes <= 1:
         return
@@ -691,12 +704,15 @@ def wait_until_ray_cluster_ready(
 
     ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
+    init_cmd = ""
+    if cloud.is_same_cloud(sky.Local()):
+        init_cmd = _LOCAL_RAY_INIT_CMD
     start = time.time()
     with console.status('[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = run_command_on_ip_via_ssh(
                 head_ip,
-                'ray status',
+                f'{init_cmd}ray status',
                 ssh_user=ssh_user,
                 ssh_private_key=ssh_key,
                 log_path=log_path,
@@ -707,11 +723,18 @@ def wait_until_ray_cluster_ready(
             logger.debug(output)
 
             # Workers that are ready
-            result = _LAUNCHED_WORKER_PATTERN.findall(output)
+            local_total_nodes = 0
             ready_workers = 0
+            if isinstance(cloud, clouds.Local):
+                result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
+                local_total_nodes = int(result[0])
+                ready_workers = local_total_nodes - 1
+            else:
+                result = _LAUNCHED_WORKER_PATTERN.findall(output)
+                ready_workers = int(result[0])
+
             if result:
                 assert len(result) == 1, result
-                ready_workers = int(result[0])
 
             result = _LAUNCHED_HEAD_PATTERN.findall(output)
             ready_head = 0
@@ -724,12 +747,15 @@ def wait_until_ray_cluster_ready(
                                  f'{ready_workers} out of {num_nodes - 1} '
                                  'workers ready')
 
-            if ready_head + ready_workers == num_nodes:
+            if ready_head + ready_workers == num_nodes or local_total_nodes == num_nodes:
                 # All nodes are up.
                 break
 
             # Pending workers that have been launched by ray up.
-            found_ips = _LAUNCHING_IP_PATTERN.findall(output)
+            if isinstance(cloud, clouds.Local):
+                found_ips = _LAUNCHING_LOCAL_IP_PATTERN.findall(output)
+            else:
+                found_ips = _LAUNCHING_IP_PATTERN.findall(output)
             pending_workers = len(found_ips)
 
             # TODO(zhwu): Handle the case where the following occurs, where ray
@@ -756,7 +782,8 @@ def wait_until_ray_cluster_ready(
                     'Timed out when waiting for workers to be provisioned.')
                 return False  # failed
 
-            if '(no pending nodes)' in output and '(no failures)' in output:
+            if '(no pending nodes)' in output and '(no failures)' in output and not isinstance(
+                    cloud, clouds.Local):
                 # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
                 # that GCP can satisfy only by half, the worker node would be
                 # forgotten. The correct behavior should be for it to error out.
@@ -1079,6 +1106,12 @@ def get_node_ips(
                        stderr=subprocess.PIPE)
             out = proc.stdout.decode()
             worker_ips = re.findall(IP_ADDR_REGEX, out)
+            # Bug for Ray Autoscaler On-prem; ray-get-worker-ips outputs nothing!
+            # Workaround: List of IPs in Stderr
+            if read_yaml(yaml_handle)['provider']['type'] == 'local':
+                out = proc.stderr.decode()
+                worker_ips = re.findall(IP_ADDR_REGEX, out)
+                worker_ips = worker_ips[1:]
         except subprocess.CalledProcessError as e:
             raise exceptions.FetchIPError(
                 exceptions.FetchIPError.Reason.WORKER) from e

@@ -68,6 +68,7 @@ class Task:
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
         # Advanced:
+        auth_config: Optional[str] = None,
         docker_image: Optional[str] = None,
     ):
         """Initializes a Task.
@@ -121,7 +122,7 @@ class Task:
         self.file_mounts = None
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
-
+        self.auth_config = auth_config
         # Check if the task is legal.
         self._validate()
 
@@ -189,13 +190,12 @@ class Task:
             config = {}
 
         # TODO: perform more checks on yaml and raise meaningful errors.
-        task = Task(
-            config.get('name'),
-            run=config.get('run'),
-            workdir=config.get('workdir'),
-            setup=config.get('setup'),
-            num_nodes=config.get('num_nodes'),
-        )
+        task = Task(config.get('name'),
+                    run=config.get('run'),
+                    workdir=config.get('workdir'),
+                    setup=config.get('setup'),
+                    num_nodes=config.get('num_nodes'),
+                    auth_config=config.get('auth'))
 
         # Create lists to store storage objects inlined in file_mounts.
         # These are retained in dicts in the YAML schema and later parsed to
@@ -272,6 +272,8 @@ class Task:
         resources = config.get('resources')
         if resources is not None:
             if resources.get('cloud') is not None:
+                if resources.get('cloud') == 'local':
+                    task.num_nodes = len(resources['ips'])
                 resources['cloud'] = clouds.CLOUD_REGISTRY[resources['cloud']]
             if resources.get('accelerators') is not None:
                 resources['accelerators'] = resources['accelerators']

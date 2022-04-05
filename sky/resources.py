@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from sky import clouds
 from sky import sky_logging
@@ -43,8 +43,17 @@ class Resources:
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
+        ips: Optional[List[str]] = None,
     ):
         self.cloud = cloud
+
+        # Check for Local Config
+        if cloud is not None and isinstance(self.cloud, clouds.Local):
+            assert instance_type is None and accelerators is None and \
+            accelerator_args is None and use_spot is None and \
+            disk_size is None and ips, 'Resources is passed incorrectly \
+            for Local/On-Prem, only Cloud and IPs fields should be filled.'
+
         self.instance_type = instance_type
         assert not (instance_type is not None and cloud is None), \
             'If instance_type is specified, must specify the cloud'
@@ -96,6 +105,8 @@ class Resources:
             self.disk_size = int(disk_size)
         else:
             self.disk_size = _DEFAULT_DISK_SIZE_GB
+
+        self.ips = ips
 
         self._try_validate_accelerators()
 
@@ -247,7 +258,8 @@ class Resources:
             return self.instance_type == other.instance_type
         # For GCP, when a accelerator type fails to launch, it should be blocked
         # regardless of the count, since the larger number will fail either.
-        return self.accelerators.keys() == other.accelerators.keys()
+        return (self.accelerators is None and other.accelerators is None
+               ) or self.accelerators.keys() == other.accelerators.keys()
 
     def is_empty(self) -> bool:
         """Is this Resources an empty request (all fields None)?"""

@@ -52,9 +52,10 @@ logger = sky_logging.init_logger(__name__)
 
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
-# Timeout for provision a cluster and wait for it to be ready in seconds.
-_NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
+# Timeout for provision a cluster and wait for it to be ready in seconds. (5 min)
+_NODES_LAUNCHING_PROGRESS_TIMEOUT = 300
 
+_LOCAL_RAY_INIT_CMD = 'eval "$(conda shell.bash hook)" && conda activate sky-ray-env && '
 _LOCK_FILENAME = '~/.sky/.{}.lock'
 _FILELOCK_TIMEOUT_SECONDS = 10
 
@@ -586,6 +587,10 @@ class RetryingVmProvisioner(object):
         if isinstance(cloud, clouds.Azure):
             return self._update_blocklist_on_azure_error(
                 region, zones, stdout, stderr)
+
+        if isinstance(cloud, clouds.Local):
+            return None
+
         assert False, f'Unknown cloud: {cloud}.'
 
     def _yield_region_zones(self, to_provision: 'resources_lib.Resources',
@@ -763,7 +768,8 @@ class RetryingVmProvisioner(object):
                             dryrun: bool,
                             stream_logs: bool,
                             cluster_name: str,
-                            cluster_exists: bool = False):
+                            cluster_exists: bool = False,
+                            auth_config: Dict[str, str] = None):
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore
@@ -794,7 +800,8 @@ class RetryingVmProvisioner(object):
                 self._local_wheel_path,
                 region=region,
                 zones=zones,
-                dryrun=dryrun)
+                dryrun=dryrun,
+                auth_config=auth_config)
             if dryrun:
                 return
             tpu_name = config_dict.get('tpu_name')
@@ -963,7 +970,8 @@ class RetryingVmProvisioner(object):
             cluster_config_file,
             num_nodes,
             log_path=log_abs_path,
-            nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT)
+            nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT,
+            cloud=to_provision_cloud)
         if cluster_ready:
             cluster_status = self.GangSchedulingStatus.CLUSTER_READY
         else:
@@ -986,17 +994,24 @@ class RetryingVmProvisioner(object):
             #   - ray up --restart-only
             return
         backend = CloudVmRayBackend()
+
+        init_cmd = ""
+        if handle.launched_resources.cloud.is_same_cloud(sky.Local()):
+            init_cmd = _LOCAL_RAY_INIT_CMD
         returncode = backend.run_on_head(
             handle,
-            'ray status',
+            f'{init_cmd}ray status',
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
             use_cached_head_ip=False)
         if returncode == 0:
             return
-        backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
+        backend.run_on_head(handle,
+                            f'{init_cmd}ray stop',
+                            use_cached_head_ip=False)
         log_lib.run_with_log(
+            init_cmd.split(' ') +
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
             stream_logs=True)
@@ -1028,7 +1043,8 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
-                    cluster_exists=cluster_exists)
+                    cluster_exists=cluster_exists,
+                    auth_config=task.auth_config)
                 if dryrun:
                     return
                 config_dict['launched_resources'] = to_provision
@@ -1828,8 +1844,12 @@ class CloudVmRayBackend(backends.Backend):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
+        init_cmd = ""
+        if handle.launched_resources.cloud.is_same_cloud(sky.Local()):
+            init_cmd = _LOCAL_RAY_INIT_CMD
+
         job_submit_cmd = (
-            f'mkdir -p {remote_log_dir} && ray job submit '
+            f'{init_cmd}mkdir -p {remote_log_dir} && ray job submit '
             f'--address=127.0.0.1:8265 --job-id {job_id} --no-wait '
             f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
 

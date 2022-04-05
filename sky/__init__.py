@@ -18,6 +18,7 @@ __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 AWS = clouds.AWS
 Azure = clouds.Azure
 GCP = clouds.GCP
+Local = clouds.Local
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     'GCP',
     'Dag',
     'DagContext',
+    'Local',
     'Optimizer',
     'OptimizeTarget',
     'Resources',

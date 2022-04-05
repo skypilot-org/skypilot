@@ -48,6 +48,7 @@ class Local(clouds.Cloud):
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
+        # On-prem machines on Sky are assumed free
         return 0.0
 
     def accelerators_to_hourly_cost(self, accelerators):
