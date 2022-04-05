@@ -142,3 +142,7 @@ class Cloud:
         and a list of patterns that will be excluded (used as rsync_exclude).
         """
         raise NotImplementedError
+
+    def validate_instance_type(self, instance_type):
+        """Returns whether the instance type is valid for this cloud."""
+        raise NotImplementedError

@@ -84,6 +84,10 @@ def list_accelerator_counts(
         ret[gpu] = sorted(counts)
     return ret
 
+def validate_instance_type(instance_type: str,
+                           clouds: CloudFilter = None) -> bool:
+    """Validates the instance type."""
+    return _map_clouds_catalog(clouds, 'validate_instance_type', instance_type)
 
 def get_region_zones_for_instance_type(
         instance_type: str,

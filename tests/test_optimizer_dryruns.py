@@ -146,6 +146,16 @@ def test_instance_type_matches_accelerators(monkeypatch):
                       accelerators={'V100': 1}))
 
 
+def test_infer_cloud_from_instance_type(monkeypatch):
+    # AWS instances
+    _test_resources(monkeypatch, sky.Resources(instance_type='m5.12xlarge'))
+    _test_resources(monkeypatch, sky.Resources(instance_type='p3.8xlarge'))
+    _test_resources(monkeypatch, sky.Resources(instance_type='g4dn.2xlarge'))
+    # GCP instances
+    _test_resources(monkeypatch, sky.Resources(instance_type='n1-standard-96'))
+    #Azure instances
+    _test_resources(monkeypatch, sky.Resources(instance_type='Standard_NC12s_v3'))
+
 def test_parse_accelerators_from_yaml():
     spec = textwrap.dedent("""\
       resources:
@@ -183,3 +193,10 @@ def test_invalid_num_nodes():
                 task = sky.Task()
                 task.num_nodes = invalid_value
             assert 'num_nodes should be a positive int' in str(e.value)
+
+
+def test_invalid_instance_type():
+    for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
+        with pytest.raises(ValueError) as e:
+            sky.Resources(cloud, instance_type='invalid')
+        assert 'Invalid instance type' in str(e.value)

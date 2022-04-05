@@ -290,3 +290,6 @@ class GCP(clouds.Cloud):
         # TODO(zhwu): rsync_exclude here is unsafe as it may exclude the folder
         # from other file_mounts as well in ray yaml.
         return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
+
+    def validate_instance_type(self, instance_type):
+        return instance_type in self._ON_DEMAND_PRICES.keys()

@@ -2,6 +2,7 @@
 from typing import Dict, Optional, Union
 
 from sky import clouds
+from sky import global_user_state
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
@@ -44,10 +45,11 @@ class Resources:
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
     ):
+        self.__version__ = '0.0.1'
         self.cloud = cloud
+
+        # Calling the setter for instance_type.
         self.instance_type = instance_type
-        assert not (instance_type is not None and cloud is None), \
-            'If instance_type is specified, must specify the cloud'
 
         self._use_spot_specified = use_spot is not None
         self.use_spot = use_spot if use_spot is not None else False
@@ -75,9 +77,62 @@ class Resources:
         use_spot = ''
         if self.use_spot:
             use_spot = '[Spot]'
-        return (f'{self.cloud}({self.instance_type}{use_spot}'
+        return (f'{self.cloud}({self._instance_type}{use_spot}'
                 f'{accelerators}{accelerator_args})')
 
+    @property
+    def instance_type(self):
+        return self._instance_type
+
+    @instance_type.setter
+    def instance_type(self, instance_type: str):
+        self._instance_type = instance_type
+        
+        if instance_type is None: return
+
+        # Validate instance type
+        if self.cloud is not None:
+            valid = self.cloud.validate_instance_type(self._instance_type)
+            if not valid:
+                raise ValueError(
+                    f'Invalid instance type {self._instance_type!r} '
+                    f'for cloud {self.cloud}.')
+        else:
+            # If cloud not specified
+            valid_clouds = []
+            enabled_clouds = global_user_state.get_enabled_clouds()
+            for cloud in enabled_clouds:
+                valid = cloud.validate_instance_type(self._instance_type)
+                if valid:
+                    valid_clouds.append(cloud)
+            if len(valid_clouds) == 0:
+                raise ValueError(
+                    f'Invalid instance type {self._instance_type!r} '
+                    f'for any cloud {enabled_clouds}.')
+            if len(valid_clouds) > 1:
+                raise ValueError(
+                    f'Ambiguous instance type {self._instance_type!r} '
+                    f'Please specify cloud explicitly among {valid_clouds}.')
+            logger.info(f'Cloud is not specified, using {valid_clouds[0]} '
+                        f'inferred from the instance_type {instance_type!r}.')
+            self.cloud = valid_clouds[0]
+            
+    
+    @property
+    def accelerators(self) -> Optional[Dict[str, int]]:
+        """Returns the accelerators field directly or by inferring.
+
+        For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
+        set to None, but this function will infer {'V100': 1} from the instance
+        type.
+        """
+        if self._accelerators is not None:
+            return self._accelerators
+        if self.cloud is not None and self._instance_type is not None:
+            return self.cloud.get_accelerators_from_instance_type(
+                self._instance_type)
+        return None
+    
     def set_accelerators(
             self,
             accelerators: Union[None, str, Dict[str, int]],
@@ -125,7 +180,7 @@ class Resources:
         self._try_validate_accelerators()
 
     def is_launchable(self) -> bool:
-        return self.cloud is not None and self.instance_type is not None
+        return self.cloud is not None and self._instance_type is not None
 
     def _try_validate_accelerators(self) -> None:
         """Try-validates accelerators against the instance type."""
@@ -136,13 +191,13 @@ class Resources:
                 return
             acc_from_instance_type = (
                 self.cloud.get_accelerators_from_instance_type(
-                    self.instance_type))
+                    self._instance_type))
             if not Resources(accelerators=acc_requested).less_demanding_than(
                     Resources(accelerators=acc_from_instance_type)):
                 raise ValueError(
                     'Infeasible resource demands found:\n'
-                    f'  Instance type requested: {self.instance_type}\n'
-                    f'  Accelerators for {self.instance_type}: '
+                    f'  Instance type requested: {self._instance_type}\n'
+                    f'  Accelerators for {self._instance_type}: '
                     f'{acc_from_instance_type}\n'
                     f'  Accelerators requested: {acc_requested}\n'
                     f'To fix: either only specify instance_type, or change '
@@ -151,31 +206,13 @@ class Resources:
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
 
-    @property
-    def accelerators(self) -> Optional[Dict[str, int]]:
-        """Returns the accelerators field directly or by inferring.
-
-        For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
-        set to None, but this function will infer {'V100': 1} from the instance
-        type.
-        """
-        if self._accelerators is not None:
-            return self._accelerators
-        if self.cloud is not None and self.instance_type is not None:
-            return self.cloud.get_accelerators_from_instance_type(
-                self.instance_type)
-        return None
-
-    @accelerators.setter
-    def accelerators(self, accelerators: Union[None, Dict[str, int]]) -> None:
-        self._accelerators = accelerators
 
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
-            self.instance_type, self.use_spot)
+            self._instance_type, self.use_spot)
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
@@ -195,10 +232,10 @@ class Resources:
             return False
         # self.cloud == other.cloud
 
-        if (self.instance_type is not None and
-                self.instance_type != other.instance_type):
+        if (self._instance_type is not None and
+                self._instance_type != other.instance_type):
             return False
-        # self.instance_type == other.instance_type
+        # self._instance_type == other.instance_type
 
         other_accelerators = other.accelerators
         accelerators = self.accelerators
@@ -222,10 +259,10 @@ class Resources:
             return False
         # self.cloud <= other.cloud
 
-        if (self.instance_type is not None and
-                self.instance_type != other.instance_type):
+        if (self._instance_type is not None and
+                self._instance_type != other.instance_type):
             return False
-        # self.instance_type <= other.instance_type
+        # self._instance_type <= other.instance_type
 
         # For case insensitive comparison.
         # TODO(wei-lin): This is a hack. We may need to use our catalog to
@@ -263,8 +300,8 @@ class Resources:
         assert self.cloud is not None and other.cloud is not None
         if not self.cloud.is_same_cloud(other.cloud):
             return False
-        if self.instance_type is not None or other.instance_type is not None:
-            return self.instance_type == other.instance_type
+        if self._instance_type is not None or other.instance_type is not None:
+            return self._instance_type == other.instance_type
         # For GCP, when a accelerator type fails to launch, it should be blocked
         # regardless of the count, since the larger number will fail either.
         return self.accelerators.keys() == other.accelerators.keys()
@@ -273,8 +310,16 @@ class Resources:
         """Is this Resources an empty request (all fields None)?"""
         return all([
             self.cloud is None,
-            self.instance_type is None,
+            self._instance_type is None,
             self.accelerators is None,
             self.accelerator_args is None,
             not self._use_spot_specified,
         ])
+
+    def __setstate__(self, state):
+        """Set state from pickled state, for backward compatibility."""
+        version = state.pop('__version__', None)
+        if version is None:
+            instance_type = state.pop('instance_type', None)
+            state['_instance_type'] = instance_type
+        self.__dict__.update(state)
