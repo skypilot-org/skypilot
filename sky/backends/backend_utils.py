@@ -535,6 +535,14 @@ def write_cluster_config(to_provision: 'resources.Resources',
         instance_type = resources_vars['instance_type']
         aws_default_ami = cloud.get_default_ami(region, instance_type)
 
+    azure_subscription_id = None
+    if isinstance(cloud, clouds.Azure):
+        azure_subscription_id = cloud.get_project_id(dryrun=dryrun)
+
+    gcp_project_id = None
+    if isinstance(cloud, clouds.GCP):
+        gcp_project_id = cloud.get_project_id(dryrun=dryrun)
+
     assert cluster_name is not None
 
     credentials = sky_check.get_cloud_credential_file_mounts()
@@ -553,7 +561,10 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
                 # Azure only.
+                'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region}',
+                # GCP only.
+                'gcp_project_id': gcp_project_id,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
@@ -567,7 +578,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
-    _add_auth_to_cluster_config(cloud, yaml_path, dryrun)
+    _add_auth_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
@@ -594,7 +605,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def _add_auth_to_cluster_config(cloud_type, cluster_config_file, dryrun: bool):
+def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
     """Adds SSH key info to the cluster config.
 
     This function's output removes comments included in the jinja2 template.
@@ -603,11 +614,11 @@ def _add_auth_to_cluster_config(cloud_type, cluster_config_file, dryrun: bool):
         config = yaml.safe_load(f)
     cloud_type = str(cloud_type)
     if cloud_type == 'AWS':
-        config = auth.setup_aws_authentication(config, dryrun)
+        config = auth.setup_aws_authentication(config)
     elif cloud_type == 'GCP':
-        config = auth.setup_gcp_authentication(config, dryrun)
+        config = auth.setup_gcp_authentication(config)
     elif cloud_type == 'Azure':
-        config = auth.setup_azure_authentication(config, dryrun)
+        config = auth.setup_azure_authentication(config)
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
     dump_yaml(cluster_config_file, config)

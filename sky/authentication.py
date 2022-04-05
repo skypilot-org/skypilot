@@ -12,7 +12,6 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from Crypto.PublicKey import RSA
 
-from sky import clouds
 from sky.adaptors import aws, gcp
 
 # TODO: Should tolerate if gcloud is not installed. Also,
@@ -82,8 +81,7 @@ def get_or_generate_keys(private_key_path: str, public_key_path: str):
 # Snippets of code inspired from
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
-def setup_aws_authentication(config, dryrun: bool = False):
-    del dryrun
+def setup_aws_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
     if private_key_path is None:
@@ -142,7 +140,7 @@ def setup_aws_authentication(config, dryrun: bool = False):
 # Snippets of code inspired from
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
-def setup_gcp_authentication(config, dryrun: bool = False):
+def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
     if private_key_path is None:
@@ -153,8 +151,7 @@ def setup_gcp_authentication(config, dryrun: bool = False):
     public_key_path = get_public_key_path(private_key_path)
     config = copy.deepcopy(config)
 
-    project_id = clouds.GCP.get_project_id(dryrun=dryrun)
-    config['provider']['project_id'] = project_id
+    project_id = config['provider']['project_id']
     compute = gcp.build('compute',
                         'v1',
                         credentials=None,
@@ -211,7 +208,7 @@ def _unexpand_user(path):
 
 
 # Takes in config, a yaml dict and outputs a postprocessed dict
-def setup_azure_authentication(config, dryrun: bool = False):
+def setup_azure_authentication(config):
     # Doesn't need special library calls!
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
@@ -221,8 +218,6 @@ def setup_azure_authentication(config, dryrun: bool = False):
 
     private_key_path = os.path.expanduser(private_key_path)
     public_key_path = get_public_key_path(private_key_path)
-    config['provider']['subscription_id'] = clouds.Azure.get_subscription_id(
-        dryrun)
 
     # Generating ssh key if it does not exist
     _, _ = get_or_generate_keys(private_key_path, public_key_path)

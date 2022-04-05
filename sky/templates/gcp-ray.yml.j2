@@ -17,8 +17,8 @@ provider:
   # Keep (otherwise cannot reuse when re-provisioning).
   # teardown(terminate=True) will override this.
   cache_stopped_nodes: True
-  # The GCP project ID, will be fill out by sky automatically from gcp credential.
-  # project_id: <your-project-id>
+  # The GCP project ID.
+  project_id: {{gcp_project_id}}
 
 auth:
   ssh_user: gcpuser
