@@ -13,6 +13,7 @@ __all__ = [
     'CLOUD_REGISTRY',
     'Cloud',
     'GCP',
+    'Local',
     'Region',
     'Zone',
     'from_str',
@@ -22,6 +23,7 @@ CLOUD_REGISTRY = {
     'aws': AWS(),
     'gcp': GCP(),
     'azure': Azure(),
+    'local': Local(),
 }
 
 

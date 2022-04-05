@@ -27,9 +27,7 @@ class Local(clouds.Cloud):
     """Amazon Web Services."""
 
     _REPR = 'Local'
-    _regions: List[clouds.Region] = []
-
-    #### Regions/Zones ####
+    _regions: List[clouds.Region] = [clouds.Region('Local')]
 
     @classmethod
     def regions(cls):
@@ -43,98 +41,30 @@ class Local(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        # AWS provisioner can handle batched requests, so yield all zones under
-        # each region.
         del accelerators  # unused
-
-        if instance_type is None:
-            # fallback to manually specified region/zones
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'aws')
         for region in regions:
             yield region, region.zones
-
-    @classmethod
-    def get_default_ami(cls, region_name: str, instance_type: str) -> str:
-        acc = cls.get_accelerators_from_instance_type(instance_type)
-        if acc is not None:
-            assert len(acc) == 1, acc
-            acc_name = list(acc.keys())[0]
-            if acc_name == 'K80':
-                # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
-                # Downgrade the AMI for K80 due as it is only compatible with
-                # NVIDIA driver lower than 470.
-                amis = {
-                    'us-east-1': 'ami-0868a20f5a3bf9702',
-                    'us-east-2': 'ami-09b8825010d4dc701',
-                    # This AMI is 20210623 as aws does not provide a newer one.
-                    'us-west-1': 'ami-0b3c34d643904a734',
-                    'us-west-2': 'ami-06b3479ab15aaeaf1',
-                }
-                assert region_name in amis, region_name
-                return amis[region_name]
-        # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
-        # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
-        # Nvidia driver: 510.47.03, CUDA Version: 11.6
-        amis = {
-            'us-east-1': 'ami-0729d913a335efca7',
-            'us-east-2': 'ami-070f4af81c19b41bf',
-            # This AMI is 20210623 as aws does not provide a newer one.
-            'us-west-1': 'ami-0b3c34d643904a734',
-            'us-west-2': 'ami-050814f384259894c',
-        }
-        assert region_name in amis, region_name
-        return amis[region_name]
 
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
-        return service_catalog.get_hourly_cost(instance_type,
-                                               region=None,
-                                               use_spot=use_spot,
-                                               clouds='aws')
+        return 0.0
 
     def accelerators_to_hourly_cost(self, accelerators):
-        # AWS includes accelerators as part of the instance type.  Implementing
-        # this is also necessary for e.g., the instance may have 4 GPUs, while
-        # the task specifies to use 1 GPU.
         return 0
 
     def get_egress_cost(self, num_gigabytes: float):
-        # In general, query this from the cloud:
-        #   https://aws.amazon.com/s3/pricing/
-        # NOTE: egress from US East (Ohio).
-        # NOTE: Not accurate as the pricing tier is based on cumulative monthly
-        # usage.
-        if num_gigabytes > 150 * 1024:
-            return 0.05 * num_gigabytes
-        cost = 0.0
-        if num_gigabytes >= 50 * 1024:
-            cost += (num_gigabytes - 50 * 1024) * 0.07
-            num_gigabytes -= 50 * 1024
-
-        if num_gigabytes >= 10 * 1024:
-            cost += (num_gigabytes - 10 * 1024) * 0.085
-            num_gigabytes -= 10 * 1024
-
-        if num_gigabytes > 1:
-            cost += (num_gigabytes - 1) * 0.09
-
-        cost += 0.0
-        return cost
+        return 0.0
 
     def __repr__(self):
-        return AWS._REPR
+        return Local._REPR
 
     def is_same_cloud(self, other: clouds.Cloud):
-        return isinstance(other, AWS)
+        return isinstance(other, Local)
 
     @classmethod
     def get_default_instance_type(cls) -> str:
-        # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
-        return 'm4.2xlarge'
+        return 'on-prem'
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -200,51 +130,7 @@ class Local(clouds.Cloud):
         return (_make(instance_list), fuzzy_candidate_list)
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to this cloud."""
-        help_str = (
-            ' Run the following commands:'
-            '\n      $ pip install boto3'
-            '\n      $ aws configure'
-            '\n    For more info: '
-            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
-        )
-        # This file is required because it will be synced to remote VMs for
-        # `aws` to access private storage buckets.
-        # `aws configure list` does not guarantee this file exists.
-        if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
-            return (False, '~/.aws/credentials does not exist.' + help_str)
-        try:
-            output = _run_output('aws configure list')
-        except subprocess.CalledProcessError:
-            return False, (
-                'AWS CLI is not installed properly.'
-                ' Run the following commands under sky folder:'
-                # TODO(zhwu): after we publish sky to pypi,
-                # change this to `pip install sky[aws]`
-                '\n     $ pip install .[aws]'
-                '\n   Credentials may also need to be set.' + help_str)
-        # Configured correctly, the AWS output should look like this:
-        #   ...
-        #   access_key     ******************** shared-credentials-file
-        #   secret_key     ******************** shared-credentials-file
-        #   ...
-        # Otherwise, one or both keys will show as '<not set>'.
-        lines = output.split('\n')
-        if len(lines) < 2:
-            return False, 'AWS CLI output invalid.'
-        access_key_ok = False
-        secret_key_ok = False
-        for line in lines[2:]:
-            line = line.lstrip()
-            if line.startswith('access_key'):
-                if '<not set>' not in line:
-                    access_key_ok = True
-            elif line.startswith('secret_key'):
-                if '<not set>' not in line:
-                    secret_key_ok = True
-        if access_key_ok and secret_key_ok:
-            return True, None
-        return False, 'AWS credentials is not set.' + help_str
+        return True, None
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
-        return {'~/.aws': '~/.aws'}, []
+        return {}, []

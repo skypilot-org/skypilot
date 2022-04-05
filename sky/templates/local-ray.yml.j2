@@ -14,10 +14,6 @@ provider:
   # This is useful when debugging the local node provider with cloud VMs.
   # external_head_ip: 169.229.48.124
   worker_ips: [havoc.millennium.berkeley.edu]
-  # Optional when running automatic cluster management on prem. If you use a coordinator server,
-  # then you can launch multiple autoscaling clusters on the same set of machines, and the coordinator
-  # will assign individual nodes to clusters as needed.
-  #    coordinator_address: "<host>:<port>"
 
 auth:
   ssh_user: mluo
