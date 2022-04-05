@@ -31,7 +31,7 @@ Use :code:`--gpus` to change the type and the number of GPUs:
 
 .. code-block:: console
 
-   $ sky gpunode  # By default, use 1 K80 GPU.
+   $ sky gpunode  # By default, use 1 T4 GPU.
    $ sky gpunode --gpus V100
    $ sky gpunode --gpus V100:8
 
