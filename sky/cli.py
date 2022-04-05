@@ -27,7 +27,6 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
-import copy
 import functools
 import getpass
 import os
@@ -255,7 +254,7 @@ def _check_interactive_node_resources_match(
     # resources.cloud and handle.launched_resources to match.
     if resources.cloud is None:
         assert launched_resources.cloud is not None, launched_resources
-        resources.cloud = launched_resources.cloud
+        resources = resources.copy(cloud=launched_resources.cloud)
 
     # TODO: Check for same number of launched_nodes if multi-node support is
     # added for gpu/cpu/tpunode.
@@ -570,18 +569,22 @@ def launch(
             task.workdir = workdir
 
         assert len(task.resources) == 1
-        new_resources = copy.deepcopy(list(task.resources)[0])
+        old_resources = list(task.resources)[0]
 
+        override_params = {}
         if cloud is not None:
-            new_resources.cloud = _get_cloud(cloud)
+            override_params['cloud'] = _get_cloud(cloud)
         if gpus is not None:
-            new_resources.set_accelerators(gpus)
+            override_params['accelerators'] = gpus
 
         if use_spot is not None:
-            new_resources.use_spot = use_spot
+            override_params['use_spot'] = use_spot
         if disk_size is not None:
-            new_resources.disk_size = disk_size
+            override_params['disk_size'] = disk_size
+
+        new_resources = old_resources.copy(**override_params)
         task.set_resources({new_resources})
+
         if num_nodes is not None:
             task.num_nodes = num_nodes
         if name is not None:
@@ -770,8 +773,8 @@ def exec(
             task.workdir = workdir
         if gpus is not None:
             assert len(task.resources) == 1
-            copied = copy.deepcopy(list(task.resources)[0])
-            copied.set_accelerators(gpus)
+            old_resources = list(task.resources)[0]
+            copied = old_resources.copy(accelerators=gpus)
             task.set_resources({copied})
         if num_nodes is not None:
             task.num_nodes = num_nodes

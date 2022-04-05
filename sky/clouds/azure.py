@@ -1,5 +1,4 @@
 """Azure."""
-import copy
 import json
 import os
 import subprocess
@@ -171,18 +170,18 @@ class Azure(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
-            resources.accelerators = None
+            resources = resources.copy(accelerators=None)
             return ([resources], fuzzy_candidate_list)
 
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
-                r = copy.deepcopy(resources)
-                r.cloud = Azure()
-                r.instance_type = instance_type
-                # Setting this to None as Azure doesn't separately bill / attach
-                # the accelerators.  Billed as part of the VM type.
-                r.accelerators = None
+                r = resources.copy(
+                    cloud=Azure(),
+                    instance_type=instance_type,
+                    # Setting this to None as Azure doesn't separately bill /
+                    # attach the accelerators.  Billed as part of the VM type.
+                    accelerators=None)
                 resource_list.append(r)
             return resource_list
 

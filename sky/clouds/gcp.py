@@ -1,5 +1,4 @@
 """Google Cloud Platform."""
-import copy
 import json
 import os
 import subprocess
@@ -232,10 +231,11 @@ class GCP(clouds.Cloud):
                     return ([], fuzzy_candidate_list)
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
-        r = copy.deepcopy(resources)
-        r.cloud = GCP()
-        r.instance_type = GCP.get_default_instance_type()
-        r.accelerators = accelerator_match
+        r = resources.copy(
+            cloud=GCP(),
+            instance_type=GCP.get_default_instance_type(),
+            accelerators=accelerator_match,
+        )
         return ([r], fuzzy_candidate_list)
 
     @classmethod

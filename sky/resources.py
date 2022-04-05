@@ -46,13 +46,14 @@ class Resources:
         disk_size: Optional[int] = None,
     ):
         self.__version__ = '0.0.1'
-        self.cloud = cloud
+        self._cloud = cloud
 
         # Calling the setter for instance_type.
-        self.instance_type = instance_type
+        # NOTE: cloud should be set before instance_type.
+        self._instance_type = instance_type
 
         self._use_spot_specified = use_spot is not None
-        self.use_spot = use_spot if use_spot is not None else False
+        self._use_spot = use_spot if use_spot is not None else False
 
         if disk_size is not None:
             if disk_size < 50:
@@ -61,11 +62,17 @@ class Resources:
             if round(disk_size) != disk_size:
                 raise ValueError(
                     f'OS disk size must be an integer. Got: {disk_size}.')
-            self.disk_size = int(disk_size)
+            self._disk_size = int(disk_size)
         else:
-            self.disk_size = _DEFAULT_DISK_SIZE_GB
+            self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self.set_accelerators(accelerators, accelerator_args)
+        self._accelerator_args = accelerator_args
+        # Calling the setter for accelerators.
+        # NOTE: self.accelerator_args should be set before this.
+        self._set_accelerators(accelerators)
+
+        self._try_validate_instance_type()
+        self._try_validate_accelerators()
 
     def __repr__(self) -> str:
         accelerators = ''
@@ -81,42 +88,12 @@ class Resources:
                 f'{accelerators}{accelerator_args})')
 
     @property
+    def cloud(self):
+        return self._cloud
+
+    @property
     def instance_type(self):
         return self._instance_type
-
-    @instance_type.setter
-    def instance_type(self, instance_type: str):
-        self._instance_type = instance_type
-
-        if instance_type is None:
-            return
-
-        # Validate instance type
-        if self.cloud is not None:
-            valid = self.cloud.validate_instance_type(self._instance_type)
-            if not valid:
-                raise ValueError(
-                    f'Invalid instance type {self._instance_type!r} '
-                    f'for cloud {self.cloud}.')
-        else:
-            # If cloud not specified
-            valid_clouds = []
-            enabled_clouds = global_user_state.get_enabled_clouds()
-            for cloud in enabled_clouds:
-                valid = cloud.validate_instance_type(self._instance_type)
-                if valid:
-                    valid_clouds.append(cloud)
-            if len(valid_clouds) == 0:
-                raise ValueError(
-                    f'Invalid instance type {self._instance_type!r} '
-                    f'for any cloud {enabled_clouds}.')
-            if len(valid_clouds) > 1:
-                raise ValueError(
-                    f'Ambiguous instance type {self._instance_type!r} '
-                    f'Please specify cloud explicitly among {valid_clouds}.')
-            logger.info(f'Cloud is not specified, using {valid_clouds[0]} '
-                        f'inferred from the instance_type {instance_type!r}.')
-            self.cloud = valid_clouds[0]
 
     @property
     def accelerators(self) -> Optional[Dict[str, int]]:
@@ -133,10 +110,20 @@ class Resources:
                 self._instance_type)
         return None
 
-    def set_accelerators(
-            self,
-            accelerators: Union[None, str, Dict[str, int]],
-            accelerator_args: Optional[Dict[str, str]] = None) -> None:
+    @property
+    def accelerator_args(self) -> Optional[Dict[str, str]]:
+        return self._accelerator_args
+
+    @property
+    def use_spot(self) -> bool:
+        return self._use_spot
+
+    @property
+    def disk_size(self) -> int:
+        return self._disk_size
+
+    def _set_accelerators(
+            self, accelerators: Union[None, str, Dict[str, int]]) -> None:
         """Sets accelerators.
 
         Args:
@@ -165,22 +152,52 @@ class Resources:
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
                 if self.cloud is None:
-                    self.cloud = clouds.GCP()
+                    self._cloud = clouds.GCP()
                 assert self.cloud.is_same_cloud(
                     clouds.GCP()), 'Cloud must be GCP.'
-                if accelerator_args is None:
-                    accelerator_args = {}
-                if 'tf_version' not in accelerator_args:
+                if self.accelerator_args is None:
+                    self._accelerator_args = {}
+                if 'tf_version' not in self.accelerator_args:
                     logger.info('Missing tf_version in accelerator_args, using'
                                 ' default (2.5.0)')
-                    accelerator_args['tf_version'] = '2.5.0'
+                    self._accelerator_args['tf_version'] = '2.5.0'
 
         self._accelerators = accelerators
-        self.accelerator_args = accelerator_args
-        self._try_validate_accelerators()
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
+
+    def _try_validate_instance_type(self):
+        if self.instance_type is None:
+            return
+
+        # Validate instance type
+        if self.cloud is not None:
+            valid = self.cloud.validate_instance_type(self._instance_type)
+            if not valid:
+                raise ValueError(
+                    f'Invalid instance type {self._instance_type!r} '
+                    f'for cloud {self.cloud}.')
+        else:
+            # If cloud not specified
+            valid_clouds = []
+            enabled_clouds = global_user_state.get_enabled_clouds()
+            for cloud in enabled_clouds:
+                valid = cloud.validate_instance_type(self._instance_type)
+                if valid:
+                    valid_clouds.append(cloud)
+            if len(valid_clouds) == 0:
+                raise ValueError(
+                    f'Invalid instance type {self._instance_type!r} '
+                    f'for any cloud {enabled_clouds}.')
+            if len(valid_clouds) > 1:
+                raise ValueError(
+                    f'Ambiguous instance type {self._instance_type!r} '
+                    f'Please specify cloud explicitly among {valid_clouds}.')
+            logger.info(
+                f'Cloud is not specified, using {valid_clouds[0]} '
+                f'inferred from the instance_type {self.instance_type!r}.')
+            self._cloud = valid_clouds[0]
 
     def _try_validate_accelerators(self) -> None:
         """Try-validates accelerators against the instance type."""
@@ -315,10 +332,36 @@ class Resources:
             not self._use_spot_specified,
         ])
 
+    def copy(self, **override) -> 'Resources':
+        """Returns a copy of the given Resources."""
+        resources = Resources(
+            cloud=override.pop('cloud', self.cloud),
+            instance_type=override.pop('instance_type', self.instance_type),
+            accelerators=override.pop('accelerators', self.accelerators),
+            accelerator_args=override.pop('accelerator_args',
+                                          self.accelerator_args),
+            use_spot=override.pop('use_spot', self.use_spot),
+            disk_size=override.pop('disk_size', self.disk_size),
+        )
+        assert len(override) == 0
+        return resources
+
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
         version = state.pop('__version__', None)
         if version is None:
-            instance_type = state.pop('instance_type', None)
+            cloud = state.pop('cloud')
+            state['_cloud'] = cloud
+
+            instance_type = state.pop('instance_type')
             state['_instance_type'] = instance_type
+
+            use_spot = state.pop('use_spot')
+            state['_use_spot'] = use_spot
+
+            accelerator_args = state.pop('accelerator_args')
+            state['_accelerator_args'] = accelerator_args
+
+            disk_size = state.pop('disk_size')
+            state['_disk_size'] = disk_size
         self.__dict__.update(state)
