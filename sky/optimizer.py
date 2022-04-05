@@ -610,7 +610,7 @@ class Optimizer:
                 print_hourly_cost = True
 
         if print_hourly_cost:
-            logger.info(f'Estimated hourly cost: ~${total_cost:.1f}/hr')
+            logger.info(f'Estimated cost: ~${total_cost:.1f}/hr')
         else:
             logger.info(
                 f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
