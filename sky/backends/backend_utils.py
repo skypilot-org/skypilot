@@ -1128,7 +1128,7 @@ def _ping_cluster_or_set_to_stopped(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def get_status_from_cluster_name(
+def get_cluster_status_with_refresh(
         cluster_name: str) -> Optional[global_user_state.ClusterStatus]:
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
