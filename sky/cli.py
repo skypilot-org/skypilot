@@ -1221,22 +1221,11 @@ def start(clusters: Tuple[str], yes: bool):
     """
     to_start = []
     if clusters:
-
-        def _filter(name, all_clusters):
-            for cluster_record in all_clusters:
-                if name == cluster_record['name']:
-                    return cluster_record
-            return None
-
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
 
-        all_clusters = global_user_state.get_clusters()
         for name in clusters:
-            record = _filter(name, all_clusters)
-            if record is None:
-                print(f'Cluster {name} was not found.')
-                continue
+            status = backend_utils.get_status_from_cluster_name(name)
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
@@ -1260,7 +1249,7 @@ def start(clusters: Tuple[str], yes: bool):
             #      INIT state cluster due to head_ip not being cached).
             #
             #      This can be replicated by adding `exit 1` to Task.setup.
-            if record['status'] == global_user_state.ClusterStatus.UP:
+            if status == global_user_state.ClusterStatus.UP:
                 # An UP cluster; skipping 'sky start' because:
                 #  1. For a really up cluster, this has no effects (ray up -y
                 #    --no-restart) anyway.
@@ -1273,10 +1262,10 @@ def start(clusters: Tuple[str], yes: bool):
                 #    This is dangerous and unwanted behavior!
                 print(f'Cluster {name} already has status UP.')
                 continue
-            assert record['status'] in (
+            assert status in (
                 global_user_state.ClusterStatus.INIT,
                 global_user_state.ClusterStatus.STOPPED), record
-            to_start.append({'name': name, 'handle': record['handle']})
+            to_start.append({'name': name, 'handle': global_user_state.get_handle_from_cluster_name(name)})
     if not to_start:
         return
     # FIXME: Assumes a specific backend.
