@@ -571,6 +571,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     credential_file_mounts, credential_excludes = credentials
     if resources_vars is None:
         resources_vars = {}
+    ip_list = to_provision.ips
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
@@ -596,11 +597,13 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
                 # Local IP Handling.
-                'head_ip': '169.229.48.124',
-                'worker_ips': ['169.229.48.125'],
+                'head_ip': None if ip_list is None else ip_list[0],
+                'worker_ips': None if ip_list is None else ip_list[1:],
                 # Authentication (optional).
-                'ssh_user': auth_config['ssh_user'],
-                'ssh_private_key': auth_config['ssh_private_key'],
+                'ssh_user': None
+                            if auth_config is None else auth_config['ssh_user'],
+                'ssh_private_key': None if auth_config is None else
+                                   auth_config['ssh_private_key'],
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -1111,7 +1114,10 @@ def get_node_ips(
             if read_yaml(yaml_handle)['provider']['type'] == 'local':
                 out = proc.stderr.decode()
                 worker_ips = re.findall(IP_ADDR_REGEX, out)
-                worker_ips = worker_ips[1:]
+                for i, ip in enumerate(worker_ips):
+                    if ip == head_ip:
+                        del worker_ips[i]
+                        break
         except subprocess.CalledProcessError as e:
             raise exceptions.FetchIPError(
                 exceptions.FetchIPError.Reason.WORKER) from e

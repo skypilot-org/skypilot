@@ -42,7 +42,6 @@ setup_commands:
   - if { conda env list | grep 'sky-ray-env'; } >/dev/null 2>&1; then echo "Conda (sky-ray-env) already exists."; else conda create -n sky-ray-env -y python=3.9; fi
   - conda activate sky-ray-env && pip install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
   - conda activate sky-ray-env && pip uninstall sky -y &> /dev/null; pip install {{sky_remote_path}}/*.whl && python -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
-  - (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:

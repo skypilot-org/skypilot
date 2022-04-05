@@ -748,6 +748,10 @@ def _fill_in_launchable_resources(
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates]:
     enabled_clouds = global_user_state.get_enabled_clouds()
+    for i, cloud in enumerate(enabled_clouds):
+        if str(cloud) == 'Local':
+            del enabled_clouds[i]
+            break
     if len(enabled_clouds) == 0 and try_fix_with_sky_check:
         check.check(quiet=True)
         return _fill_in_launchable_resources(task, blocked_launchable_resources,

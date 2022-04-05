@@ -1314,8 +1314,12 @@ def start(clusters: Tuple[str], yes: bool):
     for record in to_start:
         name = record['name']
         handle = record['handle']
+        with open(handle.cluster_yaml, 'r') as f:
+            ray_yaml = yaml.safe_load(f)
+
         with sky.Dag():
-            dummy_task = sky.Task().set_resources(handle.launched_resources)
+            dummy_task = sky.Task(auth_config=ray_yaml['auth']).set_resources(
+                handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
         backend.provision(dummy_task,
                           to_provision=handle.launched_resources,
