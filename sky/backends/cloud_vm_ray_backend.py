@@ -207,6 +207,7 @@ class RayCodeGen:
         self,
         num_nodes: int,
         accelerator_dict: Dict[str, int],
+        cloud: clouds.Cloud,
     ) -> None:
         """Create the gang scheduling placement group for a Task."""
         assert self._has_prologue, ('Call add_prologue() before '
@@ -229,11 +230,14 @@ class RayCodeGen:
             if 'tpu' in acc_name.lower():
                 gpu_dict = dict()
             for bundle in bundles:
-                bundle.update({
-                    **accelerator_dict,
-                    # Set the GPU to avoid ray hanging the resources allocation
-                    **gpu_dict,
-                })
+                if isinstance(cloud, clouds.Local):
+                    bundle.update({**accelerator_dict})
+                else:
+                    bundle.update({
+                        **accelerator_dict,
+                        # Set the GPU to avoid ray hanging the resources allocation
+                        **gpu_dict,
+                    })
 
         pack_mode = 'STRICT_SPREAD'
         self._code += [
@@ -995,23 +999,17 @@ class RetryingVmProvisioner(object):
             return
         backend = CloudVmRayBackend()
 
-        init_cmd = ""
-        if handle.launched_resources.cloud.is_same_cloud(sky.Local()):
-            init_cmd = _LOCAL_RAY_INIT_CMD
         returncode = backend.run_on_head(
             handle,
-            f'{init_cmd}ray status',
+            f'ray status',
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
             use_cached_head_ip=False)
         if returncode == 0:
             return
-        backend.run_on_head(handle,
-                            f'{init_cmd}ray stop',
-                            use_cached_head_ip=False)
+        backend.run_on_head(handle, f'ray stop', use_cached_head_ip=False)
         log_lib.run_with_log(
-            init_cmd.split(' ') +
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
             stream_logs=True)
@@ -1844,12 +1842,8 @@ class CloudVmRayBackend(backends.Backend):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        init_cmd = ""
-        if handle.launched_resources.cloud.is_same_cloud(sky.Local()):
-            init_cmd = _LOCAL_RAY_INIT_CMD
-
         job_submit_cmd = (
-            f'{init_cmd}mkdir -p {remote_log_dir} && ray job submit '
+            f'mkdir -p {remote_log_dir} && ray job submit '
             f'--address=127.0.0.1:8265 --job-id {job_id} --no-wait '
             f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
@@ -1963,7 +1957,8 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
-        codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
+        cloud = handle.launched_resources.cloud
+        codegen.add_gang_scheduling_placement_group(1, accelerator_dict, cloud)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -1996,8 +1991,9 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
+        cloud = handle.launched_resources.cloud
         codegen.add_gang_scheduling_placement_group(task.num_nodes,
-                                                    accelerator_dict)
+                                                    accelerator_dict, cloud)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -2332,4 +2328,4 @@ class CloudVmRayBackend(backends.Backend):
             ssh_mode=ssh_mode,
             ssh_control_name=self._ssh_control_name(handle),
             require_outputs=require_outputs,
-        )
+            cloud=handle.launched_resources.cloud)

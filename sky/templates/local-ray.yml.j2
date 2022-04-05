@@ -37,7 +37,7 @@ rsync_exclude: [
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-  - which conda && (echo "Conda is already installed." && conda update -y conda) || (wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && chmod +x Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda3)
+  - which conda && (echo "Conda is already installed.") || (wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && chmod +x Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda3)
   - which conda > /dev/null 2>&1 && conda init > /dev/null && conda config --set auto_activate_base false;
   - if { conda env list | grep 'sky-ray-env'; } >/dev/null 2>&1; then echo "Conda (sky-ray-env) already exists."; else conda create -n sky-ray-env -y python=3.9; fi
   - conda activate sky-ray-env && pip install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;

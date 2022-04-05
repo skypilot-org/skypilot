@@ -49,10 +49,9 @@ class Resources:
 
         # Check for Local Config
         if cloud is not None and isinstance(self.cloud, clouds.Local):
-            assert instance_type is None and accelerators is None and \
-            accelerator_args is None and use_spot is None and \
-            disk_size is None and ips, 'Resources is passed incorrectly \
-            for Local/On-Prem, only Cloud and IPs fields should be filled.'
+            assert instance_type is None and use_spot is None and \
+            disk_size is None and ips, 'Resources are passed incorrectly ' + \
+            'to Local/On-Prem.'
 
         self.instance_type = instance_type
         assert not (instance_type is not None and cloud is None), \
@@ -217,6 +216,11 @@ class Resources:
 
     def less_demanding_than(self, other: 'Resources') -> bool:
         """Returns whether this resources is less demanding than the other."""
+
+        # Local case, assume true
+        if isinstance(self.cloud, clouds.Local) or isinstance(
+                other.cloud, clouds.Local):
+            return True
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud

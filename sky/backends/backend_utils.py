@@ -707,20 +707,18 @@ def wait_until_ray_cluster_ready(
 
     ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
-    init_cmd = ""
-    if cloud.is_same_cloud(sky.Local()):
-        init_cmd = _LOCAL_RAY_INIT_CMD
     start = time.time()
     with console.status('[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = run_command_on_ip_via_ssh(
                 head_ip,
-                f'{init_cmd}ray status',
+                f'ray status',
                 ssh_user=ssh_user,
                 ssh_private_key=ssh_key,
                 log_path=log_path,
                 stream_logs=False,
-                require_outputs=True)
+                require_outputs=True,
+                cloud=cloud)
             handle_returncode(rc, 'ray status',
                               'Failed to run ray status on head node.', stderr)
             logger.debug(output)
@@ -914,6 +912,7 @@ def run_command_on_ip_via_ssh(
     stream_logs: bool = True,
     ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
     ssh_control_name: Optional[str] = None,
+    cloud: clouds.Cloud = None,
 ) -> Union[int, Tuple[int, str, str]]:
     """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -954,6 +953,8 @@ def run_command_on_ip_via_ssh(
         return proc.returncode, '', ''
     if isinstance(cmd, list):
         cmd = ' '.join(cmd)
+    if isinstance(cloud, clouds.Local):
+        cmd = _LOCAL_RAY_INIT_CMD + cmd
     # We need this to correctly run the cmd, and get the output.
     command = base_ssh_command + [
         'bash',
@@ -1115,7 +1116,7 @@ def get_node_ips(
                 out = proc.stderr.decode()
                 worker_ips = re.findall(IP_ADDR_REGEX, out)
                 for i, ip in enumerate(worker_ips):
-                    if ip == head_ip:
+                    if ip == head_ip[0]:
                         del worker_ips[i]
                         break
         except subprocess.CalledProcessError as e:
