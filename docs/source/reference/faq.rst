@@ -30,10 +30,10 @@ Then, any Sky clusters launched from this machine would be able to clone private
 
 Note: currently, cloning private repositories in the ``run`` commands is not supported yet.
 
-Can I file mounts to a repository cloned in a task's ``setup`` commands?
+Can I mount files in a repository cloned on remote in a task's ``setup`` / ``run`` section?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Yes, you can use symlink to link the mounted files/folders to the repository cloned in the ``setup`` commands. For example:
+Yes, you can use symlink to link the mounted files/folders to the repository cloned in the ``setup`` / ``run`` section. For example:
 
 .. code-block:: yaml
 
