@@ -552,17 +552,33 @@ def launch(
     """
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
+
     entrypoint = ' '.join(entrypoint)
+    is_yaml = _check_yaml(entrypoint)
+    if is_yaml:
+        # Treat entrypoint as a yaml.
+        click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+    else:
+        # Treat entrypoint as a bash command.
+        click.secho('Task from command: ', fg='yellow', nl=False)
+    click.secho(entrypoint, bold=True)
+
+    if not yes:
+        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
+        # it exists but is STOPPED.
+        maybe_status = backend_utils.get_status_from_cluster_name(cluster)
+        prompt = None
+        if maybe_status is None:
+            prompt = 'Launching a new cluster. Proceed?'
+        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
+            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
+
     with sky.Dag() as dag:
-        if _check_yaml(entrypoint):
-            # Treat entrypoint as a yaml.
-            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
-            click.secho(entrypoint, bold=True)
+        if is_yaml:
             task = sky.Task.from_yaml(entrypoint)
         else:
-            # Treat entrypoint as a bash command.
-            click.secho('Task from command: ', fg='yellow', nl=False)
-            click.secho(entrypoint, bold=True)
             task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
         # Override.
@@ -586,18 +602,6 @@ def launch(
             task.num_nodes = num_nodes
         if name is not None:
             task.name = name
-
-    if not yes:
-        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
-        maybe_status = backend_utils.get_status_from_cluster_name(cluster)
-        prompt = None
-        if maybe_status is None:
-            prompt = 'Launching a new cluster. Proceed?'
-        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
-            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
 
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
