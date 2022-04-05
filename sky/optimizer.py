@@ -595,7 +595,7 @@ class Optimizer:
             for k, v in node_to_cost_map.items()
             if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
         }
-        is_trivial = any(len(v) == 1 for v in node_to_cost_map.values())
+        is_trivial = all(len(v) == 1 for v in node_to_cost_map.values())
         if not is_trivial:
             if minimize_cost:
                 logger.info('Optimizer - plan minimizing cost')
