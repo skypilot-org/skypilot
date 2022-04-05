@@ -12,7 +12,6 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from Crypto.PublicKey import RSA
 
-from sky import clouds
 from sky.adaptors import aws, gcp
 
 # TODO: Should tolerate if gcloud is not installed. Also,
@@ -152,8 +151,7 @@ def setup_gcp_authentication(config):
     public_key_path = get_public_key_path(private_key_path)
     config = copy.deepcopy(config)
 
-    project_id = clouds.GCP.get_project_id()
-    config['provider']['project_id'] = project_id
+    project_id = config['provider']['project_id']
     compute = gcp.build('compute',
                         'v1',
                         credentials=None,
