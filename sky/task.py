@@ -417,8 +417,12 @@ class Task:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
                     # TODO: allow for Storage mounting of different clouds
+                    if storage.source.startswith('s3://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 's3://' + storage.name
                     self.update_file_mounts({
-                        mnt_path: 's3://' + storage.name,
+                        mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.GCS:
                     # Remember to run `gcloud auth application-default login`
@@ -427,8 +431,12 @@ class Task:
                         'echo GOOGLE_APPLICATION_CREDENTIALS='
                         f'{data_transfer_lib.DEFAULT_GCS_CREDENTIALS_PATH} '
                         f'>> ~/.bashrc || true); {self.setup or "true"}')
+                    if storage.source.startswith('gs://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'gs://' + storage.name
                     self.update_file_mounts({
-                        mnt_path: 'gs://' + storage.name,
+                        mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.AZURE:
                     # TODO when Azure Blob is done: sync ~/.azure
