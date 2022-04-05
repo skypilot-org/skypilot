@@ -601,7 +601,8 @@ class Optimizer:
         if len(node_to_cost_map) == 1:
             # Single-task DAG.
             node = list(node_to_cost_map.keys())[0]
-            if len(node.get_resources()) == 1 and node.get_inputs() is None and node.get_outputs() is None:
+            if len(node.get_resources()) == 1 and \
+                node.get_inputs() is None and node.get_outputs() is None:
                 print_message_header = False
                 if node.time_estimator_func is None:
                     print_hourly_cost = True
@@ -615,8 +616,9 @@ class Optimizer:
         if print_hourly_cost:
             logger.info(f'Estimated hourly cost: ~${total_cost:.1f}/hr')
         else:
-            logger.info(f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
-                        f'total cost: ~${total_cost:.1f}')
+            logger.info(
+                f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
+                f'total cost: ~${total_cost:.1f}')
 
         # Do not print Source or Sink.
         message_data = [
