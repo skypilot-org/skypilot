@@ -298,7 +298,9 @@ class GCP(clouds.Cloud):
         return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
 
     @classmethod
-    def get_project_id(cls):
+    def get_project_id(cls, dryrun: bool = False) -> str:
+        if dryrun:
+            return 'dryrun-project-id'
         if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
             gcp_credential_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
         else:

@@ -30,7 +30,6 @@ from sky import clouds
 from sky import global_user_state
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import azure
 from sky.skylet import log_lib
 
 if typing.TYPE_CHECKING:
@@ -536,27 +535,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
         instance_type = resources_vars['instance_type']
         aws_default_ami = cloud.get_default_ami(region, instance_type)
 
-    azure_subscription_id = None
-    if isinstance(cloud, clouds.Azure):
-        if dryrun:
-            azure_subscription_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
-        else:
-            try:
-                azure_subscription_id = azure.get_subscription_id()
-                if not azure_subscription_id:
-                    raise ValueError  # The error message will be replaced.
-            except ModuleNotFoundError as e:
-                raise ModuleNotFoundError('Unable to import azure python '
-                                          'module. Is azure-cli python package '
-                                          'installed? Try pip install '
-                                          '.[azure] in the sky repo.') from e
-            except Exception as e:
-                raise RuntimeError(
-                    'Failed to get subscription id from azure cli. '
-                    'Make sure you have logged in and run this Azure '
-                    'cli command: "az account set -s <subscription_id>".'
-                ) from e
-
     assert cluster_name is not None
 
     credentials = sky_check.get_cloud_credential_file_mounts()
@@ -575,7 +553,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
                 # Azure only.
-                'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region}',
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
@@ -590,7 +567,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
-    _add_ssh_to_cluster_config(cloud, yaml_path)
+    _add_auth_to_cluster_config(cloud, yaml_path, dryrun)
     if resources_vars.get('tpu_type') is not None:
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
@@ -617,7 +594,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def _add_ssh_to_cluster_config(cloud_type, cluster_config_file):
+def _add_auth_to_cluster_config(cloud_type, cluster_config_file, dryrun: bool):
     """Adds SSH key info to the cluster config.
 
     This function's output removes comments included in the jinja2 template.
@@ -626,11 +603,11 @@ def _add_ssh_to_cluster_config(cloud_type, cluster_config_file):
         config = yaml.safe_load(f)
     cloud_type = str(cloud_type)
     if cloud_type == 'AWS':
-        config = auth.setup_aws_authentication(config)
+        config = auth.setup_aws_authentication(config, dryrun)
     elif cloud_type == 'GCP':
-        config = auth.setup_gcp_authentication(config)
+        config = auth.setup_gcp_authentication(config, dryrun)
     elif cloud_type == 'Azure':
-        config = auth.setup_azure_authentication(config)
+        config = auth.setup_azure_authentication(config, dryrun)
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
     dump_yaml(cluster_config_file, config)

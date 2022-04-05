@@ -17,8 +17,8 @@ provider:
     # Keep (otherwise cannot reuse when re-provisioning).
     # teardown(terminate=True) will override this.
     cache_stopped_nodes: True
-    # subscription id of the azure user
-    subscription_id: {{azure_subscription_id}}
+    # subscription id of the azure user will be filled out by sky from Azure credential.
+    # subscription_id: <your-subscription-id>
 
 auth:
     ssh_user: azureuser
