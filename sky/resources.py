@@ -35,6 +35,7 @@ class Resources:
         # TODO:
         sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
+    __VERSION__ = 1
 
     def __init__(
         self,
@@ -45,7 +46,7 @@ class Resources:
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
     ):
-        self.__version__ = 1
+        self.__version__ = self.__VERSION__
         self._cloud = cloud
 
         # Calling the setter for instance_type.
@@ -348,6 +349,7 @@ class Resources:
 
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
+        self.__version__ = self.__VERSION__
         version = state.pop('__version__', None)
         if version is None:
             cloud = state.pop('cloud')
