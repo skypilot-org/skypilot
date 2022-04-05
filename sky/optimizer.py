@@ -590,12 +590,31 @@ class Optimizer:
         node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool,
     ):
-        if minimize_cost:
-            logger.info('Optimizer - plan minimizing cost')
+        node_to_cost_map = {
+            k: v
+            for k, v in node_to_cost_map.items()
+            if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
+        }
+        is_trivial = all(len(v) == 1 for v in node_to_cost_map.values())
+        if not is_trivial:
+            if minimize_cost:
+                logger.info('Optimizer - plan minimizing cost')
+            else:
+                logger.info('Optimizer - plan minimizing run time')
+
+        print_hourly_cost = False
+        if len(node_to_cost_map) == 1:
+            node = list(node_to_cost_map.keys())[0]
+            if (node.time_estimator_func is None and
+                    node.get_inputs() is None and node.get_outputs() is None):
+                print_hourly_cost = True
+
+        if print_hourly_cost:
+            logger.info(f'Estimated cost: ~${total_cost:.1f}/hr')
         else:
-            logger.info('Optimizer - plan minimizing run time')
-        logger.info(f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
-                    f'total cost: ~${total_cost:.1f}')
+            logger.info(
+                f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
+                f'total cost: ~${total_cost:.1f}')
 
         # Do not print Source or Sink.
         message_data = [
@@ -608,16 +627,11 @@ class Optimizer:
                                     tablefmt='plain')
         logger.info(f'\n{message}\n')
 
+        # Print the egress plan if any data egress is scheduled.
         Optimizer._print_egress_plan(graph, best_plan, minimize_cost)
 
         # Print the list of resouces that the optimizer considered.
-        should_print = any(len(v) > 1 for v in node_to_cost_map.values())
-        if should_print:
-            node_to_cost_map = {
-                k: v
-                for k, v in node_to_cost_map.items()
-                if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
-            }
+        if not is_trivial:
             metric = 'cost ($)' if minimize_cost else 'time (hr)'
             for k, v in node_to_cost_map.items():
                 node_to_cost_map[k] = {
