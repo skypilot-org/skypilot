@@ -605,8 +605,8 @@ class Optimizer:
         print_hourly_cost = False
         if len(node_to_cost_map) == 1:
             node = list(node_to_cost_map.keys())[0]
-            if node.time_estimator_func is None and \
-                node.get_inputs() is None and node.get_outputs() is None:
+            if (node.time_estimator_func is None and
+                    node.get_inputs() is None and node.get_outputs() is None):
                 print_hourly_cost = True
 
         if print_hourly_cost:
