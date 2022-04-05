@@ -321,7 +321,7 @@ def _create_and_ssh_into_node(
 
         # This handles stopped interactive nodes where they are restarted by
         # skipping sky start and directly calling sky [cpu|tpu|gpu]node.
-        cluster_status = backend_utils.get_status_from_cluster_name(
+        cluster_status = backend_utils.get_cluster_status_with_refresh(
             cluster_name)
         if cluster_status == global_user_state.ClusterStatus.STOPPED:
             assert handle.launched_resources is not None, handle
@@ -590,7 +590,7 @@ def launch(
     if not yes:
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
         # it exists but is STOPPED.
-        maybe_status = backend_utils.get_status_from_cluster_name(cluster)
+        maybe_status = backend_utils.get_cluster_status_with_refresh(cluster)
         prompt = None
         if maybe_status is None:
             prompt = 'Launching a new cluster. Proceed?'
@@ -924,7 +924,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
             # LocalDockerBackend does not support job queues
             unsupported_clusters.append(cluster)
             continue
-        cluster_status = backend_utils.get_status_from_cluster_name(cluster)
+        cluster_status = backend_utils.get_cluster_status_with_refresh(cluster)
         if cluster_status != global_user_state.ClusterStatus.UP:
             print(f'Cluster {cluster} is not up. Skipping.')
             continue
@@ -980,7 +980,7 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
     if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
         raise click.UsageError('Sky logs is not available with '
                                'LocalDockerBackend.')
-    cluster_status = backend_utils.get_status_from_cluster_name(cluster_name)
+    cluster_status = backend_utils.get_cluster_status_with_refresh(cluster_name)
     if cluster_status != global_user_state.ClusterStatus.UP:
         click.secho(
             f'Cluster {cluster_name} (status: {cluster_status}) '
@@ -1037,7 +1037,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             f'{backends.CloudVmRayBackend.NAME}, but cluster {cluster!r} '
             f'is created by {backend.NAME}.')
     # Check the status of the cluster.
-    cluster_status = backend_utils.get_status_from_cluster_name(cluster)
+    cluster_status = backend_utils.get_cluster_status_with_refresh(cluster)
     if cluster_status != global_user_state.ClusterStatus.UP:
         click.secho(f'Cluster {cluster} (status: {cluster_status}) '
                     'is not up...skipped.')
@@ -1225,7 +1225,7 @@ def start(clusters: Tuple[str], yes: bool):
         clusters = _get_glob_clusters(clusters)
 
         for name in clusters:
-            cluster_status = backend_utils.get_status_from_cluster_name(name)
+            cluster_status = backend_utils.get_cluster_status_with_refresh(name)
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
@@ -1433,7 +1433,7 @@ def _terminate_or_stop_clusters(
                 f'{colorama.Style.BRIGHT}sky down {name}'
                 f'{colorama.Style.RESET_ALL}')
         elif idle_minutes_to_autostop is not None:
-            cluster_status = backend_utils.get_status_from_cluster_name(name)
+            cluster_status = backend_utils.get_cluster_status_with_refresh(name)
             if not isinstance(backend, backends.CloudVmRayBackend):
                 message = (f'{colorama.Fore.GREEN}{operation} cluster '
                            f'{name}... skipped{colorama.Style.RESET_ALL}'
