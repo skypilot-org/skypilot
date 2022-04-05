@@ -1225,7 +1225,7 @@ def start(clusters: Tuple[str], yes: bool):
         clusters = _get_glob_clusters(clusters)
 
         for name in clusters:
-            status = backend_utils.get_status_from_cluster_name(name)
+            cluster_status = backend_utils.get_status_from_cluster_name(name)
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
@@ -1249,7 +1249,7 @@ def start(clusters: Tuple[str], yes: bool):
             #      INIT state cluster due to head_ip not being cached).
             #
             #      This can be replicated by adding `exit 1` to Task.setup.
-            if status == global_user_state.ClusterStatus.UP:
+            if cluster_status == global_user_state.ClusterStatus.UP:
                 # An UP cluster; skipping 'sky start' because:
                 #  1. For a really up cluster, this has no effects (ray up -y
                 #    --no-restart) anyway.
@@ -1262,8 +1262,8 @@ def start(clusters: Tuple[str], yes: bool):
                 #    This is dangerous and unwanted behavior!
                 print(f'Cluster {name} already has status UP.')
                 continue
-            assert status in (global_user_state.ClusterStatus.INIT,
-                              global_user_state.ClusterStatus.STOPPED), record
+            assert cluster_status in (global_user_state.ClusterStatus.INIT,
+                              global_user_state.ClusterStatus.STOPPED), cluster_status
             to_start.append({
                 'name': name,
                 'handle': global_user_state.get_handle_from_cluster_name(name)
