@@ -1262,8 +1262,9 @@ def start(clusters: Tuple[str], yes: bool):
                 #    This is dangerous and unwanted behavior!
                 print(f'Cluster {name} already has status UP.')
                 continue
-            assert cluster_status in (global_user_state.ClusterStatus.INIT,
-                              global_user_state.ClusterStatus.STOPPED), cluster_status
+            assert cluster_status in (
+                global_user_state.ClusterStatus.INIT,
+                global_user_state.ClusterStatus.STOPPED), cluster_status
             to_start.append({
                 'name': name,
                 'handle': global_user_state.get_handle_from_cluster_name(name)
