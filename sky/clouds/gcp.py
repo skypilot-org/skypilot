@@ -299,6 +299,8 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def get_project_id(cls):
+        # TODO(zhwu): change the project id fetching with the following command
+        # `gcloud info --format='value(config.project)'`
         if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
             gcp_credential_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
         else:
