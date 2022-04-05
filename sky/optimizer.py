@@ -590,12 +590,33 @@ class Optimizer:
         node_to_cost_map: _TaskToCostMap,
         minimize_cost: bool,
     ):
-        if minimize_cost:
-            logger.info('Optimizer - plan minimizing cost')
+        node_to_cost_map = {
+            k: v
+            for k, v in node_to_cost_map.items()
+            if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
+        }
+
+        print_message_header = True
+        print_hourly_cost = False
+        if len(node_to_cost_map) == 1:
+            # Single-task DAG.
+            node = list(node_to_cost_map.keys())[0]
+            if len(node.get_resources()) == 1 and node.get_inputs() is None and node.get_outputs() is None:
+                print_message_header = False
+                if node.time_estimator_func is None:
+                    print_hourly_cost = True
+
+        if print_message_header:
+            if minimize_cost:
+                logger.info('Optimizer - plan minimizing cost')
+            else:
+                logger.info('Optimizer - plan minimizing run time')
+
+        if print_hourly_cost:
+            logger.info(f'Estimated hourly cost: ~${total_cost:.1f}/hr')
         else:
-            logger.info('Optimizer - plan minimizing run time')
-        logger.info(f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
-                    f'total cost: ~${total_cost:.1f}')
+            logger.info(f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
+                        f'total cost: ~${total_cost:.1f}')
 
         # Do not print Source or Sink.
         message_data = [
@@ -611,13 +632,8 @@ class Optimizer:
         Optimizer._print_egress_plan(graph, best_plan, minimize_cost)
 
         # Print the list of resouces that the optimizer considered.
-        should_print = any(len(v) > 1 for v in node_to_cost_map.values())
-        if should_print:
-            node_to_cost_map = {
-                k: v
-                for k, v in node_to_cost_map.items()
-                if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
-            }
+        print_details = any(len(v) > 1 for v in node_to_cost_map.values())
+        if print_details:
             metric = 'cost ($)' if minimize_cost else 'time (hr)'
             for k, v in node_to_cost_map.items():
                 node_to_cost_map[k] = {
