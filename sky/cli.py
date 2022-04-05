@@ -35,7 +35,7 @@ import shlex
 import sys
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 import yaml
 
 import click
@@ -97,22 +97,6 @@ def _truncate_long_string(s: str, max_length: int = 35) -> str:
         if total >= max_length:
             break
     return ' '.join(splits[:i]) + ' ...'
-
-
-def _parse_accelerator_options(accelerator_options: str) -> Dict[str, float]:
-    """Parses accelerator options: e.g., V100:8 into {'V100': 8}."""
-    accelerators = {}
-    accelerator_options = accelerator_options.split(':')
-    if len(accelerator_options) == 1:
-        accelerator_type = accelerator_options[0]
-        accelerators[accelerator_type] = 1
-    elif len(accelerator_options) == 2:
-        accelerator_type = accelerator_options[0]
-        accelerator_count = float(accelerator_options[1])
-        accelerators[accelerator_type] = accelerator_count
-    else:
-        raise ValueError(f'Invalid accelerator option: {accelerator_options}')
-    return accelerators
 
 
 def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
@@ -548,7 +532,7 @@ def launch(
     cluster: Optional[str],
     dryrun: bool,
     detach_run: bool,
-    backend_name: str,
+    backend_name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     gpus: Optional[str],
@@ -591,11 +575,8 @@ def launch(
         if cloud is not None:
             new_resources.cloud = _get_cloud(cloud)
         if gpus is not None:
-            new_resources.accelerators = _parse_accelerator_options(gpus)
-            if 'tpu' in gpus.lower():
-                logger.info('Missing tf_version in accelerator_args, using'
-                            ' default (2.5.0)')
-                new_resources.accelerator_args = {'tf_version': '2.5.0'}
+            new_resources.set_accelerators(gpus)
+
         if use_spot is not None:
             new_resources.use_spot = use_spot
         if disk_size is not None:
@@ -790,7 +771,7 @@ def exec(
         if gpus is not None:
             assert len(task.resources) == 1
             copied = copy.deepcopy(list(task.resources)[0])
-            copied.accelerators = _parse_accelerator_options(gpus)
+            copied.set_accelerators(gpus)
             task.set_resources({copied})
         if num_nodes is not None:
             task.num_nodes = num_nodes
@@ -1565,9 +1546,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                                     gpus is None and spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = _get_cloud(cloud)
-    if gpus is not None:
-        gpus = _parse_accelerator_options(gpus)
-    elif instance_type is None:
+    if gpus is None and instance_type is None:
         # Use this request if both gpus and instance_type are not specified.
         gpus = default_resources.accelerators
         instance_type = default_resources.instance_type
@@ -1717,8 +1696,6 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         instance_type = default_resources.instance_type
     if tpus is None:
         tpus = default_resources.accelerators
-    else:
-        tpus = _parse_accelerator_options(tpus)
     if spot is None:
         spot = default_resources.use_spot
     resources = sky.Resources(cloud=sky.GCP(),

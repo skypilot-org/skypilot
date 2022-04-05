@@ -10,15 +10,38 @@ on:
       - master
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: ["ubuntu-latest"]
+        python-version: [3.6]
+        test-path:
+          - tests/test_cli.py
+          - tests/test_global_user_state.py
+          - tests/test_list_accelerators.py
+          - tests/test_optimizer_dryruns.py
+          - tests/test_optimizer_random_dag.py
+          - tests/test_pycryptodome_version.py
+          - tests/test_storage.py
+          - tests/test_wheels.py
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Install Python 3
+      - name: Install Python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
         with:
-          python-version: 3.6
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        if: startsWith(runner.os, 'Linux')
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-pytest-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip-pytest-${{ matrix.python-version }}
+
 
       - name: Install dependencies
         run: |
@@ -27,4 +50,4 @@ jobs:
           pip install pytest
 
       - name: Run tests with pytest
-        run: pytest --ignore=tests/test_smoke.py
+        run: pytest ${{ matrix.test-path }}
