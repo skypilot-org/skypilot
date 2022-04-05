@@ -45,7 +45,7 @@ class Resources:
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
     ):
-        self.__version__ = '0.0.1'
+        self.__version__ = 1
         self._cloud = cloud
 
         # Calling the setter for instance_type.

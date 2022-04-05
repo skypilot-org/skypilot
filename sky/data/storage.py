@@ -252,6 +252,7 @@ class Storage(object):
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None):
             assert storage_name is not None or source is not None
+            self.__version__ = 1
             self.storage_name = storage_name
             self.source = source
             # Only stores managed by sky are stored here in the
@@ -272,6 +273,12 @@ class Storage(object):
             storetype = _get_storetype_from_store(store)
             if storetype in self.sky_stores:
                 del self.sky_stores[storetype]
+
+        def __setstate__(self, state):
+            """Used by pickle.loads for backwards compatibility"""
+            version = state.get('__version__', None)
+            del version
+            self.__dict__.update(state)
 
     def __init__(self,
                  name: Optional[str] = None,
