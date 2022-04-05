@@ -431,7 +431,7 @@ class RetryingVmProvisioner(object):
         if region.name in self._blocked_regions:
             return True
         # We do not keep track of zones in Azure.
-        if isinstance(cloud, clouds.Azure):
+        if isinstance(cloud, clouds.Azure) or isinstance(cloud, clouds.Local):
             return False
         assert zones, (cloud, region, zones)
         for zone in zones:
@@ -609,6 +609,9 @@ class RetryingVmProvisioner(object):
                         zones = config['provider']['availability_zone']
                     elif cloud.is_same_cloud(sky.Azure()):
                         region = config['provider']['location']
+                        zones = None
+                    elif cloud.is_same_cloud(sky.Local()):
+                        region = 'Local'
                         zones = None
                     else:
                         assert False, cloud
@@ -805,7 +808,6 @@ class RetryingVmProvisioner(object):
                 if not success:
                     continue
             cluster_config_file = config_dict['ray']
-
             # Record early, so if anything goes wrong, 'sky status' will show
             # the cluster name and users can appropriately 'sky down'.  It also
             # means a second 'sky launch -c <name>' will attempt to reuse.
@@ -1143,6 +1145,8 @@ class CloudVmRayBackend(backends.Backend):
             elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
                     sky.AWS()):
                 self.cluster_region = provider['region']
+            elif cloud.is_same_cloud(sky.Local()):
+                self.cluster_region = 'Local'
 
         def get_cluster_region(self):
             if not hasattr(self, 'cluster_region'):

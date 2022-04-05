@@ -42,7 +42,7 @@ class Local(clouds.Cloud):
         use_spot: bool,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         del accelerators  # unused
-        for region in regions:
+        for region in cls.regions():
             yield region, region.zones
 
     #### Normal methods ####
@@ -66,68 +66,20 @@ class Local(clouds.Cloud):
     def get_default_instance_type(cls) -> str:
         return 'on-prem'
 
-    # TODO: factor the following three methods, as they are the same logic
-    # between Azure and AWS.
     @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='aws')
+        return None
 
     def make_deploy_resources_variables(self,
                                         resources: 'resources_lib.Resources'):
-        r = resources
-        # r.accelerators is cleared but .instance_type encodes the info.
-        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
-        return {
-            'instance_type': r.instance_type,
-            'custom_resources': custom_resources,
-            'use_spot': r.use_spot,
-        }
+        return
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        fuzzy_candidate_list = []
-        if resources.instance_type is not None:
-            assert resources.is_launchable(), resources
-            # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
-            resources.accelerators = None
-            return ([resources], fuzzy_candidate_list)
-
-        def _make(instance_list):
-            resource_list = []
-            for instance_type in instance_list:
-                r = copy.deepcopy(resources)
-                r.cloud = AWS()
-                r.instance_type = instance_type
-                # Setting this to None as AWS doesn't separately bill / attach
-                # the accelerators.  Billed as part of the VM type.
-                r.accelerators = None
-                resource_list.append(r)
-            return resource_list
-
-        # Currently, handle a filter on accelerators only.
-        accelerators = resources.accelerators
-        if accelerators is None:
-            # No requirements to filter, so just return a default VM type.
-            return (_make([AWS.get_default_instance_type()]),
-                    fuzzy_candidate_list)
-
-        assert len(accelerators) == 1, resources
-        acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                              acc_count,
-                                                              clouds='aws')
-        if instance_list is None:
-            return ([], fuzzy_candidate_list)
-        return (_make(instance_list), fuzzy_candidate_list)
+        return ([resources], [])
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         return True, None

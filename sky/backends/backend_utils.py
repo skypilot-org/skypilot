@@ -528,6 +528,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
     elif isinstance(cloud, clouds.Azure):
         # Azure does not support specific zones.
         zones = []
+    elif isinstance(cloud, clouds.Local):
+        # Local does not have zones
+        zones = []
     else:
         zones = [zones[0].name]
 
@@ -561,6 +564,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
     credentials = sky_check.get_cloud_credential_file_mounts()
     credential_file_mounts, credential_excludes = credentials
+    if resources_vars is None:
+        resources_vars = {}
     yaml_path = _fill_template(
         cluster_config_template,
         dict(
@@ -631,6 +636,8 @@ def _add_ssh_to_cluster_config(cloud_type, cluster_config_file):
         config = auth.setup_gcp_authentication(config)
     elif cloud_type == 'Azure':
         config = auth.setup_azure_authentication(config)
+    elif cloud_type == 'Local':
+        config = config
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
     dump_yaml(cluster_config_file, config)
