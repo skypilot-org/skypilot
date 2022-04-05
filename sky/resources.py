@@ -35,7 +35,7 @@ class Resources:
         # TODO:
         sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
-    __VERSION__ = 1
+    _VERSION = 1
 
     def __init__(
         self,
@@ -46,7 +46,7 @@ class Resources:
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
     ):
-        self.__version__ = self.__VERSION__
+        self.__version__ = self._VERSION
         self._cloud = cloud
 
         # Calling the setter for instance_type.
@@ -184,13 +184,12 @@ class Resources:
             valid_clouds = []
             enabled_clouds = global_user_state.get_enabled_clouds()
             for cloud in enabled_clouds:
-                valid = cloud.validate_instance_type(self._instance_type)
-                if valid:
+                if cloud.validate_instance_type(self._instance_type):
                     valid_clouds.append(cloud)
             if len(valid_clouds) == 0:
                 raise ValueError(
                     f'Invalid instance type {self._instance_type!r} '
-                    f'for any cloud {enabled_clouds}.')
+                    f'for any cloud among {enabled_clouds}.')
             if len(valid_clouds) > 1:
                 raise ValueError(
                     f'Ambiguous instance type {self._instance_type!r} '
@@ -349,7 +348,7 @@ class Resources:
 
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
-        self.__version__ = self.__VERSION__
+        self.__version__ = self._VERSION
         version = state.pop('__version__', None)
         if version is None:
             cloud = state.pop('cloud')
