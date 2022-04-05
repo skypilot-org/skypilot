@@ -595,23 +595,19 @@ class Optimizer:
             for k, v in node_to_cost_map.items()
             if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
         }
-
-        print_message_header = True
-        print_hourly_cost = False
-        if len(node_to_cost_map) == 1:
-            # Single-task DAG.
-            node = list(node_to_cost_map.keys())[0]
-            if len(node.get_resources()) == 1 and \
-                node.get_inputs() is None and node.get_outputs() is None:
-                print_message_header = False
-                if node.time_estimator_func is None:
-                    print_hourly_cost = True
-
-        if print_message_header:
+        is_trivial = any(len(v) == 1 for v in node_to_cost_map.values())
+        if not is_trivial:
             if minimize_cost:
                 logger.info('Optimizer - plan minimizing cost')
             else:
                 logger.info('Optimizer - plan minimizing run time')
+
+        print_hourly_cost = False
+        if len(node_to_cost_map) == 1:
+            node = list(node_to_cost_map.keys())[0]
+            if node.time_estimator_func is None and \
+                node.get_inputs() is None and node.get_outputs() is None:
+                print_hourly_cost = True
 
         if print_hourly_cost:
             logger.info(f'Estimated hourly cost: ~${total_cost:.1f}/hr')
@@ -631,11 +627,11 @@ class Optimizer:
                                     tablefmt='plain')
         logger.info(f'\n{message}\n')
 
+        # Print the egress plan if any data egress is scheduled.
         Optimizer._print_egress_plan(graph, best_plan, minimize_cost)
 
         # Print the list of resouces that the optimizer considered.
-        print_details = any(len(v) > 1 for v in node_to_cost_map.values())
-        if print_details:
+        if not is_trivial:
             metric = 'cost ($)' if minimize_cost else 'time (hr)'
             for k, v in node_to_cost_map.items():
                 node_to_cost_map[k] = {
