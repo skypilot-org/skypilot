@@ -242,4 +242,5 @@ class Azure(clouds.Cloud):
         return {'~/.azure': '~/.azure'}, []
 
     def validate_instance_type(self, instance_type):
-        return service_catalog.validate_instance_type(instance_type, clouds='azure')
+        return service_catalog.validate_instance_type(instance_type,
+                                                      clouds='azure')

@@ -50,10 +50,11 @@ def _get_instance_type(
         idx &= df['Region'] == region
     return df[idx]
 
-def validate_instance_type_impl(df: pd.DataFrame,
-                           instance_type: str) -> bool:
+
+def validate_instance_type_impl(df: pd.DataFrame, instance_type: str) -> bool:
     """Returns True if the instance type is valid."""
     return instance_type in df['InstanceType'].unique()
+
 
 def get_hourly_cost_impl(
     df: pd.DataFrame,

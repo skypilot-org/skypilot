@@ -154,7 +154,9 @@ def test_infer_cloud_from_instance_type(monkeypatch):
     # GCP instances
     _test_resources(monkeypatch, sky.Resources(instance_type='n1-standard-96'))
     #Azure instances
-    _test_resources(monkeypatch, sky.Resources(instance_type='Standard_NC12s_v3'))
+    _test_resources(monkeypatch,
+                    sky.Resources(instance_type='Standard_NC12s_v3'))
+
 
 def test_parse_accelerators_from_yaml():
     spec = textwrap.dedent("""\

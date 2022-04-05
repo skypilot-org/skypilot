@@ -13,8 +13,10 @@ _df = common.read_catalog('azure.csv')
 
 _DEFAULT_REGION = 'southcentralus'
 
+
 def validate_instance_type(instance_type: str) -> bool:
     return common.validate_instance_type_impl(_df, instance_type)
+
 
 def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,

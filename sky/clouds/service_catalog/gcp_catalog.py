@@ -36,9 +36,11 @@ _A100_HOST_MEMORY = {
     16: 1360,
 }
 
+
 def validate_instance_type(instance_type: str) -> bool:
     """Validates the instance type."""
     raise NotImplementedError('GCP does not support instance type validation.')
+
 
 def _get_accelerator(
     df: pd.DataFrame,

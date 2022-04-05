@@ -87,8 +87,9 @@ class Resources:
     @instance_type.setter
     def instance_type(self, instance_type: str):
         self._instance_type = instance_type
-        
-        if instance_type is None: return
+
+        if instance_type is None:
+            return
 
         # Validate instance type
         if self.cloud is not None:
@@ -116,8 +117,7 @@ class Resources:
             logger.info(f'Cloud is not specified, using {valid_clouds[0]} '
                         f'inferred from the instance_type {instance_type!r}.')
             self.cloud = valid_clouds[0]
-            
-    
+
     @property
     def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
@@ -132,7 +132,7 @@ class Resources:
             return self.cloud.get_accelerators_from_instance_type(
                 self._instance_type)
         return None
-    
+
     def set_accelerators(
             self,
             accelerators: Union[None, str, Dict[str, int]],
@@ -205,7 +205,6 @@ class Resources:
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
-
 
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
