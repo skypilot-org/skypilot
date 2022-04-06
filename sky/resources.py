@@ -353,7 +353,7 @@ class Resources:
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
         self._version = self._VERSION
-        version = state.pop('__version__', None)
+        version = state.pop('_version', None)
         # Handle old version(s) here.
         if version is None:
             cloud = state.pop('cloud')
