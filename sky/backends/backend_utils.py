@@ -30,7 +30,6 @@ from sky import clouds
 from sky import global_user_state
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import azure
 from sky.skylet import log_lib
 
 if typing.TYPE_CHECKING:
@@ -538,24 +537,11 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
-        if dryrun:
-            azure_subscription_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
-        else:
-            try:
-                azure_subscription_id = azure.get_subscription_id()
-                if not azure_subscription_id:
-                    raise ValueError  # The error message will be replaced.
-            except ModuleNotFoundError as e:
-                raise ModuleNotFoundError('Unable to import azure python '
-                                          'module. Is azure-cli python package '
-                                          'installed? Try pip install '
-                                          '.[azure] in the sky repo.') from e
-            except Exception as e:
-                raise RuntimeError(
-                    'Failed to get subscription id from azure cli. '
-                    'Make sure you have logged in and run this Azure '
-                    'cli command: "az account set -s <subscription_id>".'
-                ) from e
+        azure_subscription_id = cloud.get_project_id(dryrun=dryrun)
+
+    gcp_project_id = None
+    if isinstance(cloud, clouds.GCP):
+        gcp_project_id = cloud.get_project_id(dryrun=dryrun)
 
     assert cluster_name is not None
 
@@ -577,6 +563,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region}',
+                # GCP only.
+                'gcp_project_id': gcp_project_id,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
@@ -590,7 +578,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
-    _add_ssh_to_cluster_config(cloud, yaml_path)
+    _add_auth_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
@@ -617,7 +605,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def _add_ssh_to_cluster_config(cloud_type, cluster_config_file):
+def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
     """Adds SSH key info to the cluster config.
 
     This function's output removes comments included in the jinja2 template.
@@ -1128,7 +1116,7 @@ def _ping_cluster_or_set_to_stopped(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def get_status_from_cluster_name(
+def get_cluster_status_with_refresh(
         cluster_name: str) -> Optional[global_user_state.ClusterStatus]:
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
