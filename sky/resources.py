@@ -65,9 +65,7 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self._accelerator_args = accelerator_args
-        # NOTE: self.accelerator_args should be set before this.
-        self._set_accelerators(accelerators)
+        self._set_accelerators(accelerators, accelerator_args)
 
         self._try_validate_instance_type()
         self._try_validate_accelerators()
@@ -121,7 +119,10 @@ class Resources:
         return self._disk_size
 
     def _set_accelerators(
-            self, accelerators: Union[None, str, Dict[str, int]]) -> None:
+        self,
+        accelerators: Union[None, str, Dict[str, int]],
+        accelerator_args: Optional[Dict[str, str]] = None,
+    ) -> None:
         """Sets accelerators.
 
         Args:
@@ -153,14 +154,15 @@ class Resources:
                     self._cloud = clouds.GCP()
                 assert self.cloud.is_same_cloud(
                     clouds.GCP()), 'Cloud must be GCP.'
-                if self.accelerator_args is None:
-                    self._accelerator_args = {}
-                if 'tf_version' not in self.accelerator_args:
+                if accelerator_args is None:
+                    accelerator_args = {}
+                if 'tf_version' not in accelerator_args:
                     logger.info('Missing tf_version in accelerator_args, using'
                                 ' default (2.5.0)')
-                    self._accelerator_args['tf_version'] = '2.5.0'
+                    accelerator_args['tf_version'] = '2.5.0'
 
         self._accelerators = accelerators
+        self._accelerator_args = accelerator_args
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
