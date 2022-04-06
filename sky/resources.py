@@ -49,8 +49,6 @@ class Resources:
         self._version = self._VERSION
         self._cloud = cloud
 
-        # Calling the setter for instance_type.
-        # NOTE: cloud should be set before instance_type.
         self._instance_type = instance_type
 
         self._use_spot_specified = use_spot is not None
@@ -68,7 +66,6 @@ class Resources:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
         self._accelerator_args = accelerator_args
-        # Calling the setter for accelerators.
         # NOTE: self.accelerator_args should be set before this.
         self._set_accelerators(accelerators)
 
