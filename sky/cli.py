@@ -33,14 +33,12 @@ import getpass
 import os
 import shlex
 import sys
-import time
 import typing
 from typing import Any, List, Optional, Tuple
 import yaml
 
 import click
 import colorama
-import pendulum
 from rich import progress as rich_progress
 
 import sky
@@ -55,6 +53,9 @@ from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
 from sky.skylet import util_lib
+
+from sky.utils.cli_utils import cli_utils
+from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -81,22 +82,6 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              accelerator_args={'tf_version': '2.5.0'},
                              use_spot=False),
 }
-
-
-def _truncate_long_string(s: str, max_length: int = 35) -> str:
-    if len(s) <= max_length:
-        return s
-    splits = s.split(' ')
-    if len(splits[0]) > max_length:
-        return splits[0][:max_length] + '...'  # Use '…'?
-    # Truncate on word boundary.
-    i = 0
-    total = 0
-    for i, part in enumerate(splits):
-        total += len(part)
-        if total >= max_length:
-            break
-    return ' '.join(splits[:i]) + ' ...'
 
 
 def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
@@ -786,15 +771,6 @@ def exec(
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _readable_time_duration(start_time: int):
-    duration = pendulum.now().subtract(seconds=time.time() - start_time)
-    diff = duration.diff_for_humans()
-    diff = diff.replace('second', 'sec')
-    diff = diff.replace('minute', 'min')
-    diff = diff.replace('hour', 'hr')
-    return diff
-
-
 @cli.command()
 @click.option('--all',
               '-a',
@@ -810,78 +786,7 @@ def _readable_time_duration(start_time: int):
               help='Query remote clusters for their latest autostop settings.')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
-    # TODO(zhwu): Update the information for auto-stop clusters.
-    show_all = all
-    clusters_status = backend_utils.get_clusters(refresh)
-    columns = [
-        'NAME',
-        'LAUNCHED',
-        'RESOURCES',
-        'STATUS',
-        'AUTOSTOP',
-        'COMMAND',
-    ]
-
-    if all:
-        columns.extend([
-            'HOURLY_PRICE',
-            'REGION',
-        ])
-
-    cluster_table = util_lib.create_table(columns)
-
-    for cluster_status in clusters_status:
-        launched_at = cluster_status['launched_at']
-        handle = cluster_status['handle']
-        resources_str = '<initializing>'
-        if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
-            resources_str = 'docker'
-        elif isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-            if (handle.launched_nodes is not None and
-                    handle.launched_resources is not None):
-                launched_resource_str = str(handle.launched_resources)
-                if not show_all:
-                    launched_resource_str = _truncate_long_string(
-                        launched_resource_str)
-                resources_str = (f'{handle.launched_nodes}x '
-                                 f'{launched_resource_str}')
-        else:
-            raise ValueError(f'Unknown handle type {type(handle)} encountered.')
-        autostop_str = '-'
-        if cluster_status['autostop'] >= 0:
-            # TODO(zhwu): check the status of the autostop cluster.
-            autostop_str = str(cluster_status['autostop']) + ' min'
-        row = [
-            # NAME
-            cluster_status['name'],
-            # LAUNCHED
-            _readable_time_duration(launched_at),
-            # RESOURCES
-            resources_str,
-            # STATUS
-            cluster_status['status'].value,
-            # AUTOSTOP
-            autostop_str,
-            # COMMAND
-            cluster_status['last_use']
-            if show_all else _truncate_long_string(cluster_status['last_use']),
-        ]
-        if all:
-            hourly_cost = handle.launched_resources.get_cost(3600) \
-                * handle.launched_nodes
-            price_str = f'$ {hourly_cost:.3f}'
-            region = handle.get_cluster_region()
-            row.extend([
-                # HOURLY PRICE
-                price_str,
-                # REGION
-                region,
-            ])
-        cluster_table.add_row(row)
-    if clusters_status:
-        click.echo(cluster_table)
-    else:
-        click.echo('No existing clusters.')
+    status_utils.show_status_table(all, refresh)
 
 
 @cli.command()
@@ -1854,7 +1759,7 @@ def storage_ls():
             # NAME
             row['name'],
             # LAUNCHED
-            _readable_time_duration(launched_at),
+            cli_utils.readable_time_duration(launched_at),
             # CLOUDS
             ', '.join([s.value for s in row['handle'].sky_stores.keys()]),
             # COMMAND
