@@ -241,9 +241,9 @@ class Azure(clouds.Cloud):
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
         return {'~/.azure': '~/.azure'}, []
 
-    def validate_instance_type(self, instance_type):
-        return service_catalog.validate_instance_type(instance_type,
-                                                      clouds='azure')
+    def instance_type_exists(self, instance_type):
+        return service_catalog.instance_type_exists(instance_type,
+                                                    clouds='azure')
 
     def get_region_by_name(self, region: str) -> Optional[clouds.Region]:
         return service_catalog.get_region_by_name(region, 'azure')

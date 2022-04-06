@@ -297,7 +297,7 @@ class GCP(clouds.Cloud):
         # from other file_mounts as well in ray yaml.
         return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
 
-    def validate_instance_type(self, instance_type):
+    def instance_type_exists(self, instance_type):
         return instance_type in self._ON_DEMAND_PRICES.keys()
 
     def get_region_by_name(self, region: str) -> Optional[clouds.Region]:
