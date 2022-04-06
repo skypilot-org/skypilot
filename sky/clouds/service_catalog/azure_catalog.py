@@ -14,6 +14,10 @@ _df = common.read_catalog('azure.csv')
 _DEFAULT_REGION = 'southcentralus'
 
 
+def instance_type_exists(instance_type: str) -> bool:
+    return common.instance_type_exists_impl(_df, instance_type)
+
+
 def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     use_spot: bool = False) -> float:

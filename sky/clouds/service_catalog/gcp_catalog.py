@@ -37,6 +37,13 @@ _A100_HOST_MEMORY = {
 }
 
 
+def instance_type_exists(instance_type: str) -> bool:
+    """Check the existence of the instance type."""
+    del instance_type
+    # Handled in gcp.py. We don't have a proper catalog right now.
+    assert False, 'Internal logic error: this function should not be called'
+
+
 def _get_accelerator(
     df: pd.DataFrame,
     accelerator: str,
