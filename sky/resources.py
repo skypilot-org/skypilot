@@ -319,7 +319,7 @@ class Resources:
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud
-        
+
         if self.region is not None and self.region != other.region:
             return False
         # self.region <= other.region

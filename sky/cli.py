@@ -479,11 +479,11 @@ def cli():
     help=('If specified, sync this dir to the remote working directory, '
           'where the task will be invoked. '
           'Overrides the "workdir" config in the YAML if both are supplied.'))
-@click.option('--cloud',
-              required=False,
-              type=str,
-              help='The cloud to use. If specified, override the "resources.cloud".'
-             )
+@click.option(
+    '--cloud',
+    required=False,
+    type=str,
+    help='The cloud to use. If specified, override the "resources.cloud".')
 @click.option(
     '--region',
     required=False,

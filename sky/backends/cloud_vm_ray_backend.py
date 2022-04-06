@@ -611,7 +611,8 @@ class RetryingVmProvisioner(object):
                         zones = None
                     else:
                         assert False, cloud
-                    assert region == prev_resources.region, (region, prev_resources.region)
+                    assert region == prev_resources.region, (
+                        region, prev_resources.region)
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -848,7 +849,8 @@ class RetryingVmProvisioner(object):
                 self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 cluster_name = config_dict['cluster_name']
-                config_dict['launched_resources'] = to_provision.copy(region.name)
+                config_dict['launched_resources'] = to_provision.copy(
+                    region.name)
                 config_dict['launched_nodes'] = num_nodes
                 plural = '' if num_nodes == 1 else 's'
                 logger.info(f'{fore.GREEN}Successfully provisioned or found'
@@ -1146,18 +1148,20 @@ class CloudVmRayBackend(backends.Backend):
             return self.cluster_name
 
         def _update_cluster_region(self):
-            if self.launched_resources.region is not None: return
-            
+            if self.launched_resources.region is not None:
+                return
+
             config = backend_utils.read_yaml(self.cluster_yaml)
             provider = config['provider']
             cloud = self.launched_resources.cloud
             if cloud.is_same_cloud(sky.Azure()):
-                region=provider['location']
+                region = provider['location']
             elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
                     sky.AWS()):
                 region = provider['region']
-            self.launched_resources = self.launched_resources.copy(region=region)
-            
+            self.launched_resources = self.launched_resources.copy(
+                region=region)
+
         def __setstate__(self, state):
             version = state.pop('_version', None)
             if version is None:
@@ -1192,7 +1196,8 @@ class CloudVmRayBackend(backends.Backend):
 
         # Backward compatibility: set the region field from the cluster_yaml
         if launched_resources.region is None:
-            region = backend_utils.read_yaml(handle.cluster_yaml)['provider']['region']
+            region = backend_utils.read_yaml(
+                handle.cluster_yaml)['provider']['region']
             handle.launched_resources = launched_resources.copy(region=region)
 
         # requested_resources <= actual_resources.
@@ -1202,7 +1207,8 @@ class CloudVmRayBackend(backends.Backend):
             existing_region = launched_resources.region or ''
             raise exceptions.ResourcesMismatchError(
                 'Requested resources do not match the existing cluster.\n'
-                f'  Requested:\t{task.num_nodes}x {task_resources} {requested_region}\n'
+                f'  Requested:\t{task.num_nodes}x {task_resources} '
+                f'{requested_region}\n'
                 f'  Existing:\t{handle.launched_nodes}x '
                 f'{handle.launched_resources} {existing_region}\n'
                 f'To fix: specify a new cluster name, or down the '

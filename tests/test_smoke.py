@@ -130,6 +130,7 @@ def test_region():
     )
     run_one_test(test)
 
+
 # ---------- Check Sky's environment variables; workdir. ----------
 def test_env_check():
     name = _get_cluster_name()
