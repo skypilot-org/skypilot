@@ -121,7 +121,7 @@ class Resources:
     def _set_accelerators(
         self,
         accelerators: Union[None, str, Dict[str, int]],
-        accelerator_args: Optional[Dict[str, str]] = None,
+        accelerator_args: Optional[Dict[str, str]],
     ) -> None:
         """Sets accelerators.
 
