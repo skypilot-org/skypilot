@@ -850,7 +850,7 @@ class RetryingVmProvisioner(object):
 
                 cluster_name = config_dict['cluster_name']
                 config_dict['launched_resources'] = to_provision.copy(
-                    region.name)
+                    region=region.name)
                 config_dict['launched_nodes'] = num_nodes
                 plural = '' if num_nodes == 1 else 's'
                 logger.info(f'{fore.GREEN}Successfully provisioned or found'
