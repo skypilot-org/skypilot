@@ -47,6 +47,7 @@ def instance_type_exists(instance_type: str) -> bool:
 def valid_region_name(region: str) -> Optional[str]:
     return common.valid_region_name_impl(_df, region)
 
+
 def _get_accelerator(
     df: pd.DataFrame,
     accelerator: str,

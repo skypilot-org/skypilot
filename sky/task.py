@@ -280,6 +280,8 @@ class Task:
                     resources['accelerator_args'])
             if resources.get('use_spot') is not None:
                 resources['use_spot'] = resources['use_spot']
+            if resources.get('region') is not None:
+                resources['region_limit'] = resources.pop('region')
             # FIXME: We should explicitly declare all the parameters
             # that are sliding through the **resources
             resources = sky.Resources(**resources)

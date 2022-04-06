@@ -279,5 +279,5 @@ class AWS(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
 
-    def get_region_by_name(self, region: str) -> Optional[clouds.Region]:
-        return service_catalog.get_region_by_name(region, 'aws')
+    def correct_region_by_name(self, region: str) -> Optional[clouds.Region]:
+        return service_catalog.correct_region_by_name(region, 'aws')

@@ -90,10 +90,11 @@ def instance_type_exists(instance_type: str,
     """Check the existence of a instance type."""
     return _map_clouds_catalog(clouds, 'instance_type_exists', instance_type)
 
-def get_region_by_name(region_name: str,
-                       clouds: CloudFilter = None) -> cloud.Region:
+
+def correct_region_by_name(region_name: str, clouds: CloudFilter = None) -> str:
     """Returns the region by name."""
-    return _map_clouds_catalog(clouds, 'get_region_by_name', region_name)
+    return _map_clouds_catalog(clouds, 'correct_region_by_name', region_name)
+
 
 def get_region_zones_for_instance_type(
         instance_type: str,

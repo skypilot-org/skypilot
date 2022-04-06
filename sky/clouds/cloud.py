@@ -147,6 +147,6 @@ class Cloud:
         """Returns whether the instance type exists for this cloud."""
         raise NotImplementedError
 
-    def get_region_by_name(self, region: str) -> Optional[Region]:
+    def correct_region_by_name(self, region: str) -> Optional[Region]:
         """Returns whether the region is valid for this cloud."""
         raise NotImplementedError

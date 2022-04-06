@@ -628,6 +628,12 @@ class RetryingVmProvisioner(object):
                     f'Cluster {cluster_name!r} (status: {cluster_status.value})'
                     f' was previously launched in {cloud} ({region.name}). '
                     'Relaunching in that region.')
+            # This should be handled in _check_existing_cluster function.
+            assert (to_provision.region_limit is None or
+                    region.name == to_provision.region_limit), (
+                    f'Cluster {cluster_name!r} was previously launched in '
+                    f'{cloud} ({region.name}). It does not match the '
+                    f'required region {to_provision.region_limit}.')
             # TODO(zhwu): The cluster being killed by cloud provider should
             # be tested whether re-launching a cluster killed spot instance
             # will recover the data.
@@ -699,6 +705,10 @@ class RetryingVmProvisioner(object):
                 accelerators=to_provision.accelerators,
                 use_spot=to_provision.use_spot,
         ):
+            # Do not retry on region if it's not in the requested region_limit.
+            if (to_provision.region_limit is not None and
+                    region.name != to_provision.region_limit):
+                continue
             yield (region, zones)
 
     def _try_provision_tpu(self, to_provision: 'resources_lib.Resources',
@@ -1170,6 +1180,19 @@ class CloudVmRayBackend(backends.Backend):
 
         launched_resources = handle.launched_resources
         task_resources = list(task.resources)[0]
+
+        # Check the region_limit matches the cluster region.
+        if task_resources.region_limit is not None:
+            origin_region = backend_utils.read_yaml(
+                handle.cluster_yaml)['provider']['region']
+            if task_resources.region_limit != origin_region:
+                raise exceptions.ResourcesMismatchError(
+                    'Requested region does not match the existing cluster.\n'
+                    f'  Requested: {task_resources.region_limit}\n'
+                    f'  Existing:  {origin_region}'
+                    f'To fix: specify a new cluster name, or down the '
+                    f'existing cluster first: sky down {cluster_name}')
+
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(launched_resources)):
