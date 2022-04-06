@@ -201,37 +201,25 @@ def test_infer_cloud_from_instance_type(monkeypatch):
                     inferred_cloud=sky.Azure())
 
 
-def test_invalid_region_limit(monkeypatch):
+def test_invalid_region(monkeypatch):
     for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
         with pytest.raises(ValueError) as e:
-            _test_resources(monkeypatch, cloud, region_limit='invalid')
+            _test_resources(monkeypatch, cloud, region='invalid')
         assert 'Invalid region' in str(e.value)
 
 
 def test_infer_cloud_from_region(monkeypatch):
     # AWS regions
-    _test_resources(monkeypatch,
-                    region_limit='us-east-1',
-                    inferred_cloud=sky.AWS())
-    _test_resources(monkeypatch,
-                    region_limit='us-west-2',
-                    inferred_cloud=sky.AWS())
-    _test_resources(monkeypatch,
-                    region_limit='US-West-1',
-                    inferred_cloud=sky.AWS())
+    _test_resources(monkeypatch, region='us-east-1', inferred_cloud=sky.AWS())
+    _test_resources(monkeypatch, region='us-west-2', inferred_cloud=sky.AWS())
+    _test_resources(monkeypatch, region='US-West-1', inferred_cloud=sky.AWS())
     # GCP instances
-    _test_resources(monkeypatch,
-                    region_limit='us-East1',
-                    inferred_cloud=sky.GCP())
-    _test_resources(monkeypatch,
-                    region_limit='us-west1',
-                    inferred_cloud=sky.GCP())
+    _test_resources(monkeypatch, region='us-East1', inferred_cloud=sky.GCP())
+    _test_resources(monkeypatch, region='us-west1', inferred_cloud=sky.GCP())
     #Azure instances
+    _test_resources(monkeypatch, region='westus', inferred_cloud=sky.Azure())
     _test_resources(monkeypatch,
-                    region_limit='westus',
-                    inferred_cloud=sky.Azure())
-    _test_resources(monkeypatch,
-                    region_limit='northCentralus',
+                    region='northCentralus',
                     inferred_cloud=sky.Azure())
 
 
