@@ -260,3 +260,4 @@ class Azure(clouds.Cloud):
                 'Failed to get subscription id from azure cli. '
                 'Make sure you have logged in and run this Azure '
                 'cli command: "az account set -s <subscription_id>".') from e
+        return azure_subscription_id
