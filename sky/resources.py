@@ -50,6 +50,9 @@ class Resources:
         self._version = self._VERSION
         self._cloud = cloud
 
+        # Region_limit is the requested region. It will not be updated
+        # with the actual region.
+        # TODO(zhwu): Should we keep the region in Resources up-to-date?
         self._region_limit: Optional[str] = None
         self._set_region_limit(region_limit)
 
@@ -319,6 +322,8 @@ class Resources:
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud
+        
+        # NOTE: region_limit should not be checked here.
 
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
