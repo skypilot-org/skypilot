@@ -217,11 +217,11 @@ def test_infer_cloud_from_region(monkeypatch):
                     region_limit='us-west-2',
                     inferred_cloud=sky.AWS())
     _test_resources(monkeypatch,
-                    region_limit='us-west-1',
+                    region_limit='US-West-1',
                     inferred_cloud=sky.AWS())
     # GCP instances
     _test_resources(monkeypatch,
-                    region_limit='us-east1',
+                    region_limit='us-East1',
                     inferred_cloud=sky.GCP())
     _test_resources(monkeypatch,
                     region_limit='us-west1',
@@ -231,7 +231,7 @@ def test_infer_cloud_from_region(monkeypatch):
                     region_limit='westus',
                     inferred_cloud=sky.Azure())
     _test_resources(monkeypatch,
-                    region_limit='northcentralus',
+                    region_limit='northCentralus',
                     inferred_cloud=sky.Azure())
 
 
