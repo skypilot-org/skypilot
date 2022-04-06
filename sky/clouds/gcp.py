@@ -1,5 +1,4 @@
 """Google Cloud Platform."""
-import copy
 import json
 import os
 import subprocess
@@ -236,10 +235,11 @@ class GCP(clouds.Cloud):
                     return ([], fuzzy_candidate_list)
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
-        r = copy.deepcopy(resources)
-        r.cloud = GCP()
-        r.instance_type = GCP.get_default_instance_type()
-        r.accelerators = accelerator_match
+        r = resources.copy(
+            cloud=GCP(),
+            instance_type=GCP.get_default_instance_type(),
+            accelerators=accelerator_match,
+        )
         return ([r], fuzzy_candidate_list)
 
     @classmethod
@@ -296,6 +296,9 @@ class GCP(clouds.Cloud):
         # TODO(zhwu): rsync_exclude here is unsafe as it may exclude the folder
         # from other file_mounts as well in ray yaml.
         return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
+
+    def instance_type_exists(self, instance_type):
+        return instance_type in self._ON_DEMAND_PRICES.keys()
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
