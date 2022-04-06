@@ -482,13 +482,13 @@ def cli():
 @click.option('--cloud',
               required=False,
               type=str,
-              help='The cloud to use. If specified, override "resources.cloud".'
+              help='The cloud to use. If specified, override the "resources.cloud".'
              )
 @click.option(
     '--region',
     required=False,
     type=str,
-    help='The region to use. If specified, override "resources.region_limit".')
+    help='The region to use. If specified, override the "resources.region".')
 @click.option(
     '--gpus',
     required=False,
@@ -594,7 +594,7 @@ def launch(
         if cloud is not None:
             override_params['cloud'] = _get_cloud(cloud)
         if region is not None:
-            override_params['region_limit'] = region
+            override_params['region'] = region
         if gpus is not None:
             override_params['accelerators'] = gpus
         if use_spot is not None:
@@ -879,7 +879,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
             hourly_cost = handle.launched_resources.get_cost(3600) \
                 * handle.launched_nodes
             price_str = f'$ {hourly_cost:.3f}'
-            region = handle.get_cluster_region()
+            region = handle.launched_resources.region
             row.extend([
                 # HOURLY PRICE
                 price_str,

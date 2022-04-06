@@ -611,6 +611,7 @@ class RetryingVmProvisioner(object):
                         zones = None
                     else:
                         assert False, cloud
+                    assert region == prev_resources.region, (region, prev_resources.region)
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -629,11 +630,11 @@ class RetryingVmProvisioner(object):
                     f' was previously launched in {cloud} ({region.name}). '
                     'Relaunching in that region.')
             # This should be handled in _check_existing_cluster function.
-            assert (to_provision.region_limit is None or
-                    region.name == to_provision.region_limit), (
+            assert (to_provision.region is None or
+                    region.name == to_provision.region), (
                         f'Cluster {cluster_name!r} was previously launched in '
                         f'{cloud} ({region.name}). It does not match the '
-                        f'required region {to_provision.region_limit}.')
+                        f'required region {to_provision.region}.')
             # TODO(zhwu): The cluster being killed by cloud provider should
             # be tested whether re-launching a cluster killed spot instance
             # will recover the data.
@@ -705,9 +706,9 @@ class RetryingVmProvisioner(object):
                 accelerators=to_provision.accelerators,
                 use_spot=to_provision.use_spot,
         ):
-            # Do not retry on region if it's not in the requested region_limit.
-            if (to_provision.region_limit is not None and
-                    region.name != to_provision.region_limit):
+            # Do not retry on region if it's not in the requested region.
+            if (to_provision.region is not None and
+                    region.name != to_provision.region):
                 continue
             yield (region, zones)
 
@@ -823,7 +824,7 @@ class RetryingVmProvisioner(object):
                 cluster_yaml=cluster_config_file,
                 launched_nodes=num_nodes,
                 # OK for this to be shown in CLI as status == INIT.
-                launched_resources=to_provision,
+                launched_resources=to_provision.copy(region=region.name),
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
 
@@ -847,6 +848,8 @@ class RetryingVmProvisioner(object):
                 self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 cluster_name = config_dict['cluster_name']
+                config_dict['launched_resources'] = to_provision.copy(region.name)
+                config_dict['launched_nodes'] = num_nodes
                 plural = '' if num_nodes == 1 else 's'
                 logger.info(f'{fore.GREEN}Successfully provisioned or found'
                             f' existing VM{plural}.{style.RESET_ALL}')
@@ -1038,8 +1041,6 @@ class RetryingVmProvisioner(object):
                     cluster_exists=cluster_exists)
                 if dryrun:
                     return
-                config_dict['launched_resources'] = to_provision
-                config_dict['launched_nodes'] = num_nodes
             except exceptions.ResourcesUnavailableError as e:
                 if e.no_retry:
                     raise e
@@ -1109,6 +1110,7 @@ class CloudVmRayBackend(backends.Backend):
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
+        _VERSION = 1
 
         def __init__(
                 self,
@@ -1120,6 +1122,7 @@ class CloudVmRayBackend(backends.Backend):
                 launched_resources: Optional['resources_lib.Resources'] = None,
                 tpu_create_script: Optional[str] = None,
                 tpu_delete_script: Optional[str] = None) -> None:
+            self._version = self._VERSION
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
@@ -1127,7 +1130,6 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
             self.tpu_delete_script = tpu_delete_script
-            self._find_cluster_region()
 
         def __repr__(self):
             return (f'ResourceHandle('
@@ -1143,20 +1145,26 @@ class CloudVmRayBackend(backends.Backend):
         def get_cluster_name(self):
             return self.cluster_name
 
-        def _find_cluster_region(self):
+        def _update_cluster_region(self):
+            if self.launched_resources.region is not None: return
+            
             config = backend_utils.read_yaml(self.cluster_yaml)
             provider = config['provider']
             cloud = self.launched_resources.cloud
             if cloud.is_same_cloud(sky.Azure()):
-                self.cluster_region = provider['location']
+                region=provider['location']
             elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
                     sky.AWS()):
-                self.cluster_region = provider['region']
+                region = provider['region']
+            self.launched_resources = self.launched_resources.copy(region=region)
+            
+        def __setstate__(self, state):
+            version = state.pop('_version', None)
+            if version is None:
+                state.pop('cluster_region', None)
 
-        def get_cluster_region(self):
-            if not hasattr(self, 'cluster_region'):
-                self._find_cluster_region()
-            return self.cluster_region
+            self.__dict__.update(state)
+            self._update_cluster_region()
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
@@ -1182,26 +1190,21 @@ class CloudVmRayBackend(backends.Backend):
         task_resources = list(task.resources)[0]
         cluster_name = handle.cluster_name
 
-        # Check the region_limit matches the cluster region.
-        if task_resources.region_limit is not None:
-            origin_region = backend_utils.read_yaml(
-                handle.cluster_yaml)['provider']['region']
-            if task_resources.region_limit != origin_region:
-                raise exceptions.ResourcesMismatchError(
-                    'Requested region does not match the existing cluster.\n'
-                    f'  Requested: {task_resources.region_limit}\n'
-                    f'  Existing:  {origin_region}'
-                    f'To fix: specify a new cluster name, or down the '
-                    f'existing cluster first: sky down {cluster_name}')
+        # Backward compatibility: set the region field from the cluster_yaml
+        if launched_resources.region is None:
+            region = backend_utils.read_yaml(handle.cluster_yaml)['provider']['region']
+            handle.launched_resources = launched_resources.copy(region=region)
 
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(launched_resources)):
+            requested_region = task_resources.region or ''
+            existing_region = launched_resources.region or ''
             raise exceptions.ResourcesMismatchError(
                 'Requested resources do not match the existing cluster.\n'
-                f'  Requested: {task.num_nodes}x {task_resources}\n'
-                f'  Existing: {handle.launched_nodes}x '
-                f'{handle.launched_resources}\n'
+                f'  Requested:\t{task.num_nodes}x {task_resources} {requested_region}\n'
+                f'  Existing:\t{handle.launched_nodes}x '
+                f'{handle.launched_resources} {existing_region}\n'
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: sky down {cluster_name}')
 

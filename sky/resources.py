@@ -35,7 +35,7 @@ class Resources:
         # TODO:
         sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
-    _VERSION = 1
+    _VERSION = 2
 
     def __init__(
         self,
@@ -45,16 +45,13 @@ class Resources:
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
-        region_limit: Optional[str] = None,
+        region: Optional[str] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
 
-        # Region_limit is the requested region. It will not be updated
-        # with the actual region.
-        # TODO(zhwu): Should we keep the region in Resources up-to-date?
-        self._region_limit: Optional[str] = None
-        self._set_region_limit(region_limit)
+        self._region: Optional[str] = None
+        self._set_region(region)
 
         # Calling the setter for instance_type.
         # NOTE: cloud should be set before instance_type.
@@ -100,8 +97,8 @@ class Resources:
         return self._cloud
 
     @property
-    def region_limit(self):
-        return self._region_limit
+    def region(self):
+        return self._region
 
     @property
     def instance_type(self):
@@ -179,8 +176,8 @@ class Resources:
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
 
-    def _set_region_limit(self, region: Optional[str]) -> None:
-        self._region_limit = region
+    def _set_region(self, region: Optional[str]) -> None:
+        self._region = region
         if region is None:
             return
 
@@ -210,7 +207,7 @@ class Resources:
             logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
                          f'inferred from the region {valid_region!r}.')
             self._cloud = valid_clouds[0]
-        self._region_limit = valid_region
+        self._region = valid_region
 
     def _try_validate_instance_type(self):
         if self.instance_type is None:
@@ -323,7 +320,9 @@ class Resources:
             return False
         # self.cloud <= other.cloud
         
-        # NOTE: region_limit should not be checked here.
+        if self.region is not None and self.region != other.region:
+            return False
+        # self.region <= other.region
 
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
@@ -392,6 +391,7 @@ class Resources:
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', self.use_spot),
             disk_size=override.pop('disk_size', self.disk_size),
+            region=override.pop('region', self.region),
         )
         assert len(override) == 0
         return resources
@@ -416,4 +416,6 @@ class Resources:
 
             disk_size = state.pop('disk_size')
             state['_disk_size'] = disk_size
+        if version < 2:
+            self._region = None
         self.__dict__.update(state)
