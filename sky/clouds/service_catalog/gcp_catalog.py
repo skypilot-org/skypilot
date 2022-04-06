@@ -42,6 +42,9 @@ def validate_instance_type(instance_type: str) -> bool:
     raise NotImplementedError('GCP does not support instance type validation.')
 
 
+def valid_region_name(region: str) -> Optional[str]:
+    return common.valid_region_name_impl(_df, region)
+
 def _get_accelerator(
     df: pd.DataFrame,
     accelerator: str,

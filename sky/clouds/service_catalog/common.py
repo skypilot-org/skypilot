@@ -56,6 +56,10 @@ def validate_instance_type_impl(df: pd.DataFrame, instance_type: str) -> bool:
     return instance_type in df['InstanceType'].unique()
 
 
+def valid_region_name_impl(df: pd.DataFrame, region: str) -> Optional[str]:
+    fuzzy_result = df[df['Region'].str.fullmatch(region, case=False)]
+    return fuzzy_result['Region'].iloc[0] if len(fuzzy_result) > 0 else None
+
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,

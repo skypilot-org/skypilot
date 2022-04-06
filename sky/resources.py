@@ -45,9 +45,13 @@ class Resources:
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
+        region: Optional[str] = None,
     ):
         self.__version__ = self._VERSION
         self._cloud = cloud
+
+        self._region: Optional[clouds.Region] = None
+        self._set_region(region)
 
         # Calling the setter for instance_type.
         # NOTE: cloud should be set before instance_type.
@@ -91,6 +95,10 @@ class Resources:
     @property
     def cloud(self):
         return self._cloud
+
+    @property
+    def region(self):
+        return self._region
 
     @property
     def instance_type(self):
@@ -167,6 +175,43 @@ class Resources:
 
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
+
+    def _set_region(self, region: Optional[str]) -> None:
+        if region is None:
+            self._region = None
+            return
+
+        # Validate region.
+        if self._cloud is not None:
+            valid_region = self._cloud.get_region_by_name(region)
+            if valid_region is None:
+                raise ValueError(
+                    f'Invalid instance type {self._instance_type!r} '
+                    f'for cloud {self.cloud}.')
+        else:
+            # If cloud not specified
+            valid_region = None
+            valid_clouds = []
+            enabled_clouds = global_user_state.get_enabled_clouds()
+            for cloud in enabled_clouds:
+                region = cloud.get_region_by_name(region)
+                if region is not None:
+                    valid_region = region
+                    valid_clouds.append(cloud)
+            if len(valid_clouds) == 0:
+                raise ValueError(
+                    f'Invalid region {self._region!r} '
+                    f'for any cloud among {enabled_clouds}.')
+            if len(valid_clouds) > 1:
+                raise ValueError(
+                    f'Ambiguous region {self._region!r} '
+                    f'Please specify cloud explicitly among {valid_clouds}.')
+            logger.info(
+                f'Cloud is not specified, using {valid_clouds[0]} '
+                f'inferred from the region {self._region!r}.')
+            self._cloud = valid_clouds[0]
+        self._region = valid_region
+
 
     def _try_validate_instance_type(self):
         if self.instance_type is None:

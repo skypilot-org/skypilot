@@ -245,6 +245,9 @@ class Azure(clouds.Cloud):
         return service_catalog.validate_instance_type(instance_type,
                                                       clouds='azure')
 
+    def get_region_by_name(self, region: str) -> Optional[clouds.Region]:
+        return service_catalog.get_region_by_name(region, 'azure')
+
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:

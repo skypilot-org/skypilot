@@ -90,6 +90,10 @@ def validate_instance_type(instance_type: str,
     """Validates the instance type."""
     return _map_clouds_catalog(clouds, 'validate_instance_type', instance_type)
 
+def get_region_by_name(region_name: str,
+                       clouds: CloudFilter = None) -> cloud.Region:
+    """Returns the region by name."""
+    return _map_clouds_catalog(clouds, 'get_region_by_name', region_name)
 
 def get_region_zones_for_instance_type(
         instance_type: str,

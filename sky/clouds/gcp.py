@@ -300,6 +300,9 @@ class GCP(clouds.Cloud):
     def validate_instance_type(self, instance_type):
         return instance_type in self._ON_DEMAND_PRICES.keys()
 
+    def get_region_by_name(self, region: str) -> Optional[clouds.Region]:
+        return service_catalog.get_region_by_name(region, 'gcp')
+
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
         # TODO(zhwu): change the project id fetching with the following command

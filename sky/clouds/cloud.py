@@ -143,6 +143,10 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def validate_instance_type(self, instance_type):
+    def validate_instance_type(self, instance_type: str):
         """Returns whether the instance type is valid for this cloud."""
+        raise NotImplementedError
+
+    def get_region_by_name(self, region: str) -> Optional[Region]:
+        """Returns whether the region is valid for this cloud."""
         raise NotImplementedError

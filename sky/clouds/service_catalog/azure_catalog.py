@@ -18,6 +18,10 @@ def validate_instance_type(instance_type: str) -> bool:
     return common.validate_instance_type_impl(_df, instance_type)
 
 
+def valid_region_name(region: str) -> Optional[str]:
+    return common.valid_region_name_impl(_df, region)
+
+
 def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     use_spot: bool = False) -> float:

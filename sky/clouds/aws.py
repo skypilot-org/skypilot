@@ -279,3 +279,6 @@ class AWS(clouds.Cloud):
     def validate_instance_type(self, instance_type):
         return service_catalog.validate_instance_type(instance_type,
                                                       clouds='aws')
+
+    def get_region_by_name(self, region: str) -> Optional[clouds.Region]:
+        return service_catalog.get_region_by_name(region, 'aws')
