@@ -584,20 +584,18 @@ def launch(
         if workdir is not None:
             task.workdir = workdir
 
-        assert len(task.resources) == 1
-        old_resources = list(task.resources)[0]
-
         override_params = {}
         if cloud is not None:
             override_params['cloud'] = _get_cloud(cloud)
         if gpus is not None:
             override_params['accelerators'] = gpus
-
         if use_spot is not None:
             override_params['use_spot'] = use_spot
         if disk_size is not None:
             override_params['disk_size'] = disk_size
 
+        assert len(task.resources) == 1
+        old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
         task.set_resources({new_resources})
 

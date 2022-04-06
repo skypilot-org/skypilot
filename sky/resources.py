@@ -46,7 +46,7 @@ class Resources:
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
     ):
-        self.__version__ = self._VERSION
+        self._version = self._VERSION
         self._cloud = cloud
 
         # Calling the setter for instance_type.
@@ -174,7 +174,7 @@ class Resources:
 
         # Validate instance type
         if self.cloud is not None:
-            valid = self.cloud.validate_instance_type(self._instance_type)
+            valid = self.cloud.instance_type_exists(self._instance_type)
             if not valid:
                 raise ValueError(
                     f'Invalid instance type {self._instance_type!r} '
@@ -184,17 +184,21 @@ class Resources:
             valid_clouds = []
             enabled_clouds = global_user_state.get_enabled_clouds()
             for cloud in enabled_clouds:
-                if cloud.validate_instance_type(self._instance_type):
+                if cloud.instance_type_exists(self._instance_type):
                     valid_clouds.append(cloud)
             if len(valid_clouds) == 0:
+                if len(enabled_clouds) == 1:
+                    cloud_str = f'for cloud {enabled_clouds[0]}'
+                else:
+                    cloud_str = f'for any cloud among {enabled_clouds}'
                 raise ValueError(
                     f'Invalid instance type {self._instance_type!r} '
-                    f'for any cloud among {enabled_clouds}.')
+                    f'{cloud_str}.')
             if len(valid_clouds) > 1:
                 raise ValueError(
-                    f'Ambiguous instance type {self._instance_type!r} '
+                    f'Ambiguous instance type {self._instance_type!r}. '
                     f'Please specify cloud explicitly among {valid_clouds}.')
-            logger.info(
+            logger.debug(
                 f'Cloud is not specified, using {valid_clouds[0]} '
                 f'inferred from the instance_type {self.instance_type!r}.')
             self._cloud = valid_clouds[0]
@@ -348,8 +352,9 @@ class Resources:
 
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
-        self.__version__ = self._VERSION
+        self._version = self._VERSION
         version = state.pop('__version__', None)
+        # Handle old version(s) here.
         if version is None:
             cloud = state.pop('cloud')
             state['_cloud'] = cloud

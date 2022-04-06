@@ -85,10 +85,10 @@ def list_accelerator_counts(
     return ret
 
 
-def validate_instance_type(instance_type: str,
-                           clouds: CloudFilter = None) -> bool:
-    """Validates the instance type."""
-    return _map_clouds_catalog(clouds, 'validate_instance_type', instance_type)
+def instance_type_exists(instance_type: str,
+                         clouds: CloudFilter = None) -> bool:
+    """Check the existence of a instance type."""
+    return _map_clouds_catalog(clouds, 'instance_type_exists', instance_type)
 
 
 def get_region_zones_for_instance_type(

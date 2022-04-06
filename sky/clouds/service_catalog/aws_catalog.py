@@ -13,8 +13,8 @@ _df = common.read_catalog('aws.csv')
 _DEFAULT_REGION = 'us-west-2'
 
 
-def validate_instance_type(instance_type: str) -> bool:
-    return common.validate_instance_type_impl(_df, instance_type)
+def instance_type_exists(instance_type: str) -> bool:
+    return common.instance_type_exists_impl(_df, instance_type)
 
 
 def get_hourly_cost(instance_type: str,
