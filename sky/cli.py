@@ -479,11 +479,16 @@ def cli():
     help=('If specified, sync this dir to the remote working directory, '
           'where the task will be invoked. '
           'Overrides the "workdir" config in the YAML if both are supplied.'))
+@click.option('--cloud',
+              required=False,
+              type=str,
+              help='The cloud to use. If specified, override "resources.cloud".'
+             )
 @click.option(
-    '--cloud',
+    '--region',
     required=False,
     type=str,
-    help='The cloud to use. If specified, override the "resources.cloud".')
+    help='The region to use. If specified, override "resources.region_limit".')
 @click.option(
     '--gpus',
     required=False,
@@ -534,6 +539,7 @@ def launch(
     backend_name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
+    region: Optional[str],
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -587,6 +593,8 @@ def launch(
         override_params = {}
         if cloud is not None:
             override_params['cloud'] = _get_cloud(cloud)
+        if region is not None:
+            override_params['region_limit'] = region
         if gpus is not None:
             override_params['accelerators'] = gpus
         if use_spot is not None:

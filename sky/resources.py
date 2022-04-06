@@ -177,36 +177,35 @@ class Resources:
         return self.cloud is not None and self._instance_type is not None
 
     def _set_region_limit(self, region: Optional[str]) -> None:
+        self._region_limit = region
         if region is None:
-            self._region_limit = None
             return
 
         # Validate region.
         if self._cloud is not None:
             valid_region = self._cloud.correct_region_by_name(region)
             if valid_region is None:
-                raise ValueError(
-                    f'Invalid instance type {self._instance_type!r} '
-                    f'for cloud {self.cloud}.')
+                raise ValueError(f'Invalid region limit {region!r} '
+                                 f'for cloud {self.cloud}.')
         else:
             # If cloud not specified
             valid_region = None
             valid_clouds = []
             enabled_clouds = global_user_state.get_enabled_clouds()
             for cloud in enabled_clouds:
-                region = cloud.correct_region_by_name(region)
-                if region is not None:
-                    valid_region = region
+                correct_region = cloud.correct_region_by_name(region)
+                if correct_region is not None:
+                    valid_region = correct_region
                     valid_clouds.append(cloud)
             if len(valid_clouds) == 0:
-                raise ValueError(f'Invalid region limit {self._region_limit!r} '
+                raise ValueError(f'Invalid region limit {region!r} '
                                  f'for any cloud among {enabled_clouds}.')
             if len(valid_clouds) > 1:
                 raise ValueError(
-                    f'Ambiguous region {self._region_limit!r} '
+                    f'Ambiguous region {region!r} '
                     f'Please specify cloud explicitly among {valid_clouds}.')
             logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
-                         f'inferred from the region {self._region_limit!r}.')
+                         f'inferred from the region {valid_region!r}.')
             self._cloud = valid_clouds[0]
         self._region_limit = valid_region
 

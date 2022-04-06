@@ -631,9 +631,9 @@ class RetryingVmProvisioner(object):
             # This should be handled in _check_existing_cluster function.
             assert (to_provision.region_limit is None or
                     region.name == to_provision.region_limit), (
-                    f'Cluster {cluster_name!r} was previously launched in '
-                    f'{cloud} ({region.name}). It does not match the '
-                    f'required region {to_provision.region_limit}.')
+                        f'Cluster {cluster_name!r} was previously launched in '
+                        f'{cloud} ({region.name}). It does not match the '
+                        f'required region {to_provision.region_limit}.')
             # TODO(zhwu): The cluster being killed by cloud provider should
             # be tested whether re-launching a cluster killed spot instance
             # will recover the data.
@@ -1180,6 +1180,7 @@ class CloudVmRayBackend(backends.Backend):
 
         launched_resources = handle.launched_resources
         task_resources = list(task.resources)[0]
+        cluster_name = handle.cluster_name
 
         # Check the region_limit matches the cluster region.
         if task_resources.region_limit is not None:
@@ -1196,7 +1197,6 @@ class CloudVmRayBackend(backends.Backend):
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(launched_resources)):
-            cluster_name = handle.cluster_name
             raise exceptions.ResourcesMismatchError(
                 'Requested resources do not match the existing cluster.\n'
                 f'  Requested: {task.num_nodes}x {task_resources}\n'

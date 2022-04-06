@@ -44,8 +44,8 @@ def instance_type_exists(instance_type: str) -> bool:
     assert False, 'Internal logic error: this function should not be called'
 
 
-def valid_region_name(region: str) -> Optional[str]:
-    return common.valid_region_name_impl(_df, region)
+def correct_region_by_name(region: str) -> Optional[str]:
+    return common.correct_region_by_name_impl(_df, region)
 
 
 def _get_accelerator(
