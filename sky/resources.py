@@ -35,6 +35,7 @@ class Resources:
         # TODO:
         sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
+    # Increment this if any fields changed. For backward compatibility.
     _VERSION = 2
 
     def __init__(
@@ -182,31 +183,31 @@ class Resources:
 
         # Validate region.
         if self._cloud is not None:
-            valid_region = self._cloud.correct_region_by_name(region)
-            if valid_region is None:
-                raise ValueError(f'Invalid region limit {region!r} '
+            if not self._cloud.region_exists(region):
+                raise ValueError(f'Invalid region {region!r} '
                                  f'for cloud {self.cloud}.')
         else:
             # If cloud not specified
-            valid_region = None
             valid_clouds = []
             enabled_clouds = global_user_state.get_enabled_clouds()
             for cloud in enabled_clouds:
-                correct_region = cloud.correct_region_by_name(region)
-                if correct_region is not None:
-                    valid_region = correct_region
+                if cloud.region_exists(region):
                     valid_clouds.append(cloud)
             if len(valid_clouds) == 0:
-                raise ValueError(f'Invalid region limit {region!r} '
-                                 f'for any cloud among {enabled_clouds}.')
+                if len(enabled_clouds) == 1:
+                    cloud_str = f'for cloud {enabled_clouds[0]}'
+                else:
+                    cloud_str = f'for any cloud among {enabled_clouds}'
+                raise ValueError(f'Invalid region {region!r} '
+                                 f'{cloud_str}.')
             if len(valid_clouds) > 1:
                 raise ValueError(
                     f'Ambiguous region {region!r} '
                     f'Please specify cloud explicitly among {valid_clouds}.')
             logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
-                         f'inferred from the region {valid_region!r}.')
+                         f'inferred from the region {region!r}.')
             self._cloud = valid_clouds[0]
-        self._region = valid_region
+        self._region = region
 
     def _try_validate_instance_type(self):
         if self.instance_type is None:
@@ -398,6 +399,9 @@ class Resources:
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
         self._version = self._VERSION
+
+        # TODO (zhwu): Design our persistent state format with `__getstate__`,
+        # so that to get rid of the version tracking.
         version = state.pop('_version', None)
         # Handle old version(s) here.
         if version is None:
@@ -415,6 +419,8 @@ class Resources:
 
             disk_size = state.pop('disk_size')
             state['_disk_size'] = disk_size
-        if version < 2:
+
+            self._region = None
+        elif version < 2:
             self._region = None
         self.__dict__.update(state)

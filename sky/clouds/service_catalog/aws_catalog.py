@@ -17,8 +17,8 @@ def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
 
-def correct_region_by_name(region: str) -> Optional[str]:
-    return common.correct_region_by_name_impl(_df, region)
+def region_exists(region: str) -> bool:
+    return common.region_exists_impl(_df, region)
 
 
 def get_hourly_cost(instance_type: str,

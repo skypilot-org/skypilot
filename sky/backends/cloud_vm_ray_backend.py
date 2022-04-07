@@ -611,8 +611,12 @@ class RetryingVmProvisioner(object):
                         zones = None
                     else:
                         assert False, cloud
-                    assert region == prev_resources.region, (
-                        region, prev_resources.region)
+                    if region != prev_resources.region:
+                        raise ValueError(
+                            f'Region mismatch. The region in '
+                            f'{handle.cluster_yaml} '
+                            f'has been changed from {prev_resources.region} '
+                            f'to {region}.')
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -628,9 +632,10 @@ class RetryingVmProvisioner(object):
             if cluster_status != global_user_state.ClusterStatus.UP:
                 logger.info(
                     f'Cluster {cluster_name!r} (status: {cluster_status.value})'
-                    f' was previously launched in {cloud} ({region.name}). '
-                    'Relaunching in that region.')
-            # This should be handled in _check_existing_cluster function.
+                    f' was previously launched in {cloud} '
+                    f'({region.name}). Relaunching in that region.')
+            # This should be handled in the
+            # _check_task_resources_smaller_than_cluster function.
             assert (to_provision.region is None or
                     region.name == to_provision.region), (
                         f'Cluster {cluster_name!r} was previously launched in '
@@ -1194,23 +1199,24 @@ class CloudVmRayBackend(backends.Backend):
         task_resources = list(task.resources)[0]
         cluster_name = handle.cluster_name
 
-        # Backward compatibility: set the region field from the cluster_yaml
-        if launched_resources.region is None:
-            region = backend_utils.read_yaml(
-                handle.cluster_yaml)['provider']['region']
-            handle.launched_resources = launched_resources.copy(region=region)
+        # Backward compatibility: the old launched_resources without region info
+        # was handled by ResourceHandle._update_cluster_region.
+        assert launched_resources.region is not None, handle
 
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(launched_resources)):
-            requested_region = task_resources.region or ''
-            existing_region = launched_resources.region or ''
+            if (task_resources.region is not None and
+                    task_resources.region != launched_resources.region):
+                raise exceptions.ResourcesMismatchError(
+                    'Task requested the resources in region '
+                    f'{task_resources.region!r}, but the existed cluster is in '
+                    f'region {launched_resources.region!r}.')
             raise exceptions.ResourcesMismatchError(
                 'Requested resources do not match the existing cluster.\n'
-                f'  Requested:\t{task.num_nodes}x {task_resources} '
-                f'{requested_region}\n'
+                f'  Requested:\t{task.num_nodes}x {task_resources} \n'
                 f'  Existing:\t{handle.launched_nodes}x '
-                f'{handle.launched_resources} {existing_region}\n'
+                f'{handle.launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: sky down {cluster_name}')
 

@@ -300,8 +300,8 @@ class GCP(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return instance_type in self._ON_DEMAND_PRICES.keys()
 
-    def correct_region_by_name(self, region: str) -> Optional[clouds.Region]:
-        return service_catalog.correct_region_by_name(region, 'gcp')
+    def region_exists(self, region: str) -> bool:
+        return service_catalog.region_exists(region, 'gcp')
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

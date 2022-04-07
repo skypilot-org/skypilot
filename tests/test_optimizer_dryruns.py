@@ -1,7 +1,8 @@
-from typing import List
-import pytest
 import tempfile
 import textwrap
+from typing import List
+
+import pytest
 
 import sky
 from sky import clouds
@@ -24,7 +25,7 @@ def _test_parse_accelerators(spec, expected_accelerators):
 # to return all three clouds. We also monkeypatch `sky.check.check` so that
 # when the optimizer tries calling it to update enabled_clouds, it does not
 # raise SystemExit.
-def _get_resources(
+def _make_resources(
     monkeypatch,
     *resources_args,
     enabled_clouds: List[str] = None,
@@ -44,14 +45,14 @@ def _get_resources(
 def _test_resources(monkeypatch,
                     *resources_args,
                     enabled_clouds: List[str] = None,
-                    inferred_cloud: clouds.Cloud = None,
+                    expected_cloud: clouds.Cloud = None,
                     **resources_kwargs):
-    resources = _get_resources(monkeypatch,
-                               *resources_args,
-                               **resources_kwargs,
-                               enabled_clouds=enabled_clouds)
-    if inferred_cloud is not None:
-        assert inferred_cloud.is_same_cloud(resources.cloud)
+    resources = _make_resources(monkeypatch,
+                                *resources_args,
+                                **resources_kwargs,
+                                enabled_clouds=enabled_clouds)
+    if expected_cloud is not None:
+        assert expected_cloud.is_same_cloud(resources.cloud)
 
 
 def _test_resources_launch(monkeypatch,
@@ -59,10 +60,10 @@ def _test_resources_launch(monkeypatch,
                            enabled_clouds: List[str] = None,
                            cluster_name: str = None,
                            **resources_kwargs):
-    resources = _get_resources(monkeypatch,
-                               *resources_args,
-                               **resources_kwargs,
-                               enabled_clouds=enabled_clouds)
+    resources = _make_resources(monkeypatch,
+                                *resources_args,
+                                **resources_kwargs,
+                                enabled_clouds=enabled_clouds)
 
     with sky.Dag() as dag:
         task = sky.Task('test_task')
@@ -183,22 +184,23 @@ def test_invalid_instance_type(monkeypatch):
 def test_infer_cloud_from_instance_type(monkeypatch):
     # AWS instances
     _test_resources(monkeypatch,
+                    cloud=sky.AWS(),
                     instance_type='m5.12xlarge',
-                    inferred_cloud=sky.AWS())
+                    expected_cloud=sky.AWS())
     _test_resources(monkeypatch,
                     instance_type='p3.8xlarge',
-                    inferred_cloud=sky.AWS())
+                    expected_cloud=sky.AWS())
     _test_resources(monkeypatch,
                     instance_type='g4dn.2xlarge',
-                    inferred_cloud=sky.AWS())
+                    expected_cloud=sky.AWS())
     # GCP instances
     _test_resources(monkeypatch,
                     instance_type='n1-standard-96',
-                    inferred_cloud=sky.GCP())
+                    expected_cloud=sky.GCP())
     #Azure instances
     _test_resources(monkeypatch,
                     instance_type='Standard_NC12s_v3',
-                    inferred_cloud=sky.Azure())
+                    expected_cloud=sky.Azure())
 
 
 def test_invalid_region(monkeypatch):
@@ -210,17 +212,18 @@ def test_invalid_region(monkeypatch):
 
 def test_infer_cloud_from_region(monkeypatch):
     # AWS regions
-    _test_resources(monkeypatch, region='us-east-1', inferred_cloud=sky.AWS())
-    _test_resources(monkeypatch, region='us-west-2', inferred_cloud=sky.AWS())
-    _test_resources(monkeypatch, region='US-West-1', inferred_cloud=sky.AWS())
-    # GCP instances
-    _test_resources(monkeypatch, region='us-East1', inferred_cloud=sky.GCP())
-    _test_resources(monkeypatch, region='us-west1', inferred_cloud=sky.GCP())
-    #Azure instances
-    _test_resources(monkeypatch, region='westus', inferred_cloud=sky.Azure())
+    _test_resources(monkeypatch, region='us-east-1', expected_cloud=sky.AWS())
+    _test_resources(monkeypatch, region='us-west-2', expected_cloud=sky.AWS())
+    _test_resources(monkeypatch, region='us-west-1', expected_cloud=sky.AWS())
+    # GCP regions
+    _test_resources(monkeypatch, region='us-east1', expected_cloud=sky.GCP())
+    _test_resources(monkeypatch, region='us-west1', expected_cloud=sky.GCP())
+    #Azure regions
+    _test_resources(monkeypatch, region='westus', expected_cloud=sky.Azure())
     _test_resources(monkeypatch,
-                    region='northCentralus',
-                    inferred_cloud=sky.Azure())
+                    cloud=sky.Azure(),
+                    region='northcentralus',
+                    expected_cloud=sky.Azure())
 
 
 def test_parse_accelerators_from_yaml():
