@@ -6,7 +6,7 @@ import logging
 import time
 import hashlib
 from typing import Any, Dict, List, Union, Tuple
-from ray.autoscaler._private.aws.utils import client_cache, resource_cache
+from sky.skylet.providers.aws.utils import client_cache, resource_cache
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME, NODE_KIND_HEAD, TAG_RAY_NODE_KIND
 
 logger = logging.getLogger(__name__)

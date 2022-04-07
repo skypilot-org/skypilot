@@ -16,10 +16,10 @@ from ray.autoscaler.tags import (
     TAG_RAY_USER_NODE_TYPE,
 )
 from ray.autoscaler._private.constants import BOTO_MAX_RETRIES, BOTO_CREATE_MAX_RETRIES
-from ray.autoscaler._private.aws.config import bootstrap_aws
+from sky.skylet.providers.aws.config import bootstrap_aws
 from ray.autoscaler._private.log_timer import LogTimer
 
-from ray.autoscaler._private.aws.utils import (
+from sky.skylet.providers.aws.utils import (
     boto_exception_handler,
     resource_cache,
     client_cache,
@@ -27,7 +27,7 @@ from ray.autoscaler._private.aws.utils import (
 from ray.autoscaler._private.cli_logger import cli_logger, cf
 import ray.ray_constants as ray_constants
 
-from ray.autoscaler._private.aws.cloudwatch.cloudwatch_helper import (
+from sky.skylet.providers.aws.cloudwatch.cloudwatch_helper import (
     CloudwatchHelper,
     CLOUDWATCH_AGENT_INSTALLED_AMI_TAG,
     CLOUDWATCH_AGENT_INSTALLED_TAG,
