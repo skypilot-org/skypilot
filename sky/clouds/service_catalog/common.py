@@ -56,6 +56,10 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
     return instance_type in df['InstanceType'].unique()
 
 
+def region_exists_impl(df: pd.DataFrame, region: str) -> bool:
+    return region in df['Region'].unique()
+
+
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,
