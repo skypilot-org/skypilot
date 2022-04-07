@@ -29,7 +29,7 @@ describe all fields available.
     resources:
       cloud: aws  # The cloud to use (optional).
 
-      # The region to use (optional). The auto failover will be disabled
+      # The region to use (optional). The Auto-failover will be disabled
       # if this is specified.
       region: us-east-1 
 
