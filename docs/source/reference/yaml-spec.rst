@@ -29,6 +29,10 @@ describe all fields available.
     resources:
       cloud: aws  # The cloud to use (optional).
 
+      # The region to use (optional). The auto failover will be disabled
+      # if this is specified.
+      region: us-east-1 
+
       # Accelerator name and count per node (optional).
       #
       # Use `sky show-gpus` to view available accelerator configurations.
