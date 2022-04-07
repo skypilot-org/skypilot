@@ -231,7 +231,7 @@ class RayCodeGen:
                 gpu_dict = dict()
             for bundle in bundles:
                 if isinstance(cloud, clouds.Local):
-                    bundle.update({**accelerator_dict})
+                    bundle.update({**gpu_dict})
                 else:
                     bundle.update({
                         **accelerator_dict,
@@ -1937,7 +1937,6 @@ class CloudVmRayBackend(backends.Backend):
             return
 
         job_id = self._add_job(handle, task.name)
-
         # Case: task_lib.Task(run, num_nodes=1)
         if task.num_nodes == 1:
             self._execute_task_one_node(handle, task, job_id, detach_run)
