@@ -300,6 +300,9 @@ class GCP(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return instance_type in self._ON_DEMAND_PRICES.keys()
 
+    def region_exists(self, region: str) -> bool:
+        return service_catalog.region_exists(region, 'gcp')
+
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
         # TODO(zhwu): change the project id fetching with the following command

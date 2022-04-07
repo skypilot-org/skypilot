@@ -278,3 +278,6 @@ class AWS(clouds.Cloud):
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
+
+    def region_exists(self, region: str) -> bool:
+        return service_catalog.region_exists(region, 'aws')

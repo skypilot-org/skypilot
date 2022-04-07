@@ -91,6 +91,11 @@ def instance_type_exists(instance_type: str,
     return _map_clouds_catalog(clouds, 'instance_type_exists', instance_type)
 
 
+def region_exists(region_name: str, clouds: CloudFilter = None) -> bool:
+    """Returns the region by name."""
+    return _map_clouds_catalog(clouds, 'region_exists', region_name)
+
+
 def get_region_zones_for_instance_type(
         instance_type: str,
         use_spot: bool,

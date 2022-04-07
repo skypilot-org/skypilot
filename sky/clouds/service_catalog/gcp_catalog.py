@@ -44,6 +44,10 @@ def instance_type_exists(instance_type: str) -> bool:
     assert False, 'Internal logic error: this function should not be called'
 
 
+def region_exists(region: str) -> bool:
+    return common.region_exists_impl(_df, region)
+
+
 def _get_accelerator(
     df: pd.DataFrame,
     accelerator: str,
