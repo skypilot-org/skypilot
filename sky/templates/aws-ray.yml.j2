@@ -6,7 +6,8 @@ upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
 
 provider:
-  type: aws
+  type: external
+  module: sky.skylet.providers.aws.AWSNodeProvider
   region: {{region}}
   availability_zone: {{zones}}
   # Keep (otherwise cannot reuse when re-provisioning).
@@ -71,6 +72,8 @@ rsync_exclude: [
 {%- endfor %}
 ]
 
+initialization_commands: []
+
 # List of shell commands to run to set up nodes.
 setup_commands:
   # This AMI's system Python is version 2+.
@@ -102,4 +105,15 @@ worker_start_ray_commands:
   - sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;';
     (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config
   - ray stop; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}}
+{%- else %}
+worker_start_ray_commands: []
 {%- endif %}
+
+head_node: {}
+worker_nodes: {}
+
+# These fields are required for external cloud providers.
+head_setup_commands: []
+worker_setup_commands: []
+cluster_synced_files: []
+file_mounts_sync_continuously: False
