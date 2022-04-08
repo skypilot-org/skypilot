@@ -543,7 +543,8 @@ class RetryingVmProvisioner(object):
             s.strip()
             for s in stdout_splits + stderr_splits
             if ('Exception Details:' in s.strip() or
-                'InvalidTemplateDeployment' in s.strip())
+                'InvalidTemplateDeployment' in s.strip() or
+                '(ReadOnlyDisabledSubscription)' in s.strip())
         ]
         if not errors:
             logger.info('====== stdout ======')
@@ -558,7 +559,11 @@ class RetryingVmProvisioner(object):
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        self._blocked_regions.add(region.name)
+        if any('(ReadOnlyDisabledSubscription)' in s for s in errors):
+            for r in sky.Azure.regions():
+                self._blocked_regions.add(r.name)
+        else:
+            self._blocked_regions.add(region.name)
 
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
                                    stderr) -> None:
@@ -690,7 +695,7 @@ class RetryingVmProvisioner(object):
 
             assert cluster_status == global_user_state.ClusterStatus.INIT
             message = (f'Failed to launch cluster {cluster_name!r} '
-                       f'(previous status: {cluster_status.value})'
+                       f'(previous status: {cluster_status.value}) '
                        f'with the original resources: {to_provision}.')
             logger.error(message)
             # We attempted re-launching a previously INIT cluster with the
@@ -905,9 +910,9 @@ class RetryingVmProvisioner(object):
             CloudVmRayBackend().teardown_no_lock(handle,
                                                  terminate=need_terminate)
 
-        message = ('Failed to acquire resources in all regions/zones'
-                   f' (requested {to_provision}).'
-                   ' Try changing resource requirements or use another cloud.')
+        message = ('Failed to acquire resources in all regions/zones of '
+                   f'{to_provision.cloud}. '
+                   'Try changing resource requirements or use another cloud.')
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
 
@@ -1062,7 +1067,7 @@ class RetryingVmProvisioner(object):
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
                     f'{to_provision}. Trying other launchable resources '
-                    f'(if any)...{style.RESET_ALL}')
+                    f'(if any).{style.RESET_ALL}')
                 if not cluster_exists:
                     # Add failed resources to the blocklist, only when it
                     # is in fallback mode.
