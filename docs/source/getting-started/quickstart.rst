@@ -103,9 +103,9 @@ Bash commands are also supported, such as:
 
 .. code-block:: console
 
-  $ sky exec mycluster -- gpustat -i
-  $ sky exec mycluster -- ls -l
-  $ sky exec mycluster htop
+  $ sky exec mycluster python train.py
+
+For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``ssh`` instead (see below) to avoid job submission overheads.
 
 
 View all clusters

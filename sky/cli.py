@@ -637,7 +637,7 @@ def launch(
               '-d',
               default=False,
               is_flag=True,
-              help='If True, run setup first (blocking), '
+              help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
 @click.option(
     '--workdir',
@@ -684,21 +684,6 @@ def exec(
     specification. Otherwise, it is interpreted as a bash command.
 
     \b
-    Execution and scheduling behavior:
-    \b
-    - If ENTRYPOINT is a YAML, or if it is a command with a resource demand
-      flag specified (`--gpus` or `--num-nodes`): it is treated as a proper
-      task that will undergo job queue scheduling, respecting its resource
-      requirement. It can be executed on any node of th cluster with enough
-      resources.
-    - Otherwise (if ENTRYPOINT is a command and no resource demand flag
-      specified), it is treated as an inline command, to be executed only on
-      the head node of the cluster. This is useful for monitoring commands
-      (e.g., gpustat, htop).
-
-    In both cases, the commands are run under the task's workdir (if specified).
-
-    \b
     Actions performed by `sky exec`:
     \b
     - workdir syncing, if:
@@ -713,6 +698,18 @@ def exec(
     skipped.  If any of those specifications changed, this command will not
     reflect those changes.  To ensure a cluster's setup is up to date, use `sky
     launch` instead.
+
+    \b
+    Execution and scheduling behavior:
+    \b
+    - The YAML task or the command will undergo job queue scheduling,
+      respecting any specified resource requirement. It can be executed on any
+      node of th cluster with enough resources.
+    - The YAML task or the command is run under the task's workdir (if
+      specified).
+    - The task/command is run non-interactively (without a pseudo-terminal or
+      pty), so interactive commands such as `htop` do not work. Use `ssh
+      my_cluster` instead.
 
     Typical workflow:
 
@@ -732,21 +729,18 @@ def exec(
         # Do "sky launch" again if anything other than Task.run is modified:
         sky launch -c mycluster app.yaml
 
-    Advanced use cases:
-
     .. code-block:: bash
 
         # Pass in commands for execution
-        sky exec mycluster -- echo Hello World
+        sky exec mycluster -- python train.py
 
     """
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
+        raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
-    resource_demand_specified = gpus is not None or num_nodes is not None
 
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
@@ -760,23 +754,6 @@ def exec(
             click.secho(entrypoint, bold=True)
             task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
-
-            if isinstance(backend, backends.CloudVmRayBackend):
-                # Run inline commands directly on head node if the resources are
-                # not set. User should take the responsibility to not overload
-                # the cluster.
-                if not resource_demand_specified:
-                    if workdir is not None:
-                        backend.sync_workdir(handle, workdir)
-                    backend.run_on_head(
-                        handle,
-                        entrypoint,
-                        stream_logs=True,
-                        # Allocate a pseudo-terminal to disable output buffering
-                        ssh_mode=backend_utils.SshMode.INTERACTIVE,
-                        under_remote_workdir=True,
-                        redirect_stdout_stderr=False)
-                    return
 
         # Override.
         if workdir is not None:
