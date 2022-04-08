@@ -213,6 +213,10 @@ Code in providers/gcp from
 https://github.com/ray-project/ray/tree/master/python/ray/autoscaler/_private/gcp
 Git Revision: ef9d9df4e7454d428a958281e9de333795dccb44
 
+Code in providers/aws from
+https://github.com/ray-project/ray/tree/master/python/ray/autoscaler/_private/aws
+Git Revision: f737731a5e53ab3a2c5192d3d9efd4bb4bbbbf48
+
 
 Copyright 2016-2022 Ray developers
 
