@@ -559,16 +559,18 @@ def launch(
         backend_name = backends.CloudVmRayBackend.NAME
 
     entrypoint = ' '.join(entrypoint)
-    if not entrypoint:
-        raise click.BadParameter('Entrypoint cannot be empty.') from None
-    is_yaml = _check_yaml(entrypoint)
-    if is_yaml:
-        # Treat entrypoint as a yaml.
-        click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+    if entrypoint:
+        is_yaml = _check_yaml(entrypoint)
+        if is_yaml:
+            # Treat entrypoint as a yaml.
+            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+        else:
+            # Treat entrypoint as a bash command.
+            click.secho('Task from command: ', fg='yellow', nl=False)
+        click.secho(entrypoint, bold=True)
     else:
-        # Treat entrypoint as a bash command.
-        click.secho('Task from command: ', fg='yellow', nl=False)
-    click.secho(entrypoint, bold=True)
+        entrypoint = None
+        is_yaml = False
 
     if not yes:
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
@@ -738,8 +740,6 @@ def exec(
         sky exec mycluster --gpus=V100:1 python train_gpu.py
     """
     entrypoint = ' '.join(entrypoint)
-    if not entrypoint:
-        raise click.BadParameter('Entrypoint cannot be empty.') from None
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
