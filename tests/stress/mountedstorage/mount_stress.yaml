@@ -1,0 +1,34 @@
+# Stress test for testing memory utilization mounted storage
+#
+# Lists or reads the files in the mounted storage (depending on --list flag)
+# Manually watch memory util using top to benchmark
+#
+# Usage:
+# cd tests/stress/mountedstorage
+# sky launch -c stress mount_stress.yaml
+
+name: stress
+
+resources:
+  cloud: aws
+
+workdir: .
+
+file_mounts:
+  /covid:
+    source: s3://fah-public-data-covid19-cryptic-pockets
+    mode: MOUNT
+
+setup: |
+  # Install jupyter for playing around with
+  pip install --upgrade pip
+  conda init bash
+  conda activate jupyter
+  conda create -n jupyter python=3.9 -y
+  conda activate jupyter
+  pip install jupyter
+
+run: |
+  python -u read_parallel.py /covid/ --list
+#  conda activate jupyter
+#  jupyter notebook --port 8888
