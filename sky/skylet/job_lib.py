@@ -109,8 +109,8 @@ def set_status(job_id: int, status: JobStatus) -> None:
             (status.value, end_at, job_id))
     else:
         _CURSOR.execute(
-            'UPDATE jobs SET status=(?) '
-            'WHERE job_id=(?) AND end_at IS NULL', (status.value, job_id))
+            'UPDATE jobs SET status=(?), end_at=NULL '
+            'WHERE job_id=(?)', (status.value, job_id))
     _CONN.commit()
 
 
@@ -253,6 +253,12 @@ def fail_all_jobs_in_progress() -> None:
 
 
 def update_status() -> None:
+    # This will be called periodically by the skylet to update the status
+    # of the jobs in the database, to avoid stale job status.
+    # NOTE: there might be a INIT job in the database set to FAILED by this
+    # function, as the `ray job status job_id` does not exist due to the app
+    # not submitted yet. It will be then reset to PENDING / RUNNING when the
+    # app starts.
     running_jobs = _get_jobs(
         username=None,
         status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
