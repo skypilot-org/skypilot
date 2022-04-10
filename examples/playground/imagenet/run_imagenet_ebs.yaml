@@ -12,10 +12,10 @@ setup: |
   cd ./examples/imagenet
   conda create -n imagenet python=3.9 -y
   conda activate imagenet
-  conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
+  conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch -y
   pip install -r requirements.txt
   pip install wandb
-  wandb login
+  wandb login <your-wandb-token>
 
 run: |
   if [ ! -d ~/imagenet ]; then
