@@ -28,12 +28,12 @@ run: |
   master_addr=`echo "$SKY_NODE_IPS" | head -n1`
   world_size=`echo "$SKY_NODE_IPS" | wc -l`
 
-  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet50-ebs-node${world_size}
+  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs-node${world_size}
 
   cd ./examples/imagenet
-  python main.py -a resnet50 \
-    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet50 \
-    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet50 \
+  python main.py -a resnet18 \
+    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet18 \
+    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet18 \
     --dist-url 'tcp://${master_addr}:12344 --dist-backend 'nccl' \
     --multiprocessing-distributed --world-size ${world_size} \
     --rank ${SKY_NODE_RANK} \

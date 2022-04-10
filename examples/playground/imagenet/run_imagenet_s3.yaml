@@ -19,11 +19,11 @@ setup: |
 
 run: |
   conda activate imagenet
-  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet50-s3
+  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3
   
   cd ./examples/imagenet
-  python main.py -a resnet50 \
-    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet50-s3 \
-    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet50-s3 \
+  python main.py -a resnet18 \
+    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3 \
+    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3 \
     /imagenet/datasets/ILSVRC2012/imagenet
 

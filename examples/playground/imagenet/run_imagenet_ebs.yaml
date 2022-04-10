@@ -23,11 +23,11 @@ run: |
   fi
 
   conda activate imagenet
-  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet50-ebs
+  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs
 
   cd ./examples/imagenet
-  python main.py -a resnet50 \
-    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet50-ebs \
-    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet50-ebs \
+  python main.py -a resnet18 \
+    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs \
+    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs \
     ~/imagenet
 
