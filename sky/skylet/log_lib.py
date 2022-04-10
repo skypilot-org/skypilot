@@ -14,7 +14,8 @@ from typing import Iterator, List, Optional, Tuple, Union
 
 import colorama
 
-from sky.skylet import job_lib, log_utils
+from sky.skylet import job_lib
+from sky.skylet.utils import log_utils
 from sky import sky_logging
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'

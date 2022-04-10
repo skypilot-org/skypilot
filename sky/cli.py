@@ -32,14 +32,12 @@ import getpass
 import os
 import shlex
 import sys
-import time
 import typing
 from typing import Any, List, Optional, Tuple
 import yaml
 
 import click
 import colorama
-import pendulum
 from rich import progress as rich_progress
 
 import sky
@@ -53,7 +51,7 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
-from sky.skylet import util_lib
+from sky.skylet.utils import log_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -776,15 +774,6 @@ def exec(
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _readable_time_duration(start_time: int):
-    duration = pendulum.now().subtract(seconds=time.time() - start_time)
-    diff = duration.diff_for_humans()
-    diff = diff.replace('second', 'sec')
-    diff = diff.replace('minute', 'min')
-    diff = diff.replace('hour', 'hr')
-    return diff
-
-
 @cli.command()
 @click.option('--all',
               '-a',
@@ -818,7 +807,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
             'REGION',
         ])
 
-    cluster_table = util_lib.create_table(columns)
+    cluster_table = log_utils.create_table(columns)
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
@@ -845,7 +834,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
             # NAME
             cluster_status['name'],
             # LAUNCHED
-            _readable_time_duration(launched_at),
+            log_utils.readable_time_duration(launched_at),
             # RESOURCES
             resources_str,
             # STATUS
@@ -998,7 +987,10 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
         else:
-            click.secho(f'Status failed for job {job_id}', fg='red')
+            click.secho(
+                f'Job {job_id} status failed with status '
+                f'{job_status.value}',
+                fg='red')
             sys.exit(1)
     else:
         backend.tail_logs(handle, job_id)
@@ -1743,11 +1735,11 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
         return ', '.join([str(e) for e in lst])
 
     def _output():
-        gpu_table = util_lib.create_table(
+        gpu_table = log_utils.create_table(
             ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
-        tpu_table = util_lib.create_table(
+        tpu_table = log_utils.create_table(
             ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
-        other_table = util_lib.create_table(
+        other_table = log_utils.create_table(
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         if gpu_name is None:
@@ -1786,7 +1778,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
             yield 'to show available accelerators.'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
-            accelerator_table = util_lib.create_table([
+            accelerator_table = log_utils.create_table([
                 'GPU',
                 'QTY',
                 'CLOUD',
@@ -1830,7 +1822,7 @@ def storage():
 def storage_ls():
     """List storage objects created."""
     storage_stat = global_user_state.get_storage()
-    storage_table = util_lib.create_table([
+    storage_table = log_utils.create_table([
         'NAME',
         'CREATED',
         'STORE',
@@ -1844,7 +1836,7 @@ def storage_ls():
             # NAME
             row['name'],
             # LAUNCHED
-            _readable_time_duration(launched_at),
+            log_utils.readable_time_duration(launched_at),
             # CLOUDS
             ', '.join([s.value for s in row['handle'].sky_stores.keys()]),
             # COMMAND
