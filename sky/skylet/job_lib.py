@@ -11,8 +11,8 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
-from sky.skylet.utils import log_utils
 from sky.skylet.utils import db_utils
+from sky.skylet.utils import log_utils
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 

@@ -1007,7 +1007,7 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
             sys.exit(0)
         else:
             click.secho(
-                f'Status failed for job {job_id} with status '
+                f'Job {job_id} status failed with status '
                 f'{job_status.value}',
                 fg='red')
             sys.exit(1)
