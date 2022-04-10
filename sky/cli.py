@@ -1006,7 +1006,10 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
         else:
-            click.secho(f'Status failed for job {job_id}', fg='red')
+            click.secho(
+                f'Status failed for job {job_id} with status '
+                f'{job_status.value}',
+                fg='red')
             sys.exit(1)
     else:
         backend.tail_logs(handle, job_id)

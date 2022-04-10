@@ -108,8 +108,9 @@ def set_status(job_id: int, status: JobStatus) -> None:
             'WHERE job_id=(?) AND end_at IS NULL',
             (status.value, end_at, job_id))
     else:
-        _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
-                        (status.value, job_id))
+        _CURSOR.execute(
+            'UPDATE jobs SET status=(?) '
+            'WHERE job_id=(?) AND end_at IS NULL', (status.value, job_id))
     _CONN.commit()
 
 
@@ -122,8 +123,9 @@ def get_status(job_id: int) -> JobStatus:
 
 
 def set_job_started(job_id: int) -> None:
-    _CURSOR.execute('UPDATE jobs SET status=(?), start_at=(?) WHERE job_id=(?)',
-                    (JobStatus.RUNNING.value, int(time.time()), job_id))
+    _CURSOR.execute(
+        'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
+        'WHERE job_id=(?)', (JobStatus.RUNNING.value, int(time.time()), job_id))
     _CONN.commit()
 
 
