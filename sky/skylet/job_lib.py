@@ -83,9 +83,9 @@ def add_job(job_name: str, username: str, run_timestamp: str,
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     # job_id will autoincrement with the null value
-    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, ?, ?)',
+    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?)',
                     (job_name, username, job_submitted_at, JobStatus.INIT.value,
-                     run_timestamp, None, None, resources_str))
+                     run_timestamp, None, resources_str))
     _CONN.commit()
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
