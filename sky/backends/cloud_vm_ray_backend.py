@@ -34,7 +34,9 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
-from sky.skylet import autostop_lib, job_lib, log_lib
+from sky.skylet import autostop_lib
+from sky.skylet import job_lib
+from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
 
 if typing.TYPE_CHECKING:
@@ -1964,7 +1966,7 @@ class CloudVmRayBackend(backends.Backend):
         else:
             resources_str = ', '.join(
                 f'{k}:{v}' for k, v in task_demand.items())
-        resources_str = f'{task.num_nodes}x ({resources_str})'
+        resources_str = f'{task.num_nodes}x [{resources_str}]'
         job_id = self._add_job(handle, task.name, resources_str)
 
         # Case: task_lib.Task(run, num_nodes=1)

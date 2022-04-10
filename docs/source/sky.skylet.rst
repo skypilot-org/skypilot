@@ -45,14 +45,6 @@ sky.skylet.utils.log\_utils module
    :undoc-members:
    :show-inheritance:
 
-sky.skylet.utils.visualization\_utils module
----------------------------
-
-.. automodule:: sky.skylet.utils.visualization_utils
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 
 Module contents
 ---------------

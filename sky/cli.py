@@ -51,7 +51,7 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
-from sky.skylet.utils import visualization_utils
+from sky.skylet.utils import log_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -826,7 +826,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
             'REGION',
         ])
 
-    cluster_table = visualization_utils.create_table(columns)
+    cluster_table = log_utils.create_table(columns)
 
     for cluster_status in clusters_status:
         launched_at = cluster_status['launched_at']
@@ -853,7 +853,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
             # NAME
             cluster_status['name'],
             # LAUNCHED
-            visualization_utils.readable_time_duration(launched_at),
+            log_utils.readable_time_duration(launched_at),
             # RESOURCES
             resources_str,
             # STATUS
@@ -1751,11 +1751,11 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
         return ', '.join([str(e) for e in lst])
 
     def _output():
-        gpu_table = visualization_utils.create_table(
+        gpu_table = log_utils.create_table(
             ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
-        tpu_table = visualization_utils.create_table(
+        tpu_table = log_utils.create_table(
             ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
-        other_table = visualization_utils.create_table(
+        other_table = log_utils.create_table(
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         if gpu_name is None:
@@ -1794,7 +1794,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
             yield 'to show available accelerators.'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
-            accelerator_table = visualization_utils.create_table([
+            accelerator_table = log_utils.create_table([
                 'GPU',
                 'QTY',
                 'CLOUD',
@@ -1838,7 +1838,7 @@ def storage():
 def storage_ls():
     """List storage objects created."""
     storage_stat = global_user_state.get_storage()
-    storage_table = visualization_utils.create_table([
+    storage_table = log_utils.create_table([
         'NAME',
         'CREATED',
         'STORE',
@@ -1852,7 +1852,7 @@ def storage_ls():
             # NAME
             row['name'],
             # LAUNCHED
-            visualization_utils.readable_time_duration(launched_at),
+            log_utils.readable_time_duration(launched_at),
             # CLOUDS
             ', '.join([s.value for s in row['handle'].sky_stores.keys()]),
             # COMMAND

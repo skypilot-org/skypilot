@@ -11,7 +11,8 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
-from sky.skylet.utils import visualization_utils, db_utils
+from sky.skylet.utils import log_utils
+from sky.skylet.utils import db_utils
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 
@@ -97,14 +98,18 @@ def add_job(job_name: str, username: str, run_timestamp: str,
 def set_status(job_id: int, status: JobStatus) -> None:
     assert status != JobStatus.RUNNING, (
         'Please use set_job_started() to set job status to RUNNING')
-    prev_status = get_status(job_id)
 
-    end_at = None
-    if not prev_status.is_terminal() and status.is_terminal():
+    if status.is_terminal():
         end_at = int(time.time())
-
-    _CURSOR.execute('UPDATE jobs SET status=(?), end_at=(?) WHERE job_id=(?)',
-                    (status.value, end_at, job_id))
+        # status does not need to be set if the end_at is not null, since the
+        # job must be in a terminal state already.
+        _CURSOR.execute(
+            'UPDATE jobs SET status=(?), end_at=(?) '
+            'WHERE job_id=(?) AND end_at IS NULL',
+            (status.value, end_at, job_id))
+    else:
+        _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
+                        (status.value, job_id))
     _CONN.commit()
 
 
@@ -274,7 +279,7 @@ def is_cluster_idle() -> bool:
 
 
 def _show_job_queue(jobs) -> None:
-    job_table = visualization_utils.create_table([
+    job_table = log_utils.create_table([
         'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
         'STATUS', 'LOG'
     ])
@@ -284,11 +289,11 @@ def _show_job_queue(jobs) -> None:
             job['job_id'],
             job['job_name'],
             job['username'],
-            visualization_utils.readable_time_duration(job['submitted_at']),
-            visualization_utils.readable_time_duration(job['start_at']),
-            visualization_utils.readable_time_duration(job['start_at'],
-                                                       job['end_at'],
-                                                       absolute=True),
+            log_utils.readable_time_duration(job['submitted_at']),
+            log_utils.readable_time_duration(job['start_at']),
+            log_utils.readable_time_duration(job['start_at'],
+                                             job['end_at'],
+                                             absolute=True),
             job['resources'],
             job['status'].value,
             os.path.join(SKY_LOGS_DIRECTORY, job['run_timestamp']),
