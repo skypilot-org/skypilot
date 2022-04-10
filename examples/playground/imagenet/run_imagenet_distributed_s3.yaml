@@ -23,6 +23,7 @@ run: |
   conda activate imagenet
   mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet50-s3-node${world_size}
 
+  cd ./examples/imagenet
   master_addr=`echo "$SKY_NODE_IPS" | head -n1`
   world_size=`echo "$SKY_NODE_IPS" | wc -l`
   python main.py -a resnet50 \
