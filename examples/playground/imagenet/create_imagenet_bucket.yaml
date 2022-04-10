@@ -1,0 +1,25 @@
+resources:
+  cloud: aws
+  instance_type: m4.16xlarge
+  disk_size: 1024
+
+file_mounts:
+  /imagenet:
+    name: sky-imagenet-data
+    mode: MOUNT
+
+run: |
+  wget https://image-net.org/data/ILSVRC/2012/ILSVRC2012_img_train.tar
+  wget https://image-net.org/data/ILSVRC/2012/ILSVRC2012_img_val.tar
+  wget https://image-net.org/data/ILSVRC/2012/ILSVRC2012_devkit_t12.tar.gz
+
+  wget https://raw.githubusercontent.com/pytorch/examples/main/imagenet/extract_ILSVRC.sh
+  chmod +x extract_ILSVRC.sh
+  ./extract_ILSVRC.sh
+
+  mv ./ILSVRC2012_devkit_t12.tar.gz ./imagenet
+  mkdir -p /imagenet/datasets/ILSVRC2012/
+  zip -r ./imagenet2012.zip ./imagenet
+  rsync -Pavz ./imagenet2012.zip /imagenet/imagenet2012.zip
+  unzip /imagenet/imagenet2012.zip -d /imagenet/datasets/ILSVRC2012/
+
