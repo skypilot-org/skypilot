@@ -34,7 +34,10 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
-from sky.skylet import autostop_lib, job_lib, log_lib, log_utils
+from sky.skylet import autostop_lib
+from sky.skylet import job_lib
+from sky.skylet import log_lib
+from sky.skylet.utils import log_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -182,7 +185,8 @@ class RayCodeGen:
             import ray
             import ray.util as ray_util
 
-            from sky.skylet import job_lib, log_utils
+            from sky.skylet import job_lib
+            from sky.skylet.utils import log_utils
 
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
@@ -1924,10 +1928,11 @@ class CloudVmRayBackend(backends.Backend):
         logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                        f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
 
-    def _add_job(self, handle: ResourceHandle, job_name: str) -> int:
+    def _add_job(self, handle: ResourceHandle, job_name: str,
+                 resources_str: str) -> int:
         username = getpass.getuser()
         code = job_lib.JobLibCodeGen.add_job(job_name, username,
-                                             self.run_timestamp)
+                                             self.run_timestamp, resources_str)
         returncode, job_id_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
@@ -1959,7 +1964,14 @@ class CloudVmRayBackend(backends.Backend):
             logger.info('Nothing to run (Task.run not specified).')
             return
 
-        job_id = self._add_job(handle, task.name)
+        task_demand = _get_task_demands_dict(task)
+        if task_demand is None:
+            resources_str = 'CPU:1'
+        else:
+            resources_str = ', '.join(
+                f'{k}:{v}' for k, v in task_demand.items())
+        resources_str = f'{task.num_nodes}x [{resources_str}]'
+        job_id = self._add_job(handle, task.name, resources_str)
 
         # Case: task_lib.Task(run, num_nodes=1)
         if task.num_nodes == 1:

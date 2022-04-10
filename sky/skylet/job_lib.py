@@ -11,9 +11,8 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
-import pendulum
-
-from sky.skylet import util_lib
+from sky.skylet.utils import db_utils
+from sky.skylet.utils import log_utils
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 
@@ -28,6 +27,10 @@ class JobStatus(enum.Enum):
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
     CANCELLED = 'CANCELLED'
+
+    def is_terminal(self):
+        return self in (JobStatus.SUCCEEDED, JobStatus.FAILED,
+                        JobStatus.CANCELLED)
 
 
 _RAY_TO_JOB_STATUS_MAP = {
@@ -49,6 +52,8 @@ class JobInfoLoc(enum.IntEnum):
     STATUS = 4
     RUN_TIMESTAMP = 5
     START_AT = 6
+    END_AT = 7
+    RESOURCES = 8
 
 
 _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
@@ -67,16 +72,20 @@ _CURSOR.execute("""\
     run_timestamp TEXT CANDIDATE KEY,
     start_at INTEGER)""")
 
+db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'end_at', 'INTEGER')
+db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'resources', 'TEXT')
+
 _CONN.commit()
 
 
-def add_job(job_name: str, username: str, run_timestamp: str) -> int:
+def add_job(job_name: str, username: str, run_timestamp: str,
+            resources_str: str) -> int:
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     # job_id will autoincrement with the null value
-    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?)',
+    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?)',
                     (job_name, username, job_submitted_at, JobStatus.INIT.value,
-                     run_timestamp, None))
+                     run_timestamp, None, resources_str))
     _CONN.commit()
     rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
                            (run_timestamp,))
@@ -89,8 +98,19 @@ def add_job(job_name: str, username: str, run_timestamp: str) -> int:
 def set_status(job_id: int, status: JobStatus) -> None:
     assert status != JobStatus.RUNNING, (
         'Please use set_job_started() to set job status to RUNNING')
-    _CURSOR.execute('UPDATE jobs SET status=(?) WHERE job_id=(?)',
-                    (status.value, job_id))
+
+    if status.is_terminal():
+        end_at = int(time.time())
+        # status does not need to be set if the end_at is not null, since the
+        # job must be in a terminal state already.
+        _CURSOR.execute(
+            'UPDATE jobs SET status=(?), end_at=(?) '
+            'WHERE job_id=(?) AND end_at IS NULL',
+            (status.value, end_at, job_id))
+    else:
+        _CURSOR.execute(
+            'UPDATE jobs SET status=(?), end_at=NULL '
+            'WHERE job_id=(?)', (status.value, job_id))
     _CONN.commit()
 
 
@@ -103,8 +123,9 @@ def get_status(job_id: int) -> JobStatus:
 
 
 def set_job_started(job_id: int) -> None:
-    _CURSOR.execute('UPDATE jobs SET status=(?), start_at=(?) WHERE job_id=(?)',
-                    (JobStatus.RUNNING.value, int(time.time()), job_id))
+    _CURSOR.execute(
+        'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
+        'WHERE job_id=(?)', (JobStatus.RUNNING.value, int(time.time()), job_id))
     _CONN.commit()
 
 
@@ -122,6 +143,8 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'status': JobStatus[row[JobInfoLoc.STATUS.value]],
             'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
             'start_at': row[JobInfoLoc.START_AT.value],
+            'end_at': row[JobInfoLoc.END_AT.value],
+            'resources': row[JobInfoLoc.RESOURCES.value],
         })
     return records
 
@@ -230,6 +253,12 @@ def fail_all_jobs_in_progress() -> None:
 
 
 def update_status() -> None:
+    # This will be called periodically by the skylet to update the status
+    # of the jobs in the database, to avoid stale job status.
+    # NOTE: there might be a INIT job in the database set to FAILED by this
+    # function, as the `ray job status job_id` does not exist due to the app
+    # not submitted yet. It will be then reset to PENDING / RUNNING when the
+    # app starts.
     running_jobs = _get_jobs(
         username=None,
         status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
@@ -257,28 +286,23 @@ def is_cluster_idle() -> bool:
         return count == 0
 
 
-def _readable_time_duration(start: Optional[int]) -> str:
-    if start is None:
-        return '-'
-    duration = pendulum.now().subtract(seconds=time.time() - start)
-    diff = duration.diff_for_humans()
-    diff = diff.replace('second', 'sec')
-    diff = diff.replace('minute', 'min')
-    diff = diff.replace('hour', 'hr')
-    return diff
-
-
 def _show_job_queue(jobs) -> None:
-    job_table = util_lib.create_table(
-        ['ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'STATUS', 'LOG'])
+    job_table = log_utils.create_table([
+        'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
+        'STATUS', 'LOG'
+    ])
 
     for job in jobs:
         job_table.add_row([
             job['job_id'],
             job['job_name'],
             job['username'],
-            _readable_time_duration(job['submitted_at']),
-            _readable_time_duration(job['start_at']),
+            log_utils.readable_time_duration(job['submitted_at']),
+            log_utils.readable_time_duration(job['start_at']),
+            log_utils.readable_time_duration(job['start_at'],
+                                             job['end_at'],
+                                             absolute=True),
+            job['resources'],
             job['status'].value,
             os.path.join(SKY_LOGS_DIRECTORY, job['run_timestamp']),
         ])
@@ -349,12 +373,16 @@ class JobLibCodeGen:
     _PREFIX = ['from sky.skylet import job_lib, log_lib']
 
     @classmethod
-    def add_job(cls, job_name: str, username: str, run_timestamp: str) -> str:
+    def add_job(cls, job_name: str, username: str, run_timestamp: str,
+                resources_str: str) -> str:
         if job_name is None:
             job_name = '-'
         code = [
             'job_id = job_lib.add_job('
-            f'{job_name!r}, {username!r}, {run_timestamp!r})',
+            f'{job_name!r}, '
+            f'{username!r}, '
+            f'{run_timestamp!r}, '
+            f'{resources_str!r})',
             'print(job_id, flush=True)',
         ]
         return cls._build(code)
