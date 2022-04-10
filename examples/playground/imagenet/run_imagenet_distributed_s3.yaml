@@ -1,0 +1,35 @@
+resources:
+  cloud: aws
+  resources: V100
+
+num_nodes: 2
+
+file_mounts:
+  /imagenet:
+    name: sky-imagenet-data
+    mode: MOUNT
+
+setup: |
+  git clone https://github.com/Michaelvll/examples.git
+  cd ./examples/imagenet
+  conda create -n imagenet python=3.9 -y
+  conda activate imagenet
+  conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
+  pip install -r requirements.txt
+  pip install wandb
+  wandb login
+
+run: |
+  conda activate imagenet
+  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet50-s3-node${world_size}
+
+  master_addr=`echo "$SKY_NODE_IPS" | head -n1`
+  world_size=`echo "$SKY_NODE_IPS" | wc -l`
+  python main.py -a resnet50 \
+    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet50 \
+    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet50 \
+    --dist-url 'tcp://${master_addr}:12344 --dist-backend 'nccl' \
+    --multiprocessing-distributed --world-size ${world_size} \
+    --rank ${SKY_NODE_RANK} \
+    /imagenet/datasets/ILSVRC2012/imagenet
+
