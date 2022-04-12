@@ -64,7 +64,7 @@ _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
 _LAUNCHING_LOCAL_IP_PATTERN = re.compile(
     r'({}): local[._]cluster[._]node'.format(IP_ADDR_REGEX))
-_LOCAL_RAY_INIT_CMD = 'eval "$(conda shell.bash hook)" && conda activate sky-ray-env && '
+_LOCAL_RAY_INIT_CMD = 'eval $(conda shell.bash hook) && conda activate sky-ray-env-{} && '
 WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 
 
@@ -954,7 +954,7 @@ def run_command_on_ip_via_ssh(
     if isinstance(cmd, list):
         cmd = ' '.join(cmd)
     if isinstance(cloud, clouds.Local):
-        cmd = _LOCAL_RAY_INIT_CMD + cmd
+        cmd = _LOCAL_RAY_INIT_CMD.format(ssh_user) + cmd
     # We need this to correctly run the cmd, and get the output.
     command = base_ssh_command + [
         'bash',

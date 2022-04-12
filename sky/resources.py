@@ -221,6 +221,7 @@ class Resources:
         if isinstance(self.cloud, clouds.Local) or isinstance(
                 other.cloud, clouds.Local):
             return True
+
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud

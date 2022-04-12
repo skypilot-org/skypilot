@@ -3,6 +3,7 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
+import hashlib
 import os
 import pathlib
 import re
@@ -103,6 +104,7 @@ def get_status(job_id: int) -> JobStatus:
 
 
 def set_job_started(job_id: int) -> None:
+    print(f"Setting Job: {job_id}")
     _CURSOR.execute('UPDATE jobs SET status=(?), start_at=(?) WHERE job_id=(?)',
                     (JobStatus.RUNNING.value, int(time.time()), job_id))
     _CONN.commit()
@@ -166,7 +168,7 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     return records
 
 
-def query_job_status(job_ids: List[int]) -> List[JobStatus]:
+def query_job_status(cluster_name: str, job_ids: List[int]) -> List[JobStatus]:
     """Return the status of the jobs based on the `ray job status` command.
 
     Though we update job status actively in ray program and job cancelling,
@@ -177,6 +179,10 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
         return []
 
     # TODO: if too slow, directly query against redis.
+    jobs_hash = [
+        hashlib.sha256(f'{cluster_name}-{job_id}'.encode()).hexdigest()
+        for job_id in job_ids
+    ]
     test_cmd = [
         (
             f'(ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
@@ -185,7 +191,7 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
             # running: job 'job_id': RUNNING
             # stopped: Job 'job_id' was stopped
             # failed: Job 'job_id' failed
-            f'grep "ob \'{job}\'" || echo "not found")') for job in job_ids
+            f'grep "ob \'{job}\'" || echo "not found")') for job in jobs_hash
     ]
     test_cmd = ' && '.join(test_cmd)
     proc = subprocess.run(test_cmd,
@@ -229,13 +235,13 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status() -> None:
+def update_status(cluster_name: str) -> None:
     running_jobs = _get_jobs(
         username=None,
         status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
     running_job_ids = [job['job_id'] for job in running_jobs]
 
-    job_status = query_job_status(running_job_ids)
+    job_status = query_job_status(cluster_name, running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
         # Do not update the status if the ray job status is RUNNING,
@@ -300,7 +306,7 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
     _show_job_queue(jobs)
 
 
-def cancel_jobs(jobs: Optional[List[int]]) -> None:
+def cancel_jobs(cluster_name: str, jobs: Optional[List[int]]) -> None:
     """Cancel the jobs.
 
     Args:
@@ -312,11 +318,17 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
         job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
     else:
         job_records = _get_jobs_by_ids(jobs)
+
     jobs = [job['job_id'] for job in job_records]
+    jobs_hash = [
+        hashlib.sha256(f'{cluster_name}-{job_id}'.encode()).hexdigest()
+        for job_id in jobs
+    ]
     # TODO(zhwu): `ray job stop` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
     cancel_cmd = [
-        f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
+        f'ray job stop --address 127.0.0.1:8265 {hash_str}'
+        for hash_str in jobs_hash
     ]
     cancel_cmd = ';'.join(cancel_cmd)
     subprocess.run(cancel_cmd, shell=True, check=False, executable='/bin/bash')
@@ -360,9 +372,9 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def update_status(cls) -> str:
+    def update_status(cls, cluster_name: str) -> str:
         code = [
-            'job_lib.update_status()',
+            f'job_lib.update_status({cluster_name!r})',
         ]
         return cls._build(code)
 
@@ -372,8 +384,9 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs(cls, job_ids: Optional[List[int]]) -> str:
-        code = [f'job_lib.cancel_jobs({job_ids!r})']
+    def cancel_jobs(cls, cluster_name: str,
+                    job_ids: Optional[List[int]]) -> str:
+        code = [f'job_lib.cancel_jobs({cluster_name!r},{job_ids!r})']
         return cls._build(code)
 
     @classmethod
@@ -383,10 +396,10 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def tail_logs(cls, job_id: int) -> str:
+    def tail_logs(cls, cluster_name: str, job_id: int) -> str:
         code = [
             f'log_dir = job_lib.log_dir({job_id})',
-            f'log_lib.tail_logs({job_id}, log_dir)',
+            f'log_lib.tail_logs({cluster_name!r},{job_id}, log_dir)',
         ]
         return cls._build(code)
 

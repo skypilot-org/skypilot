@@ -262,13 +262,13 @@ def _follow_job_logs(file,
             status = job_lib.get_status(job_id)
 
 
-def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
+def tail_logs(cluster_name: str, job_id: int, log_dir: Optional[str]) -> None:
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
-    status = job_lib.query_job_status([job_id])[0]
+    status = job_lib.query_job_status(cluster_name, [job_id])[0]
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
             # Not using `ray job logs` because it will put progress bar in

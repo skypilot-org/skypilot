@@ -17,6 +17,7 @@ import textwrap
 import time
 import typing
 from typing import Dict, List, Optional, Tuple, Union
+import uuid
 
 import colorama
 import filelock
@@ -55,7 +56,7 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 # Timeout for provision a cluster and wait for it to be ready in seconds. (5 min)
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 300
 
-_LOCAL_RAY_INIT_CMD = 'eval "$(conda shell.bash hook)" && conda activate sky-ray-env && '
+_LOCAL_RAY_INIT_CMD = 'eval $(conda shell.bash hook) && source activate sky-ray-env-{} && '
 _LOCK_FILENAME = '~/.sky/.{}.lock'
 _FILELOCK_TIMEOUT_SECONDS = 10
 
@@ -189,7 +190,7 @@ class RayCodeGen:
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
-            ray.init('auto', namespace='__sky__{job_id}__', log_to_driver=True)
+            ray.init(address = 'ray://localhost:10001', _redis_password='5241590000000000', namespace='__sky__{job_id}__', log_to_driver=True)
 
             run_fn = None
             futures = []"""),
@@ -843,7 +844,6 @@ class RetryingVmProvisioner(object):
             status, stdout, stderr = self._gang_schedule_ray_up(
                 to_provision.cloud, num_nodes, cluster_config_file,
                 log_abs_path, stream_logs, logging_info)
-
             # The cluster is not ready.
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 # However, ray processes may not be up due to 'ray up
@@ -1325,7 +1325,7 @@ class CloudVmRayBackend(backends.Backend):
                 # update_status will query the ray job status for all INIT /
                 # PENDING / RUNNING jobs for the real status, since we do not
                 # know the actual previous status of the cluster.
-                cmd = job_lib.JobLibCodeGen.update_status()
+                cmd = job_lib.JobLibCodeGen.update_status(cluster_name)
                 with backend_utils.safe_console_status(
                         '[bold cyan]Preparing Job Queue'):
                     returncode, _, stderr = self.run_on_head(
@@ -1836,20 +1836,70 @@ class CloudVmRayBackend(backends.Backend):
                            source=fp.name,
                            target=script_path,
                            stream_logs=False)
+
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
+        remote_run_file = os.path.join(remote_log_dir, 'run.sh')
+
+        head_ip = backend_utils.get_head_ip(handle, True)
+        ssh_user, ssh_private_key = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+
+        backend_utils.run_command_on_ip_via_ssh(
+            head_ip,
+            f"mkdir -p {remote_log_dir}",
+            ssh_user=ssh_user,
+            ssh_private_key=ssh_private_key,
+            ssh_control_name=self._ssh_control_name(handle))
 
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        job_submit_cmd = (
-            f'mkdir -p {remote_log_dir} && ray job submit '
-            f'--address=127.0.0.1:8265 --job-id {job_id} --no-wait '
-            f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
+        # Ray Multitenancy is unsupported: https://github.com/ray-project/ray/issues/6800
+        # We will do a very complicated workaround...
+        ray_command = f'{cd} && {executable} -u {script_path} > {remote_log_path} 2>&1'
+        if isinstance(handle.launched_resources.cloud, clouds.Local):
+            ray_command = _LOCAL_RAY_INIT_CMD.format(ssh_user) + ray_command
 
-        returncode = self.run_on_head(handle,
-                                      f'{cd} && {job_submit_cmd}',
-                                      stream_logs=False)
+        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+            fp.write(ray_command)
+            fp.flush()
+            # We choose to sync code + exec, because the alternative of 'ray
+            # submit' may not work as it may use system python (python2) to
+            # execute the script.  Happens for AWS.
+            self._rsync_up(handle,
+                           source=fp.name,
+                           target=remote_run_file,
+                           stream_logs=False)
+
+        _, stdout, _ = backend_utils.run_command_on_ip_via_ssh(
+            head_ip,
+            f"chmod a+rwx {remote_run_file}; echo $HOME",
+            ssh_user=ssh_user,
+            ssh_private_key=ssh_private_key,
+            redirect_stdout_stderr=True,
+            ssh_control_name=self._ssh_control_name(handle),
+            require_outputs=True,
+            cloud=handle.launched_resources.cloud)
+
+        head_home_path = stdout.strip()
+        remote_log_path = remote_log_path.replace("~", head_home_path)
+        script_path = script_path.replace("~", head_home_path)
+        remote_run_file = remote_run_file.replace('~', head_home_path)
+
+        cluster_name = handle.cluster_name
+        job_id_hash = hashlib.sha256(
+            f'{cluster_name}-{job_id}'.encode()).hexdigest()
+        job_submit_cmd = (
+            f'ray job submit '
+            f'--address=127.0.0.1:8265 --job-id {job_id_hash} --no-wait '
+            f'-- sudo su - {ssh_user} -c {remote_run_file}')
+        print(job_submit_cmd)
+        returncode, a, b = self.run_on_head(handle,
+                                            job_submit_cmd,
+                                            require_outputs=True,
+                                            stream_logs=False)
+
         backend_utils.handle_returncode(returncode, job_submit_cmd,
                                         f'Failed to submit job {job_id}.')
 
@@ -1878,10 +1928,9 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.RESET_BOLD}')
 
     def tail_logs(self, handle: ResourceHandle, job_id: int) -> None:
-        code = job_lib.JobLibCodeGen.tail_logs(job_id)
+        code = job_lib.JobLibCodeGen.tail_logs(handle.cluster_name, job_id)
         logger.info(f'{colorama.Fore.YELLOW}Start streaming logs...'
                     f'{colorama.Style.RESET_ALL}')
-
         # With interactive mode, the ctrl-c will send directly to the running
         # program on the remote instance, and the ssh will be disconnected by
         # sshd, so no error code will appear.

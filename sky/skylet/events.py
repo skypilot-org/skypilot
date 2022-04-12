@@ -52,8 +52,16 @@ class JobUpdateEvent(SkyletEvent):
     """Skylet event for updating job status."""
     EVENT_INTERVAL_SECONDS = 20
 
+    def __init__(self):
+        super().__init__()
+        self.ray_yaml_path = os.path.abspath(
+            os.path.expanduser(backend_utils.SKY_RAY_YAML_REMOTE_PATH))
+
     def _run(self):
-        job_lib.update_status()
+        with open(self.ray_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+            cluster_name = config['cluster_name']
+        job_lib.update_status(cluster_name)
 
 
 class AutostopEvent(SkyletEvent):

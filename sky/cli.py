@@ -587,7 +587,6 @@ def launch(
 
         assert len(task.resources) == 1
         new_resources = copy.deepcopy(list(task.resources)[0])
-
         if cloud is not None:
             new_resources.cloud = _get_cloud(cloud)
         if gpus is not None:
@@ -1070,7 +1069,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster}...',
                     fg='yellow')
 
-    code = job_lib.JobLibCodeGen.cancel_jobs(jobs)
+    code = job_lib.JobLibCodeGen.cancel_jobs(handle.cluster_name, jobs)
 
     returncode, _, stderr = backend.run_on_head(handle,
                                                 code,
