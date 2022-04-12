@@ -1023,8 +1023,6 @@ def generate_cluster_name():
 
 
 def generate_tpu_name(cluster_name):
-    # TODO: change this ID formatting to something more pleasant.
-    # User name is helpful in non-isolated accounts, e.g. GCP, Azure.
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}-{cluster_name}'
 
 
