@@ -19,7 +19,7 @@ setup: |
 
 run: |
   if [ ! -d ~/imagenet ]; then
-    unzip /imagenet/imagenet2012.zip -d ~
+    time unzip /imagenet/imagenet2012.zip -d ~
   fi
 
   conda activate imagenet
