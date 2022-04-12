@@ -1023,7 +1023,7 @@ def generate_cluster_name():
 
 
 def generate_tpu_name(cluster_name):
-    return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}-{cluster_name}'
+    return f'sky_tpu-{uuid.uuid4().hex[:4]}-{cluster_name}'
 
 
 def get_node_ips(
