@@ -1026,8 +1026,10 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     # Check the status of the cluster.
     cluster_status = backend_utils.get_cluster_status_with_refresh(cluster)
     if cluster_status != global_user_state.ClusterStatus.UP:
-        click.secho(f'Cluster {cluster} (status: {cluster_status}) '
-                    'is not up...skipped.', fg='yellow')
+        click.secho(
+            f'Cluster {cluster} (status: {cluster_status}) '
+            'is not up...skipped.',
+            fg='yellow')
         return
 
     if all:
