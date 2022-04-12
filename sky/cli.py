@@ -1027,7 +1027,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     cluster_status = backend_utils.get_cluster_status_with_refresh(cluster)
     if cluster_status != global_user_state.ClusterStatus.UP:
         click.secho(f'Cluster {cluster} (status: {cluster_status}) '
-                    'is not up...skipped.')
+                    'is not up...skipped.', fg='yellow')
         return
 
     if all:
@@ -1416,7 +1416,7 @@ def _terminate_or_stop_clusters(
             # Disable spot instances to be stopped.
             # TODO(suquark): enable GCP+spot to be stopped in the future.
             message = (
-                f'{colorama.Fore.GREEN}Stopping cluster {name}... skipped.'
+                f'{colorama.Fore.YELLOW}Stopping cluster {name}... skipped.'
                 f'{colorama.Style.RESET_ALL}\n'
                 '  Stopping spot instances is not supported as the attached '
                 'disks will be lost.\n'
@@ -1426,14 +1426,14 @@ def _terminate_or_stop_clusters(
         elif idle_minutes_to_autostop is not None:
             cluster_status = backend_utils.get_cluster_status_with_refresh(name)
             if not isinstance(backend, backends.CloudVmRayBackend):
-                message = (f'{colorama.Fore.GREEN}{operation} cluster '
+                message = (f'{colorama.Fore.YELLOW}{operation} cluster '
                            f'{name}... skipped{colorama.Style.RESET_ALL}'
                            '\n  Auto-stopping is only supported by backend: '
                            f'{backends.CloudVmRayBackend.NAME}')
             else:
                 if cluster_status != global_user_state.ClusterStatus.UP:
                     message = (
-                        f'{colorama.Fore.GREEN}{operation} cluster '
+                        f'{colorama.Fore.YELLOW}{operation} cluster '
                         f'{name} (status: {cluster_status.value})... skipped'
                         f'{colorama.Style.RESET_ALL}'
                         '\n  Auto-stop can only be run on '
