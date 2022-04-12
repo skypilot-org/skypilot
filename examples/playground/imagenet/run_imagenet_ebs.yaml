@@ -26,6 +26,7 @@ run: |
   mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs
 
   cd ./examples/imagenet
+  git pull
   python main.py -a resnet18 \
     --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs \
     --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs \

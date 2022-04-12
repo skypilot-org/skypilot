@@ -1,6 +1,6 @@
 resources:
   cloud: aws
-  resources: V100
+  accelerators: V100
 
 file_mounts:
   /imagenet:
@@ -20,8 +20,9 @@ setup: |
 run: |
   conda activate imagenet
   mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3
-  
+
   cd ./examples/imagenet
+  git pull
   python main.py -a resnet18 \
     --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3 \
     --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3 \
