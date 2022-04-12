@@ -576,7 +576,8 @@ def launch(
         maybe_status = backend_utils.get_cluster_status_with_refresh(cluster)
         prompt = None
         if maybe_status is None:
-            prompt = 'Launching a new cluster. Proceed?'
+            cluster_str = '' if cluster is None else f' {cluster!r}'
+            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
         elif maybe_status == global_user_state.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
@@ -1398,7 +1399,9 @@ def _terminate_or_stop_clusters(
         verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
         operation = f'{verb} auto-stop on'
     plural = 's' if len(to_down) > 1 else ''
-    progress = rich_progress.Progress(transient=True)
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
     task = progress.add_task(
         f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
         total=len(to_down))
@@ -1407,6 +1410,7 @@ def _terminate_or_stop_clusters(
         name = record['name']
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
+        success_progress = False
         if (isinstance(backend, backends.CloudVmRayBackend) and
                 handle.launched_resources.use_spot and not terminate):
             # Disable spot instances to be stopped.
@@ -1414,8 +1418,9 @@ def _terminate_or_stop_clusters(
             message = (
                 f'{colorama.Fore.GREEN}Stopping cluster {name}... skipped.'
                 f'{colorama.Style.RESET_ALL}\n'
-                '  The spot instances may lose attached volumes.\n'
-                '  To terminate the cluster, run: '
+                '  Stopping spot instances is not supported as the attached '
+                'disks will be lost.\n'
+                '  To terminate the cluster instead, run: '
                 f'{colorama.Style.BRIGHT}sky down {name}'
                 f'{colorama.Style.RESET_ALL}')
         elif idle_minutes_to_autostop is not None:
@@ -1446,6 +1451,7 @@ def _terminate_or_stop_clusters(
                             f'{colorama.Style.BRIGHT}'
                             f'sky autostop {name} --cancel'
                             f'{colorama.Style.RESET_ALL}')
+                    success_progress = True
         else:
             success = backend.teardown(handle, terminate=terminate, purge=purge)
             if success:
@@ -1456,6 +1462,7 @@ def _terminate_or_stop_clusters(
                     message += ('\n  To restart the cluster, run: '
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
+                success_progress = True
             else:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
@@ -1463,7 +1470,8 @@ def _terminate_or_stop_clusters(
                     f'{colorama.Style.RESET_ALL}')
         progress.stop()
         click.echo(message)
-        progress.update(task, advance=1)
+        if success_progress:
+            progress.update(task, advance=1)
         progress.start()
 
     with progress:
