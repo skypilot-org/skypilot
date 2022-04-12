@@ -15,7 +15,11 @@ if typing.TYPE_CHECKING:
 
 _df = common.read_catalog('gcp.csv')
 
-_DEFAULT_REGION = 'us-central1'
+_TPU_REGIONS = [
+    'us-central1',
+    'europe-west4',
+    'asia-east1',
+]
 
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
@@ -67,9 +71,10 @@ def get_accelerator_hourly_cost(accelerator: str,
                                 use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     if region is None:
-        region = _DEFAULT_REGION
-    df = _get_accelerator(_df, accelerator, count, region)
-    assert len(set(df['Price'])) == 1, df
+        for region in _TPU_REGIONS:
+            df = _get_accelerator(_df, accelerator, count, region)
+            if len(set(df['Price'])) == 1: break
+        assert len(set(df['Price'])) == 1, df
     if not use_spot:
         return df['Price'].iloc[0]
 
