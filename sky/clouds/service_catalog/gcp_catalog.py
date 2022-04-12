@@ -71,10 +71,10 @@ def get_accelerator_hourly_cost(accelerator: str,
                                 use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     if region is None:
-        for _region in _TPU_REGIONS:
-            df = _get_accelerator(_df, accelerator, count, _region)
+        for tpu_region in _TPU_REGIONS:
+            df = _get_accelerator(_df, accelerator, count, tpu_region)
             if len(set(df['Price'])) == 1:
-                region = _region
+                region = tpu_region
                 break
     df = _get_accelerator(_df, accelerator, count, region)
     assert len(set(df['Price'])) == 1, df
