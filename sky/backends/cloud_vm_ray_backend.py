@@ -2224,20 +2224,30 @@ class CloudVmRayBackend(backends.Backend):
                     return False
 
         if returncode == 0 and terminate and isinstance(cloud, clouds.AWS):
-            # this independent branch is for cleaning up AWS security group
-            region = config['provider']['region']
-            aws_security_group_name = f'ray-autoscaler-{cluster_name}'
-            cleanup_cmd = (f'aws ec2 delete-security-group --region {region} '
-                           f'--group-name {aws_security_group_name}')
-            with backend_utils.safe_console_status(
-                    f'[bold cyan]Cleaning up [green] security group '
-                    f'for {cluster_name}'):
-                returncode, stdout, stderr = log_lib.run_with_log(
-                    cleanup_cmd,
-                    log_abs_path,
-                    shell=True,
-                    stream_logs=False,
-                    require_outputs=True)
+            while True:
+                # this independent branch is for cleaning up AWS security group
+                region = config['provider']['region']
+                aws_security_group_name = f'ray-autoscaler-{cluster_name}'
+                cleanup_cmd = (f'aws ec2 delete-security-group --region {region} '
+                               f'--group-name {aws_security_group_name}')
+                with backend_utils.safe_console_status(
+                        f'[bold cyan]Cleaning up [green] security group '
+                        f'for {cluster_name}'):
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        cleanup_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False,
+                        require_outputs=True)
+                # TODO(suquark): check the stderr to confirm the dependency error.
+                if returncode == 0:
+                    break
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}'
+                    f'WARNING: Failed to delete the security group. '
+                    f'{stderr}\nRetrying...'
+                    f'{colorama.Style.RESET_ALL}')
+                time.sleep(3)
 
         if returncode != 0:
             if purge:
