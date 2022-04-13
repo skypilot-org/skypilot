@@ -2231,7 +2231,7 @@ class CloudVmRayBackend(backends.Backend):
                 cleanup_cmd = (f'aws ec2 delete-security-group --region {region} '
                                f'--group-name {aws_security_group_name}')
                 with backend_utils.safe_console_status(
-                        f'[bold cyan]Cleaning up [green] security group '
+                        f'[bold cyan]Cleaning up security group [green]'
                         f'for {cluster_name}'):
                     returncode, stdout, stderr = log_lib.run_with_log(
                         cleanup_cmd,
@@ -2239,15 +2239,15 @@ class CloudVmRayBackend(backends.Backend):
                         shell=True,
                         stream_logs=False,
                         require_outputs=True)
-                # TODO(suquark): check the stderr to confirm the dependency error.
-                if returncode == 0:
-                    break
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}'
-                    f'WARNING: Failed to delete the security group. '
-                    f'{stderr}\nRetrying...'
-                    f'{colorama.Style.RESET_ALL}')
-                time.sleep(3)
+                    # TODO(suquark): check the stderr to confirm the dependency error.
+                    if returncode == 0:
+                        break
+                    logger.warning(
+                        f'{colorama.Fore.YELLOW}'
+                        f'WARNING: Failed to delete the security group. '
+                        f'{stderr}\nRetrying...'
+                        f'{colorama.Style.RESET_ALL}')
+                    time.sleep(3)
 
         if returncode != 0:
             if purge:
