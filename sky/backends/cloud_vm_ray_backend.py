@@ -2240,6 +2240,8 @@ class CloudVmRayBackend(backends.Backend):
                         stream_logs=False,
                         require_outputs=True)
                     # TODO(suquark): check the stderr to confirm the dependency error.
+                    if "InvalidGroup.NotFound" in stderr:
+                        returncode = 0  # ignore the case where we cannot find the security group
                     if returncode == 0:
                         break
                     logger.warning(
