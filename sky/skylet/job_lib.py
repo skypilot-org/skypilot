@@ -29,8 +29,7 @@ class JobStatus(enum.Enum):
     CANCELLED = 'CANCELLED'
 
     def is_terminal(self):
-        return self in (JobStatus.SUCCEEDED, JobStatus.FAILED,
-                        JobStatus.CANCELLED)
+        return self in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED)
 
 
 _RAY_TO_JOB_STATUS_MAP = {
@@ -78,17 +77,15 @@ db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'resources', 'TEXT')
 _CONN.commit()
 
 
-def add_job(job_name: str, username: str, run_timestamp: str,
-            resources_str: str) -> int:
+def add_job(job_name: str, username: str, run_timestamp: str, resources_str: str) -> int:
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = int(time.time())
     # job_id will autoincrement with the null value
     _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?)',
-                    (job_name, username, job_submitted_at, JobStatus.INIT.value,
-                     run_timestamp, None, resources_str))
+                    (job_name, username, job_submitted_at, JobStatus.INIT.value, run_timestamp,
+                     None, resources_str))
     _CONN.commit()
-    rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
-                           (run_timestamp,))
+    rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)', (run_timestamp,))
     for row in rows:
         job_id = row[0]
     assert job_id is not None
@@ -105,27 +102,23 @@ def set_status(job_id: int, status: JobStatus) -> None:
         # job must be in a terminal state already.
         _CURSOR.execute(
             'UPDATE jobs SET status=(?), end_at=(?) '
-            'WHERE job_id=(?) AND end_at IS NULL',
-            (status.value, end_at, job_id))
+            'WHERE job_id=(?) AND end_at IS NULL', (status.value, end_at, job_id))
     else:
-        _CURSOR.execute(
-            'UPDATE jobs SET status=(?), end_at=NULL '
-            'WHERE job_id=(?)', (status.value, job_id))
+        _CURSOR.execute('UPDATE jobs SET status=(?), end_at=NULL '
+                        'WHERE job_id=(?)', (status.value, job_id))
     _CONN.commit()
 
 
 def get_status(job_id: int) -> JobStatus:
-    rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
-                           (job_id,))
+    rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)', (job_id,))
     for (status,) in rows:
         assert status is not None
         return JobStatus[status]
 
 
 def set_job_started(job_id: int) -> None:
-    _CURSOR.execute(
-        'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
-        'WHERE job_id=(?)', (JobStatus.RUNNING.value, int(time.time()), job_id))
+    _CURSOR.execute('UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
+                    'WHERE job_id=(?)', (JobStatus.RUNNING.value, int(time.time()), job_id))
     _CONN.commit()
 
 
@@ -149,9 +142,8 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
     return records
 
 
-def _get_jobs(
-        username: Optional[str],
-        status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
+def _get_jobs(username: Optional[str],
+              status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [status.value for status in status_list]
@@ -241,9 +233,7 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
 
 
 def fail_all_jobs_in_progress() -> None:
-    in_progress_status = [
-        JobStatus.INIT.value, JobStatus.PENDING.value, JobStatus.RUNNING.value
-    ]
+    in_progress_status = [JobStatus.INIT.value, JobStatus.PENDING.value, JobStatus.RUNNING.value]
     _CURSOR.execute(
         f"""\
         UPDATE jobs SET status=(?)
@@ -259,9 +249,8 @@ def update_status() -> None:
     # function, as the `ray job status job_id` does not exist due to the app
     # not submitted yet. It will be then reset to PENDING / RUNNING when the
     # app starts.
-    running_jobs = _get_jobs(
-        username=None,
-        status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
+    running_jobs = _get_jobs(username=None,
+                             status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
     running_job_ids = [job['job_id'] for job in running_jobs]
 
     job_status = query_job_status(running_job_ids)
@@ -280,17 +269,14 @@ def is_cluster_idle() -> bool:
         """\
         SELECT COUNT(*) FROM jobs
         WHERE status IN (?, ?, ?)
-        """, (JobStatus.INIT.value, JobStatus.PENDING.value,
-              JobStatus.RUNNING.value))
+        """, (JobStatus.INIT.value, JobStatus.PENDING.value, JobStatus.RUNNING.value))
     for (count,) in rows:
         return count == 0
 
 
 def _show_job_queue(jobs) -> None:
-    job_table = log_utils.create_table([
-        'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
-        'STATUS', 'LOG'
-    ])
+    job_table = log_utils.create_table(
+        ['ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES', 'STATUS', 'LOG'])
 
     for job in jobs:
         job_table.add_row([
@@ -299,9 +285,7 @@ def _show_job_queue(jobs) -> None:
             job['username'],
             log_utils.readable_time_duration(job['submitted_at']),
             log_utils.readable_time_duration(job['start_at']),
-            log_utils.readable_time_duration(job['start_at'],
-                                             job['end_at'],
-                                             absolute=True),
+            log_utils.readable_time_duration(job['start_at'], job['end_at'], absolute=True),
             job['resources'],
             job['status'].value,
             os.path.join(SKY_LOGS_DIRECTORY, job['run_timestamp']),
@@ -339,9 +323,7 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
     jobs = [job['job_id'] for job in job_records]
     # TODO(zhwu): `ray job stop` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
-    cancel_cmd = [
-        f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
-    ]
+    cancel_cmd = [f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs]
     cancel_cmd = ';'.join(cancel_cmd)
     subprocess.run(cancel_cmd, shell=True, check=False, executable='/bin/bash')
     for job in job_records:
@@ -351,8 +333,7 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
 
 def log_dir(job_id: int) -> Optional[str]:
     """Returns the relative path to the log file for a job."""
-    _CURSOR.execute(
-        """\
+    _CURSOR.execute("""\
             SELECT * FROM jobs
             WHERE job_id=(?)""", (job_id,))
     row = _CURSOR.fetchone()
@@ -373,8 +354,7 @@ class JobLibCodeGen:
     _PREFIX = ['from sky.skylet import job_lib, log_lib']
 
     @classmethod
-    def add_job(cls, job_name: str, username: str, run_timestamp: str,
-                resources_str: str) -> str:
+    def add_job(cls, job_name: str, username: str, run_timestamp: str, resources_str: str) -> str:
         if job_name is None:
             job_name = '-'
         code = [

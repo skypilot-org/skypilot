@@ -58,8 +58,7 @@ def generate_random_dag(
             op.set_outputs('CLOUD', random.randint(0, max_data_size))
 
             num_candidates = random.randint(1, max_num_candidate_resources)
-            candidate_instance_types = random.choices(ALL_INSTANCE_TYPES,
-                                                      k=num_candidates)
+            candidate_instance_types = random.choices(ALL_INSTANCE_TYPES, k=num_candidates)
             op.set_resources({
                 sky.Resources(
                     cloud=CLOUDS[candidate.cloud],
@@ -89,11 +88,9 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
             plan[task] = resources
             if len(tasks) == 1:
                 if minimize_cost:
-                    objective = sky.Optimizer._compute_total_cost(
-                        graph, topo_order, plan)
+                    objective = sky.Optimizer._compute_total_cost(graph, topo_order, plan)
                 else:
-                    objective = sky.Optimizer._compute_total_time(
-                        graph, topo_order, plan)
+                    objective = sky.Optimizer._compute_total_time(graph, topo_order, plan)
             else:
                 objective = _optimize_by_brute_force(tasks[1:], plan)
             if objective < min_objective:
@@ -108,11 +105,9 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
 
     _, optimizer_plan = sky.Optimizer._optimize_objective(dag, minimize_cost)
     if minimize_cost:
-        objective = sky.Optimizer._compute_total_cost(dag.get_graph(),
-                                                      dag.tasks, optimizer_plan)
+        objective = sky.Optimizer._compute_total_cost(dag.get_graph(), dag.tasks, optimizer_plan)
     else:
-        objective = sky.Optimizer._compute_total_time(dag.get_graph(),
-                                                      dag.tasks, optimizer_plan)
+        objective = sky.Optimizer._compute_total_time(dag.get_graph(), dag.tasks, optimizer_plan)
 
     min_objective = find_min_objective(copy_dag, minimize_cost)
     assert objective == min_objective

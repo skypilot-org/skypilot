@@ -48,10 +48,7 @@ def _get_cluster_name():
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
-    log_file = tempfile.NamedTemporaryFile('a',
-                                           prefix=f'{test.name}-',
-                                           suffix='.log',
-                                           delete=False)
+    log_file = tempfile.NamedTemporaryFile('a', prefix=f'{test.name}-', suffix='.log', delete=False)
     test.echo(f'Test started. Log: less {log_file.name}')
     for command in test.commands:
         proc = subprocess.Popen(
@@ -377,11 +374,9 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_mount):
         # Creates a temporary storage object. Stores must be added in the test.
-        storage_obj = storage_lib.Storage(name=tmp_bucket_name,
-                                          source=tmp_mount)
+        storage_obj = storage_lib.Storage(name=tmp_bucket_name, source=tmp_mount)
         yield storage_obj
-        handle = global_user_state.get_handle_from_storage_name(
-            storage_obj.name)
+        handle = global_user_state.get_handle_from_storage_name(storage_obj.name)
         if handle:
             # If handle exists, delete manually
             # TODO(romilb): This is potentially risky - if the delete method has
@@ -395,8 +390,7 @@ class TestStorageWithCredentials:
         # Creates a temporary bucket using awscli
         subprocess.check_call(['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
         yield tmp_bucket_name
-        subprocess.check_call(
-            ['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force'])
+        subprocess.check_call(['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force'])
 
     @pytest.fixture
     def tmp_public_storage_obj(self, tmp_bucket_name):
@@ -416,8 +410,7 @@ class TestStorageWithCredentials:
         assert tmp_local_storage_obj.name in out.decode('utf-8')
 
         # Run sky storage delete to delete the storage object
-        subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_local_storage_obj.name])
+        subprocess.check_output(['sky', 'storage', 'delete', tmp_local_storage_obj.name])
 
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
@@ -435,13 +428,11 @@ class TestStorageWithCredentials:
     def test_upload_to_existing_bucket(self, tmp_awscli_bucket, tmp_mount):
         # Tries uploading existing files to newly created bucket (outside of
         # sky) and verifies that files are written.
-        storage_obj = storage_lib.Storage(name=tmp_awscli_bucket,
-                                          source=tmp_mount)
+        storage_obj = storage_lib.Storage(name=tmp_awscli_bucket, source=tmp_mount)
         storage_obj.add_store(storage_lib.StoreType.S3)
 
         # Check if tmp_mount/tmp-file exists in the bucket using aws cli
-        out = subprocess.check_output(
-            ['aws', 's3', 'ls', f's3://{tmp_awscli_bucket}'])
+        out = subprocess.check_output(['aws', 's3', 'ls', f's3://{tmp_awscli_bucket}'])
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))

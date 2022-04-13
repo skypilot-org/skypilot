@@ -61,8 +61,7 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
         url = content.get('NextPageLink')
     print(f'Done fetching pricing {region}')
     df = pd.DataFrame(all_items)
-    return df[(~df['productName'].str.contains(' Windows')) &
-              (df['unitPrice'] > 0)]
+    return df[(~df['productName'].str.contains(' Windows')) & (df['unitPrice'] > 0)]
 
 
 @ray.remote
@@ -123,16 +122,12 @@ def get_all_regions_instance_types_df():
         is_promo = row['name'].endswith('_Promo')
         sku = row['name'].replace('_Promo', '')
         region = row['Region']
-        pricing_rows = df[(df['armSkuName'] == sku) &
-                          (df['armRegionName'] == region) &
-                          (df['unitPrice'] > 0) &
-                          (~df['skuName'].str.contains(' Spot'))]
+        pricing_rows = df[(df['armSkuName'] == sku) & (df['armRegionName'] == region) &
+                          (df['unitPrice'] > 0) & (~df['skuName'].str.contains(' Spot'))]
         if is_promo:
-            pricing_rows = pricing_rows[pricing_rows['skuName'].str.contains(
-                ' Low Priority')]
+            pricing_rows = pricing_rows[pricing_rows['skuName'].str.contains(' Low Priority')]
         else:
-            pricing_rows = pricing_rows[~pricing_rows['skuName'].str.
-                                        contains(' Low Priority')]
+            pricing_rows = pricing_rows[~pricing_rows['skuName'].str.contains(' Low Priority')]
         assert len(pricing_rows) <= 1, (sku, pricing_rows)
         if len(pricing_rows) == 0:
             return np.nan
@@ -141,10 +136,8 @@ def get_all_regions_instance_types_df():
     def get_spot_price(row):
         sku = row['name']
         region = row['Region']
-        spot_pricing_rows = df[(df['armSkuName'] == sku) &
-                               (df['armRegionName'] == region) &
-                               (df['unitPrice'] > 0) &
-                               (df['skuName'].str.contains(' Spot'))]
+        spot_pricing_rows = df[(df['armSkuName'] == sku) & (df['armRegionName'] == region) &
+                               (df['unitPrice'] > 0) & (df['skuName'].str.contains(' Spot'))]
         assert len(spot_pricing_rows) <= 1, (sku, spot_pricing_rows)
         if len(spot_pricing_rows) == 0:
             return np.nan

@@ -29,8 +29,7 @@ class SkyletEvent:
 
     def __init__(self):
         self._event_interval = int(
-            math.ceil(self.EVENT_INTERVAL_SECONDS /
-                      EVENT_CHECKING_INTERVAL_SECONDS))
+            math.ceil(self.EVENT_INTERVAL_SECONDS / EVENT_CHECKING_INTERVAL_SECONDS))
         self._n = 0
 
     def run(self):
@@ -81,37 +80,28 @@ class AutostopEvent(SkyletEvent):
 
         if job_lib.is_cluster_idle():
             idle_minutes = (time.time() - self.last_active_time) // 60
-            logger.debug(
-                f'Idle minutes: {idle_minutes}, '
-                f'AutoStop config: {autostop_config.autostop_idle_minutes}')
+            logger.debug(f'Idle minutes: {idle_minutes}, '
+                         f'AutoStop config: {autostop_config.autostop_idle_minutes}')
         else:
             self.last_active_time = time.time()
             idle_minutes = -1
-            logger.debug(
-                'Not idle. Reset idle minutes.'
-                f'AutoStop config: {autostop_config.autostop_idle_minutes}')
+            logger.debug('Not idle. Reset idle minutes.'
+                         f'AutoStop config: {autostop_config.autostop_idle_minutes}')
         if idle_minutes >= autostop_config.autostop_idle_minutes:
-            logger.info(
-                f'{idle_minutes} idle minutes reached; threshold: '
-                f'{autostop_config.autostop_idle_minutes} minutes. Stopping.')
+            logger.info(f'{idle_minutes} idle minutes reached; threshold: '
+                        f'{autostop_config.autostop_idle_minutes} minutes. Stopping.')
             self._stop_cluster(autostop_config)
 
     def _stop_cluster(self, autostop_config):
-        if (autostop_config.backend ==
-                cloud_vm_ray_backend.CloudVmRayBackend.NAME):
+        if autostop_config.backend == cloud_vm_ray_backend.CloudVmRayBackend.NAME:
             self._replace_yaml_for_stopping(self.ray_yaml_path)
             # `ray up` is required to reset the upscaling speed and min/max
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
-            subprocess.run(
-                ['ray', 'up', '-y', '--restart-only', self.ray_yaml_path],
-                check=True)
+            subprocess.run(['ray', 'up', '-y', '--restart-only', self.ray_yaml_path], check=True)
             # Stop the workers first to avoid orphan workers.
-            subprocess.run(
-                ['ray', 'down', '-y', '--workers-only', self.ray_yaml_path],
-                check=True)
-            subprocess.run(['ray', 'down', '-y', self.ray_yaml_path],
-                           check=True)
+            subprocess.run(['ray', 'down', '-y', '--workers-only', self.ray_yaml_path], check=True)
+            subprocess.run(['ray', 'down', '-y', self.ray_yaml_path], check=True)
         else:
             raise NotImplementedError
 

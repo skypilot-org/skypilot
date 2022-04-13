@@ -27,8 +27,7 @@ if __name__ == '__main__':
     tag = docker_utils.build_dockerimage_from_task(t)
     logger.info(f'Build successful. Tag: {tag}.')
     logger.info(f'Try running docker run -it --rm {tag}')
-    logger.info(
-        f'Debug your container with docker run -it --rm {tag} /bin/bash')
+    logger.info(f'Debug your container with docker run -it --rm {tag} /bin/bash')
 
     # TODO(romilb): Need to implement cloud-agnostic push pipeline - ECR/GCR/ACR
     logger.info(f'Trying to push image {tag}')

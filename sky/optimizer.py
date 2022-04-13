@@ -46,10 +46,8 @@ class Optimizer:
     """The Sky optimizer: assigns best resources to user tasks."""
 
     @staticmethod
-    def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
-                     gigabytes: float):
-        if isinstance(src_cloud, DummyCloud) or isinstance(
-                dst_cloud, DummyCloud):
+    def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud, gigabytes: float):
+        if isinstance(src_cloud, DummyCloud) or isinstance(dst_cloud, DummyCloud):
             return 0.0
 
         if not src_cloud.is_same_cloud(dst_cloud):
@@ -59,12 +57,10 @@ class Optimizer:
         return egress_cost
 
     @staticmethod
-    def _egress_time(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
-                     gigabytes: float):
+    def _egress_time(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud, gigabytes: float):
         """Returns estimated egress time in seconds."""
         # FIXME: estimate bandwidth between each cloud-region pair.
-        if isinstance(src_cloud, DummyCloud) or isinstance(
-                dst_cloud, DummyCloud):
+        if isinstance(src_cloud, DummyCloud) or isinstance(dst_cloud, DummyCloud):
             return 0.0
         if not src_cloud.is_same_cloud(dst_cloud):
             # 10Gbps is close to the average of observed b/w from S3
@@ -79,8 +75,7 @@ class Optimizer:
     @staticmethod
     def optimize(dag: 'dag_lib.Dag',
                  minimize=OptimizeTarget.COST,
-                 blocked_launchable_resources: Optional[List[
-                     resources_lib.Resources]] = None,
+                 blocked_launchable_resources: Optional[List[resources_lib.Resources]] = None,
                  raise_error: bool = False):
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
@@ -168,11 +163,11 @@ class Optimizer:
 
     @staticmethod
     def _egress_cost_or_time(minimize_cost: bool, parent: Task,
-                             parent_resources: resources_lib.Resources,
-                             node: Task, resources: resources_lib.Resources):
+                             parent_resources: resources_lib.Resources, node: Task,
+                             resources: resources_lib.Resources):
         """Computes the egress cost or time depending on 'minimize_cost'."""
-        src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
-            parent, parent_resources, node, resources)
+        src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(parent, parent_resources, node,
+                                                                  resources)
         if nbytes == 0:
             return 0
 
@@ -186,8 +181,7 @@ class Optimizer:
     def _estimate_nodes_cost_or_time(
         topo_order: List[Task],
         minimize_cost: bool = True,
-        blocked_launchable_resources: Optional[List[
-            resources_lib.Resources]] = None,
+        blocked_launchable_resources: Optional[List[resources_lib.Resources]] = None,
         raise_error: bool = False,
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
         """Estimates the cost/time of each task-resource mapping in the DAG.
@@ -227,27 +221,23 @@ class Optimizer:
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
-                launchable_resources = {
-                    list(node.get_resources())[0]: launchable_resources
-                }
+                launchable_resources = {list(node.get_resources())[0]: launchable_resources}
 
             num_resources = len(node.get_resources())
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
-                    error_msg = (
-                        f'No launchable resource found for task {node}. '
-                        'To fix: relax its resource requirements.\n'
-                        'Hint: \'sky show-gpus --all\' '
-                        'to list available accelerators.\n'
-                        '      \'sky check\' to check the enabled clouds.')
+                    error_msg = (f'No launchable resource found for task {node}. '
+                                 'To fix: relax its resource requirements.\n'
+                                 'Hint: \'sky show-gpus --all\' '
+                                 'to list available accelerators.\n'
+                                 '      \'sky check\' to check the enabled clouds.')
                     if raise_error:
                         raise exceptions.ResourcesUnavailableError(error_msg)
                     else:
                         logger.error(error_msg)
                         sys.exit(1)
                 if num_resources == 1 and node.time_estimator_func is None:
-                    logger.debug(
-                        'Defaulting the task\'s estimated time to 1 hour.')
+                    logger.debug('Defaulting the task\'s estimated time to 1 hour.')
                     estimated_runtime = 1 * 3600
                 else:
                     # We assume the time estimator takes in a partial resource
@@ -272,13 +262,11 @@ class Optimizer:
                         # Minimize run time.
                         estimated_cost_or_time = estimated_runtime
                     if do_print:
-                        logger.debug(
-                            '  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
-                                estimated_runtime, estimated_runtime / 3600))
+                        logger.debug('  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
+                            estimated_runtime, estimated_runtime / 3600))
                         if minimize_cost:
-                            logger.debug(
-                                '  estimated_cost (not incl. egress): ${:.1f}'.
-                                format(estimated_cost_or_time))
+                            logger.debug('  estimated_cost (not incl. egress): ${:.1f}'.format(
+                                estimated_cost_or_time))
                     node_to_cost_map[node][resources] = estimated_cost_or_time
         return node_to_cost_map, node_to_candidate_map
 
@@ -310,9 +298,8 @@ class Optimizer:
                 min_pred_cost_plus_egress = np.inf
                 for parent_resources, parent_cost in \
                     dp_best_objective[parent].items():
-                    egress_cost = Optimizer._egress_cost_or_time(
-                        minimize_cost, parent, parent_resources, node,
-                        resources)
+                    egress_cost = Optimizer._egress_cost_or_time(minimize_cost, parent,
+                                                                 parent_resources, node, resources)
 
                     if parent_cost + egress_cost < min_pred_cost_plus_egress:
                         min_pred_cost_plus_egress = parent_cost + egress_cost
@@ -412,21 +399,15 @@ class Optimizer:
             F[u][v] = []
             for r_u in node_to_cost_map[u].keys():
                 for r_v in node_to_cost_map[v].keys():
-                    F[u][v].append(
-                        Optimizer._egress_cost_or_time(minimize_cost, u, r_u, v,
-                                                       r_v))
+                    F[u][v].append(Optimizer._egress_cost_or_time(minimize_cost, u, r_u, v, r_v))
 
         # Define the decision variables.
-        c = {
-            v: pulp.LpVariable.matrix(v.name, (range(len(k[v])),), cat='Binary')
-            for v in V
-        }
+        c = {v: pulp.LpVariable.matrix(v.name, (range(len(k[v])),), cat='Binary') for v in V}
 
         e = collections.defaultdict(dict)
         for u, v in E:
             num_vars = len(c[u]) * len(c[v])
-            e[u][v] = pulp.LpVariable.matrix(f'({u.name}->{v.name})',
-                                             (range(num_vars),),
+            e[u][v] = pulp.LpVariable.matrix(f'({u.name}->{v.name})', (range(num_vars),),
                                              cat='Binary')
 
         # Formulate the constraints.
@@ -445,12 +426,10 @@ class Optimizer:
             N_v = len(c[v])  # pylint: disable=invalid-name
 
             for row in range(N_u):
-                prob += pulp.lpSum(
-                    e_uv[N_v * row + col] for col in range(N_v)) == c[u][row]
+                prob += pulp.lpSum(e_uv[N_v * row + col] for col in range(N_v)) == c[u][row]
 
             for col in range(N_v):
-                prob += pulp.lpSum(
-                    e_uv[N_v * row + col] for row in range(N_u)) == c[v][col]
+                prob += pulp.lpSum(e_uv[N_v * row + col] for row in range(N_u)) == c[v][col]
 
         # Formulate the objective.
         if minimize_cost:
@@ -461,12 +440,10 @@ class Optimizer:
                 objective += pulp.lpDot(e[u][v], F[u][v])
         else:
             # We need additional decision variables.
-            finish_time = {
-                v: pulp.LpVariable(f'lat({v})', lowBound=0) for v in V
-            }
+            finish_time = {v: pulp.LpVariable(f'lat({v})', lowBound=0) for v in V}
             for u, v in E:
-                prob += finish_time[v] >= (pulp.lpDot(
-                    c[v], k[v]) + finish_time[u] + pulp.lpDot(e[u][v], F[u][v]))
+                prob += finish_time[v] >= (pulp.lpDot(c[v], k[v]) + finish_time[u] +
+                                           pulp.lpDot(e[u][v], F[u][v]))
             sink_node = V[-1]
             objective = finish_time[sink_node]
         prob += objective
@@ -511,8 +488,8 @@ class Optimizer:
             pred_finish_times = [0]
             for pred in graph.predecessors(node):
                 # FIXME: Account for egress time for multi-node clusters
-                egress_time = Optimizer._egress_cost_or_time(
-                    False, pred, plan[pred], node, resources)
+                egress_time = Optimizer._egress_cost_or_time(False, pred, plan[pred], node,
+                                                             resources)
                 pred_finish_times.append(finish_time(pred) + egress_time)
 
             cache_finish_time[node] = execution_time + max(pred_finish_times)
@@ -543,8 +520,8 @@ class Optimizer:
 
             for pred in graph.predecessors(node):
                 # FIXME: Account for egress costs for multi-node clusters
-                egress_cost = Optimizer._egress_cost_or_time(
-                    True, pred, plan[pred], node, resources)
+                egress_cost = Optimizer._egress_cost_or_time(True, pred, plan[pred], node,
+                                                             resources)
                 total_cost += egress_cost
         return total_cost
 
@@ -552,8 +529,8 @@ class Optimizer:
     def _print_egress_plan(graph, plan, minimize_cost):
         message_data = []
         for parent, child in graph.edges():
-            src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
-                parent, plan[parent], child, plan[child])
+            src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(parent, plan[parent], child,
+                                                                      plan[child])
             if nbytes == 0:
                 continue
 
@@ -605,23 +582,20 @@ class Optimizer:
         print_hourly_cost = False
         if len(node_to_cost_map) == 1:
             node = list(node_to_cost_map.keys())[0]
-            if (node.time_estimator_func is None and
-                    node.get_inputs() is None and node.get_outputs() is None):
+            if (node.time_estimator_func is None and node.get_inputs() is None and
+                    node.get_outputs() is None):
                 print_hourly_cost = True
 
         if print_hourly_cost:
             logger.info(f'Estimated cost: ~${total_cost:.1f}/hr')
         else:
-            logger.info(
-                f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
-                f'total cost: ~${total_cost:.1f}')
+            logger.info(f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
+                        f'total cost: ~${total_cost:.1f}')
 
         # Do not print Source or Sink.
-        message_data = [
-            (t, f'{t.num_nodes}x {repr(r)}' if t.num_nodes > 1 else repr(r))
-            for t, r in best_plan.items()
-            if t.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
-        ]
+        message_data = [(t, f'{t.num_nodes}x {repr(r)}' if t.num_nodes > 1 else repr(r))
+                        for t, r in best_plan.items()
+                        if t.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)]
         message = tabulate.tabulate(reversed(message_data),
                                     headers=['TASK', 'BEST_RESOURCE'],
                                     tablefmt='plain')
@@ -646,8 +620,7 @@ class Optimizer:
                 logger.info('%s\n', pprint.pformat(node_to_cost_map))
             elif num_tasks == 1:
                 logger.info(f'Considered resources -> {metric}')
-                logger.info('%s\n',
-                            pprint.pformat(list(node_to_cost_map.values())[0]))
+                logger.info('%s\n', pprint.pformat(list(node_to_cost_map.values())[0]))
 
     @staticmethod
     def _print_candidates(node_to_candidate_map: _TaskToPerCloudCandidates):
@@ -659,24 +632,19 @@ class Optimizer:
                 for cloud, candidate_list in candidate_set.items():
                     if len(candidate_list) > 1:
                         is_multi_instances = True
-                        instance_list = [
-                            res.instance_type for res in candidate_list
-                        ]
-                        logger.info(
-                            f'Multiple {cloud} instances satisfy '
-                            f'{acc_name}:{int(acc_count)}. '
-                            f'The cheapest {candidate_list[0]!r} is considered '
-                            f'among:\n{instance_list}.\n')
+                        instance_list = [res.instance_type for res in candidate_list]
+                        logger.info(f'Multiple {cloud} instances satisfy '
+                                    f'{acc_name}:{int(acc_count)}. '
+                                    f'The cheapest {candidate_list[0]!r} is considered '
+                                    f'among:\n{instance_list}.\n')
             if is_multi_instances:
-                logger.info(
-                    f'To list more details, run \'sky show-gpus {acc_name}\'.')
+                logger.info(f'To list more details, run \'sky show-gpus {acc_name}\'.')
 
     @staticmethod
     def _optimize_objective(
         dag: 'dag_lib.Dag',
         minimize_cost: bool = True,
-        blocked_launchable_resources: Optional[List[
-            resources_lib.Resources]] = None,
+        blocked_launchable_resources: Optional[List[resources_lib.Resources]] = None,
         raise_error: bool = False,
     ) -> Tuple['dag_lib.Dag', Dict[Task, resources_lib.Resources]]:
         """Finds the optimal task-resource mapping for the entire DAG.
@@ -706,16 +674,14 @@ class Optimizer:
                 graph, topo_order, node_to_cost_map, minimize_cost)
 
         if minimize_cost:
-            total_time = Optimizer._compute_total_time(graph, topo_order,
-                                                       best_plan)
+            total_time = Optimizer._compute_total_time(graph, topo_order, best_plan)
             total_cost = best_total_objective
         else:
             total_time = best_total_objective
-            total_cost = Optimizer._compute_total_cost(graph, topo_order,
-                                                       best_plan)
+            total_cost = Optimizer._compute_total_cost(graph, topo_order, best_plan)
 
-        Optimizer.print_optimized_plan(graph, best_plan, total_time, total_cost,
-                                       node_to_cost_map, minimize_cost)
+        Optimizer.print_optimized_plan(graph, best_plan, total_time, total_cost, node_to_cost_map,
+                                       minimize_cost)
         Optimizer._print_candidates(node_to_candidate_map)
         return dag, best_plan
 
@@ -759,24 +725,20 @@ def _fill_in_launchable_resources(
     task: Task,
     blocked_launchable_resources: Optional[List[resources_lib.Resources]],
     try_fix_with_sky_check: bool = True,
-) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
-           _PerCloudCandidates]:
+) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]], _PerCloudCandidates]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     if len(enabled_clouds) == 0 and try_fix_with_sky_check:
         check.check(quiet=True)
-        return _fill_in_launchable_resources(task, blocked_launchable_resources,
-                                             False)
+        return _fill_in_launchable_resources(task, blocked_launchable_resources, False)
     launchable = collections.defaultdict(list)
     cloud_candidates = collections.defaultdict(resources_lib.Resources)
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
     for resources in task.get_resources():
-        if resources.cloud is not None and not _cloud_in_list(
-                resources.cloud, enabled_clouds):
+        if resources.cloud is not None and not _cloud_in_list(resources.cloud, enabled_clouds):
             if try_fix_with_sky_check:
                 check.check(quiet=True)
-                return _fill_in_launchable_resources(
-                    task, blocked_launchable_resources, False)
+                return _fill_in_launchable_resources(task, blocked_launchable_resources, False)
             raise exceptions.ResourcesUnavailableError(
                 f'Task {task} requires {resources.cloud} which is not '
                 'enabled. Run `sky check` to enable access to it, '
@@ -784,12 +746,11 @@ def _fill_in_launchable_resources(
         elif resources.is_launchable():
             launchable[resources] = [resources]
         else:
-            clouds_list = [resources.cloud
-                          ] if resources.cloud is not None else enabled_clouds
+            clouds_list = [resources.cloud] if resources.cloud is not None else enabled_clouds
             all_fuzzy_candidates = set()
             for cloud in clouds_list:
-                (feasible_resources, fuzzy_candidate_list
-                ) = cloud.get_feasible_launchable_resources(resources)
+                (feasible_resources,
+                 fuzzy_candidate_list) = cloud.get_feasible_launchable_resources(resources)
                 if len(feasible_resources) > 0:
                     # Assume feasible_resources is sorted by prices and
                     # only append the cheapest option for each cloud

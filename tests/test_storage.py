@@ -12,8 +12,7 @@ class TestStorageSpecLocalSource:
 
     def test_nonexist_local_source(self):
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='test',
-                                source=f'/tmp/test-{int(time.time())}')
+            storage_lib.Storage(name='test', source=f'/tmp/test-{int(time.time())}')
         assert 'Local source path does not exist' in str(e)
 
     def test_source_trailing_slashes(self):
@@ -56,14 +55,12 @@ class TestStorageSpecValidation:
         # When mode is COPY - invalid spec
         # TODO(romilb): This case should work if my-bucket already exists.
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='my-bucket',
-                                mode=storage_lib.StorageMode.COPY)
+            storage_lib.Storage(name='my-bucket', mode=storage_lib.StorageMode.COPY)
 
         assert 'Storage source must be specified when using COPY mode' in str(e)
 
         # When mode is MOUNT - valid spec (e.g., use for scratch space)
-        storage_lib.Storage(name='my-bucket',
-                            mode=storage_lib.StorageMode.MOUNT)
+        storage_lib.Storage(name='my-bucket', mode=storage_lib.StorageMode.MOUNT)
 
     def test_noname_and_nosource(self):
         """Tests when neither name nor source is specified"""

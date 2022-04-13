@@ -41,9 +41,7 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     from oauth2client.client import GoogleCredentials  # pylint: disable=import-outside-toplevel
 
     oauth_credentials = GoogleCredentials.get_application_default()
-    storagetransfer = gcp.build('storagetransfer',
-                                'v1',
-                                credentials=oauth_credentials)
+    storagetransfer = gcp.build('storagetransfer', 'v1', credentials=oauth_credentials)
 
     session = aws.session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
@@ -51,8 +49,7 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     project_id = clouds.GCP.get_project_id()
 
     # Update cloud bucket IAM role to allow for data transfer
-    storage_account = storagetransfer.googleServiceAccounts().get(
-        projectId=project_id).execute()
+    storage_account = storagetransfer.googleServiceAccounts().get(projectId=project_id).execute()
     _add_bucket_iam_member(gs_bucket_name, 'roles/storage.admin',
                            'serviceAccount:' + storage_account['accountEmail'])
 

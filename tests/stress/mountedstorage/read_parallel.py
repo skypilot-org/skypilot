@@ -9,9 +9,7 @@ def parse_args():
     import argparse
     parser = argparse.ArgumentParser(description='Recursively read in parallel')
     parser.add_argument('path', help='Path to directory to read files;')
-    parser.add_argument('--list',
-                        action='store_true',
-                        help='List files before reading')
+    parser.add_argument('--list', action='store_true', help='List files before reading')
     args = parser.parse_args()
     return args
 
@@ -52,10 +50,7 @@ def read_parallel(path):
     done = 0
     for root, dirs, files in os.walk(path):  # Uses a generator
         with ThreadPoolExecutor(max_workers=64) as executor:
-            futures = [
-                executor.submit(read_file, os.path.join(root, file))
-                for file in files
-            ]
+            futures = [executor.submit(read_file, os.path.join(root, file)) for file in files]
             for future in as_completed(futures):
                 done += 1
                 if done % 10 == 0:

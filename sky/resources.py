@@ -61,11 +61,9 @@ class Resources:
 
         if disk_size is not None:
             if disk_size < 50:
-                raise ValueError(
-                    f'OS disk size must be larger than 50GB. Got: {disk_size}.')
+                raise ValueError(f'OS disk size must be larger than 50GB. Got: {disk_size}.')
             if round(disk_size) != disk_size:
-                raise ValueError(
-                    f'OS disk size must be an integer. Got: {disk_size}.')
+                raise ValueError(f'OS disk size must be an integer. Got: {disk_size}.')
             self._disk_size = int(disk_size)
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
@@ -111,8 +109,7 @@ class Resources:
         if self._accelerators is not None:
             return self._accelerators
         if self.cloud is not None and self._instance_type is not None:
-            return self.cloud.get_accelerators_from_instance_type(
-                self._instance_type)
+            return self.cloud.get_accelerators_from_instance_type(self._instance_type)
         return None
 
     @property
@@ -161,8 +158,7 @@ class Resources:
             if 'tpu' in acc.lower():
                 if self.cloud is None:
                     self._cloud = clouds.GCP()
-                assert self.cloud.is_same_cloud(
-                    clouds.GCP()), 'Cloud must be GCP.'
+                assert self.cloud.is_same_cloud(clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
                 if 'tf_version' not in accelerator_args:
@@ -201,9 +197,8 @@ class Resources:
                 raise ValueError(f'Invalid region {region!r} '
                                  f'{cloud_str}.')
             if len(valid_clouds) > 1:
-                raise ValueError(
-                    f'Ambiguous region {region!r} '
-                    f'Please specify cloud explicitly among {valid_clouds}.')
+                raise ValueError(f'Ambiguous region {region!r} '
+                                 f'Please specify cloud explicitly among {valid_clouds}.')
             logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
                          f'inferred from the region {region!r}.')
             self._cloud = valid_clouds[0]
@@ -217,9 +212,8 @@ class Resources:
         if self.cloud is not None:
             valid = self.cloud.instance_type_exists(self._instance_type)
             if not valid:
-                raise ValueError(
-                    f'Invalid instance type {self._instance_type!r} '
-                    f'for cloud {self.cloud}.')
+                raise ValueError(f'Invalid instance type {self._instance_type!r} '
+                                 f'for cloud {self.cloud}.')
         else:
             # If cloud not specified
             valid_clouds = []
@@ -232,16 +226,13 @@ class Resources:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
                     cloud_str = f'for any cloud among {enabled_clouds}'
-                raise ValueError(
-                    f'Invalid instance type {self._instance_type!r} '
-                    f'{cloud_str}.')
+                raise ValueError(f'Invalid instance type {self._instance_type!r} '
+                                 f'{cloud_str}.')
             if len(valid_clouds) > 1:
-                raise ValueError(
-                    f'Ambiguous instance type {self._instance_type!r}. '
-                    f'Please specify cloud explicitly among {valid_clouds}.')
-            logger.debug(
-                f'Cloud is not specified, using {valid_clouds[0]} '
-                f'inferred from the instance_type {self.instance_type!r}.')
+                raise ValueError(f'Ambiguous instance type {self._instance_type!r}. '
+                                 f'Please specify cloud explicitly among {valid_clouds}.')
+            logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
+                         f'inferred from the instance_type {self.instance_type!r}.')
             self._cloud = valid_clouds[0]
 
     def _try_validate_accelerators(self) -> None:
@@ -251,19 +242,17 @@ class Resources:
             acc_requested = self.accelerators
             if acc_requested is None:
                 return
-            acc_from_instance_type = (
-                self.cloud.get_accelerators_from_instance_type(
-                    self._instance_type))
+            acc_from_instance_type = (self.cloud.get_accelerators_from_instance_type(
+                self._instance_type))
             if not Resources(accelerators=acc_requested).less_demanding_than(
                     Resources(accelerators=acc_from_instance_type)):
-                raise ValueError(
-                    'Infeasible resource demands found:\n'
-                    f'  Instance type requested: {self._instance_type}\n'
-                    f'  Accelerators for {self._instance_type}: '
-                    f'{acc_from_instance_type}\n'
-                    f'  Accelerators requested: {acc_requested}\n'
-                    f'To fix: either only specify instance_type, or change '
-                    'the accelerators field to be consistent.')
+                raise ValueError('Infeasible resource demands found:\n'
+                                 f'  Instance type requested: {self._instance_type}\n'
+                                 f'  Accelerators for {self._instance_type}: '
+                                 f'{acc_from_instance_type}\n'
+                                 f'  Accelerators requested: {acc_requested}\n'
+                                 f'To fix: either only specify instance_type, or change '
+                                 'the accelerators field to be consistent.')
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
@@ -272,12 +261,10 @@ class Resources:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
-        hourly_cost = self.cloud.instance_type_to_hourly_cost(
-            self._instance_type, self.use_spot)
+        hourly_cost = self.cloud.instance_type_to_hourly_cost(self._instance_type, self.use_spot)
         # Accelerators (if any).
         if self.accelerators is not None:
-            hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators)
+            hourly_cost += self.cloud.accelerators_to_hourly_cost(self.accelerators)
         return hourly_cost * hours
 
     def is_same_resources(self, other: 'Resources') -> bool:
@@ -293,8 +280,7 @@ class Resources:
             return False
         # self.cloud == other.cloud
 
-        if (self._instance_type is not None and
-                self._instance_type != other.instance_type):
+        if (self._instance_type is not None and self._instance_type != other.instance_type):
             return False
         # self._instance_type == other.instance_type
 
@@ -324,8 +310,7 @@ class Resources:
             return False
         # self.region <= other.region
 
-        if (self._instance_type is not None and
-                self._instance_type != other.instance_type):
+        if (self._instance_type is not None and self._instance_type != other.instance_type):
             return False
         # self._instance_type <= other.instance_type
 
@@ -335,8 +320,7 @@ class Resources:
         other_accelerators = other.accelerators
         if other_accelerators is not None:
             other_accelerators = {
-                acc.upper(): num_acc
-                for acc, num_acc in other_accelerators.items()
+                acc.upper(): num_acc for acc, num_acc in other_accelerators.items()
             }
         if self.accelerators is not None and other_accelerators is None:
             return False
@@ -349,8 +333,7 @@ class Resources:
                     return False
         # self.accelerators <= other.accelerators
 
-        if (self.accelerator_args is not None and
-                self.accelerator_args != other.accelerator_args):
+        if (self.accelerator_args is not None and self.accelerator_args != other.accelerator_args):
             return False
         # self.accelerator_args == other.accelerator_args
 
@@ -387,8 +370,7 @@ class Resources:
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
             accelerators=override.pop('accelerators', self.accelerators),
-            accelerator_args=override.pop('accelerator_args',
-                                          self.accelerator_args),
+            accelerator_args=override.pop('accelerator_args', self.accelerator_args),
             use_spot=override.pop('use_spot', self.use_spot),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),

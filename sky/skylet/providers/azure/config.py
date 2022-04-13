@@ -28,11 +28,8 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
     """
     func = getattr(client, function_name, getattr(client, f"begin_{function_name}"))
     if func is None:
-        raise AttributeError(
-            "'{obj}' object has no {func} or begin_{func} attribute".format(
-                obj={client.__name__}, func=function_name
-            )
-        )
+        raise AttributeError("'{obj}' object has no {func} or begin_{func} attribute".format(
+            obj={client.__name__}, func=function_name))
     return func
 
 
@@ -52,23 +49,19 @@ def _configure_resource_group(config):
     config["provider"]["subscription_id"] = subscription_id
     logger.info("Using subscription id: %s", subscription_id)
 
-    assert (
-        "resource_group" in config["provider"]
-    ), "Provider config must include resource_group field"
+    assert ("resource_group"
+            in config["provider"]), "Provider config must include resource_group field"
     resource_group = config["provider"]["resource_group"]
 
-    assert (
-        "location" in config["provider"]
-    ), "Provider config must include location field"
+    assert ("location" in config["provider"]), "Provider config must include location field"
     params = {"location": config["provider"]["location"]}
 
     if "tags" in config["provider"]:
         params["tags"] = config["provider"]["tags"]
 
     logger.info("Creating/Updating Resource Group: %s", resource_group)
-    resource_client.resource_groups.create_or_update(
-        resource_group_name=resource_group, parameters=params
-    )
+    resource_client.resource_groups.create_or_update(resource_group_name=resource_group,
+                                                     parameters=params)
 
     # load the template file
     current_path = Path(__file__).parent
@@ -84,13 +77,16 @@ def _configure_resource_group(config):
         "properties": {
             "mode": DeploymentMode.incremental,
             "template": template,
-            "parameters": {"subnet": {"value": subnet_mask}},
+            "parameters": {
+                "subnet": {
+                    "value": subnet_mask
+                }
+            },
         }
     }
 
-    create_or_update = get_azure_sdk_function(
-        client=resource_client.deployments, function_name="create_or_update"
-    )
+    create_or_update = get_azure_sdk_function(client=resource_client.deployments,
+                                              function_name="create_or_update")
     create_or_update(
         resource_group_name=resource_group,
         deployment_name="ray-config",
@@ -119,9 +115,7 @@ def _configure_key_pair(config):
                 public_key = f.read()
 
     for node_type in config["available_node_types"].values():
-        azure_arm_parameters = node_type["node_config"].setdefault(
-            "azure_arm_parameters", {}
-        )
+        azure_arm_parameters = node_type["node_config"].setdefault("azure_arm_parameters", {})
         azure_arm_parameters["adminUsername"] = ssh_user
         azure_arm_parameters["publicKey"] = public_key
 

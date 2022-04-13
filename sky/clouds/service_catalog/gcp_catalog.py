@@ -54,8 +54,8 @@ def _get_accelerator(
     count: int,
     region: Optional[str],
 ) -> pd.DataFrame:
-    idx = (df['AcceleratorName'].str.fullmatch(
-        accelerator, case=False)) & (df['AcceleratorCount'] == count)
+    idx = (df['AcceleratorName'].str.fullmatch(accelerator, case=False)) & (df['AcceleratorCount']
+                                                                            == count)
     if region is not None:
         idx &= df['Region'] == region
     return df[idx]
@@ -95,9 +95,8 @@ def list_accelerators(
         for info in a100_infos:
             assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
             new_infos.append(
-                info._replace(
-                    instance_type=_A100_INSTANCE_TYPES[info.accelerator_count],
-                    memory=_A100_HOST_MEMORY[info.accelerator_count]))
+                info._replace(instance_type=_A100_INSTANCE_TYPES[info.accelerator_count],
+                              memory=_A100_HOST_MEMORY[info.accelerator_count]))
         results['A100'] = new_infos
     return results
 

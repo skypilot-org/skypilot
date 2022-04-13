@@ -62,9 +62,7 @@ def make_ec2_client(region, max_retries, aws_credentials=None):
     return resource_cache("ec2", region, max_retries, **aws_credentials)
 
 
-def list_ec2_instances(
-    region: str, aws_credentials: Dict[str, Any] = None
-) -> List[Dict[str, Any]]:
+def list_ec2_instances(region: str, aws_credentials: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     """Get all instance-types/resources available in the user's AWS region.
     Args:
         region (str): the region of the AWS provider. e.g., "us-west-2".
@@ -85,9 +83,7 @@ def list_ec2_instances(
     instance_types = ec2.describe_instance_types()
     final_instance_types.extend(copy.deepcopy(instance_types["InstanceTypes"]))
     while "NextToken" in instance_types:
-        instance_types = ec2.describe_instance_types(
-            NextToken=instance_types["NextToken"]
-        )
+        instance_types = ec2.describe_instance_types(NextToken=instance_types["NextToken"])
         final_instance_types.extend(copy.deepcopy(instance_types["InstanceTypes"]))
 
     return final_instance_types
@@ -144,12 +140,10 @@ class AWSNodeProvider(NodeProvider):
             },
         ]
         for k, v in tag_filters.items():
-            filters.append(
-                {
-                    "Name": "tag:{}".format(k),
-                    "Values": [v],
-                }
-            )
+            filters.append({
+                "Name": "tag:{}".format(k),
+                "Values": [v],
+            })
 
         with boto_exception_handler("Failed to fetch running instances from AWS."):
             nodes = list(self.ec2.instances.filter(Filters=filters))
@@ -159,9 +153,7 @@ class AWSNodeProvider(NodeProvider):
             if node.id in self.tag_cache:
                 continue
 
-            self.tag_cache[node.id] = from_aws_format(
-                {x["Key"]: x["Value"] for x in node.tags}
-            )
+            self.tag_cache[node.id] = from_aws_format({x["Key"]: x["Value"] for x in node.tags})
 
         self.cached_nodes = {node.id: node for node in nodes}
         return [node.id for node in nodes]
@@ -243,7 +235,10 @@ class AWSNodeProvider(NodeProvider):
                     k = "Name"
                 self.ec2.meta.client.create_tags(
                     Resources=node_ids,
-                    Tags=[{"Key": k, "Value": v}],
+                    Tags=[{
+                        "Key": k,
+                        "Value": v
+                    }],
                 )
 
     def create_node(self, node_config, tags, count) -> Dict[str, Any]:
@@ -280,12 +275,10 @@ class AWSNodeProvider(NodeProvider):
             ]
             # This tag may not always be present.
             if TAG_RAY_USER_NODE_TYPE in tags:
-                filters.append(
-                    {
-                        "Name": "tag:{}".format(TAG_RAY_USER_NODE_TYPE),
-                        "Values": [tags[TAG_RAY_USER_NODE_TYPE]],
-                    }
-                )
+                filters.append({
+                    "Name": "tag:{}".format(TAG_RAY_USER_NODE_TYPE),
+                    "Values": [tags[TAG_RAY_USER_NODE_TYPE]],
+                })
 
             reuse_nodes = list(self.ec2.instances.filter(Filters=filters))[:count]
             reuse_node_ids = [n.id for n in reuse_nodes]
@@ -303,8 +296,7 @@ class AWSNodeProvider(NodeProvider):
                 with cli_logger.group("Stopping instances to reuse"):
                     for node in reuse_nodes:
                         self.tag_cache[node.id] = from_aws_format(
-                            {x["Key"]: x["Value"] for x in node.tags}
-                        )
+                            {x["Key"]: x["Value"] for x in node.tags})
                         if node.state["Name"] == "stopping":
                             cli_logger.print("Waiting for instance {} to stop", node.id)
                             node.wait_until_stopped()
@@ -323,9 +315,8 @@ class AWSNodeProvider(NodeProvider):
         return all_created_nodes
 
     @staticmethod
-    def _merge_tag_specs(
-        tag_specs: List[Dict[str, Any]], user_tag_specs: List[Dict[str, Any]]
-    ) -> None:
+    def _merge_tag_specs(tag_specs: List[Dict[str, Any]], user_tag_specs: List[Dict[str,
+                                                                                    Any]]) -> None:
         """
         Merges user-provided node config tag specifications into a base
         list of node provider tag specifications. The base list of
@@ -361,36 +352,26 @@ class AWSNodeProvider(NodeProvider):
         tags = to_aws_format(tags)
         conf = node_config.copy()
 
-        tag_pairs = [
-            {
-                "Key": TAG_RAY_CLUSTER_NAME,
-                "Value": self.cluster_name,
-            }
-        ]
+        tag_pairs = [{
+            "Key": TAG_RAY_CLUSTER_NAME,
+            "Value": self.cluster_name,
+        }]
         for k, v in tags.items():
-            tag_pairs.append(
-                {
-                    "Key": k,
-                    "Value": v,
-                }
-            )
+            tag_pairs.append({
+                "Key": k,
+                "Value": v,
+            })
         if CloudwatchHelper.cloudwatch_config_exists(self.provider_config, "agent"):
             cwa_installed = self._check_ami_cwa_installation(node_config)
             if cwa_installed:
-                tag_pairs.extend(
-                    [
-                        {
-                            "Key": CLOUDWATCH_AGENT_INSTALLED_TAG,
-                            "Value": "True",
-                        }
-                    ]
-                )
-        tag_specs = [
-            {
-                "ResourceType": "instance",
-                "Tags": tag_pairs,
-            }
-        ]
+                tag_pairs.extend([{
+                    "Key": CLOUDWATCH_AGENT_INSTALLED_TAG,
+                    "Value": "True",
+                }])
+        tag_specs = [{
+            "ResourceType": "instance",
+            "Tags": tag_pairs,
+        }]
         user_tag_specs = conf.get("TagSpecifications", [])
         AWSNodeProvider._merge_tag_specs(tag_specs, user_tag_specs)
 
@@ -425,9 +406,7 @@ class AWSNodeProvider(NodeProvider):
 
                 # todo: timed?
                 # todo: handle plurality?
-                with cli_logger.group(
-                    "Launched {} nodes", count, _tags=cli_logger_tags
-                ):
+                with cli_logger.group("Launched {} nodes", count, _tags=cli_logger_tags):
                     for instance in created:
                         # NOTE(maximsmol): This is needed for mocking
                         # boto3 for tests. This is likely a bug in moto
@@ -455,9 +434,7 @@ class AWSNodeProvider(NodeProvider):
                         exc=exc,
                     )
                 else:
-                    cli_logger.warning(
-                        "create_instances: Attempt failed with {}, retrying.", exc
-                    )
+                    cli_logger.warning("create_instances: Attempt failed with {}, retrying.", exc)
 
                 # Launch failure may be due to instance type availability in
                 # the given AZ
@@ -470,19 +447,17 @@ class AWSNodeProvider(NodeProvider):
         if self.cache_stopped_nodes:
             if node.spot_instance_request_id:
                 cli_logger.print(
-                    "Terminating instance {} "
-                    + cf.dimmed("(cannot stop spot instances, only terminate)"),
+                    "Terminating instance {} " +
+                    cf.dimmed("(cannot stop spot instances, only terminate)"),
                     node_id,
                 )  # todo: show node name?
                 node.terminate()
             else:
                 cli_logger.print(
-                    "Stopping instance {} "
-                    + cf.dimmed(
-                        "(to terminate instead, "
-                        "set `cache_stopped_nodes: False` "
-                        "under `provider` in the cluster configuration)"
-                    ),
+                    "Stopping instance {} " +
+                    cf.dimmed("(to terminate instead, "
+                              "set `cache_stopped_nodes: False` "
+                              "under `provider` in the cluster configuration)"),
                     node_id,
                 )  # todo: show node name?
                 node.stop()
@@ -501,10 +476,8 @@ class AWSNodeProvider(NodeProvider):
         cwa_installed = False
         images = response.get("Images")
         if images:
-            assert len(images) == 1, (
-                f"Expected to find only 1 AMI with the given ID, "
-                f"but found {len(images)}."
-            )
+            assert len(images) == 1, (f"Expected to find only 1 AMI with the given ID, "
+                                      f"but found {len(images)}.")
             image_name = images[0].get("Name", "")
             if CLOUDWATCH_AGENT_INSTALLED_AMI_TAG in image_name:
                 cwa_installed = True
@@ -538,19 +511,17 @@ class AWSNodeProvider(NodeProvider):
             if on_demand_ids:
                 # todo: show node names?
                 cli_logger.print(
-                    "Stopping instances {} "
-                    + cf.dimmed(
-                        "(to terminate instead, "
-                        "set `cache_stopped_nodes: False` "
-                        "under `provider` in the cluster configuration)"
-                    ),
+                    "Stopping instances {} " +
+                    cf.dimmed("(to terminate instead, "
+                              "set `cache_stopped_nodes: False` "
+                              "under `provider` in the cluster configuration)"),
                     cli_logger.render_list(on_demand_ids),
                 )
 
             if spot_ids:
                 cli_logger.print(
-                    "Terminating instances {} "
-                    + cf.dimmed("(cannot stop spot instances, only terminate)"),
+                    "Terminating instances {} " +
+                    cf.dimmed("(cannot stop spot instances, only terminate)"),
                     cli_logger.render_list(spot_ids),
                 )
 
@@ -559,15 +530,12 @@ class AWSNodeProvider(NodeProvider):
         else:
             nodes_to_terminate[terminate_instances_func] = node_ids
 
-        max_terminate_nodes = (
-            self.max_terminate_nodes
-            if self.max_terminate_nodes is not None
-            else len(node_ids)
-        )
+        max_terminate_nodes = (self.max_terminate_nodes
+                               if self.max_terminate_nodes is not None else len(node_ids))
 
         for terminate_func, nodes in nodes_to_terminate.items():
             for start in range(0, len(nodes), max_terminate_nodes):
-                terminate_func(InstanceIds=nodes[start : start + max_terminate_nodes])
+                terminate_func(InstanceIds=nodes[start:start + max_terminate_nodes])
 
     def _get_node(self, node_id):
         """Refresh and get info for this node, updating the cache."""
@@ -594,9 +562,7 @@ class AWSNodeProvider(NodeProvider):
         return bootstrap_aws(cluster_config)
 
     @staticmethod
-    def fillout_available_node_types_resources(
-        cluster_config: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def fillout_available_node_types_resources(cluster_config: Dict[str, Any]) -> Dict[str, Any]:
         """Fills out missing "resources" field for available_node_types."""
         if "available_node_types" not in cluster_config:
             return cluster_config
@@ -606,24 +572,18 @@ class AWSNodeProvider(NodeProvider):
             cluster_config["provider"]["region"],
             cluster_config["provider"].get("aws_credentials"),
         )
-        instances_dict = {
-            instance["InstanceType"]: instance for instance in instances_list
-        }
+        instances_dict = {instance["InstanceType"]: instance for instance in instances_list}
         available_node_types = cluster_config["available_node_types"]
         head_node_type = cluster_config["head_node_type"]
         for node_type in available_node_types:
-            instance_type = available_node_types[node_type]["node_config"][
-                "InstanceType"
-            ]
+            instance_type = available_node_types[node_type]["node_config"]["InstanceType"]
             if instance_type in instances_dict:
                 cpus = instances_dict[instance_type]["VCpuInfo"]["DefaultVCpus"]
 
                 autodetected_resources = {"CPU": cpus}
                 if node_type != head_node_type:
                     # we only autodetect worker node type memory resource
-                    memory_total = instances_dict[instance_type]["MemoryInfo"][
-                        "SizeInMiB"
-                    ]
+                    memory_total = instances_dict[instance_type]["MemoryInfo"]["SizeInMiB"]
                     memory_total = int(memory_total) * 1024 * 1024
                     prop = 1 - ray_constants.DEFAULT_OBJECT_STORE_MEMORY_PROPORTION
                     memory_resources = int(memory_total * prop)
@@ -634,29 +594,17 @@ class AWSNodeProvider(NodeProvider):
                     # TODO(ameer): currently we support one gpu type per node.
                     assert len(gpus) == 1
                     gpu_name = gpus[0]["Name"]
-                    autodetected_resources.update(
-                        {"GPU": gpus[0]["Count"], f"accelerator_type:{gpu_name}": 1}
-                    )
-                autodetected_resources.update(
-                    available_node_types[node_type].get("resources", {})
-                )
-                if autodetected_resources != available_node_types[node_type].get(
-                    "resources", {}
-                ):
-                    available_node_types[node_type][
-                        "resources"
-                    ] = autodetected_resources
-                    logger.debug(
-                        "Updating the resources of {} to {}.".format(
-                            node_type, autodetected_resources
-                        )
-                    )
+                    autodetected_resources.update({
+                        "GPU": gpus[0]["Count"],
+                        f"accelerator_type:{gpu_name}": 1
+                    })
+                autodetected_resources.update(available_node_types[node_type].get("resources", {}))
+                if autodetected_resources != available_node_types[node_type].get("resources", {}):
+                    available_node_types[node_type]["resources"] = autodetected_resources
+                    logger.debug("Updating the resources of {} to {}.".format(
+                        node_type, autodetected_resources))
             else:
-                raise ValueError(
-                    "Instance type "
-                    + instance_type
-                    + " is not available in AWS region: "
-                    + cluster_config["provider"]["region"]
-                    + "."
-                )
+                raise ValueError("Instance type " + instance_type +
+                                 " is not available in AWS region: " +
+                                 cluster_config["provider"]["region"] + ".")
         return cluster_config

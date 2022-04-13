@@ -169,11 +169,9 @@ class AWS(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='aws')
+        return service_catalog.get_accelerators_from_instance_type(instance_type, clouds='aws')
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources_lib.Resources'):
+    def make_deploy_resources_variables(self, resources: 'resources_lib.Resources'):
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -187,8 +185,7 @@ class AWS(clouds.Cloud):
             'use_spot': r.use_spot,
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def get_feasible_launchable_resources(self, resources: 'resources_lib.Resources'):
         fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -213,15 +210,14 @@ class AWS(clouds.Cloud):
         accelerators = resources.accelerators
         if accelerators is None:
             # No requirements to filter, so just return a default VM type.
-            return (_make([AWS.get_default_instance_type()]),
-                    fuzzy_candidate_list)
+            return (_make([AWS.get_default_instance_type()]), fuzzy_candidate_list)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                              acc_count,
-                                                              clouds='aws')
+        (instance_list,
+         fuzzy_candidate_list) = service_catalog.get_instance_type_for_accelerator(acc,
+                                                                                   acc_count,
+                                                                                   clouds='aws')
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)

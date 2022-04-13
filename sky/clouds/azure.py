@@ -87,9 +87,7 @@ class Azure(clouds.Cloud):
                 image_config['image_version'] = '21.08.30'
 
         # ubuntu-2004 does not work on A100
-        if instance_type in [
-                'Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4'
-        ]:
+        if instance_type in ['Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4']:
             image_config['image_offer'] = 'ubuntu-hpc'
             image_config['image_sku'] = '2004'
             image_config['image_version'] = '20.04.2021120101'
@@ -129,8 +127,9 @@ class Azure(clouds.Cloud):
             # fallback to manually specified region/zones
             regions = cls.regions()
         else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, clouds='azure')
+            regions = service_catalog.get_region_zones_for_instance_type(instance_type,
+                                                                         use_spot,
+                                                                         clouds='azure')
         for region in regions:
             yield region, region.zones
 
@@ -142,8 +141,7 @@ class Azure(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='azure')
+        return service_catalog.get_accelerators_from_instance_type(instance_type, clouds='azure')
 
     def make_deploy_resources_variables(self, resources):
         r = resources
@@ -156,8 +154,7 @@ class Azure(clouds.Cloud):
         else:
             custom_resources = None
         from sky.clouds.service_catalog import azure_catalog  # pylint: disable=import-outside-toplevel
-        gen_version = azure_catalog.get_gen_version_from_instance_type(
-            r.instance_type)
+        gen_version = azure_catalog.get_gen_version_from_instance_type(r.instance_type)
         image_config = self._get_image_config(gen_version, r.instance_type)
         return {
             'instance_type': r.instance_type,
@@ -190,15 +187,14 @@ class Azure(clouds.Cloud):
         accelerators = resources.accelerators
         if accelerators is None:
             # No requirements to filter, so just return a default VM type.
-            return (_make([Azure.get_default_instance_type()]),
-                    fuzzy_candidate_list)
+            return (_make([Azure.get_default_instance_type()]), fuzzy_candidate_list)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
-        (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                              acc_count,
-                                                              clouds='azure')
+        (instance_list,
+         fuzzy_candidate_list) = service_catalog.get_instance_type_for_accelerator(acc,
+                                                                                   acc_count,
+                                                                                   clouds='azure')
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
@@ -217,8 +213,7 @@ class Azure(clouds.Cloud):
         # `az account show` does not guarantee this file exists.
         azure_token_cache_file = '~/.azure/msal_token_cache.json'
         if not os.path.isfile(os.path.expanduser(azure_token_cache_file)):
-            return (False,
-                    f'{azure_token_cache_file} does not exist.' + help_str)
+            return (False, f'{azure_token_cache_file} does not exist.' + help_str)
 
         try:
             output = _run_output('az account show --output=json')
@@ -242,8 +237,7 @@ class Azure(clouds.Cloud):
         return {'~/.azure': '~/.azure'}, []
 
     def instance_type_exists(self, instance_type):
-        return service_catalog.instance_type_exists(instance_type,
-                                                    clouds='azure')
+        return service_catalog.instance_type_exists(instance_type, clouds='azure')
 
     def region_exists(self, region: str) -> bool:
         return service_catalog.region_exists(region, 'azure')
@@ -262,8 +256,7 @@ class Azure(clouds.Cloud):
                                       'installed? Try pip install '
                                       '.[azure] in the sky repo.') from e
         except Exception as e:
-            raise RuntimeError(
-                'Failed to get subscription id from azure cli. '
-                'Make sure you have logged in and run this Azure '
-                'cli command: "az account set -s <subscription_id>".') from e
+            raise RuntimeError('Failed to get subscription id from azure cli. '
+                               'Make sure you have logged in and run this Azure '
+                               'cli command: "az account set -s <subscription_id>".') from e
         return azure_subscription_id

@@ -80,8 +80,7 @@ def _execute(dag: sky.Dag,
 
     cluster_exists = False
     if cluster_name is not None:
-        existing_handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
+        existing_handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         cluster_exists = existing_handle is not None
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
@@ -124,8 +123,7 @@ def _execute(dag: sky.Dag,
                 backend.sync_workdir(handle, task.workdir)
 
         if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
-            backend.sync_file_mounts(handle, task.file_mounts,
-                                     task.storage_mounts)
+            backend.sync_file_mounts(handle, task.file_mounts, task.storage_mounts)
 
         if stages is None or Stage.SETUP in stages:
             backend.setup(handle, task)
@@ -192,8 +190,7 @@ def exec(  # pylint: disable=redefined-builtin
         logger.error(f'Cluster {cluster_name!r} not found.  '
                      'Use `sky launch` to provision first.')
         sys.exit(1)
-    status = backends.backend_utils.get_cluster_status_with_refresh(
-        cluster_name)
+    status = backends.backend_utils.get_cluster_status_with_refresh(cluster_name)
     if status != global_user_state.ClusterStatus.UP:
         logger.error(f'Cluster {cluster_name!r} is not up.  '
                      'Use `sky status` to check the status.')

@@ -32,8 +32,7 @@ class InstanceTypeInfo(NamedTuple):
 
 
 def get_data_path(filename: str) -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data',
-                        filename)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', filename)
 
 
 def read_catalog(filename: str) -> pd.DataFrame:
@@ -69,9 +68,8 @@ def get_hourly_cost_impl(
     """Returns the cost, or the cheapest cost among all zones for spot."""
     df = _get_instance_type(df, instance_type, region)
     assert len(set(df['Price'])) == 1, df
-    assert pd.isnull(
-        df['Price'].iloc[0]) is False, (f'Missing price for "{instance_type}, '
-                                        f'Spot: {use_spot}" in the catalog.')
+    assert pd.isnull(df['Price'].iloc[0]) is False, (f'Missing price for "{instance_type}, '
+                                                     f'Spot: {use_spot}" in the catalog.')
     if not use_spot:
         return df['Price'].iloc[0]
 
@@ -109,12 +107,10 @@ def get_instance_type_for_accelerator_impl(
     result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
                 (df['AcceleratorCount'] == acc_count)]
     if len(result) == 0:
-        fuzzy_result = df[
-            (df['AcceleratorName'].str.contains(acc_name, case=False)) &
-            (df['AcceleratorCount'] >= acc_count)]
+        fuzzy_result = df[(df['AcceleratorName'].str.contains(acc_name, case=False)) &
+                          (df['AcceleratorCount'] >= acc_count)]
         fuzzy_result = fuzzy_result.sort_values('Price', ascending=True)
-        fuzzy_result = fuzzy_result[['AcceleratorName',
-                                     'AcceleratorCount']].drop_duplicates()
+        fuzzy_result = fuzzy_result[['AcceleratorName', 'AcceleratorCount']].drop_duplicates()
         fuzzy_candidate_list = []
         if len(fuzzy_result) > 0:
             for _, row in fuzzy_result.iterrows():
@@ -144,8 +140,7 @@ def list_accelerators_impl(
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
     df = df[[
-        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB',
-        'Price', 'SpotPrice'
+        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB', 'Price', 'SpotPrice'
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter, regex=True)]
@@ -154,9 +149,7 @@ def list_accelerators_impl(
 
     def make_list_from_df(rows):
         # Only keep the lowest prices across regions.
-        rows = rows.groupby([
-            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB'
-        ],
+        rows = rows.groupby(['InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB'],
                             dropna=False).aggregate(min).reset_index()
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
@@ -176,8 +169,7 @@ def list_accelerators_impl(
     return {k: make_list_from_df(v) for k, v in grouped}
 
 
-def get_region_zones(df: pd.DataFrame,
-                     use_spot: bool) -> List[cloud_lib.Region]:
+def get_region_zones(df: pd.DataFrame, use_spot: bool) -> List[cloud_lib.Region]:
     """Returns a list of regions/zones from a dataframe."""
     price_str = 'SpotPrice' if use_spot else 'Price'
     df = df.dropna(subset=[price_str]).sort_values(price_str)

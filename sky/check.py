@@ -18,9 +18,7 @@ def check(quiet: bool = False) -> None:
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
         status_color = 'green' if ok else 'red'
-        echo('  ' +
-             click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-             ' ' * 10)
+        echo('  ' + click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) + ' ' * 10)
         if ok:
             enabled_clouds.append(str(cloud))
             if reason is not None:

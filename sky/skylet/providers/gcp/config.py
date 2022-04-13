@@ -13,8 +13,7 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 
 from ray.autoscaler._private.util import check_legacy_fields
-from sky.skylet.providers.gcp.node import (GCPNodeType, MAX_POLLS,
-                                           POLL_INTERVAL)
+from sky.skylet.providers.gcp.node import (GCPNodeType, MAX_POLLS, POLL_INTERVAL)
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +22,14 @@ TPU_VERSION = "v2alpha"  # change once v2 is stable
 
 RAY = "ray-autoscaler"
 DEFAULT_SERVICE_ACCOUNT_ID = RAY + "-sa-" + VERSION
-SERVICE_ACCOUNT_EMAIL_TEMPLATE = (
-    "{account_id}@{project_id}.iam.gserviceaccount.com")
+SERVICE_ACCOUNT_EMAIL_TEMPLATE = ("{account_id}@{project_id}.iam.gserviceaccount.com")
 DEFAULT_SERVICE_ACCOUNT_CONFIG = {
     "displayName": "Ray Autoscaler Service Account ({})".format(VERSION),
 }
 
 # Those roles will be always added.
 DEFAULT_SERVICE_ACCOUNT_ROLES = [
-    "roles/storage.objectAdmin", "roles/compute.admin",
-    "roles/iam.serviceAccountUser"
+    "roles/storage.objectAdmin", "roles/compute.admin", "roles/iam.serviceAccountUser"
 ]
 # Those roles will only be added if there are TPU nodes defined in config.
 TPU_SERVICE_ACCOUNT_ROLES = ["roles/tpu.admin"]
@@ -57,19 +54,17 @@ def get_node_type(node: dict) -> GCPNodeType:
     """
 
     if "machineType" not in node and "acceleratorType" not in node:
-        raise ValueError(
-            "Invalid node. For a Compute instance, 'machineType' is "
-            "required. "
-            "For a TPU instance, 'acceleratorType' and no 'machineType' "
-            "is required. "
-            f"Got {list(node)}")
+        raise ValueError("Invalid node. For a Compute instance, 'machineType' is "
+                         "required. "
+                         "For a TPU instance, 'acceleratorType' and no 'machineType' "
+                         "is required. "
+                         f"Got {list(node)}")
 
     if "machineType" not in node and "acceleratorType" in node:
         # remove after TPU pod support is added!
         if node["acceleratorType"] not in ("v2-8", "v3-8"):
-            raise ValueError(
-                "For now, only v2-8' and 'v3-8' accelerator types are "
-                "supported. Support for TPU pods will be added in the future.")
+            raise ValueError("For now, only v2-8' and 'v3-8' accelerator types are "
+                             "supported. Support for TPU pods will be added in the future.")
 
         return GCPNodeType.TPU
     return GCPNodeType.COMPUTE
@@ -97,8 +92,7 @@ def wait_for_crm_operation(operation, crm):
 def wait_for_compute_global_operation(project_name, operation, compute):
     """Poll for global compute operation until finished."""
     logger.info("wait_for_compute_global_operation: "
-                "Waiting for operation {} to finish...".format(
-                    operation["name"]))
+                "Waiting for operation {} to finish...".format(operation["name"]))
 
     for _ in range(MAX_POLLS):
         result = compute.globalOperations().get(
@@ -120,8 +114,7 @@ def wait_for_compute_global_operation(project_name, operation, compute):
 
 def key_pair_name(i, region, project_id, ssh_user):
     """Returns the ith default gcp_key_pair_name."""
-    key_name = "{}_gcp_{}_{}_{}_{}".format(RAY, region, project_id, ssh_user,
-                                           i)
+    key_name = "{}_gcp_{}_{}_{}_{}".format(RAY, region, project_id, ssh_user, i)
     return key_name
 
 
@@ -135,17 +128,14 @@ def key_pair_paths(key_name):
 def generate_rsa_key_pair():
     """Create public and private ssh-keys."""
 
-    key = rsa.generate_private_key(
-        backend=default_backend(), public_exponent=65537, key_size=2048)
+    key = rsa.generate_private_key(backend=default_backend(), public_exponent=65537, key_size=2048)
 
-    public_key = key.public_key().public_bytes(
-        serialization.Encoding.OpenSSH,
-        serialization.PublicFormat.OpenSSH).decode("utf-8")
+    public_key = key.public_key().public_bytes(serialization.Encoding.OpenSSH,
+                                               serialization.PublicFormat.OpenSSH).decode("utf-8")
 
-    pem = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.NoEncryption()).decode("utf-8")
+    pem = key.private_bytes(encoding=serialization.Encoding.PEM,
+                            format=serialization.PrivateFormat.TraditionalOpenSSL,
+                            encryption_algorithm=serialization.NoEncryption()).decode("utf-8")
 
     return public_key, pem
 
@@ -153,8 +143,7 @@ def generate_rsa_key_pair():
 def _has_tpus_in_node_configs(config: dict) -> bool:
     """Check if any nodes in config are TPUs."""
     node_configs = [
-        node_type["node_config"]
-        for node_type in config["available_node_types"].values()
+        node_type["node_config"] for node_type in config["available_node_types"].values()
     ]
     return any(get_node_type(node) == GCPNodeType.TPU for node in node_configs)
 
@@ -165,35 +154,30 @@ def _is_head_node_a_tpu(config: dict) -> bool:
         node_id: node_type["node_config"]
         for node_id, node_type in config["available_node_types"].items()
     }
-    return get_node_type(
-        node_configs[config["head_node_type"]]) == GCPNodeType.TPU
+    return get_node_type(node_configs[config["head_node_type"]]) == GCPNodeType.TPU
 
 
 def _create_crm(gcp_credentials=None):
-    return discovery.build(
-        "cloudresourcemanager",
-        "v1",
-        credentials=gcp_credentials,
-        cache_discovery=False)
+    return discovery.build("cloudresourcemanager",
+                           "v1",
+                           credentials=gcp_credentials,
+                           cache_discovery=False)
 
 
 def _create_iam(gcp_credentials=None):
-    return discovery.build(
-        "iam", "v1", credentials=gcp_credentials, cache_discovery=False)
+    return discovery.build("iam", "v1", credentials=gcp_credentials, cache_discovery=False)
 
 
 def _create_compute(gcp_credentials=None):
-    return discovery.build(
-        "compute", "v1", credentials=gcp_credentials, cache_discovery=False)
+    return discovery.build("compute", "v1", credentials=gcp_credentials, cache_discovery=False)
 
 
 def _create_tpu(gcp_credentials=None):
-    return discovery.build(
-        "tpu",
-        TPU_VERSION,
-        credentials=gcp_credentials,
-        cache_discovery=False,
-        discoveryServiceUrl="https://tpu.googleapis.com/$discovery/rest")
+    return discovery.build("tpu",
+                           TPU_VERSION,
+                           credentials=gcp_credentials,
+                           cache_discovery=False,
+                           discoveryServiceUrl="https://tpu.googleapis.com/$discovery/rest")
 
 
 def construct_clients_from_provider_config(provider_config):
@@ -209,8 +193,7 @@ def construct_clients_from_provider_config(provider_config):
         logger.debug("gcp_credentials not found in cluster yaml file. "
                      "Falling back to GOOGLE_APPLICATION_CREDENTIALS "
                      "environment variable.")
-        tpu_resource = _create_tpu() if provider_config.get(
-            HAS_TPU_PROVIDER_FIELD, False) else None
+        tpu_resource = _create_tpu() if provider_config.get(HAS_TPU_PROVIDER_FIELD, False) else None
         # If gcp_credentials is None, then discovery.build will search for
         # credentials in the local environment.
         return _create_crm(), \
@@ -232,17 +215,15 @@ def construct_clients_from_provider_config(provider_config):
         try:
             service_account_info = json.loads(credentials_field)
         except json.decoder.JSONDecodeError:
-            raise RuntimeError(
-                "gcp_credentials found in cluster yaml file but "
-                "formatted improperly.")
-        credentials = service_account.Credentials.from_service_account_info(
-            service_account_info)
+            raise RuntimeError("gcp_credentials found in cluster yaml file but "
+                               "formatted improperly.")
+        credentials = service_account.Credentials.from_service_account_info(service_account_info)
     elif cred_type == "credentials_token":
         # Otherwise the credentials type must be credentials_token.
         credentials = OAuthCredentials(credentials_field)
 
-    tpu_resource = _create_tpu(credentials) if provider_config.get(
-        HAS_TPU_PROVIDER_FIELD, False) else None
+    tpu_resource = _create_tpu(credentials) if provider_config.get(HAS_TPU_PROVIDER_FIELD,
+                                                                   False) else None
 
     return _create_crm(credentials), \
         _create_iam(credentials), \
@@ -298,8 +279,7 @@ def _configure_project(config, crm):
 
     assert project is not None, "Failed to create project"
     assert project["lifecycleState"] == "ACTIVE", (
-        "Project status needs to be ACTIVE, got {}".format(
-            project["lifecycleState"]))
+        "Project status needs to be ACTIVE, got {}".format(project["lifecycleState"]))
 
     config["provider"]["project_id"] = project["projectId"]
 
@@ -318,19 +298,16 @@ def _configure_iam_role(config, crm, iam):
     """
     config = copy.deepcopy(config)
 
-    email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
-        account_id=DEFAULT_SERVICE_ACCOUNT_ID,
-        project_id=config["provider"]["project_id"])
+    email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(account_id=DEFAULT_SERVICE_ACCOUNT_ID,
+                                                  project_id=config["provider"]["project_id"])
     service_account = _get_service_account(email, config, iam)
 
     if service_account is None:
         logger.info("_configure_iam_role: "
-                    "Creating new service account {}".format(
-                        DEFAULT_SERVICE_ACCOUNT_ID))
+                    "Creating new service account {}".format(DEFAULT_SERVICE_ACCOUNT_ID))
 
-        service_account = _create_service_account(
-            DEFAULT_SERVICE_ACCOUNT_ID, DEFAULT_SERVICE_ACCOUNT_CONFIG, config,
-            iam)
+        service_account = _create_service_account(DEFAULT_SERVICE_ACCOUNT_ID,
+                                                  DEFAULT_SERVICE_ACCOUNT_CONFIG, config, iam)
 
     assert service_account is not None, "Failed to create service account"
 
@@ -375,22 +352,20 @@ def _configure_key_pair(config, compute):
 
     ssh_user = config["auth"]["ssh_user"]
 
-    project = compute.projects().get(
-        project=config["provider"]["project_id"]).execute()
+    project = compute.projects().get(project=config["provider"]["project_id"]).execute()
 
     # Key pairs associated with project meta data. The key pairs are general,
     # and not just ssh keys.
-    ssh_keys_str = next(
-        (item for item in project["commonInstanceMetadata"].get("items", [])
-         if item["key"] == "ssh-keys"), {}).get("value", "")
+    ssh_keys_str = next((item for item in project["commonInstanceMetadata"].get("items", [])
+                         if item["key"] == "ssh-keys"), {}).get("value", "")
 
     ssh_keys = ssh_keys_str.split("\n") if ssh_keys_str else []
 
     # Try a few times to get or create a good key pair.
     key_found = False
     for i in range(10):
-        key_name = key_pair_name(i, config["provider"]["region"],
-                                 config["provider"]["project_id"], ssh_user)
+        key_name = key_pair_name(i, config["provider"]["region"], config["provider"]["project_id"],
+                                 ssh_user)
         public_key_path, private_key_path = key_pair_paths(key_name)
 
         for ssh_key in ssh_keys:
@@ -413,8 +388,7 @@ def _configure_key_pair(config, compute):
                         "Creating new key pair {}".format(key_name))
             public_key, private_key = generate_rsa_key_pair()
 
-            _create_project_ssh_key_pair(project, public_key, ssh_user,
-                                         compute)
+            _create_project_ssh_key_pair(project, public_key, ssh_user, compute)
 
             # Create the directory if it doesn't exists
             private_key_dir = os.path.dirname(private_key_path)
@@ -440,11 +414,9 @@ def _configure_key_pair(config, compute):
         if key_found:
             break
 
-    assert key_found, "SSH keypair for user {} not found for {}".format(
-        ssh_user, private_key_path)
-    assert os.path.exists(private_key_path), (
-        "Private key file {} not found for user {}"
-        "".format(private_key_path, ssh_user))
+    assert key_found, "SSH keypair for user {} not found for {}".format(ssh_user, private_key_path)
+    assert os.path.exists(private_key_path), ("Private key file {} not found for user {}"
+                                              "".format(private_key_path, ssh_user))
 
     logger.info("_configure_key_pair: "
                 "Private key not specified in config, using"
@@ -460,8 +432,7 @@ def _configure_subnet(config, compute):
     config = copy.deepcopy(config)
 
     node_configs = [
-        node_type["node_config"]
-        for node_type in config["available_node_types"].values()
+        node_type["node_config"] for node_type in config["available_node_types"].values()
     ]
     # Rationale: avoid subnet lookup if the network is already
     # completely manually configured
@@ -494,8 +465,7 @@ def _configure_subnet(config, compute):
 
         # compute
         if "networkInterfaces" not in node_config:
-            node_config["networkInterfaces"] = copy.deepcopy(
-                default_interfaces)
+            node_config["networkInterfaces"] = copy.deepcopy(default_interfaces)
         # TPU
         if "networkConfig" not in node_config:
             node_config["networkConfig"] = copy.deepcopy(default_interfaces)[0]
@@ -505,9 +475,8 @@ def _configure_subnet(config, compute):
 
 
 def _list_subnets(config, compute):
-    response = compute.subnetworks().list(
-        project=config["provider"]["project_id"],
-        region=config["provider"]["region"]).execute()
+    response = compute.subnetworks().list(project=config["provider"]["project_id"],
+                                          region=config["provider"]["region"]).execute()
 
     return response["items"]
 
@@ -534,10 +503,7 @@ def _get_project(project_id, crm):
 
 
 def _create_project(project_id, crm):
-    operation = crm.projects().create(body={
-        "projectId": project_id,
-        "name": project_id
-    }).execute()
+    operation = crm.projects().create(body={"projectId": project_id, "name": project_id}).execute()
 
     result = wait_for_crm_operation(operation, crm)
 
@@ -549,8 +515,7 @@ def _get_service_account(account, config, iam):
     full_name = ("projects/{project_id}/serviceAccounts/{account}"
                  "".format(project_id=project_id, account=account))
     try:
-        service_account = iam.projects().serviceAccounts().get(
-            name=full_name).execute()
+        service_account = iam.projects().serviceAccounts().get(name=full_name).execute()
     except errors.HttpError as e:
         if e.resp.status != 404:
             raise
@@ -578,8 +543,7 @@ def _add_iam_policy_binding(service_account, roles, crm):
     email = service_account["email"]
     member_id = "serviceAccount:" + email
 
-    policy = crm.projects().getIamPolicy(
-        resource=project_id, body={}).execute()
+    policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
 
     already_configured = True
     for role in roles:
@@ -603,10 +567,9 @@ def _add_iam_policy_binding(service_account, roles, crm):
         # roles, so only call setIamPolicy if needed.
         return
 
-    result = crm.projects().setIamPolicy(
-        resource=project_id, body={
-            "policy": policy,
-        }).execute()
+    result = crm.projects().setIamPolicy(resource=project_id, body={
+        "policy": policy,
+    }).execute()
 
     return result
 
@@ -620,14 +583,13 @@ def _create_project_ssh_key_pair(project, public_key, ssh_user, compute):
     assert len(key_parts) == 2, key_parts
     assert key_parts[0] == "ssh-rsa", key_parts
 
-    new_ssh_meta = "{ssh_user}:ssh-rsa {key_value} {ssh_user}".format(
-        ssh_user=ssh_user, key_value=key_parts[1])
+    new_ssh_meta = "{ssh_user}:ssh-rsa {key_value} {ssh_user}".format(ssh_user=ssh_user,
+                                                                      key_value=key_parts[1])
 
     common_instance_metadata = project["commonInstanceMetadata"]
     items = common_instance_metadata.get("items", [])
 
-    ssh_keys_i = next(
-        (i for i, item in enumerate(items) if item["key"] == "ssh-keys"), None)
+    ssh_keys_i = next((i for i, item in enumerate(items) if item["key"] == "ssh-keys"), None)
 
     if ssh_keys_i is None:
         items.append({"key": "ssh-keys", "value": new_ssh_meta})
@@ -641,7 +603,6 @@ def _create_project_ssh_key_pair(project, public_key, ssh_user, compute):
     operation = compute.projects().setCommonInstanceMetadata(
         project=project["name"], body=common_instance_metadata).execute()
 
-    response = wait_for_compute_global_operation(project["name"], operation,
-                                                 compute)
+    response = wait_for_compute_global_operation(project["name"], operation, compute)
 
     return response

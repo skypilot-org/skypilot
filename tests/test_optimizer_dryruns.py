@@ -107,18 +107,13 @@ def test_partial_tpu(monkeypatch):
 
 def test_partial_v100(monkeypatch):
     _test_resources_launch(monkeypatch, sky.AWS(), accelerators='V100')
-    _test_resources_launch(monkeypatch,
-                           sky.AWS(),
-                           accelerators='V100',
-                           use_spot=True)
+    _test_resources_launch(monkeypatch, sky.AWS(), accelerators='V100', use_spot=True)
     _test_resources_launch(monkeypatch, sky.AWS(), accelerators={'V100': 8})
 
 
 def test_invalid_cloud_tpu(monkeypatch):
     with pytest.raises(AssertionError) as e:
-        _test_resources_launch(monkeypatch,
-                               cloud=sky.AWS(),
-                               accelerators='tpu-v3-8')
+        _test_resources_launch(monkeypatch, cloud=sky.AWS(), accelerators='tpu-v3-8')
     assert 'Cloud must be GCP' in str(e.value)
 
 
@@ -132,14 +127,10 @@ def test_clouds_not_enabled(monkeypatch):
                                ])
 
     with pytest.raises(exceptions.ResourcesUnavailableError):
-        _test_resources_launch(monkeypatch,
-                               clouds.Azure(),
-                               enabled_clouds=[clouds.AWS()])
+        _test_resources_launch(monkeypatch, clouds.Azure(), enabled_clouds=[clouds.AWS()])
 
     with pytest.raises(exceptions.ResourcesUnavailableError):
-        _test_resources_launch(monkeypatch,
-                               clouds.GCP(),
-                               enabled_clouds=[clouds.AWS()])
+        _test_resources_launch(monkeypatch, clouds.GCP(), enabled_clouds=[clouds.AWS()])
 
 
 def test_instance_type_mistmatches_accelerators(monkeypatch):
@@ -151,18 +142,12 @@ def test_instance_type_mistmatches_accelerators(monkeypatch):
     ]
     for instance, acc in bad_instance_and_accs:
         with pytest.raises(ValueError) as e:
-            _test_resources_launch(monkeypatch,
-                                   sky.AWS(),
-                                   instance_type=instance,
-                                   accelerators=acc)
+            _test_resources_launch(monkeypatch, sky.AWS(), instance_type=instance, accelerators=acc)
         assert 'Infeasible resource demands found' in str(e.value)
 
 
 def test_instance_type_matches_accelerators(monkeypatch):
-    _test_resources_launch(monkeypatch,
-                           sky.AWS(),
-                           instance_type='p3.2xlarge',
-                           accelerators='V100')
+    _test_resources_launch(monkeypatch, sky.AWS(), instance_type='p3.2xlarge', accelerators='V100')
     _test_resources_launch(monkeypatch,
                            sky.GCP(),
                            instance_type='n1-standard-2',
@@ -187,20 +172,12 @@ def test_infer_cloud_from_instance_type(monkeypatch):
                     cloud=sky.AWS(),
                     instance_type='m5.12xlarge',
                     expected_cloud=sky.AWS())
-    _test_resources(monkeypatch,
-                    instance_type='p3.8xlarge',
-                    expected_cloud=sky.AWS())
-    _test_resources(monkeypatch,
-                    instance_type='g4dn.2xlarge',
-                    expected_cloud=sky.AWS())
+    _test_resources(monkeypatch, instance_type='p3.8xlarge', expected_cloud=sky.AWS())
+    _test_resources(monkeypatch, instance_type='g4dn.2xlarge', expected_cloud=sky.AWS())
     # GCP instances
-    _test_resources(monkeypatch,
-                    instance_type='n1-standard-96',
-                    expected_cloud=sky.GCP())
+    _test_resources(monkeypatch, instance_type='n1-standard-96', expected_cloud=sky.GCP())
     #Azure instances
-    _test_resources(monkeypatch,
-                    instance_type='Standard_NC12s_v3',
-                    expected_cloud=sky.Azure())
+    _test_resources(monkeypatch, instance_type='Standard_NC12s_v3', expected_cloud=sky.Azure())
 
 
 def test_invalid_region(monkeypatch):

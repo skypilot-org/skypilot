@@ -65,12 +65,10 @@ class _SQLiteConn(threading.local):
         # TODO(zhwu): Remove this function after all users have migrated to
         # the latest version of Sky.
         # Add autostop column to clusters table
-        db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
-                                     'autostop', 'INTEGER DEFAULT -1')
-        db_utils.rename_column(self.cursor, self.conn, 'clusters', 'lauched_at',
-                               'launched_at')
-        db_utils.rename_column(self.cursor, self.conn, 'storage', 'lauched_at',
-                               'launched_at')
+        db_utils.add_column_to_table(self.cursor, self.conn, 'clusters', 'autostop',
+                                     'INTEGER DEFAULT -1')
+        db_utils.rename_column(self.cursor, self.conn, 'clusters', 'lauched_at', 'launched_at')
+        db_utils.rename_column(self.cursor, self.conn, 'storage', 'lauched_at', 'launched_at')
 
         self.conn.commit()
 
@@ -131,8 +129,7 @@ def _get_pretty_entry_point() -> str:
     return ' '.join(argv)
 
 
-def add_or_update_cluster(cluster_name: str,
-                          cluster_handle: 'backends.Backend.ResourceHandle',
+def add_or_update_cluster(cluster_name: str, cluster_handle: 'backends.Backend.ResourceHandle',
                           ready: bool):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     # FIXME: launched_at will be changed when `sky launch -c` is called.
@@ -149,8 +146,8 @@ def add_or_update_cluster(cluster_name: str,
         'COALESCE('
         '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1)'
         ')',  # VALUES
-        (cluster_name, cluster_launched_at, handle, last_use, status.value,
-         cluster_name, ClusterStatus.STOPPED.value))
+        (cluster_name, cluster_launched_at, handle, last_use, status.value, cluster_name,
+         ClusterStatus.STOPPED.value))
     _DB.conn.commit()
 
 
@@ -164,8 +161,7 @@ def update_last_use(cluster_name: str):
 def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
     if terminate:
-        _DB.cursor.execute('DELETE FROM clusters WHERE name=(?)',
-                           (cluster_name,))
+        _DB.cursor.execute('DELETE FROM clusters WHERE name=(?)', (cluster_name,))
     else:
         handle = get_handle_from_cluster_name(cluster_name)
         if handle is None:
@@ -173,37 +169,32 @@ def remove_cluster(cluster_name: str, terminate: bool):
         # Must invalidate head_ip: otherwise 'sky cpunode' on a stopped cpunode
         # will directly try to ssh, which leads to timeout.
         handle.head_ip = None
-        _DB.cursor.execute(
-            'UPDATE clusters SET handle=(?), status=(?) '
-            'WHERE name=(?)', (
-                pickle.dumps(handle),
-                ClusterStatus.STOPPED.value,
-                cluster_name,
-            ))
+        _DB.cursor.execute('UPDATE clusters SET handle=(?), status=(?) '
+                           'WHERE name=(?)', (
+                               pickle.dumps(handle),
+                               ClusterStatus.STOPPED.value,
+                               cluster_name,
+                           ))
     _DB.conn.commit()
 
 
-def get_handle_from_cluster_name(
-        cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
+def get_handle_from_cluster_name(cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
-    rows = _DB.cursor.execute('SELECT handle FROM clusters WHERE name=(?)',
-                              (cluster_name,))
+    rows = _DB.cursor.execute('SELECT handle FROM clusters WHERE name=(?)', (cluster_name,))
     for (handle,) in rows:
         return pickle.loads(handle)
 
 
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
     assert cluster_name is not None, 'cluster_name cannot be None'
-    rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name GLOB (?)',
-                              (cluster_name,))
+    rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name GLOB (?)', (cluster_name,))
     return [row[0] for row in rows]
 
 
 def get_cluster_name_from_handle(
         cluster_handle: 'backends.Backend.ResourceHandle') -> Optional[str]:
     handle = pickle.dumps(cluster_handle)
-    rows = _DB.cursor.execute('SELECT name FROM clusters WHERE handle=(?)',
-                              (handle,))
+    rows = _DB.cursor.execute('SELECT name FROM clusters WHERE handle=(?)', (handle,))
     for (name,) in rows:
         return name
 
@@ -232,10 +223,8 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_cluster_from_name(
-        cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
-    rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
-                              (cluster_name,))
+def get_cluster_from_name(cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)', (cluster_name,))
     for name, launched_at, handle, last_use, status, autostop in rows:
         record = {
             'name': name,
@@ -266,8 +255,7 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 def get_enabled_clouds() -> List[clouds.Cloud]:
-    rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
-                              (_ENABLED_CLOUDS_KEY,))
+    rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?', (_ENABLED_CLOUDS_KEY,))
     ret = []
     for (value,) in rows:
         ret = json.loads(value)
@@ -281,8 +269,7 @@ def set_enabled_clouds(enabled_clouds: List[str]) -> None:
     _DB.conn.commit()
 
 
-def add_or_update_storage(storage_name: str,
-                          storage_handle: 'Storage.StorageMetadata',
+def add_or_update_storage(storage_name: str, storage_handle: 'Storage.StorageMetadata',
                           storage_status: StorageStatus):
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
@@ -295,8 +282,7 @@ def add_or_update_storage(storage_name: str,
         raise ValueError(f'Error in updating global state. Storage Status '
                          f'{storage_status} is passed in incorrectly')
     _DB.cursor.execute('INSERT OR REPLACE INTO storage VALUES (?, ?, ?, ?, ?)',
-                       (storage_name, storage_launched_at, handle, last_use,
-                        storage_status.value))
+                       (storage_name, storage_launched_at, handle, last_use, storage_status.value))
     _DB.conn.commit()
 
 
@@ -320,8 +306,7 @@ def set_storage_status(storage_name: str, status: StorageStatus) -> None:
 
 def get_storage_status(storage_name: str) -> None:
     assert storage_name is not None, 'storage_name cannot be None'
-    rows = _DB.cursor.execute('SELECT status FROM storage WHERE name=(?)',
-                              (storage_name,))
+    rows = _DB.cursor.execute('SELECT status FROM storage WHERE name=(?)', (storage_name,))
     for (status,) in rows:
         return StorageStatus[status]
 
@@ -340,8 +325,7 @@ def set_storage_handle(storage_name: str, handle: 'Storage.StorageMetadata'):
 
 def get_handle_from_storage_name(storage_name: str):
     assert storage_name is not None, 'storage_name cannot be None'
-    rows = _DB.cursor.execute('SELECT handle FROM storage WHERE name=(?)',
-                              (storage_name,))
+    rows = _DB.cursor.execute('SELECT handle FROM storage WHERE name=(?)', (storage_name,))
     for (handle,) in rows:
         return pickle.loads(handle)
 

@@ -24,14 +24,13 @@ logger = sky_logging.init_logger(__name__)
 
 
 def redirect_process_output(
-    proc,
-    log_path: str,
-    stream_logs: bool,
-    start_streaming_at: str = '',
-    skip_lines: Optional[List[str]] = None,
-    replace_crlf: bool = False,
-    line_processor: Optional[log_utils.LineProcessor] = None
-) -> Tuple[str, str]:
+        proc,
+        log_path: str,
+        stream_logs: bool,
+        start_streaming_at: str = '',
+        skip_lines: Optional[List[str]] = None,
+        replace_crlf: bool = False,
+        line_processor: Optional[log_utils.LineProcessor] = None) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
@@ -41,16 +40,10 @@ def redirect_process_output(
         line_processor = log_utils.LineProcessor()
 
     sel = selectors.DefaultSelector()
-    out_io = io.TextIOWrapper(proc.stdout,
-                              encoding='utf-8',
-                              newline='',
-                              errors='replace')
+    out_io = io.TextIOWrapper(proc.stdout, encoding='utf-8', newline='', errors='replace')
     sel.register(out_io, selectors.EVENT_READ)
     if proc.stderr is not None:
-        err_io = io.TextIOWrapper(proc.stderr,
-                                  encoding='utf-8',
-                                  newline='',
-                                  errors='replace')
+        err_io = io.TextIOWrapper(proc.stderr, encoding='utf-8', newline='', errors='replace')
         sel.register(err_io, selectors.EVENT_READ)
 
     stdout = ''
@@ -73,8 +66,7 @@ def redirect_process_output(
                         # Replace CRLF with LF to avoid ray logging to the same
                         # line due to separating lines with '\n'.
                         line = line[:-2] + '\n'
-                    if (skip_lines is not None and
-                            any(skip in line for skip in skip_lines)):
+                    if (skip_lines is not None and any(skip in line for skip in skip_lines)):
                         continue
                     if start_streaming_at in line:
                         start_streaming_flag = True
@@ -129,14 +121,9 @@ def run_with_log(
         # and then SIGKILL the process group.
         # Adapted from ray/dashboard/modules/job/job_manager.py#L154
         parent_pid = os.getpid()
-        daemon_script = os.path.join(
-            os.path.dirname(os.path.abspath(job_lib.__file__)),
-            'subprocess_daemon.sh')
-        daemon_cmd = [
-            '/bin/bash', daemon_script,
-            str(parent_pid),
-            str(proc.pid)
-        ]
+        daemon_script = os.path.join(os.path.dirname(os.path.abspath(job_lib.__file__)),
+                                     'subprocess_daemon.sh')
+        daemon_cmd = ['/bin/bash', daemon_script, str(parent_pid), str(proc.pid)]
         subprocess.Popen(
             daemon_cmd,
             start_new_session=True,
@@ -245,17 +232,13 @@ def _follow_job_logs(file,
 
             # Auto-exit the log tailing, if the job has finished. Check
             # the job status before query again to avoid unfinished logs.
-            if status not in [
-                    job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
-            ]:
+            if status not in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
                 if wait_last_logs:
                     # Wait all the logs are printed before exit.
                     time.sleep(1 + sleep_sec)
                     wait_last_logs = False
                     continue
-                print(
-                    f'SKY INFO: Job {job_id} finished (status: {status.value}).'
-                )
+                print(f'SKY INFO: Job {job_id} finished (status: {status.value}).')
                 return
 
             if sleep_sec:
@@ -278,8 +261,7 @@ def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
                 # Using `_follow` instead of `tail -f` to streaming the whole
                 # log and creating a new process for tail.
                 for line in _follow_job_logs(
-                        log_file,
-                        job_id=job_id,
+                        log_file, job_id=job_id,
                         start_streaming_at='SKY INFO: Reserving task slots on'):
                     print(line, end='', flush=True)
         except KeyboardInterrupt:
@@ -289,6 +271,5 @@ def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
             with open(log_path, 'r') as f:
                 print(f.read())
         except FileNotFoundError:
-            print(
-                f'{colorama.Fore.RED}SKY ERROR: Logs for job {job_id} (status:'
-                f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
+            print(f'{colorama.Fore.RED}SKY ERROR: Logs for job {job_id} (status:'
+                  f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')

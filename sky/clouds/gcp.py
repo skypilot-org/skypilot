@@ -9,9 +9,8 @@ from google import auth
 from sky import clouds
 from sky.clouds import service_catalog
 
-DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
-    '~/.config/gcloud/'
-    'application_default_credentials.json')
+DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser('~/.config/gcloud/'
+                                                             'application_default_credentials.json')
 
 
 def _run_output(cmd):
@@ -132,8 +131,10 @@ class GCP(clouds.Cloud):
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
             acc_count = list(accelerators.values())[0]
-            regions = service_catalog.get_region_zones_for_accelerators(
-                acc, acc_count, use_spot, clouds='gcp')
+            regions = service_catalog.get_region_zones_for_accelerators(acc,
+                                                                        acc_count,
+                                                                        use_spot,
+                                                                        clouds='gcp')
 
         for region in regions:
             for zone in region.zones:
@@ -149,9 +150,7 @@ class GCP(clouds.Cloud):
     def accelerators_to_hourly_cost(self, accelerators):
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
-        return service_catalog.get_accelerator_hourly_cost(acc,
-                                                           acc_count,
-                                                           clouds='gcp')
+        return service_catalog.get_accelerator_hourly_cost(acc, acc_count, clouds='gcp')
 
     def get_egress_cost(self, num_gigabytes):
         # In general, query this from the cloud:
@@ -195,9 +194,7 @@ class GCP(clouds.Cloud):
         if accelerators is not None:
             assert len(accelerators) == 1, r
             acc, acc_count = list(accelerators.items())[0]
-            resources_vars['custom_resources'] = json.dumps(accelerators,
-                                                            separators=(',',
-                                                                        ':'))
+            resources_vars['custom_resources'] = json.dumps(accelerators, separators=(',', ':'))
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
@@ -221,14 +218,13 @@ class GCP(clouds.Cloud):
         accelerator_match = None
         if resources.accelerators is not None:
             # TODO: Refactor below implementation with pandas
-            available_accelerators = service_catalog.list_accelerators(
-                gpus_only=False, clouds='gcp')
+            available_accelerators = service_catalog.list_accelerators(gpus_only=False,
+                                                                       clouds='gcp')
             for acc, acc_count in resources.accelerators.items():
                 for acc_avail, infos in available_accelerators.items():
                     # case-insenstive matching
                     if acc.upper() == acc_avail.upper() and any(
-                            acc_count == info.accelerator_count
-                            for info in infos):
+                            acc_count == info.accelerator_count for info in infos):
                         accelerator_match = {acc_avail: acc_count}
                         break
                 if accelerator_match is None:
@@ -257,10 +253,7 @@ class GCP(clouds.Cloud):
             # These files are required because they will be synced to remote
             # VMs for `gsutil` to access private storage buckets.
             # `auth.default()` does not guarantee these files exist.
-            for file in [
-                    '~/.config/gcloud/access_tokens.db',
-                    '~/.config/gcloud/credentials.db'
-            ]:
+            for file in ['~/.config/gcloud/access_tokens.db', '~/.config/gcloud/credentials.db']:
                 assert os.path.isfile(os.path.expanduser(file))
             # Check if application default credentials are set.
             self.get_project_id()
@@ -322,6 +315,5 @@ class GCP(clouds.Cloud):
 
         with open(gcp_credential_path, 'r') as fp:
             gcp_credentials = json.load(fp)
-        project_id = gcp_credentials.get('quota_project_id',
-                                         None) or gcp_credentials['project_id']
+        project_id = gcp_credentials.get('quota_project_id', None) or gcp_credentials['project_id']
         return project_id

@@ -46,10 +46,8 @@ def get_pricing_table(region: str) -> pd.DataFrame:
     url = PRICING_TABLE_URL_FMT.format(region=region)
     df = pd.read_csv(url, skiprows=5, low_memory=False)
     return df[(df['TermType'] == 'OnDemand') &
-              (df['Operating System'] == 'Linux') &
-              df['Pre Installed S/W'].isnull() &
-              (df['CapacityStatus'] == 'Used') &
-              (df['Tenancy'].isin(['Host', 'Shared'])) &
+              (df['Operating System'] == 'Linux') & df['Pre Installed S/W'].isnull() &
+              (df['CapacityStatus'] == 'Used') & (df['Tenancy'].isin(['Host', 'Shared'])) &
               df['PricePerUnit'] > 0].set_index('Instance Type')
 
 
@@ -94,8 +92,7 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
 
     def get_acc_info(row) -> Tuple[str, float]:
         accelerator = None
-        for col, info_key in [('GpuInfo', 'Gpus'),
-                              ('InferenceAcceleratorInfo', 'Accelerators'),
+        for col, info_key in [('GpuInfo', 'Gpus'), ('InferenceAcceleratorInfo', 'Accelerators'),
                               ('FpgaInfo', 'Fpgas')]:
             info = row.get(col)
             if isinstance(info, dict):
@@ -123,8 +120,7 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
 
     df['Region'] = region
     df = df.merge(pd.DataFrame(zone_df), how='cross')
-    df = pd.concat([df, df.apply(get_additional_columns, axis='columns')],
-                   axis='columns')
+    df = pd.concat([df, df.apply(get_additional_columns, axis='columns')], axis='columns')
     return df
 
 

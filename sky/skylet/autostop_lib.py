@@ -10,10 +10,8 @@ AUTOSTOP_CONFIG_KEY = 'autostop_config'
 
 class AutostopConfig:
 
-    def __init__(self, autostop_idle_minutes: int, boot_time: int,
-                 backend: Optional[str]):
-        assert autostop_idle_minutes < 0 or backend is not None, (
-            autostop_idle_minutes, backend)
+    def __init__(self, autostop_idle_minutes: int, boot_time: int, backend: Optional[str]):
+        assert autostop_idle_minutes < 0 or backend is not None, (autostop_idle_minutes, backend)
         self.autostop_idle_minutes = autostop_idle_minutes
         self.boot_time = boot_time
         self.backend = backend

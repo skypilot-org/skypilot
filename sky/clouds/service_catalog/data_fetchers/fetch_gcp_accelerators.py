@@ -18,41 +18,35 @@ def get_gpu_tpu_df():
     gpu_data = {
         'A100': (
             [1, 2, 4, 8, 16],
-            [('us-central1', 2.939, 0.880), ('us-west1', 2.939, 0.880),
-             ('us-east1', 2.939, 0.880)],
+            [('us-central1', 2.939, 0.880), ('us-west1', 2.939, 0.880), ('us-east1', 2.939, 0.880)],
         ),
         'T4': (
             [1, 2, 4],
-            [('us-central1', 0.35, 0.11), ('us-west1', 0.35, 0.11),
-             ('us-west2', 0.41, 0.11), ('us-west4', 0.37, 0.069841),
-             ('us-east1', 0.35, 0.11), ('us-east4', 0.35, 0.11)],
+            [('us-central1', 0.35, 0.11), ('us-west1', 0.35, 0.11), ('us-west2', 0.41, 0.11),
+             ('us-west4', 0.37, 0.069841), ('us-east1', 0.35, 0.11), ('us-east4', 0.35, 0.11)],
         ),
         'P4': (
             [1, 2, 4],
-            [('us-central1', 0.60, 0.216), ('us-west2', 0.72, 0.2592),
-             ('us-west4', 0.60, 0.216), ('us-east4', 0.60, 0.216)],
+            [('us-central1', 0.60, 0.216), ('us-west2', 0.72, 0.2592), ('us-west4', 0.60, 0.216),
+             ('us-east4', 0.60, 0.216)],
         ),
         'V100': (
             [1, 2, 4, 8],
-            [('us-central1', 2.48, 0.74), ('us-west1', 2.48, 0.74),
-             ('us-east1', 2.48, 0.74)],
+            [('us-central1', 2.48, 0.74), ('us-west1', 2.48, 0.74), ('us-east1', 2.48, 0.74)],
         ),
         'P100': (
             [1, 2, 4],
-            [('us-central1', 1.46, 0.43), ('us-west1', 1.46, 0.43),
-             ('us-east1', 1.46, 0.43)],
+            [('us-central1', 1.46, 0.43), ('us-west1', 1.46, 0.43), ('us-east1', 1.46, 0.43)],
         ),
         'K80': (
             [1, 2, 4, 8],
-            [('us-central1', 0.45, 0.038), ('us-west1', 0.45, 0.038),
-             ('us-east1', 0.45, 0.038)],
+            [('us-central1', 0.45, 0.038), ('us-west1', 0.45, 0.038), ('us-east1', 0.45, 0.038)],
         ),
     }
     # https://cloud.google.com/tpu/pricing
     # These are the only TPUs that we can launch using our account.
     tpu_data = {
-        'tpu-v2-8': ([1], [('us-central1', 4.50, 1.35),
-                           ('europe-west4', 4.95, 1.485),
+        'tpu-v2-8': ([1], [('us-central1', 4.50, 1.35), ('europe-west4', 4.95, 1.485),
                            ('asia-east1', 5.22, 1.566)]),
         'tpu-v2-32': (
             [1],
@@ -72,10 +66,8 @@ def get_gpu_tpu_df():
     for acc_name, (counts, regions) in acc_data.items():
         for region, price, spot_price in regions:
             for cnt in counts:
-                rows.append([
-                    None, acc_name, cnt, 0, acc_name, price * cnt,
-                    spot_price * cnt, region
-                ])
+                rows.append(
+                    [None, acc_name, cnt, 0, acc_name, price * cnt, spot_price * cnt, region])
     df = pd.DataFrame(
         data=rows,
         columns=[

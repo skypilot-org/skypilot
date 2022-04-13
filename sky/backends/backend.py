@@ -48,8 +48,7 @@ class Backend:
     def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
-    def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
-                detach_run: bool) -> None:
+    def execute(self, handle: ResourceHandle, task: 'task_lib.Task', detach_run: bool) -> None:
         raise NotImplementedError
 
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
@@ -59,10 +58,7 @@ class Backend:
     def teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
-    def teardown(self,
-                 handle: ResourceHandle,
-                 terminate: bool,
-                 purge: bool = False) -> bool:
+    def teardown(self, handle: ResourceHandle, terminate: bool, purge: bool = False) -> bool:
         raise NotImplementedError
 
     def register_info(self, **kwargs) -> None:

@@ -75,11 +75,9 @@ def create_dockerfile(
         workdir_name = os.path.basename(os.path.dirname(copy_path))
         # NOTE: This relies on copy_path being copied to build context.
         copy_docker_cmd = f'{workdir_name} /{workdir_name}/'
-        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
-            copy_command=copy_docker_cmd)
+        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(copy_command=copy_docker_cmd)
 
-    def add_script_to_dockerfile(dockerfile_contents: str, multiline_cmds: str,
-                                 out_filename: str):
+    def add_script_to_dockerfile(dockerfile_contents: str, multiline_cmds: str, out_filename: str):
         # Converts multiline commands to a script and adds the script to the
         # dockerfile. You still need to add the docker command to run the
         # script (either as CMD or RUN).
@@ -90,22 +88,19 @@ def create_dockerfile(
         copy_cmd = f'{out_filename} /sky/{out_filename}'
 
         # Set permissions and add to dockerfile
-        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(
-            copy_command=copy_cmd)
+        dockerfile_contents += '\n' + DOCKERFILE_COPYCMD.format(copy_command=copy_cmd)
         dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(
             setup_command=f'chmod +x ./sky/{out_filename}')
         return dockerfile_contents
 
     # ===== SETUP ======
-    dockerfile_contents = add_script_to_dockerfile(dockerfile_contents,
-                                                   setup_command,
+    dockerfile_contents = add_script_to_dockerfile(dockerfile_contents, setup_command,
                                                    SKY_DOCKER_SETUP_SCRIPT)
     cmd = f'./sky/{SKY_DOCKER_SETUP_SCRIPT}'
     dockerfile_contents += '\n' + DOCKERFILE_SETUPCMD.format(setup_command=cmd)
 
     # ===== RUN ======
-    dockerfile_contents = add_script_to_dockerfile(dockerfile_contents,
-                                                   run_command,
+    dockerfile_contents = add_script_to_dockerfile(dockerfile_contents, run_command,
                                                    SKY_DOCKER_RUN_SCRIPT)
     cmd = f'./sky/{SKY_DOCKER_RUN_SCRIPT}'
     dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=cmd)
@@ -127,17 +122,18 @@ def _execute_build(tag, context_path):
                             'task name? '
     docker_client = docker.from_env()
     try:
-        unused_image, unused_build_logs = docker_client.images.build(
-            path=context_path, tag=tag, rm=True, quiet=False)
+        unused_image, unused_build_logs = docker_client.images.build(path=context_path,
+                                                                     tag=tag,
+                                                                     rm=True,
+                                                                     quiet=False)
     except docker.build_error() as e:
         colorama.init()
         style = colorama.Style
         fore = colorama.Fore
         logger.error(f'{fore.RED}Image build for {tag} failed - are your setup '
                      f'commands correct? Logs below{style.RESET_ALL}')
-        logger.error(
-            f'{style.BRIGHT}Image context is available at {context_path}'
-            f'{style.RESET_ALL}')
+        logger.error(f'{style.BRIGHT}Image context is available at {context_path}'
+                     f'{style.RESET_ALL}')
         for line in e.build_log:
             if 'stream' in line:
                 logger.error(line['stream'].strip())
@@ -213,9 +209,7 @@ def make_bash_from_multiline(codegen: str) -> str:
     return script
 
 
-def bash_codegen(workdir_name: str,
-                 multiline_cmds: Optional[str],
-                 out_path: Optional[str] = None):
+def bash_codegen(workdir_name: str, multiline_cmds: Optional[str], out_path: Optional[str] = None):
     # Generate commands (if they exist) script and write to file
     if not multiline_cmds:
         multiline_cmds = ''

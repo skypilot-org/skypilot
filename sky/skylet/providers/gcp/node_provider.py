@@ -6,19 +6,18 @@ import time
 import logging
 
 from ray.autoscaler.node_provider import NodeProvider
-from ray.autoscaler.tags import (TAG_RAY_LAUNCH_CONFIG, TAG_RAY_NODE_KIND,
-                                 TAG_RAY_USER_NODE_TYPE)
+from ray.autoscaler.tags import (TAG_RAY_LAUNCH_CONFIG, TAG_RAY_NODE_KIND, TAG_RAY_USER_NODE_TYPE)
 from ray.autoscaler._private.cli_logger import cli_logger, cf
 
-from sky.skylet.providers.gcp.config import (
-    bootstrap_gcp, construct_clients_from_provider_config, get_node_type)
+from sky.skylet.providers.gcp.config import (bootstrap_gcp, construct_clients_from_provider_config,
+                                             get_node_type)
 
 # The logic has been abstracted away here to allow for different GCP resources
 # (API endpoints), which can differ widely, making it impossible to use
 # the same logic for everything.
 from sky.skylet.providers.gcp.node import (  # noqa
-    GCPResource, GCPNode, GCPCompute, GCPTPU, GCPNodeType,
-    INSTANCE_NAME_MAX_LEN, INSTANCE_NAME_UUID_LEN)
+    GCPResource, GCPNode, GCPCompute, GCPTPU, GCPNodeType, INSTANCE_NAME_MAX_LEN,
+    INSTANCE_NAME_UUID_LEN)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +51,7 @@ def _retry(method, max_tries=5, backoff_s=1):
 
 
 class GCPNodeProvider(NodeProvider):
+
     def __init__(self, provider_config: dict, cluster_name: str):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
@@ -60,30 +60,28 @@ class GCPNodeProvider(NodeProvider):
         # Cache of node objects from the last nodes() call. This avoids
         # excessive DescribeInstances requests.
         self.cached_nodes: Dict[str, GCPNode] = {}
-        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes",
-                                                       True)
+        self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
 
     def _construct_clients(self):
-        _, _, compute, tpu = construct_clients_from_provider_config(
-            self.provider_config)
+        _, _, compute, tpu = construct_clients_from_provider_config(self.provider_config)
 
         # Dict of different resources provided by GCP.
         # At this moment - Compute and TPUs
         self.resources: Dict[GCPNodeType, GCPResource] = {}
 
         # Compute is always required
-        self.resources[GCPNodeType.COMPUTE] = GCPCompute(
-            compute, self.provider_config["project_id"],
-            self.provider_config["availability_zone"], self.cluster_name)
+        self.resources[GCPNodeType.COMPUTE] = GCPCompute(compute,
+                                                         self.provider_config["project_id"],
+                                                         self.provider_config["availability_zone"],
+                                                         self.cluster_name)
 
         # if there are no TPU nodes defined in config, tpu will be None.
         if tpu is not None:
-            self.resources[GCPNodeType.TPU] = GCPTPU(
-                tpu, self.provider_config["project_id"],
-                self.provider_config["availability_zone"], self.cluster_name)
+            self.resources[GCPNodeType.TPU] = GCPTPU(tpu, self.provider_config["project_id"],
+                                                     self.provider_config["availability_zone"],
+                                                     self.cluster_name)
 
-    def _get_resource_depending_on_node_name(self,
-                                             node_name: str) -> GCPResource:
+    def _get_resource_depending_on_node_name(self, node_name: str) -> GCPResource:
         """Return the resource responsible for the node, based on node_name.
 
         This expects the name to be in format '[NAME]-[UUID]-[TYPE]',
@@ -182,8 +180,7 @@ class GCPNodeProvider(NodeProvider):
                         # TODO: handle plural vs singular?
                         f"Reusing nodes {cli_logger.render_list(reuse_node_ids)}. "
                         "To disable reuse, set `cache_stopped_nodes: False` "
-                        "under `provider` in the cluster configuration."
-                    )
+                        "under `provider` in the cluster configuration.")
                     for node_id in reuse_node_ids:
                         resource.start_instance(node_id)
                     for node_id in reuse_node_ids:
@@ -198,13 +195,10 @@ class GCPNodeProvider(NodeProvider):
             resource = self._get_resource_depending_on_node_name(node_id)
             if self.cache_stopped_nodes:
                 cli_logger.print(
-                    f"Stopping instance {node_id} "
-                    + cf.dimmed(
-                        "(to terminate instead, "
-                        "set `cache_stopped_nodes: False` "
-                        "under `provider` in the cluster configuration)"
-                    ),
-                )
+                    f"Stopping instance {node_id} " +
+                    cf.dimmed("(to terminate instead, "
+                              "set `cache_stopped_nodes: False` "
+                              "under `provider` in the cluster configuration)"),)
                 result = resource.stop_instance(node_id=node_id)
             else:
                 result = resource.delete_instance(node_id=node_id)
