@@ -380,7 +380,7 @@ class Storage(object):
                     self.add_store(StoreType.GCS)
 
     @staticmethod
-    def _validate_source(source: str, mode: StorageMode) -> [str, bool]:
+    def _validate_source(source: str, mode: StorageMode) -> Tuple[str, bool]:
         """Validates the source path.
 
         Args:
