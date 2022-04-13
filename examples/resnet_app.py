@@ -5,9 +5,7 @@ import sky
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
-    subprocess.run(f'cd {workdir} && git checkout 222cc86',
-                   shell=True,
-                   check=True)
+    subprocess.run(f'cd {workdir} && git checkout 222cc86', shell=True, check=True)
 
     # The setup command.  Will be run under the working directory.
     setup = 'pip install --upgrade pip && \
@@ -48,8 +46,7 @@ with sky.Dag() as dag:
     )
     train.set_file_mounts(file_mounts)
     # TODO: allow option to say (or detect) no download/egress cost.
-    train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
-                     estimated_size_gigabytes=70)
+    train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet', estimated_size_gigabytes=70)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
         ##### Fully specified

@@ -25,9 +25,8 @@ def make_application():
 
     with sky.Dag() as dag:
         # Train.
-        train_op = sky.Task(
-            'train_op',
-            run='python train.py --data_dir=INPUTS[0] --model_dir=OUTPUTS[0]')
+        train_op = sky.Task('train_op',
+                            run='python train.py --data_dir=INPUTS[0] --model_dir=OUTPUTS[0]')
 
         train_op.set_inputs(
             's3://my-imagenet-data',
@@ -49,13 +48,11 @@ def make_application():
         train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
         # Infer.
-        infer_op = sky.Task('infer_op',
-                            run='python infer.py --model_dir=INPUTS[0]')
+        infer_op = sky.Task('infer_op', run='python infer.py --model_dir=INPUTS[0]')
 
         # Data dependency.
         # FIXME: make the system know this is from train_op's outputs.
-        infer_op.set_inputs(train_op.get_outputs(),
-                            estimated_size_gigabytes=0.1)
+        infer_op.set_inputs(train_op.get_outputs(), estimated_size_gigabytes=0.1)
 
         infer_op.set_resources({
             sky.Resources(sky.AWS(), 'inf1.2xlarge'),
@@ -64,8 +61,7 @@ def make_application():
             sky.Resources(sky.GCP(), 'n1-standard-8', 'T4'),
         })
 
-        infer_op.set_time_estimator(
-            time_estimators.resnet50_infer_estimate_runtime)
+        infer_op.set_time_estimator(time_estimators.resnet50_infer_estimate_runtime)
 
         # Chain the sky.tasks (Airflow syntax).
         # The dependency represents data flow.

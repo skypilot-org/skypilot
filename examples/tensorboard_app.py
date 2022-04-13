@@ -6,9 +6,7 @@ import sky
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
     workdir = '~/Downloads/tpu'
-    subprocess.run(f'cd {workdir} && git checkout 222cc86',
-                   shell=True,
-                   check=True)
+    subprocess.run(f'cd {workdir} && git checkout 222cc86', shell=True, check=True)
     # The setup command.  Will be run under the working directory.
     setup = 'pip install --upgrade pip && \
         conda init bash && \

@@ -8,8 +8,7 @@ with sky.Dag() as dag:
     # Total Nodes, INCLUDING Head Node
     num_nodes = 2
 
-    workdir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           'ray_tune_examples')
+    workdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ray_tune_examples')
 
     # The setup command.  Will be run under the working directory.
     setup = 'pip3 install --upgrade pip && \

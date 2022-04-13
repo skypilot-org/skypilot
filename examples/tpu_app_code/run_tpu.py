@@ -15,10 +15,9 @@ ds_train, ds_info = tfds.load('amazon_us_reviews/Books_v1_02',
                               data_dir="gs://weilin-bert-test")
 
 MAX_SEQ_LEN = 512
-bert_tokenizer = tf_text.BertTokenizer(
-    vocab_lookup_table='gs://weilin-bert-test/vocab.txt',
-    token_out_type=tf.int64,
-    lower_case=True)
+bert_tokenizer = tf_text.BertTokenizer(vocab_lookup_table='gs://weilin-bert-test/vocab.txt',
+                                       token_out_type=tf.int64,
+                                       lower_case=True)
 
 
 def preprocessing_fn(inputs):
@@ -74,8 +73,8 @@ def preprocessing_fn(inputs):
         input_type_ids = tf.cast(input_type_ids, tf.int64)
 
         return (tf.squeeze(input_word_ids,
-                           axis=0), tf.squeeze(input_mask, axis=0),
-                tf.squeeze(input_type_ids, axis=0))
+                           axis=0), tf.squeeze(input_mask,
+                                               axis=0), tf.squeeze(input_type_ids, axis=0))
 
     input_word_ids, input_mask, input_type_ids = preprocess_bert_input(
         [inputs['data']['review_body']])
@@ -100,17 +99,14 @@ ds_train_filtered = ds_train.apply(dataset_fn)
 
 
 def process(example):
-    return (dict(tokenizer(
-        example['data']['review_body'].numpy().decode('utf-8')),
+    return (dict(tokenizer(example['data']['review_body'].numpy().decode('utf-8')),
                  truncation=True,
                  padding=True), example['data']['star_rating'].numpy())
 
 
 def process_py(inp1, inp2):
     return [
-        dict(tokenizer(inp1.numpy().decode('utf-8')),
-             truncation=True,
-             padding=True),
+        dict(tokenizer(inp1.numpy().decode('utf-8')), truncation=True, padding=True),
         inp2.numpy()
     ]
 
@@ -120,14 +116,11 @@ ds_train_filtered_2 = ds_train_filtered.map(preprocessing_fn)
 tf.keras.mixed_precision.experimental.set_policy('mixed_bfloat16')
 
 with strategy.scope():
-    model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
-                                                            num_labels=1)
+    model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=1)
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=5e-5)
-    model.compile(optimizer=optimizer,
-                  loss=model.compute_loss)  # can also use any keras loss fn
+    model.compile(optimizer=optimizer, loss=model.compute_loss)  # can also use any keras loss fn
     model.summary()
 
-inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(256).prefetch(
-    tf.data.experimental.AUTOTUNE)
+inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(256).prefetch(tf.data.experimental.AUTOTUNE)
 model.fit(inuse_dataset, epochs=1, batch_size=256)

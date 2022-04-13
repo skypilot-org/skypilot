@@ -69,9 +69,7 @@ def train_mnist_tune(config, num_epochs=10, num_gpus=0):
     data_dir = os.path.abspath("./data")
     model = LightningMNISTClassifier(config, data_dir)
     with FileLock(os.path.expanduser("~/.data.lock")):
-        dm = MNISTDataModule(data_dir=data_dir,
-                             num_workers=1,
-                             batch_size=config["batch_size"])
+        dm = MNISTDataModule(data_dir=data_dir, num_workers=1, batch_size=config["batch_size"])
     metrics = {"loss": "ptl/val_loss", "acc": "ptl/val_accuracy"}
     trainer = pl.Trainer(
         max_epochs=num_epochs,
@@ -111,9 +109,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--smoke-test",
-                        action="store_true",
-                        help="Finish quickly for testing")
+    parser.add_argument("--smoke-test", action="store_true", help="Finish quickly for testing")
     parser.add_argument("--server-address",
                         type=str,
                         default="auto",

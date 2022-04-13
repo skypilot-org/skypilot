@@ -41,8 +41,7 @@ def test_public_bucket_aws():
     print("Running test_public_bucket_aws")
     try:
         # This should fail as you can't write to a public bucket
-        storage_2 = storage.Storage(name='tcga-2-open',
-                                    source=LOCAL_SOURCE_PATH)
+        storage_2 = storage.Storage(name='tcga-2-open', source=LOCAL_SOURCE_PATH)
     except Exception:
         print("Uploading to public bucket failed successfully.")
     storage_2.delete()
@@ -52,8 +51,7 @@ def test_public_bucket_gcp():
     print("Running test_public_bucket_gcp")
     try:
         # This should fail as you can't write to a public bucket
-        storage_2 = storage.Storage(name='cloud-tpu-test-datasets',
-                                    source=LOCAL_SOURCE_PATH)
+        storage_2 = storage.Storage(name='cloud-tpu-test-datasets', source=LOCAL_SOURCE_PATH)
         storage_2.add_store(StoreType.GCS)
     except Exception:
         print("Uploading to public bucket failed successfully.")

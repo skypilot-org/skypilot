@@ -16,8 +16,7 @@ PROJECT_DIR = '~/Downloads/pytorch-image-models'
 def clone_project():
     if not os.path.isdir(os.path.expanduser(PROJECT_DIR)):
         subprocess.run(
-            'git clone https://github.com/rwightman/pytorch-image-models {}'.
-            format(PROJECT_DIR),
+            'git clone https://github.com/rwightman/pytorch-image-models {}'.format(PROJECT_DIR),
             shell=True,
             check=True)
 

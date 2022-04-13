@@ -26,9 +26,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--smoke-test",
-                        action="store_true",
-                        help="Finish quickly for testing")
+    parser.add_argument("--smoke-test", action="store_true", help="Finish quickly for testing")
     parser.add_argument("--server-address",
                         type=str,
                         default="auto",
