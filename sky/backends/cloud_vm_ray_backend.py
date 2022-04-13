@@ -2223,6 +2223,22 @@ class CloudVmRayBackend(backends.Backend):
                                  f'{tpu_stderr}{colorama.Style.RESET_ALL}')
                     return False
 
+        if returncode == 0 and terminate and isinstance(cloud, clouds.AWS):
+            # this independent branch is for cleaning up AWS security group
+            region = config['provider']['region']
+            aws_security_group_name = f'ray-autoscaler-{cluster_name}'
+            cleanup_cmd = (f'aws ec2 delete-security-group --region {region} '
+                           f'--group-name {aws_security_group_name}')
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Cleaning up [green] security group '
+                    f'for {cluster_name}'):
+                returncode, stdout, stderr = log_lib.run_with_log(
+                    cleanup_cmd,
+                    log_abs_path,
+                    shell=True,
+                    stream_logs=False,
+                    require_outputs=True)
+
         if returncode != 0:
             if purge:
                 logger.warning(
