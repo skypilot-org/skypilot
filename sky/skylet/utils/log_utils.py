@@ -3,6 +3,7 @@ import enum
 from typing import Optional
 
 import colorama
+from numpy import absolute
 import pendulum
 import prettytable
 import rich.status
@@ -68,14 +69,31 @@ def create_table(field_names):
 def readable_time_duration(start: Optional[int],
                            end: Optional[int] = None,
                            absolute: bool = False) -> str:
-    """Human readable time duration from timestamps."""
+    """Human readable time duration from timestamps.
+    Args:
+        start: Start timestamp.
+        end: end timestamp. If None, current time is used.
+        absolute: Whether to return accurate time duration.
+    Returns:
+        Human readable time duration. e.g. "1 hour ago", "2 minutes ago", etc.
+        If absolute is specified, returns the accurate time duration, e.g. "1h 2m 23s"
+    """
     if start is None:
         return '-'
     if end is not None:
         end = pendulum.from_timestamp(end)
-    duration = pendulum.from_timestamp(start)
-    diff = duration.diff_for_humans(end, absolute=absolute)
-    diff = diff.replace('second', 'sec')
-    diff = diff.replace('minute', 'min')
-    diff = diff.replace('hour', 'hr')
+    start_time = pendulum.from_timestamp(start)
+    if absolute:
+        diff = start_time.diff(end).in_words()
+        diff = diff.replace(' seconds', 's')
+        diff = diff.replace(' second', 's')
+        diff = diff.replace(' minutes', 'm')
+        diff = diff.replace(' minute', 'm')
+        diff = diff.replace(' hours', 'h')
+        diff = diff.replace(' hour', 'h')
+    else:
+        diff = start_time.diff_for_humans(end)
+        diff = diff.replace('second', 'sec')
+        diff = diff.replace('minute', 'min')
+        diff = diff.replace('hour', 'hr')
     return diff
