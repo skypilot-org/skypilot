@@ -287,6 +287,9 @@ class Task:
             resources = sky.Resources(**resources)
         else:
             resources = sky.Resources()
+        acc, _ = list(resources.accelerators.items())[0]
+        if 'tpu' in acc:
+            assert task.num_nodes == 1, 'Multi-node TPU cluster not supported.'
         task.set_resources({resources})
         return task
 
