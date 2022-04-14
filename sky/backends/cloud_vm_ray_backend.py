@@ -2224,6 +2224,7 @@ class CloudVmRayBackend(backends.Backend):
                     return False
 
         if returncode == 0 and terminate and isinstance(cloud, clouds.AWS):
+            n_retry = 0
             while True:
                 # this independent branch is for cleaning up AWS security group
                 region = config['provider']['region']
@@ -2248,13 +2249,20 @@ class CloudVmRayBackend(backends.Backend):
                         break
                     if 'DependencyViolation' not in stderr:
                         break
-                    logger.warning(
-                        f'{colorama.Fore.YELLOW}'
-                        f'WARNING: Failed to delete the security group '
-                        f'due to dependencies. '
-                        f'{stderr}\nRetrying...'
-                        f'{colorama.Style.RESET_ALL}')
-                    time.sleep(3)
+                    if n_retry > 20:
+                        break  # stop retrying
+                    elif n_retry > 10:
+                        # give user a warning and
+                        logger.warning(
+                            f'{colorama.Fore.YELLOW}'
+                            f'WARNING: Failed to delete the security group '
+                            f'due to dependencies. '
+                            f'{stderr}\nRetrying...'
+                            f'{colorama.Style.RESET_ALL}')
+                        time.sleep(30)
+                    else:
+                        time.sleep(5)
+                    n_retry += 1
 
         if returncode != 0:
             if purge:
