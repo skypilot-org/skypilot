@@ -2239,14 +2239,15 @@ class CloudVmRayBackend(backends.Backend):
                         shell=True,
                         stream_logs=False,
                         require_outputs=True)
-                    # TODO(suquark): check the stderr to confirm the dependency error.
                     if "InvalidGroup.NotFound" in stderr:
                         returncode = 0  # ignore the case where we cannot find the security group
                     if returncode == 0:
                         break
+                    if "DependencyViolation" not in stderr:
+                        break
                     logger.warning(
                         f'{colorama.Fore.YELLOW}'
-                        f'WARNING: Failed to delete the security group. '
+                        f'WARNING: Failed to delete the security group due to dependencies. '
                         f'{stderr}\nRetrying...'
                         f'{colorama.Style.RESET_ALL}')
                     time.sleep(3)
