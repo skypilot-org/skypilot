@@ -2232,42 +2232,39 @@ class CloudVmRayBackend(backends.Backend):
                 cleanup_cmd = (
                     f'aws ec2 delete-security-group --region {region} '
                     f'--group-name {aws_security_group_name}')
-                with backend_utils.safe_console_status(
-                        f'[bold cyan]Cleaning up the security group [green]'
-                        f'for {cluster_name}'):
-                    returncode, stdout, stderr = log_lib.run_with_log(
-                        cleanup_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
-                    if 'InvalidGroup.NotFound' in stderr:
-                        # ignore the error that we cannot find the
-                        # security group
-                        logger.warning(f'{colorama.Fore.YELLOW}'
-                                       'WARNING: Security group '
-                                       f'{aws_security_group_name} not found. '
-                                       f'Skip deleting the security group.'
-                                       f'{colorama.Style.RESET_ALL}')
-                        returncode = 0
-                    if returncode == 0:
-                        break
-                    if 'DependencyViolation' not in stderr:
-                        break
-                    if n_retry > 20:
-                        break  # stop retrying
-                    elif n_retry > 10:
-                        # give user a warning and wait longer
-                        logger.warning(
-                            f'{colorama.Fore.YELLOW}'
-                            f'WARNING: Failed to delete the security group '
-                            f'due to dependencies. '
-                            f'{stderr}\nRetrying...'
-                            f'{colorama.Style.RESET_ALL}')
-                        time.sleep(30)
-                    else:
-                        time.sleep(5)
-                    n_retry += 1
+                returncode, stdout, stderr = log_lib.run_with_log(
+                    cleanup_cmd,
+                    log_abs_path,
+                    shell=True,
+                    stream_logs=False,
+                    require_outputs=True)
+                if 'InvalidGroup.NotFound' in stderr:
+                    # ignore the error that we cannot find the
+                    # security group
+                    logger.warning(f'{colorama.Fore.YELLOW}'
+                                   'WARNING: Security group '
+                                   f'{aws_security_group_name} not found. '
+                                   f'Skip deleting the security group.'
+                                   f'{colorama.Style.RESET_ALL}')
+                    returncode = 0
+                if returncode == 0:
+                    break
+                if 'DependencyViolation' not in stderr:
+                    break
+                if n_retry > 20:
+                    break  # stop retrying
+                elif n_retry > 10:
+                    # give user a warning and wait longer
+                    logger.warning(
+                        f'{colorama.Fore.YELLOW}'
+                        f'WARNING: Failed to delete the security group '
+                        f'{aws_security_group_name} for {cluster_name} '
+                        f'due to dependencies.\nRetrying...'
+                        f'{colorama.Style.RESET_ALL}')
+                    time.sleep(30)
+                else:
+                    time.sleep(5)
+                n_retry += 1
 
         if returncode != 0:
             if purge:
