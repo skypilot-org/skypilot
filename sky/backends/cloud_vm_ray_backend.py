@@ -2244,6 +2244,11 @@ class CloudVmRayBackend(backends.Backend):
                     if 'InvalidGroup.NotFound' in stderr:
                         # ignore the error that we cannot find the
                         # security group
+                        logger.warning(f'{colorama.Fore.YELLOW}'
+                                       'WARNING: Security group '
+                                       f'{aws_security_group_name} not found. '
+                                       f'Skip deleting the security group.'
+                                       f'{colorama.Style.RESET_ALL}')
                         returncode = 0
                     if returncode == 0:
                         break
@@ -2252,7 +2257,7 @@ class CloudVmRayBackend(backends.Backend):
                     if n_retry > 20:
                         break  # stop retrying
                     elif n_retry > 10:
-                        # give user a warning and
+                        # give user a warning and wait longer
                         logger.warning(
                             f'{colorama.Fore.YELLOW}'
                             f'WARNING: Failed to delete the security group '
