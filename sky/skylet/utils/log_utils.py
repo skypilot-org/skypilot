@@ -3,7 +3,6 @@ import enum
 from typing import Optional
 
 import colorama
-from numpy import absolute
 import pendulum
 import prettytable
 import rich.status
@@ -76,7 +75,8 @@ def readable_time_duration(start: Optional[int],
         absolute: Whether to return accurate time duration.
     Returns:
         Human readable time duration. e.g. "1 hour ago", "2 minutes ago", etc.
-        If absolute is specified, returns the accurate time duration, e.g. "1h 2m 23s"
+        If absolute is specified, returns the accurate time duration,
+          e.g. "1h 2m 23s"
     """
     if start is None:
         return '-'
