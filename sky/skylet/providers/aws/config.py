@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 RAY = "ray-autoscaler"
 DEFAULT_RAY_INSTANCE_PROFILE = RAY + "-v1"
 DEFAULT_RAY_IAM_ROLE = RAY + "-v1"
-SECURITY_GROUP_TEMPLATE = RAY + "-{}"
+SECURITY_GROUP_TEMPLATE = "sky-{}"
 
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V30.0"
 
