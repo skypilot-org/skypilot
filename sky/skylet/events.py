@@ -52,8 +52,12 @@ class JobUpdateEvent(SkyletEvent):
     """Skylet event for updating job status."""
     EVENT_INTERVAL_SECONDS = 20
 
+    # Only update status of the jobs after this many seconds of job submission.
+    # TODO(zhwu): This number should be tuned based on heuristics.
+    _SUBMITTED_GAP_SECONDS = 2
+
     def _run(self):
-        job_lib.update_status()
+        job_lib.update_status(submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
 
 
 class AutostopEvent(SkyletEvent):

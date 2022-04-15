@@ -149,9 +149,9 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
     return records
 
 
-def _get_jobs(
-        username: Optional[str],
-        status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
+def _get_jobs(username: Optional[str],
+              status_list: Optional[List[JobStatus]] = None,
+              submitted_gap_sec: int = 0) -> List[Dict[str, Any]]:
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [status.value for status in status_list]
@@ -160,17 +160,18 @@ def _get_jobs(
             f"""\
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
+            AND submitted_at >= (?)
             ORDER BY job_id DESC""",
-            (*status_str_list,),
+            (*status_str_list, submitted_gap_sec + time.time()),
         )
     else:
         rows = _CURSOR.execute(
             f"""\
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
-            AND username=(?)
+            AND username=(?) AND submitted_at >= (?)
             ORDER BY job_id DESC""",
-            (*status_str_list, username),
+            (*status_str_list, username, submitted_gap_sec + time.time()),
         )
 
     records = _get_records_from_rows(rows)
@@ -252,7 +253,7 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status() -> None:
+def update_status(submitted_gap_sec: int = 0) -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
@@ -261,7 +262,8 @@ def update_status() -> None:
     # app starts.
     running_jobs = _get_jobs(
         username=None,
-        status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
+        status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING],
+        submitted_gap_sec=submitted_gap_sec)
     running_job_ids = [job['job_id'] for job in running_jobs]
 
     job_status = query_job_status(running_job_ids)
