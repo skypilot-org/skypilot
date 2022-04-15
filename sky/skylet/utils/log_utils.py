@@ -69,9 +69,10 @@ def readable_time_duration(start: Optional[int],
                            end: Optional[int] = None,
                            absolute: bool = False) -> str:
     """Human readable time duration from timestamps.
+
     Args:
         start: Start timestamp.
-        end: end timestamp. If None, current time is used.
+        end: End timestamp. If None, current time is used.
         absolute: Whether to return accurate time duration.
     Returns:
         Human readable time duration. e.g. "1 hour ago", "2 minutes ago", etc.
