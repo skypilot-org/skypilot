@@ -19,6 +19,8 @@ from sky.skylet.utils import log_utils
 from sky import sky_logging
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+_SKY_LOG_WAITING_GAP_SECONDS = 1
+_SKY_LOG_TAILING_GAP_SECONDS = 0.2
 
 logger = sky_logging.init_logger(__name__)
 
@@ -217,7 +219,6 @@ def run_bash_command_with_log(bash_command: str,
 
 def _follow_job_logs(file,
                      job_id: int,
-                     sleep_sec: float = 0.2,
                      start_streaming_at: str = '') -> Iterator[str]:
     """Yield each line from a file as they are written.
 
@@ -250,7 +251,7 @@ def _follow_job_logs(file,
             ]:
                 if wait_last_logs:
                     # Wait all the logs are printed before exit.
-                    time.sleep(1 + sleep_sec)
+                    time.sleep(1 + _SKY_LOG_TAILING_GAP_SECONDS)
                     wait_last_logs = False
                     continue
                 print(
@@ -258,8 +259,7 @@ def _follow_job_logs(file,
                 )
                 return
 
-            if sleep_sec:
-                time.sleep(sleep_sec)
+            time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
             status = job_lib.get_status(job_id)
 
 
@@ -270,6 +270,18 @@ def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
     status = job_lib.query_job_status([job_id])[0]
+
+    # Wait for the log to be written. This is needed due to the `ray submit`
+    # will take some time to start the job and write the log.
+    while status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
+        if os.path.exists(log_path):
+            break
+        print(
+            f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs to be written...'
+        )
+        time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
+        status = job_lib.query_job_status([job_id])[0]
+
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:
             # Not using `ray job logs` because it will put progress bar in
