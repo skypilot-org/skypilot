@@ -19,16 +19,18 @@ setup: |
 
 run: |
   if [ ! -d ~/imagenet ]; then
-    time unzip /imagenet/imagenet2012.zip -d ~
+    unzip /imagenet/imagenet2012.zip -d ~
   fi
 
   conda activate imagenet
-  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs
+  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs-64
 
   cd ./examples/imagenet
   git pull
+  export OMP_NUM_THREADS=8
   python main.py -a resnet18 \
-    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs \
-    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs \
+    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs-64 \
+    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-ebs-64 \
+    --workers 64 \
     ~/imagenet
 

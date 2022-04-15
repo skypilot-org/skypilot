@@ -19,12 +19,13 @@ setup: |
 
 run: |
   conda activate imagenet
-  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3
+  mkdir -p /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3-64-omp8
 
   cd ./examples/imagenet
   git pull
+  export OMP_NUM_THREADS=8
   python main.py -a resnet18 \
-    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3 \
-    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3 \
+    --save-path /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3-64-omp8 \
+    --resume /imagenet/checkpoints/ILSRC2012/imagenet/resnet18-s3-64-omp8 \
+    --workers 64 \
     /imagenet/datasets/ILSVRC2012/imagenet
-
