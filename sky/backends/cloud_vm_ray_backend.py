@@ -198,7 +198,7 @@ class RayCodeGen:
             # FIXME: This is a hack to make sure that the functions can be found
             # by ray.remote. This should be removed once we have a better way to
             # specify dependencies for ray.
-            inspect.getsource(log_lib.redirect_process_output),
+            inspect.getsource(log_lib.process_subprocess_stream),
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.make_task_bash_script),
             inspect.getsource(log_lib.run_bash_command_with_log),
@@ -1024,7 +1024,7 @@ class RetryingVmProvisioner(object):
         log_lib.run_with_log(
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
-            stream_logs=True)
+            stream_logs=False)
 
     def provision_with_retries(
         self,
@@ -1756,7 +1756,9 @@ class CloudVmRayBackend(backends.Backend):
                     cmd,
                     ssh_user=ssh_user,
                     ssh_private_key=ssh_key,
+                    process_stream=False,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
+                    # ssh_mode=backend_utils.SshMode.INTERACTIVE,
                     ssh_control_name=self._ssh_control_name(handle))
                 backend_utils.handle_returncode(
                     returncode=returncode,
@@ -1768,9 +1770,7 @@ class CloudVmRayBackend(backends.Backend):
             plural = 's' if num_nodes > 1 else ''
             logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
                         f'{style.RESET_ALL}')
-            with backend_utils.safe_console_status(
-                    '[bold cyan]Running setup[/]'):
-                backend_utils.run_in_parallel(_setup_node, ip_list)
+            backend_utils.run_in_parallel(_setup_node, ip_list)
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
@@ -1916,7 +1916,7 @@ class CloudVmRayBackend(backends.Backend):
             handle,
             code,
             stream_logs=True,
-            redirect_stdout_stderr=False,
+            process_stream=False,
             # Allocate a pseudo-terminal to disable output buffering. Otherwise,
             # there may be 5 minutes delay in logging.
             ssh_mode=backend_utils.SshMode.INTERACTIVE)
@@ -2335,7 +2335,7 @@ class CloudVmRayBackend(backends.Backend):
         *,
         port_forward: Optional[List[str]] = None,
         log_path: str = '/dev/null',
-        redirect_stdout_stderr: bool = True,
+        process_stream: bool = True,
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
         ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
@@ -2356,7 +2356,7 @@ class CloudVmRayBackend(backends.Backend):
             ssh_private_key=ssh_private_key,
             port_forward=port_forward,
             log_path=log_path,
-            redirect_stdout_stderr=redirect_stdout_stderr,
+            process_stream=process_stream,
             stream_logs=stream_logs,
             ssh_mode=ssh_mode,
             ssh_control_name=self._ssh_control_name(handle),

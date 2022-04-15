@@ -861,7 +861,7 @@ def run_command_on_ip_via_ssh(
     require_outputs: bool = False,
     log_path: str = '/dev/null',
     # If False, do not redirect stdout/stderr to optimize performance.
-    redirect_stdout_stderr: bool = True,
+    process_stream: bool = True,
     stream_logs: bool = True,
     ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
     ssh_control_name: Optional[str] = None,
@@ -920,7 +920,7 @@ def run_command_on_ip_via_ssh(
     return log_lib.run_with_log(command,
                                 log_path,
                                 stream_logs,
-                                redirect_stdout_stderr=redirect_stdout_stderr,
+                                process_stream=process_stream,
                                 require_outputs=require_outputs)
 
 

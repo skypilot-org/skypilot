@@ -23,7 +23,7 @@ SKY_REMOTE_WORKDIR = '~/sky_workdir'
 logger = sky_logging.init_logger(__name__)
 
 
-def redirect_process_output(
+def process_subprocess_stream(
     proc,
     log_path: str,
     stream_logs: bool,
@@ -33,9 +33,6 @@ def redirect_process_output(
     line_processor: Optional[log_utils.LineProcessor] = None
 ) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
-    log_path = os.path.expanduser(log_path)
-    dirname = os.path.dirname(log_path)
-    os.makedirs(dirname, exist_ok=True)
 
     if line_processor is None:
         line_processor = log_utils.LineProcessor()
@@ -102,20 +99,33 @@ def run_with_log(
     require_outputs: bool = False,
     shell: bool = False,
     with_ray: bool = False,
-    redirect_stdout_stderr: bool = True,
+    process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
+    
+    Args:
+        cmd: The command to run.
+        log_path: The path to the log file.
+        stream_logs: Whether to stream the logs to stdout/stderr.
+        require_outputs: Whether to return the stdout/stderr of the command.
+        process_stream: Whether to post-process the stdout/stderr of the command.
+          If enabled, lines can be printed only when '\r' or '\n' is found.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-    assert redirect_stdout_stderr or log_path == '/dev/null'
+    assert process_stream or not require_outputs, (
+        process_stream, require_outputs,
+        'require_outputs should be False when process_stream is False')
+    log_path = os.path.expanduser(log_path)
+    dirname = os.path.dirname(log_path)
+    os.makedirs(dirname, exist_ok=True)
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout = stderr = None
-    if redirect_stdout_stderr:
+    if process_stream or log_path != '/dev/null':
         stdout = subprocess.PIPE
         stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
     with subprocess.Popen(cmd,
@@ -146,10 +156,11 @@ def run_with_log(
         )
         stdout = ''
         stderr = ''
-        if redirect_stdout_stderr:
+        if process_stream:
             # We need this even if the log_path is '/dev/null' to ensure the
             # progress bar is shown.
-            stdout, stderr = redirect_process_output(
+            # NOTE: Lines can be printed only when '\r' or '\n' is found.
+            stdout, stderr = process_subprocess_stream(
                 proc,
                 log_path,
                 stream_logs,
@@ -166,6 +177,12 @@ def run_with_log(
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
             )
+        elif log_path != '/dev/null':
+            stdout = None if stream_logs else subprocess.DEVNULL
+            subprocess.Popen(['tee', log_path],
+                             stdin=proc.stdout,
+                             stdout=stdout,
+                             stderr=subprocess.STDOUT)
         proc.wait()
         if require_outputs:
             return proc.returncode, stdout, stderr
