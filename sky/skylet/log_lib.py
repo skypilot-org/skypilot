@@ -104,14 +104,15 @@ def run_with_log(
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
-    
+
     Args:
         cmd: The command to run.
         log_path: The path to the log file.
         stream_logs: Whether to stream the logs to stdout/stderr.
         require_outputs: Whether to return the stdout/stderr of the command.
-        process_stream: Whether to post-process the stdout/stderr of the command.
-          If enabled, lines can be printed only when '\r' or '\n' is found.
+        process_stream: Whether to post-process the stdout/stderr of the
+          command. If enabled, lines can be printed only when '\r' or '\n' is
+          found.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -168,7 +169,7 @@ def run_with_log(
                 # Skip these lines caused by `-i` option of bash. Failed to find
                 # other way to turn off these two warning.
                 # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-                # TODO(zongheng,zhwu): ssh -T -i -tt seems to get rid of these.
+                # `ssh -T -i -tt` still cause the problem.
                 skip_lines=[
                     'bash: cannot set terminal process group',
                     'bash: no job control in this shell',
@@ -179,6 +180,7 @@ def run_with_log(
             )
         elif log_path != '/dev/null':
             stdout = None if stream_logs else subprocess.DEVNULL
+            # The bash warning lines will still be printed.
             subprocess.Popen(['tee', log_path],
                              stdin=proc.stdout,
                              stdout=stdout,

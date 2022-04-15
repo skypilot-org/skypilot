@@ -1756,8 +1756,8 @@ class CloudVmRayBackend(backends.Backend):
                     cmd,
                     ssh_user=ssh_user,
                     ssh_private_key=ssh_key,
-                    process_stream=False,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
+                    process_stream=False,
                     # ssh_mode=backend_utils.SshMode.INTERACTIVE,
                     ssh_control_name=self._ssh_control_name(handle))
                 backend_utils.handle_returncode(
