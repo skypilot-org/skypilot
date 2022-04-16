@@ -52,8 +52,6 @@ from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
-
-from sky.utils.cli_utils import cli_utils
 from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:

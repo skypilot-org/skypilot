@@ -1,4 +1,5 @@
 """Utilities for sky status."""
+from typing import Callable
 import click
 
 from sky import backends
@@ -12,7 +13,7 @@ class StatusColumn:
 
     def __init__(self,
                  name: str,
-                 calc_func,
+                 calc_func: Callable,
                  trunc_length: int = 0,
                  show_by_default: bool = True):
         self.name = name
@@ -36,19 +37,19 @@ def show_status_table(show_all: bool, refresh: bool):
         StatusColumn('NAME', _get_name),
         StatusColumn('LAUNCHED', _get_launched),
         StatusColumn('RESOURCES', _get_resources),
-        StatusColumn('REGION', _get_region, only_all=True),
+        StatusColumn('REGION', _get_region, show_by_default=False),
         StatusColumn('STATUS', _get_status),
-        StatusColumn('DURATION', _get_duration, only_all=True),
+        StatusColumn('DURATION', _get_duration, show_by_default=False),
         StatusColumn('AUTOSTOP', _get_autostop),
         StatusColumn('COMMAND',
                      _get_command,
                      trunc_length=35 if not show_all else 0),
-        StatusColumn('HOURLY_PRICE', _get_price, only_all=True)
+        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False)
     ]
 
     columns = []
     for status_column in status_columns:
-        if not status_column.only_all or show_all:
+        if status_column.show_by_default or show_all:
             columns.append(status_column.name)
     cluster_table = log_utils.create_table(columns)
 
@@ -56,10 +57,10 @@ def show_status_table(show_all: bool, refresh: bool):
     for cluster_status in clusters_status:
         row = []
         for status_column in status_columns:
-            if not status_column.only_all or show_all:
+            if status_column.show_by_default or show_all:
                 row.append(status_column.calc(cluster_status))
         cluster_table.add_row(row)
-        pending_autostop += _check_pending_autostop(cluster_status)
+        pending_autostop += _is_pending_autostop(cluster_status)
 
     if clusters_status:
         click.echo(cluster_table)
@@ -71,18 +72,16 @@ def show_status_table(show_all: bool, refresh: bool):
     else:
         click.echo('No existing clusters.')
 
-_get_name = lambda cluster_status: \
-    cluster_status['name']
-_get_launched = lambda cluster_status: \
-    log_utils.readable_time_duration(cluster_status['launched_at'])
-_get_region = lambda clusters_status: \
-    clusters_status['handle'].launched_resources.region
-_get_status = lambda cluster_status: \
-    cluster_status['status'].value
-_get_duration = lambda cluster_status: \
-     log_utils.readable_time_duration(cluster_status['launched_at'])
-_get_command = lambda cluster_status: \
-    cluster_status['last_use']
+
+_get_name = (lambda cluster_status: cluster_status['name'])
+_get_launched = (lambda cluster_status: log_utils.readable_time_duration(
+    cluster_status['launched_at']))
+_get_region = (
+    lambda clusters_status: clusters_status['handle'].launched_resources.region)
+_get_status = (lambda cluster_status: cluster_status['status'].value)
+_get_duration = (lambda cluster_status: log_utils.readable_time_duration(
+    cluster_status['launched_at']))
+_get_command = (lambda cluster_status: cluster_status['last_use'])
 
 
 def _get_resources(cluster_status):
@@ -111,11 +110,12 @@ def _get_autostop(cluster_status):
 
 def _get_price(cluster_status):
     handle = cluster_status['handle']
-    hourly_cost = (handle.launched_resources.get_cost(3600) * handle.launched_nodes)
+    hourly_cost = (handle.launched_resources.get_cost(3600) *
+                   handle.launched_nodes)
     price_str = f'$ {hourly_cost:.3f}'
     return price_str
 
 
-def _check_pending_autostop(cluster_status):
+def _is_pending_autostop(cluster_status):
     return _get_autostop(cluster_status) != '-' and _get_status(
         cluster_status) == 'UP'

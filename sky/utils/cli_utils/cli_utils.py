@@ -1,11 +1,7 @@
 """Utilities shared by CLI functions."""
 
-import time
-import pendulum
-
 
 def truncate_long_string(s: str, max_length: int = 35) -> str:
-    print(s, max_length)
     if len(s) <= max_length:
         return s
     splits = s.split(' ')
