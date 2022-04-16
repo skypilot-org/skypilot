@@ -1,0 +1,49 @@
+Task from YAML spec: ./examples/minimal.yaml
+Running task on cluster min-2...
+I 04-01 14:23:02 optimizer.py:446] Optimizer - plan minimizing cost
+I 04-01 14:23:02 optimizer.py:449] Estimated total run time: ~1.0 hr, total cost: ~$0.4
+I 04-01 14:23:02 optimizer.py:461] 
+I 04-01 14:23:02 optimizer.py:461] TASK     BEST_RESOURCE
+I 04-01 14:23:02 optimizer.py:461] minimal  AWS(m4.2xlarge)
+I 04-01 14:23:02 optimizer.py:461] 
+I 04-01 14:23:02 cloud_vm_ray_backend.py:1216] [36mCreating a new cluster: "min-2" [1x AWS(m4.2xlarge)].[0m
+I 04-01 14:23:02 cloud_vm_ray_backend.py:1216] Tip: to reuse an existing cluster, specify --cluster (-c). Run `sky status` to see existing clusters.
+I 04-01 14:23:05 cloud_vm_ray_backend.py:789] To view detailed progress: [1mtail -n100 -f /Users/zhwu/sky_logs/sky-2022-04-01-14-23-01-489065/provision.log[0m
+I 04-01 14:23:06 cloud_vm_ray_backend.py:959] [1mLaunching on AWS us-east-1[0m (us-east-1a,us-east-1b,us-east-1c,us-east-1d,us-east-1e,us-east-1f)
+W 04-01 14:23:20 cloud_vm_ray_backend.py:550] Got error(s) in all zones of us-east-1:
+W 04-01 14:23:20 cloud_vm_ray_backend.py:552] [2m	create_instances: Attempt failed with An error occurred (VcpuLimitExceeded) when calling the RunInstances operation: You have requested more vCPU capacity than your current vCPU limit of 32 allows for the instance bucket that the specified instance type belongs to. Please visit http://aws.amazon.com/contact-us/ec2-request to request an adjustment to this limit., retrying.
+W 04-01 14:23:20 cloud_vm_ray_backend.py:552] 	create_instances: Attempt failed with An error occurred (RequestLimitExceeded) when calling the RunInstances operation (reached max retries: 0): Request limit exceeded., retrying.
+W 04-01 14:23:20 cloud_vm_ray_backend.py:552] 	create_instances: Attempt failed with An error occurred (RequestLimitExceeded) when calling the RunInstances operation (reached max retries: 0): Request limit exceeded., retrying.
+W 04-01 14:23:20 cloud_vm_ray_backend.py:552] 	create_instances: Attempt failed with An error occurred (RequestLimitExceeded) when calling the RunInstances operation (reached max retries: 0): Request limit exceeded., retrying.
+W 04-01 14:23:20 cloud_vm_ray_backend.py:552] 	create_instances: Attempt failed with An error occurred (RequestLimitExceeded) when calling the RunInstances operation (reached max retries: 0): Request limit exceeded., retrying.
+W 04-01 14:23:20 cloud_vm_ray_backend.py:552] 	botocore.exceptions.ClientError: An error occurred (RequestLimitExceeded) when calling the RunInstances operation (reached max retries: 0): Request limit exceeded.[0m
+I 04-01 14:23:30 cloud_vm_ray_backend.py:959] [1mLaunching on AWS us-east-2[0m (us-east-2a,us-east-2b,us-east-2c)
+I 04-01 14:24:56 log_lib.py:37] [32mHead node is up.[0m
+I 04-01 14:26:17 cloud_vm_ray_backend.py:860] [32mSuccessfully provisioned or found existing VM.[0m
+I 04-01 14:26:19 cloud_vm_ray_backend.py:1659] [36mRunning setup on 1 node.[0m
+running setup
+I 04-01 14:26:20 cloud_vm_ray_backend.py:1664] [32mSetup completed.[0m
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1773] Job submitted with Job ID: [1m1[0m
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1785] [36mJob ID: [1m1[0m
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1785] To cancel the job:	[1msky cancel min-2 1[0m
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1785] To stream the logs:	[1msky logs min-2 1[0m
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1785] To view the job queue:	[1msky queue min-2[0m
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1956] 
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1956] [36mCluster name: [1mmin-2[0m
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1956] To log into the head VM:	[1mssh min-2[0m
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1956] To submit a job:		[1msky exec min-2 yaml_file[0m
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1956] To stop the cluster:	[1msky stop min-2[0m
+I 04-01 14:26:23 cloud_vm_ray_backend.py:1956] To teardown the cluster:	[1msky down min-2[0m
+NAME                             LAUNCHED        RESOURCES                 STATUS  AUTOSTOP  COMMAND                      
+test-azure-start-stop-zhwu-dbb9  1 day ago       1x Azure(Standard_D8_v4)  INIT    -         sky launch -y -c ...         
+min-1                            32 secs ago     1x AWS(m4.2xlarge)        UP      -         sky launch -d -c min-1 ...   
+min-6                            32 secs ago     1x AWS(m4.2xlarge)        UP      -         sky launch -d -c min-6 ...   
+min-4                            32 secs ago     1x AWS(m4.2xlarge)        UP      -         sky launch -d -c min-4 ...   
+min-5                            32 secs ago     1x AWS(m4.2xlarge)        UP      -         sky launch -d -c min-5 ...   
+min-8                            a few secs ago  1x AWS(m4.2xlarge)        UP      -         sky launch -d -c min-8 ...   
+min-10                           a few secs ago  1x AWS(m4.2xlarge)        UP      -         sky launch -d -c min-10 ...  
+min-7                            a few secs ago  1x AWS(m4.2xlarge)        UP      -         sky launch -d -c min-7 ...   
+min-3                            a few secs ago  1x AWS(m4.2xlarge)        UP      -         sky launch -d -c min-3 ...   
+min-9                            a few secs ago  1x AWS(m4.2xlarge)        UP      -         sky launch -d -c min-9 ...   
+min-2                            a few secs ago  1x AWS(m4.2xlarge)        UP      -         sky launch -d -c min-2 ...   
+[?25h

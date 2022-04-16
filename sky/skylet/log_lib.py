@@ -111,7 +111,7 @@ def run_with_log(
         stream_logs: Whether to stream the logs to stdout/stderr.
         require_outputs: Whether to return the stdout/stderr of the command.
         process_stream: Whether to post-process the stdout/stderr of the
-          command. If enabled, lines can be printed only when '\r' or '\n' is
+          command. If enabled, lines are printed only when '\r' or '\n' is
           found.
 
     Returns the returncode or returncode, stdout and stderr of the command.
@@ -160,7 +160,7 @@ def run_with_log(
         if process_stream:
             # We need this even if the log_path is '/dev/null' to ensure the
             # progress bar is shown.
-            # NOTE: Lines can be printed only when '\r' or '\n' is found.
+            # NOTE: Lines are printed only when '\r' or '\n' is found.
             stdout, stderr = process_subprocess_stream(
                 proc,
                 log_path,
