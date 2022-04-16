@@ -1026,7 +1026,13 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
             click.secho(f'Status failed for job {job_id}', fg='red')
             sys.exit(1)
     else:
-        backend.tail_logs(handle, job_id)
+        if not job_id.isdigit():
+            click.secho(
+                'Only single job ID supported for streaming, '
+                'consider using --sync_down',
+                fg='yellow')
+            return
+        backend.tail_logs(handle, int(job_id))
 
 
 @cli.command()

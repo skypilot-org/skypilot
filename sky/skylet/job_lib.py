@@ -338,7 +338,7 @@ def log_dir(job_id: int) -> Optional[str]:
     return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
 
 
-def log_dirs_with_globbing(job_id: int) -> Optional[str]:
+def log_dirs_with_globbing(job_id: str) -> List[str]:
     """Returns the relative paths to the log files for job with globbing."""
     _CURSOR.execute(
         """\
@@ -426,7 +426,7 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_log_path_with_globbing(cls, job_id: int) -> str:
+    def get_log_path_with_globbing(cls, job_id: str) -> str:
         code = [
             f'log_dirs = job_lib.log_dirs_with_globbing(\'{job_id}\')',
             'print(log_dirs, flush=True)',

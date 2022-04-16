@@ -1688,6 +1688,12 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.handle_returncode(returncode, code,
                                         'Failed to sync logs.', stderr)
         log_dirs = ast.literal_eval(log_dirs)
+        if len(log_dirs) == 0:
+            logger.info(f'{colorama.Fore.YELLOW}'
+                        'No matching log directories found'
+                        f'{colorama.Style.RESET_ALL}')
+            return
+
         job_ids = [log_dir[0] for log_dir in log_dirs]
         local_log_dirs = [
             os.path.expanduser(log_dir[1]) for log_dir in log_dirs
@@ -1730,7 +1736,6 @@ class CloudVmRayBackend(backends.Backend):
                               'a') as f, contextlib.redirect_stdout(
                                   f), contextlib.redirect_stderr(f):
                         rsync_down(ip, local_log_dir, remote_log_dir)
-                        pass
                     logger.info(
                         f'{fore.CYAN}Job {job_id} logs: Downloaded from '
                         f'node-{i} ({ip}){style.RESET_ALL}')
