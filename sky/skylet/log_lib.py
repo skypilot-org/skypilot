@@ -276,9 +276,8 @@ def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
     while status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         if os.path.exists(log_path):
             break
-        print(
-            f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs to be written...'
-        )
+        print(f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
+              'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.query_job_status([job_id])[0]
 
