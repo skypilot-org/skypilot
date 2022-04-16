@@ -20,6 +20,7 @@ from sky import sky_logging
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 _SKY_LOG_WAITING_GAP_SECONDS = 1
+_SKY_LOG_WAITING_MAX_RETRY = 5
 _SKY_LOG_TAILING_GAP_SECONDS = 0.2
 
 logger = sky_logging.init_logger(__name__)
@@ -273,9 +274,21 @@ def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
 
     # Wait for the log to be written. This is needed due to the `ray submit`
     # will take some time to start the job and write the log.
-    while status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
+    retry_cnt = 0
+    while status in [
+            job_lib.JobStatus.INIT,
+            job_lib.JobStatus.PENDING,
+            job_lib.JobStatus.RUNNING,
+    ]:
+        retry_cnt += 1
         if os.path.exists(log_path):
             break
+        if retry_cnt >= _SKY_LOG_WAITING_MAX_RETRY:
+            print(
+                f'{colorama.Fore.RED}SKY ERROR: Logs for job {job_id} (status: '
+                f'{status.value}) does not exist after retry {retry_cnt} times.'
+                f'{colorama.Style.RESET_ALL}')
+            return
         print(f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
