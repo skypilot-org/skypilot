@@ -1,18 +1,11 @@
 """Utilities shared by CLI functions."""
-import pendulum
+
 import time
-
-
-def readable_time_duration(start_time: int):
-    duration = pendulum.now().subtract(seconds=time.time() - start_time)
-    diff = duration.diff_for_humans()
-    diff = diff.replace('second', 'sec')
-    diff = diff.replace('minute', 'min')
-    diff = diff.replace('hour', 'hr')
-    return diff
+import pendulum
 
 
 def truncate_long_string(s: str, max_length: int = 35) -> str:
+    print(s, max_length)
     if len(s) <= max_length:
         return s
     splits = s.split(' ')
