@@ -88,9 +88,8 @@ setup_commands:
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
     sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf; # This is needed for `-o allow_other` option for `goofys`
-  # we should install "sky[aws]", however this does not work with wheel file path
-  - pip3 install awscli boto3;
-    pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl;
+  - pip3 uninstall sky -y &> /dev/null;
+    pip3 install "$(echo {{sky_remote_path}}/*.whl)[aws]";
     python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
 
 # Command to start ray on the head node. You don't need to change this.
