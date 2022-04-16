@@ -175,7 +175,7 @@ class SSHConfigHelper(object):
     """Helper for handling local SSH configuration."""
 
     ssh_conf_path = '~/.ssh/config'
-    ssh_multinode_path = '~/.sky/generated/ssh/{}'
+    ssh_multinode_path = SKY_USER_FILE_PATH + '/ssh/{}'
 
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
@@ -349,7 +349,7 @@ class SSHConfigHelper(object):
                     sky_autogen_comment, host_name, worker_ips[idx], username,
                     key_path)
 
-        # All workers go to ~/.sky/generated/ssh/{cluster_name}
+        # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
             if line.strip() in host_lines:
                 idx = host_lines.index(line.strip())
@@ -593,7 +593,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                     'tpu_name': tpu_name,
                 }),
                 # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in ~/.sky/generated/ to be consistent
+                # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
                 # with cluster yamls.
                 output_path=os.path.join(user_file_dir, template_name).replace(
                     '.sh.j2', f'.{cluster_name}.sh'),
