@@ -19,6 +19,7 @@ import typing
 from typing import Any, Dict, List, Optional
 
 from sky import clouds
+from sky.skylet.utils import db_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -64,27 +65,14 @@ class _SQLiteConn(threading.local):
         # TODO(zhwu): Remove this function after all users have migrated to
         # the latest version of Sky.
         # Add autostop column to clusters table
-        self._add_column_to_table('clusters', 'autostop', 'INTEGER DEFAULT -1')
-        self._rename_column('clusters', 'lauched_at', 'launched_at')
-        self._rename_column('storage', 'lauched_at', 'launched_at')
+        db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
+                                     'autostop', 'INTEGER DEFAULT -1')
+        db_utils.rename_column(self.cursor, self.conn, 'clusters', 'lauched_at',
+                               'launched_at')
+        db_utils.rename_column(self.cursor, self.conn, 'storage', 'lauched_at',
+                               'launched_at')
 
         self.conn.commit()
-
-    def _add_column_to_table(self, table_name: str, column_name: str,
-                             column_type: str):
-        for row in self.cursor.execute(f'PRAGMA table_info({table_name})'):
-            if row[1] == column_name:
-                break
-        else:
-            self.cursor.execute(f'ALTER TABLE {table_name} '
-                                f'ADD COLUMN {column_name} {column_type}')
-
-    def _rename_column(self, table_name: str, old_name: str, new_name: str):
-        for row in self.cursor.execute(f'PRAGMA table_info({table_name})'):
-            if row[1] == old_name:
-                self.cursor.execute(f'ALTER TABLE {table_name} '
-                                    f'RENAME COLUMN {old_name} to {new_name}')
-                break
 
 
 _DB = _SQLiteConn()

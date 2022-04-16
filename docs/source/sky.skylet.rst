@@ -28,13 +28,23 @@ sky.skylet.log\_lib module
    :undoc-members:
    :show-inheritance:
 
-sky.skylet.util\_lib module
+sky.skylet.utils.db\_utils module
 ---------------------------
 
-.. automodule:: sky.skylet.util_lib
+.. automodule:: sky.skylet.utils.db_utils
    :members:
    :undoc-members:
    :show-inheritance:
+
+
+sky.skylet.utils.log\_utils module
+---------------------------
+
+.. automodule:: sky.skylet.utils.log_utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 
 Module contents
 ---------------

@@ -175,7 +175,7 @@ class SSHConfigHelper(object):
     """Helper for handling local SSH configuration."""
 
     ssh_conf_path = '~/.ssh/config'
-    ssh_multinode_path = '~/.sky/generated/ssh/{}'
+    ssh_multinode_path = SKY_USER_FILE_PATH + '/ssh/{}'
 
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
@@ -349,7 +349,7 @@ class SSHConfigHelper(object):
                     sky_autogen_comment, host_name, worker_ips[idx], username,
                     key_path)
 
-        # All workers go to ~/.sky/generated/ssh/{cluster_name}
+        # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
             if line.strip() in host_lines:
                 idx = host_lines.index(line.strip())
@@ -582,7 +582,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if resources_vars.get('tpu_type') is not None:
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
-            tpu_name = cluster_name
+            tpu_name = generate_tpu_name(cluster_name)
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
         scripts = tuple(
@@ -593,7 +593,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                     'tpu_name': tpu_name,
                 }),
                 # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in ~/.sky/generated/ to be consistent
+                # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
                 # with cluster yamls.
                 output_path=os.path.join(user_file_dir, template_name).replace(
                     '.sh.j2', f'.{cluster_name}.sh'),
@@ -1020,6 +1020,10 @@ def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+
+
+def generate_tpu_name(cluster_name):
+    return f'{cluster_name}-sky-{uuid.uuid4().hex[:4]}'
 
 
 def get_node_ips(

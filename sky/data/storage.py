@@ -380,7 +380,7 @@ class Storage(object):
                     self.add_store(StoreType.GCS)
 
     @staticmethod
-    def _validate_source(source: str, mode: StorageMode) -> [str, bool]:
+    def _validate_source(source: str, mode: StorageMode) -> Tuple[str, bool]:
         """Validates the source path.
 
         Args:
@@ -808,7 +808,7 @@ class S3Store(AbstractStore):
             # Install goofys if not already installed
             if ! [ -x "$(command -v goofys)" ]; then
               echo "Installing goofys..."
-              sudo wget -nc https://github.com/kahing/goofys/releases/latest/download/goofys -O /usr/local/bin/goofys
+              sudo wget -nc https://github.com/romilbhardwaj/goofys/releases/download/0.24.0-romilb-upstream/goofys -O /usr/local/bin/goofys
               sudo chmod +x /usr/local/bin/goofys
             else
               echo "Goofys already installed. Proceeding..."

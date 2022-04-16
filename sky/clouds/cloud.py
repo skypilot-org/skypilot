@@ -142,3 +142,11 @@ class Cloud:
         and a list of patterns that will be excluded (used as rsync_exclude).
         """
         raise NotImplementedError
+
+    def instance_type_exists(self, instance_type):
+        """Returns whether the instance type exists for this cloud."""
+        raise NotImplementedError
+
+    def region_exists(self, region: str) -> bool:
+        """Returns whether the region is valid for this cloud."""
+        raise NotImplementedError

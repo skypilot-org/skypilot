@@ -280,11 +280,18 @@ class Task:
                     resources['accelerator_args'])
             if resources.get('use_spot') is not None:
                 resources['use_spot'] = resources['use_spot']
+            if resources.get('region') is not None:
+                resources['region'] = resources.pop('region')
             # FIXME: We should explicitly declare all the parameters
             # that are sliding through the **resources
             resources = sky.Resources(**resources)
         else:
             resources = sky.Resources()
+        if resources.accelerators is not None:
+            acc, _ = list(resources.accelerators.items())[0]
+            if acc.startswith('tpu-') and task.num_nodes > 1:
+                raise ValueError('Multi-node TPU cluster not supported. '
+                                 f'Got num_nodes={task.num_nodes}')
         task.set_resources({resources})
         return task
 

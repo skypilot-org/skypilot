@@ -116,6 +116,21 @@ def test_minimal():
     run_one_test(test)
 
 
+# ---------- Test region ----------
+def test_region():
+    name = _get_cluster_name()
+    test = Test(
+        'region',
+        [
+            f'sky launch -y -c {name} --region us-west-2 examples/minimal.yaml',
+            f'sky exec {name} examples/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Check Sky's environment variables; workdir. ----------
 def test_env_check():
     name = _get_cluster_name()

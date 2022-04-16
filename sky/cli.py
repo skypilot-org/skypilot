@@ -27,7 +27,6 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
-import copy
 import functools
 import getpass
 import os
@@ -52,7 +51,7 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
-from sky.skylet import util_lib
+from sky.skylet.utils import log_utils
 
 from sky.utils.cli_utils import cli_utils
 from sky.utils.cli_utils import status_utils
@@ -240,7 +239,7 @@ def _check_interactive_node_resources_match(
     # resources.cloud and handle.launched_resources to match.
     if resources.cloud is None:
         assert launched_resources.cloud is not None, launched_resources
-        resources.cloud = launched_resources.cloud
+        resources = resources.copy(cloud=launched_resources.cloud)
 
     # TODO: Check for same number of launched_nodes if multi-node support is
     # added for gpu/cpu/tpunode.
@@ -471,6 +470,11 @@ def cli():
     type=str,
     help='The cloud to use. If specified, override the "resources.cloud".')
 @click.option(
+    '--region',
+    required=False,
+    type=str,
+    help='The region to use. If specified, override the "resources.region".')
+@click.option(
     '--gpus',
     required=False,
     type=str,
@@ -520,6 +524,7 @@ def launch(
     backend_name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
+    region: Optional[str],
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -539,14 +544,18 @@ def launch(
         backend_name = backends.CloudVmRayBackend.NAME
 
     entrypoint = ' '.join(entrypoint)
-    is_yaml = _check_yaml(entrypoint)
-    if is_yaml:
-        # Treat entrypoint as a yaml.
-        click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+    if entrypoint:
+        is_yaml = _check_yaml(entrypoint)
+        if is_yaml:
+            # Treat entrypoint as a yaml.
+            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+        else:
+            # Treat entrypoint as a bash command.
+            click.secho('Task from command: ', fg='yellow', nl=False)
+        click.secho(entrypoint, bold=True)
     else:
-        # Treat entrypoint as a bash command.
-        click.secho('Task from command: ', fg='yellow', nl=False)
-    click.secho(entrypoint, bold=True)
+        entrypoint = None
+        is_yaml = False
 
     if not yes:
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
@@ -554,7 +563,8 @@ def launch(
         maybe_status = backend_utils.get_cluster_status_with_refresh(cluster)
         prompt = None
         if maybe_status is None:
-            prompt = 'Launching a new cluster. Proceed?'
+            cluster_str = '' if cluster is None else f' {cluster!r}'
+            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
         elif maybe_status == global_user_state.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
@@ -570,19 +580,23 @@ def launch(
         if workdir is not None:
             task.workdir = workdir
 
-        assert len(task.resources) == 1
-        new_resources = copy.deepcopy(list(task.resources)[0])
-
+        override_params = {}
         if cloud is not None:
-            new_resources.cloud = _get_cloud(cloud)
+            override_params['cloud'] = _get_cloud(cloud)
+        if region is not None:
+            override_params['region'] = region
         if gpus is not None:
-            new_resources.set_accelerators(gpus)
-
+            override_params['accelerators'] = gpus
         if use_spot is not None:
-            new_resources.use_spot = use_spot
+            override_params['use_spot'] = use_spot
         if disk_size is not None:
-            new_resources.disk_size = disk_size
+            override_params['disk_size'] = disk_size
+
+        assert len(task.resources) == 1
+        old_resources = list(task.resources)[0]
+        new_resources = old_resources.copy(**override_params)
         task.set_resources({new_resources})
+
         if num_nodes is not None:
             task.num_nodes = num_nodes
         if name is not None:
@@ -613,7 +627,7 @@ def launch(
               '-d',
               default=False,
               is_flag=True,
-              help='If True, run setup first (blocking), '
+              help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
 @click.option(
     '--workdir',
@@ -660,21 +674,6 @@ def exec(
     specification. Otherwise, it is interpreted as a bash command.
 
     \b
-    Execution and scheduling behavior:
-    \b
-    - If ENTRYPOINT is a YAML, or if it is a command with a resource demand
-      flag specified (`--gpus` or `--num-nodes`): it is treated as a proper
-      task that will undergo job queue scheduling, respecting its resource
-      requirement. It can be executed on any node of th cluster with enough
-      resources.
-    - Otherwise (if ENTRYPOINT is a command and no resource demand flag
-      specified), it is treated as an inline command, to be executed only on
-      the head node of the cluster. This is useful for monitoring commands
-      (e.g., gpustat, htop).
-
-    In both cases, the commands are run under the task's workdir (if specified).
-
-    \b
     Actions performed by `sky exec`:
     \b
     - workdir syncing, if:
@@ -689,6 +688,18 @@ def exec(
     skipped.  If any of those specifications changed, this command will not
     reflect those changes.  To ensure a cluster's setup is up to date, use `sky
     launch` instead.
+
+    \b
+    Execution and scheduling behavior:
+    \b
+    - The YAML task or the command will undergo job queue scheduling,
+      respecting any specified resource requirement. It can be executed on any
+      node of th cluster with enough resources.
+    - The YAML task or the command is run under the task's workdir (if
+      specified).
+    - The task/command is run non-interactively (without a pseudo-terminal or
+      pty), so interactive commands such as `htop` do not work. Use `ssh
+      my_cluster` instead.
 
     Typical workflow:
 
@@ -708,21 +719,18 @@ def exec(
         # Do "sky launch" again if anything other than Task.run is modified:
         sky launch -c mycluster app.yaml
 
-    Advanced use cases:
-
     .. code-block:: bash
 
         # Pass in commands for execution
-        sky exec mycluster -- echo Hello World
-
+        sky exec mycluster python train_cpu.py
+        sky exec mycluster --gpus=V100:1 python train_gpu.py
     """
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster}\' not found.  '
+        raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
-    resource_demand_specified = gpus is not None or num_nodes is not None
 
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
@@ -737,30 +745,13 @@ def exec(
             task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
 
-            if isinstance(backend, backends.CloudVmRayBackend):
-                # Run inline commands directly on head node if the resources are
-                # not set. User should take the responsibility to not overload
-                # the cluster.
-                if not resource_demand_specified:
-                    if workdir is not None:
-                        backend.sync_workdir(handle, workdir)
-                    backend.run_on_head(
-                        handle,
-                        entrypoint,
-                        stream_logs=True,
-                        # Allocate a pseudo-terminal to disable output buffering
-                        ssh_mode=backend_utils.SshMode.INTERACTIVE,
-                        under_remote_workdir=True,
-                        redirect_stdout_stderr=False)
-                    return
-
         # Override.
         if workdir is not None:
             task.workdir = workdir
         if gpus is not None:
             assert len(task.resources) == 1
-            copied = copy.deepcopy(list(task.resources)[0])
-            copied.set_accelerators(gpus)
+            old_resources = list(task.resources)[0]
+            copied = old_resources.copy(accelerators=gpus)
             task.set_resources({copied})
         if num_nodes is not None:
             task.num_nodes = num_nodes
@@ -913,7 +904,10 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
         else:
-            click.secho(f'Status failed for job {job_id}', fg='red')
+            click.secho(
+                f'Job {job_id} status failed with status '
+                f'{job_status.value}',
+                fg='red')
             sys.exit(1)
     else:
         backend.tail_logs(handle, job_id)
@@ -948,8 +942,10 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     # Check the status of the cluster.
     cluster_status = backend_utils.get_cluster_status_with_refresh(cluster)
     if cluster_status != global_user_state.ClusterStatus.UP:
-        click.secho(f'Cluster {cluster} (status: {cluster_status}) '
-                    'is not up...skipped.')
+        click.secho(
+            f'Cluster {cluster} (status: {cluster_status}) '
+            'is not up...skipped.',
+            fg='yellow')
         return
 
     if all:
@@ -1321,7 +1317,9 @@ def _terminate_or_stop_clusters(
         verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
         operation = f'{verb} auto-stop on'
     plural = 's' if len(to_down) > 1 else ''
-    progress = rich_progress.Progress(transient=True)
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
     task = progress.add_task(
         f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
         total=len(to_down))
@@ -1330,28 +1328,30 @@ def _terminate_or_stop_clusters(
         name = record['name']
         handle = record['handle']
         backend = backend_utils.get_backend_from_handle(handle)
+        success_progress = False
         if (isinstance(backend, backends.CloudVmRayBackend) and
                 handle.launched_resources.use_spot and not terminate):
             # Disable spot instances to be stopped.
             # TODO(suquark): enable GCP+spot to be stopped in the future.
             message = (
-                f'{colorama.Fore.GREEN}Stopping cluster {name}... skipped.'
+                f'{colorama.Fore.YELLOW}Stopping cluster {name}... skipped.'
                 f'{colorama.Style.RESET_ALL}\n'
-                '  The spot instances may lose attached volumes.\n'
-                '  To terminate the cluster, run: '
+                '  Stopping spot instances is not supported as the attached '
+                'disks will be lost.\n'
+                '  To terminate the cluster instead, run: '
                 f'{colorama.Style.BRIGHT}sky down {name}'
                 f'{colorama.Style.RESET_ALL}')
         elif idle_minutes_to_autostop is not None:
             cluster_status = backend_utils.get_cluster_status_with_refresh(name)
             if not isinstance(backend, backends.CloudVmRayBackend):
-                message = (f'{colorama.Fore.GREEN}{operation} cluster '
+                message = (f'{colorama.Fore.YELLOW}{operation} cluster '
                            f'{name}... skipped{colorama.Style.RESET_ALL}'
                            '\n  Auto-stopping is only supported by backend: '
                            f'{backends.CloudVmRayBackend.NAME}')
             else:
                 if cluster_status != global_user_state.ClusterStatus.UP:
                     message = (
-                        f'{colorama.Fore.GREEN}{operation} cluster '
+                        f'{colorama.Fore.YELLOW}{operation} cluster '
                         f'{name} (status: {cluster_status.value})... skipped'
                         f'{colorama.Style.RESET_ALL}'
                         '\n  Auto-stop can only be run on '
@@ -1369,6 +1369,7 @@ def _terminate_or_stop_clusters(
                             f'{colorama.Style.BRIGHT}'
                             f'sky autostop {name} --cancel'
                             f'{colorama.Style.RESET_ALL}')
+                    success_progress = True
         else:
             success = backend.teardown(handle, terminate=terminate, purge=purge)
             if success:
@@ -1379,6 +1380,7 @@ def _terminate_or_stop_clusters(
                     message += ('\n  To restart the cluster, run: '
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
+                success_progress = True
             else:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
@@ -1386,7 +1388,8 @@ def _terminate_or_stop_clusters(
                     f'{colorama.Style.RESET_ALL}')
         progress.stop()
         click.echo(message)
-        progress.update(task, advance=1)
+        if success_progress:
+            progress.update(task, advance=1)
         progress.start()
 
     with progress:
@@ -1658,11 +1661,11 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
         return ', '.join([str(e) for e in lst])
 
     def _output():
-        gpu_table = util_lib.create_table(
+        gpu_table = log_utils.create_table(
             ['NVIDIA_GPU', 'AVAILABLE_QUANTITIES'])
-        tpu_table = util_lib.create_table(
+        tpu_table = log_utils.create_table(
             ['GOOGLE_TPU', 'AVAILABLE_QUANTITIES'])
-        other_table = util_lib.create_table(
+        other_table = log_utils.create_table(
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         if gpu_name is None:
@@ -1701,7 +1704,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
             yield 'to show available accelerators.'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
-            accelerator_table = util_lib.create_table([
+            accelerator_table = log_utils.create_table([
                 'GPU',
                 'QTY',
                 'CLOUD',
@@ -1745,7 +1748,7 @@ def storage():
 def storage_ls():
     """List storage objects created."""
     storage_stat = global_user_state.get_storage()
-    storage_table = util_lib.create_table([
+    storage_table = log_utils.create_table([
         'NAME',
         'CREATED',
         'STORE',
@@ -1759,7 +1762,7 @@ def storage_ls():
             # NAME
             row['name'],
             # LAUNCHED
-            cli_utils.readable_time_duration(launched_at),
+            log_utils.readable_time_duration(launched_at),
             # CLOUDS
             ', '.join([s.value for s in row['handle'].sky_stores.keys()]),
             # COMMAND

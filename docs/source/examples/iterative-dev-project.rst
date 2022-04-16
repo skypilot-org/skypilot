@@ -30,10 +30,8 @@ To run a command or a script on the cluster, use :code:`sky exec`:
 
   $ # Run a script inside the workdir.
   $ # Workdir contents are synced to the cluster (~/sky_workdir/).
-  $ sky exec dev -- python train.py
-
-  $ # Run a command.
-  $ sky exec dev -- gpustat -i
+  $ sky exec dev -- python train_cpu.py
+  $ sky exec dev --gpus=V100:1 -- python train_gpu.py
 
 Alternatively, the user can directly :code:`ssh` into the cluster's nodes and run commands:
 
