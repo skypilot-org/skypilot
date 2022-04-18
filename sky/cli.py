@@ -774,8 +774,12 @@ def exec(
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
+@cli.group(cls=_NaturalOrderGroup)
+def benchmark():
+    """Benchmark related commands."""
+    pass
 
-@cli.command(cls=_DocumentedCodeCommand)
+@benchmark.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 @click.option(
     '--workdir',
@@ -816,7 +820,7 @@ def exec(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-def benchmark(
+def benchmark_launch(
     entrypoint: str,
     workdir: Optional[str],
     cloud: Optional[str],
@@ -914,6 +918,12 @@ def benchmark(
         for dag, cluster_name in zip(dags, cluster_names)
     ])
     autostop(tuple(cluster_names), all=False, idle_minutes=0, cancel=False)
+
+
+@benchmark.command('report', cls=_DocumentedCodeCommand)
+def benchmark_report():
+    """Generate a report of benchmark results."""
+    pass
 
 
 @cli.command()
