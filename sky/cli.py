@@ -794,12 +794,11 @@ def exec(
     required=False,
     type=str,
     help='The region to use. If specified, override the "resources.region".')
-@click.option(
-    '--gpus',
-    multiple=True,
-    required=True,
-    type=str,
-    help='The GPU types to benchmark.')
+@click.option('--gpus',
+              multiple=True,
+              required=True,
+              type=str,
+              help='The GPU types to benchmark.')
 @click.option('--name',
               '-n',
               required=False,
@@ -866,7 +865,7 @@ def benchmark(
     cluster_names = []
     dags = []
     for gpu in gpus:
-        cluster_name = f'benchmark-{gpu}' # FIXME
+        cluster_name = f'benchmark-{gpu}'  # FIXME
         override_params['accelerators'] = gpu
         with sky.Dag() as dag:
             if is_yaml:
@@ -900,7 +899,8 @@ def benchmark(
         dags.append(dag)
         cluster_names.append(cluster_name)
 
-    import ray # pylint: disable=import-outside-toplevel
+    import ray  # pylint: disable=import-outside-toplevel
+
     @ray.remote
     def _launch_benchmark(dag, cluster_name):
         sky.launch(dag,
