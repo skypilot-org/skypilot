@@ -11,6 +11,7 @@ from sky.resources import Resources
 from sky.task import Task
 from sky.optimizer import Optimizer, OptimizeTarget
 from sky.data import Storage, StoreType
+from sky.skylet import log
 
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
@@ -37,4 +38,5 @@ __all__ = [
     '__root_dir__',
     'Storage',
     'StoreType',
+    'log',
 ]
