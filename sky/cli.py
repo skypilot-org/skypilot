@@ -774,10 +774,12 @@ def exec(
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
+
 @cli.group(cls=_NaturalOrderGroup)
 def benchmark():
     """Benchmark related commands."""
     pass
+
 
 @benchmark.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
