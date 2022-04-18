@@ -775,6 +775,147 @@ def exec(
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
+@cli.command(cls=_DocumentedCodeCommand)
+@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.option(
+    '--workdir',
+    required=False,
+    type=click.Path(exists=True, file_okay=False),
+    help=('If specified, sync this dir to the remote working directory, '
+          'where the task will be invoked. '
+          'Overrides the "workdir" config in the YAML if both are supplied.'))
+@click.option(
+    '--cloud',
+    required=False,
+    type=str,
+    help='The cloud to use. If specified, override the "resources.cloud".')
+@click.option(
+    '--region',
+    required=False,
+    type=str,
+    help='The region to use. If specified, override the "resources.region".')
+@click.option(
+    '--gpus',
+    multiple=True,
+    required=True,
+    type=str,
+    help='The GPU types to benchmark.')
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help=('Task name. Overrides the "name" '
+                    'config in the YAML if both are supplied.'))
+@click.option('--disk-size',
+              default=None,
+              type=int,
+              required=False,
+              help=('OS disk size in GBs.'))
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def benchmark(
+    entrypoint: str,
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    gpus: Optional[str],
+    name: Optional[str],
+    disk_size: Optional[int],
+    yes: bool,
+):
+    """Benchmark a task on different GPU types."""
+    entrypoint = ' '.join(entrypoint)
+    if entrypoint:
+        is_yaml = _check_yaml(entrypoint)
+        if is_yaml:
+            # Treat entrypoint as a yaml.
+            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+        else:
+            # Treat entrypoint as a bash command.
+            click.secho('Task from command: ', fg='yellow', nl=False)
+        click.secho(entrypoint, bold=True)
+    else:
+        entrypoint = None
+        is_yaml = False
+
+    click.secho('Benchmarking: ', fg='yellow', nl=False)
+    click.secho(f'{", ".join(gpus)}', bold=True)
+
+    case_insensitive_gpus = [g.casefold() for g in gpus]
+    if len(case_insensitive_gpus) != len(set(case_insensitive_gpus)):
+        raise click.BadParameter('GPU types must be unique.')
+
+    if not yes:
+        plural = 's' if len(gpus) > 1 else ''
+        prompt = f'Launching {len(gpus)} cluster{plural}. Proceed?'
+        click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    backend = backends.CloudVmRayBackend()
+    override_params = {}
+    if cloud is not None:
+        override_params['cloud'] = _get_cloud(cloud)
+    if region is not None:
+        override_params['region'] = region
+    if disk_size is not None:
+        override_params['disk_size'] = disk_size
+
+    cluster_names = []
+    dags = []
+    for gpu in gpus:
+        cluster_name = f'benchmark-{gpu}' # FIXME
+        override_params['accelerators'] = gpu
+        with sky.Dag() as dag:
+            if is_yaml:
+                task = sky.Task.from_yaml(entrypoint)
+            else:
+                task = sky.Task(name='sky-cmd', run=entrypoint)
+                task.set_resources({sky.Resources()})
+            # Override.
+            if workdir is not None:
+                task.workdir = workdir
+
+            task_name = task.name if name is None else name
+            task.name = f'benchmark-{task_name}-{gpu}'
+
+            assert len(task.resources) == 1
+            old_resources = list(task.resources)[0]
+            new_resources = old_resources.copy(**override_params)
+            task.set_resources({new_resources})
+
+            # Create a Sky Storage to store the benchmark logs.
+            storage_obj = data.Storage(name=cluster_name,
+                                       source=None,
+                                       persistent=True,
+                                       mode='MOUNT')
+            if task.storage_mounts is None:
+                task.storage_mounts = {}
+            new_storage_mounts = task.storage_mounts.copy()
+            new_storage_mounts['/benchmark-logs'] = storage_obj
+            task.set_storage_mounts(new_storage_mounts)
+
+        dags.append(dag)
+        cluster_names.append(cluster_name)
+
+    import ray # pylint: disable=import-outside-toplevel
+    @ray.remote
+    def _launch_benchmark(dag, cluster_name):
+        sky.launch(dag,
+                   stream_logs=False,
+                   detach_run=True,
+                   backend=backend,
+                   cluster_name=cluster_name)
+
+    ray.get([
+        _launch_benchmark.remote(dag, cluster_name)
+        for dag, cluster_name in zip(dags, cluster_names)
+    ])
+    autostop(tuple(cluster_names), all=False, idle_minutes=0, cancel=False)
+
+
 @cli.command()
 @click.option('--all',
               '-a',
