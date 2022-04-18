@@ -989,6 +989,12 @@ def run_in_parallel(func: Callable, args: List[Any]):
                 f'Command failed with code {e.returncode}: {e.command}')
             logger.error(e.error_msg)
             sys.exit(e.returncode)
+        except KeyboardInterrupt:
+            print()
+            logger.error(
+                f'{colorama.Fore.RED}Interrupted by user.{colorama.Style.RESET_ALL}'
+            )
+            sys.exit(1)
 
 
 def run(cmd, **kwargs):

@@ -220,7 +220,7 @@ def run_bash_command_with_log(bash_command: str,
             # Do not use shell=True because it will cause the environment
             # set in this task visible to other tasks. shell=False requires
             # the cmd to be a list.
-            f'stdbuf -o0 -e0 /bin/bash -i {script_path}',
+            f'/bin/bash -i {script_path}',
             log_path,
             stream_logs=stream_logs,
             with_ray=with_ray,
