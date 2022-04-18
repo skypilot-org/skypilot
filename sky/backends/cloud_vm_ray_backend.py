@@ -1884,8 +1884,6 @@ class CloudVmRayBackend(backends.Backend):
 
         try:
             if not detach_run:
-                # Wait for the job being sucessfully submitted to ray job.
-                time.sleep(1)
                 # Sky logs. Not using subprocess.run since it will make the
                 # ssh keep connected after ctrl-c.
                 self.tail_logs(handle, job_id)
