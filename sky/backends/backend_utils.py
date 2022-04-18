@@ -905,23 +905,46 @@ def run_command_on_ip_via_ssh(
         return proc.returncode, '', ''
     if isinstance(cmd, list):
         cmd = ' '.join(cmd)
+
+    log_dir = os.path.expanduser(os.path.dirname(log_path))
+    os.makedirs(log_dir, exist_ok=True)
     # We need this to correctly run the cmd, and get the output.
-    command = base_ssh_command + [
+    command = [
         'bash',
         '--login',
         '-c',
         # Need this `-i` option to make sure `source ~/.bashrc` work.
         '-i',
     ]
+
     command += [
         shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                     f'PYTHONWARNINGS=ignore && ({cmd})'),
+        '2>&1',
     ]
-    return log_lib.run_with_log(command,
+    if not process_stream and ssh_mode == SshMode.NON_INTERACTIVE:
+        command += [
+            # A hack to remove the following bash warnings (twice):
+            #  bash: cannot set terminal process group
+            #  bash: no job control in this shell
+            '| stdbuf -o0 tail -n +5',
+        ]
+
+    command = ' '.join(command)
+    command = base_ssh_command + [shlex.quote(command)]
+
+    if not process_stream:
+        if stream_logs:
+            command += [f'| tee {log_path}']
+        else:
+            command += [f'> {log_path}']
+
+    return log_lib.run_with_log(' '.join(command),
                                 log_path,
                                 stream_logs,
                                 process_stream=process_stream,
-                                require_outputs=require_outputs)
+                                require_outputs=require_outputs,
+                                shell=True)
 
 
 def handle_returncode(returncode: int,
