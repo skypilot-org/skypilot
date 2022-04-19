@@ -118,4 +118,4 @@ def _get_price(cluster_status):
 
 def _is_pending_autostop(cluster_status):
     return _get_autostop(cluster_status) != '-' and _get_status(
-        cluster_status) == 'UP'
+        cluster_status) != 'STOPPED'
