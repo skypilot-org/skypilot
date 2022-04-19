@@ -30,7 +30,6 @@ from sky import clouds
 from sky import global_user_state
 from sky import exceptions
 from sky import sky_logging
-from sky.adaptors import azure
 from sky.skylet import log_lib
 
 if typing.TYPE_CHECKING:
@@ -180,7 +179,7 @@ class SSHConfigHelper(object):
     """Helper for handling local SSH configuration."""
 
     ssh_conf_path = '~/.ssh/config'
-    ssh_multinode_path = '~/.sky/generated/ssh/{}'
+    ssh_multinode_path = SKY_USER_FILE_PATH + '/ssh/{}'
 
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
@@ -354,7 +353,7 @@ class SSHConfigHelper(object):
                     sky_autogen_comment, host_name, worker_ips[idx], username,
                     key_path)
 
-        # All workers go to ~/.sky/generated/ssh/{cluster_name}
+        # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
             if line.strip() in host_lines:
                 idx = host_lines.index(line.strip())
@@ -546,24 +545,11 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
-        if dryrun:
-            azure_subscription_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
-        else:
-            try:
-                azure_subscription_id = azure.get_subscription_id()
-                if not azure_subscription_id:
-                    raise ValueError  # The error message will be replaced.
-            except ModuleNotFoundError as e:
-                raise ModuleNotFoundError('Unable to import azure python '
-                                          'module. Is azure-cli python package '
-                                          'installed? Try pip install '
-                                          '.[azure] in the sky repo.') from e
-            except Exception as e:
-                raise RuntimeError(
-                    'Failed to get subscription id from azure cli. '
-                    'Make sure you have logged in and run this Azure '
-                    'cli command: "az account set -s <subscription_id>".'
-                ) from e
+        azure_subscription_id = cloud.get_project_id(dryrun=dryrun)
+
+    gcp_project_id = None
+    if isinstance(cloud, clouds.GCP):
+        gcp_project_id = cloud.get_project_id(dryrun=dryrun)
 
     assert cluster_name is not None
 
@@ -588,6 +574,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region}',
+                # GCP only.
+                'gcp_project_id': gcp_project_id,
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
@@ -609,11 +597,11 @@ def write_cluster_config(to_provision: 'resources.Resources',
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
-    _add_ssh_to_cluster_config(cloud, yaml_path)
+    _add_auth_to_cluster_config(cloud, yaml_path)
     if resources_vars.get('tpu_type') is not None:
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
-            tpu_name = cluster_name
+            tpu_name = generate_tpu_name(cluster_name)
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
         scripts = tuple(
@@ -624,7 +612,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                     'tpu_name': tpu_name,
                 }),
                 # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in ~/.sky/generated/ to be consistent
+                # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
                 # with cluster yamls.
                 output_path=os.path.join(user_file_dir, template_name).replace(
                     '.sh.j2', f'.{cluster_name}.sh'),
@@ -636,7 +624,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def _add_ssh_to_cluster_config(cloud_type, cluster_config_file):
+def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
     """Adds SSH key info to the cluster config.
 
     This function's output removes comments included in the jinja2 template.
@@ -1072,6 +1060,10 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
+def generate_tpu_name(cluster_name):
+    return f'{cluster_name}-sky-{uuid.uuid4().hex[:4]}'
+
+
 def get_node_ips(
         cluster_yaml: str,
         expected_num_nodes: int,
@@ -1175,7 +1167,7 @@ def _ping_cluster_or_set_to_stopped(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def get_status_from_cluster_name(
+def get_cluster_status_with_refresh(
         cluster_name: str) -> Optional[global_user_state.ClusterStatus]:
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:

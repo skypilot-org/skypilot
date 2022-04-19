@@ -52,6 +52,12 @@ class JobUpdateEvent(SkyletEvent):
     """Skylet event for updating job status."""
     EVENT_INTERVAL_SECONDS = 20
 
+    # Only update status of the jobs after this many seconds of job submission,
+    # to avoid race condition with `ray job` to make sure it job has been
+    # correctly updated.
+    # TODO(zhwu): This number should be tuned based on heuristics.
+    _SUBMITTED_GAP_SECONDS = 2
+
     def __init__(self):
         super().__init__()
         self.ray_yaml_path = os.path.abspath(
@@ -61,7 +67,8 @@ class JobUpdateEvent(SkyletEvent):
         with open(self.ray_yaml_path, 'r') as f:
             config = yaml.safe_load(f)
             cluster_name = config['cluster_name']
-        job_lib.update_status(cluster_name)
+        job_lib.update_status(cluster_name,
+                              submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
 
 
 class AutostopEvent(SkyletEvent):

@@ -1,5 +1,4 @@
 """Google Cloud Platform."""
-import copy
 import json
 import os
 import subprocess
@@ -9,6 +8,10 @@ from google import auth
 
 from sky import clouds
 from sky.clouds import service_catalog
+
+DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
+    '~/.config/gcloud/'
+    'application_default_credentials.json')
 
 
 def _run_output(cmd):
@@ -232,10 +235,11 @@ class GCP(clouds.Cloud):
                     return ([], fuzzy_candidate_list)
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
-        r = copy.deepcopy(resources)
-        r.cloud = GCP()
-        r.instance_type = GCP.get_default_instance_type()
-        r.accelerators = accelerator_match
+        r = resources.copy(
+            cloud=GCP(),
+            instance_type=GCP.get_default_instance_type(),
+            accelerators=accelerator_match,
+        )
         return ([r], fuzzy_candidate_list)
 
     @classmethod
@@ -258,13 +262,15 @@ class GCP(clouds.Cloud):
                     '~/.config/gcloud/credentials.db'
             ]:
                 assert os.path.isfile(os.path.expanduser(file))
+            # Check if application default credentials are set.
+            self.get_project_id()
             # Calling `auth.default()` ensures the GCP client library works,
             # which is used by Ray Autoscaler to launch VMs.
             auth.default()
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
         except (AssertionError, auth.exceptions.DefaultCredentialsError,
-                subprocess.CalledProcessError):
+                subprocess.CalledProcessError, FileNotFoundError, KeyError):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
                 'GCP tools are not installed or credentials are not set. '
@@ -290,3 +296,32 @@ class GCP(clouds.Cloud):
         # TODO(zhwu): rsync_exclude here is unsafe as it may exclude the folder
         # from other file_mounts as well in ray yaml.
         return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
+
+    def instance_type_exists(self, instance_type):
+        return instance_type in self._ON_DEMAND_PRICES.keys()
+
+    def region_exists(self, region: str) -> bool:
+        return service_catalog.region_exists(region, 'gcp')
+
+    @classmethod
+    def get_project_id(cls, dryrun: bool = False) -> str:
+        # TODO(zhwu): change the project id fetching with the following command
+        # `gcloud info --format='value(config.project)'`
+        if dryrun:
+            return 'dryrun-project-id'
+        if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
+            gcp_credential_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+        else:
+            gcp_credential_path = DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
+        if not os.path.exists(gcp_credential_path):
+            raise FileNotFoundError(f'No GCP credentials found at '
+                                    f'{gcp_credential_path}. Please set the '
+                                    f'GOOGLE_APPLICATION_CREDENTIALS '
+                                    f'environment variable to point to '
+                                    f'the path of your credentials file.')
+
+        with open(gcp_credential_path, 'r') as fp:
+            gcp_credentials = json.load(fp)
+        project_id = gcp_credentials.get('quota_project_id',
+                                         None) or gcp_credentials['project_id']
+        return project_id

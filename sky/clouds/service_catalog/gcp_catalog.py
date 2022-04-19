@@ -15,7 +15,11 @@ if typing.TYPE_CHECKING:
 
 _df = common.read_catalog('gcp.csv')
 
-_DEFAULT_REGION = 'us-central1'
+_TPU_REGIONS = [
+    'us-central1',
+    'europe-west4',
+    'asia-east1',
+]
 
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
@@ -37,6 +41,17 @@ _A100_HOST_MEMORY = {
 }
 
 
+def instance_type_exists(instance_type: str) -> bool:
+    """Check the existence of the instance type."""
+    del instance_type
+    # Handled in gcp.py. We don't have a proper catalog right now.
+    assert False, 'Internal logic error: this function should not be called'
+
+
+def region_exists(region: str) -> bool:
+    return common.region_exists_impl(_df, region)
+
+
 def _get_accelerator(
     df: pd.DataFrame,
     accelerator: str,
@@ -55,8 +70,14 @@ def get_accelerator_hourly_cost(accelerator: str,
                                 region: Optional[str] = None,
                                 use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
+    # NOTE: As of 2022/4/13, Prices of TPU v3-64 to v3-2048 are not available on
+    # https://cloud.google.com/tpu/pricing. We put estimates in gcp catalog.
     if region is None:
-        region = _DEFAULT_REGION
+        for tpu_region in _TPU_REGIONS:
+            df = _get_accelerator(_df, accelerator, count, tpu_region)
+            if len(set(df['Price'])) == 1:
+                region = tpu_region
+                break
     df = _get_accelerator(_df, accelerator, count, region)
     assert len(set(df['Price'])) == 1, df
     if not use_spot:

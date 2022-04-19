@@ -1,11 +1,11 @@
 """Azure."""
-import copy
 import json
 import os
 import subprocess
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky.adaptors import azure
 from sky.clouds import service_catalog
 
 
@@ -171,18 +171,18 @@ class Azure(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
-            resources.accelerators = None
+            resources = resources.copy(accelerators=None)
             return ([resources], fuzzy_candidate_list)
 
         def _make(instance_list):
             resource_list = []
             for instance_type in instance_list:
-                r = copy.deepcopy(resources)
-                r.cloud = Azure()
-                r.instance_type = instance_type
-                # Setting this to None as Azure doesn't separately bill / attach
-                # the accelerators.  Billed as part of the VM type.
-                r.accelerators = None
+                r = resources.copy(
+                    cloud=Azure(),
+                    instance_type=instance_type,
+                    # Setting this to None as Azure doesn't separately bill /
+                    # attach the accelerators.  Billed as part of the VM type.
+                    accelerators=None)
                 resource_list.append(r)
             return resource_list
 
@@ -240,3 +240,30 @@ class Azure(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
         return {'~/.azure': '~/.azure'}, []
+
+    def instance_type_exists(self, instance_type):
+        return service_catalog.instance_type_exists(instance_type,
+                                                    clouds='azure')
+
+    def region_exists(self, region: str) -> bool:
+        return service_catalog.region_exists(region, 'azure')
+
+    @classmethod
+    def get_project_id(cls, dryrun: bool = False) -> str:
+        if dryrun:
+            return 'dryrun-project-id'
+        try:
+            azure_subscription_id = azure.get_subscription_id()
+            if not azure_subscription_id:
+                raise ValueError  # The error message will be replaced.
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError('Unable to import azure python '
+                                      'module. Is azure-cli python package '
+                                      'installed? Try pip install '
+                                      '.[azure] in the sky repo.') from e
+        except Exception as e:
+            raise RuntimeError(
+                'Failed to get subscription id from azure cli. '
+                'Make sure you have logged in and run this Azure '
+                'cli command: "az account set -s <subscription_id>".') from e
+        return azure_subscription_id

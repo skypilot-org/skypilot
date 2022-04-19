@@ -10,8 +10,12 @@ Install Sky using pip:
   $ # Sky requires python >= 3.6 and < 3.10.
   $ git clone ssh://git@github.com/sky-proj/sky.git
   $ cd sky
-  $ pip install ".[all]"
 
+  $ # Recommended: use a new conda env to avoid package conflicts.
+  $ conda create -n sky python=3.7
+  $ conda activate sky
+
+  $ pip install ".[all]"
   $ # To install AWS dependencies only:
   $ # pip install ".[aws]"
 

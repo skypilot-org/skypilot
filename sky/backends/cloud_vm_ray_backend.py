@@ -35,7 +35,10 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
-from sky.skylet import autostop_lib, job_lib, log_lib, log_utils
+from sky.skylet import autostop_lib
+from sky.skylet import job_lib
+from sky.skylet import log_lib
+from sky.skylet.utils import log_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -186,7 +189,8 @@ class RayCodeGen:
             import ray
             import ray.util as ray_util
 
-            from sky.skylet import job_lib, log_utils
+            from sky.skylet import job_lib
+            from sky.skylet.utils import log_utils
 
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
@@ -557,8 +561,8 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if ('Exception Details:' in s.strip() or
-                'InvalidTemplateDeployment' in s.strip())
+            if ('Exception Details:' in s.strip() or 'InvalidTemplateDeployment'
+                in s.strip() or '(ReadOnlyDisabledSubscription)' in s.strip())
         ]
         if not errors:
             logger.info('====== stdout ======')
@@ -573,7 +577,11 @@ class RetryingVmProvisioner(object):
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        self._blocked_regions.add(region.name)
+        if any('(ReadOnlyDisabledSubscription)' in s for s in errors):
+            for r in sky.Azure.regions():
+                self._blocked_regions.add(r.name)
+        else:
+            self._blocked_regions.add(region.name)
 
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
                                    stderr) -> None:
@@ -633,6 +641,12 @@ class RetryingVmProvisioner(object):
                         zones = None
                     else:
                         assert False, cloud
+                    if region != prev_resources.region:
+                        raise ValueError(
+                            f'Region mismatch. The region in '
+                            f'{handle.cluster_yaml} '
+                            f'has been changed from {prev_resources.region} '
+                            f'to {region}.')
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -643,13 +657,20 @@ class RetryingVmProvisioner(object):
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
                 region.set_zones(zones)
             # Get the *previous* cluster status.
-            cluster_status = backend_utils.get_status_from_cluster_name(
+            cluster_status = backend_utils.get_cluster_status_with_refresh(
                 cluster_name)
             if cluster_status != global_user_state.ClusterStatus.UP:
                 logger.info(
                     f'Cluster {cluster_name!r} (status: {cluster_status.value})'
-                    f' was previously launched in {cloud} ({region.name}). '
-                    'Relaunching in that region.')
+                    f' was previously launched in {cloud} '
+                    f'({region.name}). Relaunching in that region.')
+            # This should be handled in the
+            # _check_task_resources_smaller_than_cluster function.
+            assert (to_provision.region is None or
+                    region.name == to_provision.region), (
+                        f'Cluster {cluster_name!r} was previously launched in '
+                        f'{cloud} ({region.name}). It does not match the '
+                        f'required region {to_provision.region}.')
             # TODO(zhwu): The cluster being killed by cloud provider should
             # be tested whether re-launching a cluster killed spot instance
             # will recover the data.
@@ -699,7 +720,7 @@ class RetryingVmProvisioner(object):
 
             assert cluster_status == global_user_state.ClusterStatus.INIT
             message = (f'Failed to launch cluster {cluster_name!r} '
-                       f'(previous status: {cluster_status.value})'
+                       f'(previous status: {cluster_status.value}) '
                        f'with the original resources: {to_provision}.')
             logger.error(message)
             # We attempted re-launching a previously INIT cluster with the
@@ -721,6 +742,10 @@ class RetryingVmProvisioner(object):
                 accelerators=to_provision.accelerators,
                 use_spot=to_provision.use_spot,
         ):
+            # Do not retry on region if it's not in the requested region.
+            if (to_provision.region is not None and
+                    region.name != to_provision.region):
+                continue
             yield (region, zones)
 
     def _try_provision_tpu(self, to_provision: 'resources_lib.Resources',
@@ -794,7 +819,7 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         # Get previous cluster status
-        prev_cluster_status = backend_utils.get_status_from_cluster_name(
+        prev_cluster_status = backend_utils.get_cluster_status_with_refresh(
             cluster_name)
 
         self._clear_blocklist()
@@ -836,7 +861,7 @@ class RetryingVmProvisioner(object):
                 cluster_yaml=cluster_config_file,
                 launched_nodes=num_nodes,
                 # OK for this to be shown in CLI as status == INIT.
-                launched_resources=to_provision,
+                launched_resources=to_provision.copy(region=region.name),
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
 
@@ -859,6 +884,9 @@ class RetryingVmProvisioner(object):
                 self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 cluster_name = config_dict['cluster_name']
+                config_dict['launched_resources'] = to_provision.copy(
+                    region=region.name)
+                config_dict['launched_nodes'] = num_nodes
                 plural = '' if num_nodes == 1 else 's'
                 logger.info(f'{fore.GREEN}Successfully provisioned or found'
                             f' existing VM{plural}.{style.RESET_ALL}')
@@ -907,9 +935,9 @@ class RetryingVmProvisioner(object):
             CloudVmRayBackend().teardown_no_lock(handle,
                                                  terminate=need_terminate)
 
-        message = ('Failed to acquire resources in all regions/zones'
-                   f' (requested {to_provision}).'
-                   ' Try changing resource requirements or use another cloud.')
+        message = ('Failed to acquire resources in all regions/zones of '
+                   f'{to_provision.cloud}. '
+                   'Try changing resource requirements or use another cloud.')
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
 
@@ -1053,8 +1081,6 @@ class RetryingVmProvisioner(object):
                     auth_config=task.auth_config)
                 if dryrun:
                     return
-                config_dict['launched_resources'] = to_provision
-                config_dict['launched_nodes'] = num_nodes
             except exceptions.ResourcesUnavailableError as e:
                 if e.no_retry:
                     raise e
@@ -1069,7 +1095,7 @@ class RetryingVmProvisioner(object):
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
                     f'{to_provision}. Trying other launchable resources '
-                    f'(if any)...{style.RESET_ALL}')
+                    f'(if any).{style.RESET_ALL}')
                 if not cluster_exists:
                     # Add failed resources to the blocklist, only when it
                     # is in fallback mode.
@@ -1124,6 +1150,7 @@ class CloudVmRayBackend(backends.Backend):
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
+        _VERSION = 1
 
         def __init__(
                 self,
@@ -1135,6 +1162,7 @@ class CloudVmRayBackend(backends.Backend):
                 launched_resources: Optional['resources_lib.Resources'] = None,
                 tpu_create_script: Optional[str] = None,
                 tpu_delete_script: Optional[str] = None) -> None:
+            self._version = self._VERSION
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
@@ -1142,7 +1170,6 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
             self.tpu_delete_script = tpu_delete_script
-            self._find_cluster_region()
 
         def __repr__(self):
             return (f'ResourceHandle('
@@ -1158,22 +1185,31 @@ class CloudVmRayBackend(backends.Backend):
         def get_cluster_name(self):
             return self.cluster_name
 
-        def _find_cluster_region(self):
+        def _update_cluster_region(self):
+            if self.launched_resources.region is not None:
+                return
+
             config = backend_utils.read_yaml(self.cluster_yaml)
             provider = config['provider']
             cloud = self.launched_resources.cloud
             if cloud.is_same_cloud(sky.Azure()):
-                self.cluster_region = provider['location']
+                region = provider['location']
             elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
                     sky.AWS()):
                 self.cluster_region = provider['region']
             elif cloud.is_same_cloud(sky.Local()):
                 self.cluster_region = 'Local'
 
-        def get_cluster_region(self):
-            if not hasattr(self, 'cluster_region'):
-                self._find_cluster_region()
-            return self.cluster_region
+            self.launched_resources = self.launched_resources.copy(
+                region=region)
+
+        def __setstate__(self, state):
+            version = state.pop('_version', None)
+            if version is None:
+                state.pop('cluster_region', None)
+
+            self.__dict__.update(state)
+            self._update_cluster_region()
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
@@ -1197,14 +1233,25 @@ class CloudVmRayBackend(backends.Backend):
 
         launched_resources = handle.launched_resources
         task_resources = list(task.resources)[0]
+        cluster_name = handle.cluster_name
+
+        # Backward compatibility: the old launched_resources without region info
+        # was handled by ResourceHandle._update_cluster_region.
+        assert launched_resources.region is not None, handle
+
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(launched_resources)):
-            cluster_name = handle.cluster_name
+            if (task_resources.region is not None and
+                    task_resources.region != launched_resources.region):
+                raise exceptions.ResourcesMismatchError(
+                    'Task requested the resources in region '
+                    f'{task_resources.region!r}, but the existed cluster is in '
+                    f'region {launched_resources.region!r}.')
             raise exceptions.ResourcesMismatchError(
                 'Requested resources do not match the existing cluster.\n'
-                f'  Requested: {task.num_nodes}x {task_resources}\n'
-                f'  Existing: {handle.launched_nodes}x '
+                f'  Requested:\t{task.num_nodes}x {task_resources} \n'
+                f'  Existing:\t{handle.launched_nodes}x '
                 f'{handle.launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: sky down {cluster_name}')
@@ -1276,7 +1323,7 @@ class CloudVmRayBackend(backends.Backend):
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status = (
-                    backend_utils.get_status_from_cluster_name(cluster_name))
+                    backend_utils.get_cluster_status_with_refresh(cluster_name))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
             # TODO(suquark): once we have sky on PYPI, we should directly
@@ -1916,8 +1963,6 @@ class CloudVmRayBackend(backends.Backend):
 
         try:
             if not detach_run:
-                # Wait for the job being sucessfully submitted to ray job.
-                time.sleep(1)
                 # Sky logs. Not using subprocess.run since it will make the
                 # ssh keep connected after ctrl-c.
                 self.tail_logs(handle, job_id)
@@ -1958,10 +2003,11 @@ class CloudVmRayBackend(backends.Backend):
         logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                        f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
 
-    def _add_job(self, handle: ResourceHandle, job_name: str) -> int:
+    def _add_job(self, handle: ResourceHandle, job_name: str,
+                 resources_str: str) -> int:
         username = getpass.getuser()
         code = job_lib.JobLibCodeGen.add_job(job_name, username,
-                                             self.run_timestamp)
+                                             self.run_timestamp, resources_str)
         returncode, job_id_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
@@ -1993,7 +2039,15 @@ class CloudVmRayBackend(backends.Backend):
             logger.info('Nothing to run (Task.run not specified).')
             return
 
-        job_id = self._add_job(handle, task.name)
+        task_demand = _get_task_demands_dict(task)
+        if task_demand is None:
+            resources_str = 'CPU:1'
+        else:
+            resources_str = ', '.join(
+                f'{k}:{v}' for k, v in task_demand.items())
+        resources_str = f'{task.num_nodes}x [{resources_str}]'
+        job_id = self._add_job(handle, task.name, resources_str)
+
         # Case: task_lib.Task(run, num_nodes=1)
         if task.num_nodes == 1:
             self._execute_task_one_node(handle, task, job_id, detach_run)
@@ -2148,7 +2202,7 @@ class CloudVmRayBackend(backends.Backend):
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
-        prev_status = backend_utils.get_status_from_cluster_name(
+        prev_status = backend_utils.get_cluster_status_with_refresh(
             handle.cluster_name)
         cluster_name = handle.cluster_name
         if terminate and isinstance(cloud, clouds.Azure):

@@ -282,11 +282,18 @@ class Task:
                     resources['accelerator_args'])
             if resources.get('use_spot') is not None:
                 resources['use_spot'] = resources['use_spot']
+            if resources.get('region') is not None:
+                resources['region'] = resources.pop('region')
             # FIXME: We should explicitly declare all the parameters
             # that are sliding through the **resources
             resources = sky.Resources(**resources)
         else:
             resources = sky.Resources()
+        if resources.accelerators is not None:
+            acc, _ = list(resources.accelerators.items())[0]
+            if acc.startswith('tpu-') and task.num_nodes > 1:
+                raise ValueError('Multi-node TPU cluster not supported. '
+                                 f'Got num_nodes={task.num_nodes}')
         task.set_resources({resources})
         return task
 
@@ -419,8 +426,12 @@ class Task:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
                     # TODO: allow for Storage mounting of different clouds
+                    if storage.source.startswith('s3://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 's3://' + storage.name
                     self.update_file_mounts({
-                        mnt_path: 's3://' + storage.name,
+                        mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.GCS:
                     # Remember to run `gcloud auth application-default login`
@@ -429,8 +440,12 @@ class Task:
                         'echo GOOGLE_APPLICATION_CREDENTIALS='
                         f'{data_transfer_lib.DEFAULT_GCS_CREDENTIALS_PATH} '
                         f'>> ~/.bashrc || true); {self.setup or "true"}')
+                    if storage.source.startswith('gs://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'gs://' + storage.name
                     self.update_file_mounts({
-                        mnt_path: 'gs://' + storage.name,
+                        mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.AZURE:
                     # TODO when Azure Blob is done: sync ~/.azure
