@@ -171,6 +171,7 @@ class RayCodeGen:
         self.job_id = job_id
         self._code = [
             textwrap.dedent(f"""\
+            import getpass
             import io
             import os
             import pathlib
@@ -349,6 +350,12 @@ class RayCodeGen:
         if run_fn is not None:
             script = run_fn({gang_scheduling_id}, ip_list)
 
+        log_path = {log_path!r}
+        log_path = os.path.expanduser(log_path)
+        dirname = os.path.dirname(log_path)
+        os.makedirs(dirname, exist_ok=True)
+        os.system(f"touch {{log_path}} && chmod a+rwx {{log_path}}")
+
         if script is not None:
             node_export_sky_env_vars = (export_sky_env_vars +
                                         'export SKY_NODE_RANK={gang_scheduling_id}\\n')
@@ -356,7 +363,8 @@ class RayCodeGen:
                     .options({name_str}{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(
                         script,
-                        {log_path!r},
+                        log_path,
+                        getpass.getuser(),
                         export_sky_env_vars=node_export_sky_env_vars,
                         stream_logs=True,
                         with_ray=True,
@@ -1893,7 +1901,7 @@ class CloudVmRayBackend(backends.Backend):
         job_submit_cmd = (
             f'ray job submit '
             f'--address=127.0.0.1:8265 --job-id {job_id_hash} --no-wait '
-            f'-- sudo su - {ssh_user} -c {remote_run_file}')
+            f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
         print(job_submit_cmd)
         returncode, a, b = self.run_on_head(handle,
                                             job_submit_cmd,

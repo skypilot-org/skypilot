@@ -4,6 +4,7 @@ This is a remote utility module that provides logging functionality.
 """
 import io
 import os
+import ray
 import selectors
 import subprocess
 import sys
@@ -32,12 +33,15 @@ def redirect_process_output(
     line_processor: Optional[log_utils.LineProcessor] = None
 ) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
-    log_path = os.path.expanduser(log_path)
-    dirname = os.path.dirname(log_path)
-    os.makedirs(dirname, exist_ok=True)
-
     if line_processor is None:
         line_processor = log_utils.LineProcessor()
+
+    try:
+        log_path = os.path.expanduser(log_path)
+        dirname = os.path.dirname(log_path)
+        os.makedirs(dirname, exist_ok=True)
+    except:
+        pass
 
     sel = selectors.DefaultSelector()
     out_io = io.TextIOWrapper(proc.stdout,
@@ -192,6 +196,7 @@ def make_task_bash_script(codegen: str) -> str:
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
+                              username: str,
                               export_sky_env_vars: Optional[str] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False):
@@ -202,12 +207,20 @@ def run_bash_command_with_log(bash_command: str,
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
+        os.system(f'chmod a+rwx {script_path}')
+
+        inner_command = f'/bin/bash -i {script_path}'
+        gpu_list = ray.get_gpu_ids()
+        if len(gpu_list) > 0:
+            gpu_list = [str(gpu_id) for gpu_id in gpu_list]
+            inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(
+                gpu_list) + " " + inner_command
         return run_with_log(
             # Need this `-i` option to make sure `source ~/.bashrc` work.
             # Do not use shell=True because it will cause the environment
             # set in this task visible to other tasks. shell=False requires
             # the cmd to be a list.
-            ['/bin/bash', '-i', script_path],
+            ['sudo', '-H', 'su', '-', username, '-c', inner_command],
             log_path,
             stream_logs=stream_logs,
             with_ray=with_ray,
