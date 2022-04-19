@@ -87,3 +87,9 @@ class Local(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
         return {}, []
+
+    def instance_type_exists(self, instance_type):
+        return True
+
+    def region_exists(self, region: str) -> bool:
+        return True

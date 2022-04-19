@@ -46,17 +46,18 @@ class Resources:
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
-        ips: Optional[List[str]] = None,
         region: Optional[str] = None,
+        ips: Optional[List[str]] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
 
         # Check for Local Config
         if cloud is not None and isinstance(self._cloud, clouds.Local):
-            assert instance_type is None and use_spot is None and \
-            disk_size is None and ips, 'Resources are passed incorrectly ' + \
+            assert instance_type is None and not use_spot and ips, \
+            'Resources are passed incorrectly ' + \
             'to Local/On-Prem.'
+            self.ips = ips
 
         self._region: Optional[str] = None
         self._set_region(region)
@@ -77,7 +78,6 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self.ips = ips
         self._set_accelerators(accelerators, accelerator_args)
 
         self._try_validate_instance_type()
@@ -406,6 +406,7 @@ class Resources:
             use_spot=override.pop('use_spot', self.use_spot),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
+            ips=override.pop('ips', self.ips),
         )
         assert len(override) == 0
         return resources
