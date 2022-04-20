@@ -59,7 +59,7 @@ To get around this, mount the files to a different path, then symlink to them.  
 How to make Sky clusters use my Weights & Biases credentials?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Install the wandb library on your laptop and login to your account via `wandb login`.
+Install the wandb library on your laptop and login to your account via ``wandb login``.
 Then, add the following lines in your task yaml file:
 
 .. code-block:: yaml
