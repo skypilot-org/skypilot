@@ -264,11 +264,11 @@ _TASK_OPTIONS = [
 ]
 
 
-def _override_task_options():
-    """Click command decorator for overriding the task fields."""
+def _add_click_options(options: List[click.Option]):
+    """A decorator for adding a list of click option decorators."""
 
     def _add_options(func):
-        for option in reversed(_TASK_OPTIONS):
+        for option in reversed(options):
             func = option(func)
         return func
 
@@ -540,7 +540,7 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
-@_override_task_options()
+@_add_click_options(_TASK_OPTIONS)
 @click.option('--disk-size',
               default=None,
               type=int,
@@ -674,7 +674,7 @@ def launch(
               is_flag=True,
               help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
-@_override_task_options()
+@_add_click_options(_TASK_OPTIONS)
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
