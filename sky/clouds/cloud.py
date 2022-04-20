@@ -68,7 +68,8 @@ class Cloud:
         raise NotImplementedError
 
     def __init_subclass__(cls) -> None:
-        cls.CLOUD_REGISTRY[cls.__name__.lower()] = cls()
+        if cls.__name__.lower() != 'dummycloud':
+            cls.CLOUD_REGISTRY[cls.__name__.lower()] = cls()
 
     @classmethod
     def from_str(cls, name: str) -> Optional['Cloud']:
