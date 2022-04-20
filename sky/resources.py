@@ -293,6 +293,14 @@ class Resources:
             return False
         # self.cloud == other.cloud
 
+        if (self.region is None) != (other.region is None):
+            # self and other's region should be both None or both not None
+            return False
+        
+        if self.region is not None and self.region != other.region:
+            return False
+        # self.region <= other.region
+
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
             return False
