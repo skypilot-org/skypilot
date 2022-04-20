@@ -56,10 +56,10 @@ To get around this, mount the files to a different path, then symlink to them.  
     ln -s /tmp/tmp.txt ~/code-repo/
 
 
-How to set up W&B in my cloud VMs?
+How to make Sky clusters use my Weights & Biases credentials?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Install the wandb library on your laptop and login to your account.
+Install the wandb library on your laptop and login to your account via `wandb login`.
 Then, add the following lines in your task yaml file:
 
 .. code-block:: yaml
