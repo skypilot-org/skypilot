@@ -628,7 +628,7 @@ def launch(
             else:
                 override_params['region'] = region
         if gpus is not None:
-            if region.lower() == 'none':
+            if gpus.lower() == 'none':
                 override_params['accelerators'] = None
             else:
                 override_params['accelerators'] = gpus
@@ -781,7 +781,7 @@ def exec(
             else:
                 override_params['region'] = region
         if gpus is not None:
-            if region.lower() == 'none':
+            if gpus.lower() == 'none':
                 override_params['accelerators'] = None
             else:
                 override_params['accelerators'] = gpus
