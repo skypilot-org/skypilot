@@ -23,6 +23,8 @@ class Zone(collections.namedtuple('Zone', ['name'])):
 
 class Cloud:
     """A cloud provider."""
+    
+    CLOUD_REGISTRY = dict()
 
     #### Regions/Zones ####
 
@@ -64,6 +66,13 @@ class Cloud:
                     break
         """
         raise NotImplementedError
+
+    def __init_subclass__(cls) -> None:
+        cls.CLOUD_REGISTRY[cls.__name__.lower()] = cls()
+        
+    @classmethod
+    def from_str(cls, name: str) -> Optional['Cloud']:
+        return cls.CLOUD_REGISTRY.get(name.lower())
 
     #### Normal methods ####
 

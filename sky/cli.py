@@ -98,11 +98,12 @@ def _truncate_long_string(s: str, max_length: int = 35) -> str:
 
 def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
     """Check if cloud is registered and return cloud object."""
-    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
+    cloud_obj = clouds.Cloud.from_str(cloud)
+    if cloud is not None and cloud_obj is None:
         raise click.UsageError(
             f'Cloud \'{cloud}\' is not supported. '
-            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
-    return clouds.CLOUD_REGISTRY.get(cloud)
+            f'Supported clouds: {list(clouds.Cloud.CLOUD_REGISTRY.keys())}')
+    return cloud_obj
 
 
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
@@ -203,6 +204,65 @@ def _interactive_node_cli_command(cli_func):
                                  reversed(click_decorators), cli_func)
 
     return decorator
+
+_TASK_OPTIONS = [
+    click.option('--name',
+                '-n',
+                required=False,
+                type=str,
+                help=('Task name. Overrides the "name" '
+                        'config in the YAML if both are supplied.')),
+    click.option(
+        '--workdir',
+        required=False,
+        type=click.Path(exists=True, file_okay=False),
+        help=('If specified, sync this dir to the remote working directory, '
+            'where the task will be invoked. '
+            'Overrides the "workdir" config in the YAML if both are supplied.')),
+    click.option(
+        '--cloud',
+        required=False,
+        type=str,
+        help='The cloud to use. If specified, override the "resources.cloud".'),
+    click.option(
+        '--region',
+        required=False,
+        type=str,
+        help='The region to use. If specified, override the "resources.region".'),
+    click.option(
+        '--gpus',
+        required=False,
+        type=str,
+        help=('Type and number of GPUs to use. Example values: '
+            '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
+            '(fractional counts are supported by the scheduling framework). '
+            'If a new cluster is being launched by this command, this is the '
+            'resources to provision. If an existing cluster is being reused, this'
+            ' is seen as the task demand, which must fit the cluster\'s total '
+            'resources and is used for scheduling the task. '
+            'Overrides the "accelerators" '
+            'config in the YAML if both are supplied.')),
+    click.option('--num-nodes',
+                required=False,
+                type=int,
+                help=('Number of nodes to launch and to execute the task on. '
+                        'Overrides the "num_nodes" config in the YAML if both are '
+                        'supplied.')),
+    click.option(
+        '--use-spot/--no-use-spot',
+        required=False,
+        default=None,
+        help=('Whether to request spot instances. If specified, override the '
+            '"resources.use_spot".')),
+]
+
+def _override_task_options():
+    """Click command decorator for overriding the task fields."""
+    def _add_options(func):
+        for option in reversed(_TASK_OPTIONS):
+            func = option(func)
+        return func
+    return _add_options
 
 
 def _default_interactive_node_name(node_type: str):
@@ -470,59 +530,12 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
-@click.option(
-    '--workdir',
-    required=False,
-    type=click.Path(exists=True, file_okay=False),
-    help=('If specified, sync this dir to the remote working directory, '
-          'where the task will be invoked. '
-          'Overrides the "workdir" config in the YAML if both are supplied.'))
-@click.option(
-    '--cloud',
-    required=False,
-    type=str,
-    help='The cloud to use. If specified, override the "resources.cloud".')
-@click.option(
-    '--region',
-    required=False,
-    type=str,
-    help='The region to use. If specified, override the "resources.region".')
-@click.option(
-    '--gpus',
-    required=False,
-    type=str,
-    help=('Type and number of GPUs to use. Example values: '
-          '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-          '(fractional counts are supported by the scheduling framework). '
-          'If a new cluster is being launched by this command, this is the '
-          'resources to provision. If an existing cluster is being reused, this'
-          ' is seen as the task demand, which must fit the cluster\'s total '
-          'resources and is used for scheduling the task. '
-          'Overrides the "accelerators" '
-          'config in the YAML if both are supplied.'))
-@click.option('--num-nodes',
-              required=False,
-              type=int,
-              help=('Number of nodes to launch and to execute the task on. '
-                    'Overrides the "num_nodes" config in the YAML if both are '
-                    'supplied.'))
-@click.option(
-    '--use-spot/--no-use-spot',
-    required=False,
-    default=None,
-    help=('Whether to request spot instances. If specified, override the '
-          '"resources.use_spot".'))
-@click.option('--name',
-              '-n',
-              required=False,
-              type=str,
-              help=('Task name. Overrides the "name" '
-                    'config in the YAML if both are supplied.'))
+@_override_task_options()
 @click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
+            default=None,
+            type=int,
+            required=False,
+            help=('OS disk size in GBs.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -535,13 +548,13 @@ def launch(
     dryrun: bool,
     detach_run: bool,
     backend_name: Optional[str],
+    name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
-    name: Optional[str],
     disk_size: Optional[int],
     yes: bool,
 ):
@@ -642,44 +655,19 @@ def launch(
               is_flag=True,
               help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
-@click.option(
-    '--workdir',
-    required=False,
-    type=click.Path(exists=True, file_okay=False),
-    help=('If specified, sync this dir to the remote working directory, '
-          'where the task will be invoked. '
-          'Overrides the "workdir" config in the YAML if both are supplied.'))
-@click.option(
-    '--gpus',
-    required=False,
-    type=str,
-    help=('Task demand: Type and number of GPUs to use. Example values: '
-          '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-          '(fractional counts are supported by the scheduling framework). '
-          'This is used for scheduling the task, so it must fit the '
-          'cluster\'s total resources. Overrides the "accelerators" '
-          'config in the YAML if both are supplied.'))
-@click.option('--num-nodes',
-              required=False,
-              type=int,
-              help=('Task demand: Number of nodes to execute the task on. '
-                    'Overrides the "num_nodes" config in the YAML if both are '
-                    'supplied.'))
-@click.option('--name',
-              '-n',
-              required=False,
-              type=str,
-              help=('Task name. Overrides the "name" '
-                    'config in the YAML if both are supplied.'))
+@_override_task_options()
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
     entrypoint: str,
     detach_run: bool,
+    name: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
     workdir: Optional[str],
     gpus: Optional[str],
     num_nodes: Optional[int],
-    name: Optional[str],
+    use_spot: Optional[bool],
 ):
     """Execute a task or a command on a cluster (skip setup).
 
@@ -761,11 +749,22 @@ def exec(
         # Override.
         if workdir is not None:
             task.workdir = workdir
+        
+        override_params = {}
+        if cloud is not None:
+            override_params['cloud'] = _get_cloud(cloud)
+        if region is not None:
+            override_params['region'] = region
         if gpus is not None:
-            assert len(task.resources) == 1
-            old_resources = list(task.resources)[0]
-            copied = old_resources.copy(accelerators=gpus)
-            task.set_resources({copied})
+            override_params['accelerators'] = gpus
+        if use_spot is not None:
+            override_params['use_spot'] = use_spot
+
+        assert len(task.resources) == 1
+        old_resources = list(task.resources)[0]
+        new_resources = old_resources.copy(**override_params)
+        task.set_resources({new_resources})
+
         if num_nodes is not None:
             task.num_nodes = num_nodes
         if name is not None:
