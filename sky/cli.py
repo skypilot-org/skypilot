@@ -891,17 +891,6 @@ def benchmark_launch(
             new_resources = old_resources.copy(**override_params)
             task.set_resources({new_resources})
 
-            # Create a Sky Storage to store the benchmark logs.
-            storage_obj = data.Storage(name=cluster_name,
-                                       source=None,
-                                       persistent=True,
-                                       mode='MOUNT')
-            if task.storage_mounts is None:
-                task.storage_mounts = {}
-            new_storage_mounts = task.storage_mounts.copy()
-            new_storage_mounts['/benchmark-logs'] = storage_obj
-            task.set_storage_mounts(new_storage_mounts)
-
         dags.append(dag)
         cluster_names.append(cluster_name)
 
