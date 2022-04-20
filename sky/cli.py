@@ -205,63 +205,73 @@ def _interactive_node_cli_command(cli_func):
 
     return decorator
 
+
 _TASK_OPTIONS = [
     click.option('--name',
-                '-n',
-                required=False,
-                type=str,
-                help=('Task name. Overrides the "name" '
-                        'config in the YAML if both are supplied.')),
+                 '-n',
+                 required=False,
+                 type=str,
+                 help=('Task name. Overrides the "name" '
+                       'config in the YAML if both are supplied.')),
     click.option(
         '--workdir',
         required=False,
         type=click.Path(exists=True, file_okay=False),
         help=('If specified, sync this dir to the remote working directory, '
-            'where the task will be invoked. '
-            'Overrides the "workdir" config in the YAML if both are supplied.')),
+              'where the task will be invoked. '
+              'Overrides the "workdir" config in the YAML if both are supplied.'
+             )),
     click.option(
         '--cloud',
         required=False,
         type=str,
-        help='The cloud to use. If specified, override the "resources.cloud".'),
+        help='The cloud to use. If specified, override the "resources.cloud".'
+        '"none" reset the "resources.cloud".'),
     click.option(
         '--region',
         required=False,
         type=str,
-        help='The region to use. If specified, override the "resources.region".'),
+        help='The region to use. If specified, override the "resources.region".'
+        '"none" reset the "resources.region".'),
     click.option(
         '--gpus',
         required=False,
         type=str,
-        help=('Type and number of GPUs to use. Example values: '
-            '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-            '(fractional counts are supported by the scheduling framework). '
-            'If a new cluster is being launched by this command, this is the '
-            'resources to provision. If an existing cluster is being reused, this'
-            ' is seen as the task demand, which must fit the cluster\'s total '
-            'resources and is used for scheduling the task. '
-            'Overrides the "accelerators" '
-            'config in the YAML if both are supplied.')),
-    click.option('--num-nodes',
-                required=False,
-                type=int,
-                help=('Number of nodes to launch and to execute the task on. '
-                        'Overrides the "num_nodes" config in the YAML if both are '
-                        'supplied.')),
+        help=
+        ('Type and number of GPUs to use. Example values: '
+         '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
+         '(fractional counts are supported by the scheduling framework). '
+         'If a new cluster is being launched by this command, this is the '
+         'resources to provision. If an existing cluster is being reused, this'
+         ' is seen as the task demand, which must fit the cluster\'s total '
+         'resources and is used for scheduling the task. '
+         'Overrides the "accelerators" '
+         'config in the YAML if both are supplied.'
+         '"none" reset the "accelerators" config.')),
+    click.option(
+        '--num-nodes',
+        required=False,
+        type=int,
+        help=('Number of nodes to launch and to execute the task on. '
+              'Overrides the "num_nodes" config in the YAML if both are '
+              'supplied.')),
     click.option(
         '--use-spot/--no-use-spot',
         required=False,
         default=None,
         help=('Whether to request spot instances. If specified, override the '
-            '"resources.use_spot".')),
+              '"resources.use_spot".')),
 ]
+
 
 def _override_task_options():
     """Click command decorator for overriding the task fields."""
+
     def _add_options(func):
         for option in reversed(_TASK_OPTIONS):
             func = option(func)
         return func
+
     return _add_options
 
 
@@ -532,10 +542,10 @@ def cli():
               help='If used, runs locally inside a docker container.')
 @_override_task_options()
 @click.option('--disk-size',
-            default=None,
-            type=int,
-            required=False,
-            help=('OS disk size in GBs.'))
+              default=None,
+              type=int,
+              required=False,
+              help=('OS disk size in GBs.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -608,11 +618,20 @@ def launch(
 
         override_params = {}
         if cloud is not None:
-            override_params['cloud'] = _get_cloud(cloud)
+            if cloud.lower() == 'none':
+                override_params['cloud'] = None
+            else:
+                override_params['cloud'] = _get_cloud(cloud)
         if region is not None:
-            override_params['region'] = region
+            if region.lower() == 'none':
+                override_params['region'] = None
+            else:
+                override_params['region'] = region
         if gpus is not None:
-            override_params['accelerators'] = gpus
+            if region.lower() == 'none':
+                override_params['accelerators'] = None
+            else:
+                override_params['accelerators'] = gpus
         if use_spot is not None:
             override_params['use_spot'] = use_spot
         if disk_size is not None:
@@ -749,14 +768,23 @@ def exec(
         # Override.
         if workdir is not None:
             task.workdir = workdir
-        
+
         override_params = {}
         if cloud is not None:
-            override_params['cloud'] = _get_cloud(cloud)
+            if cloud.lower() == 'none':
+                override_params['cloud'] = None
+            else:
+                override_params['cloud'] = _get_cloud(cloud)
         if region is not None:
-            override_params['region'] = region
+            if region.lower() == 'none':
+                override_params['region'] = None
+            else:
+                override_params['region'] = region
         if gpus is not None:
-            override_params['accelerators'] = gpus
+            if region.lower() == 'none':
+                override_params['accelerators'] = None
+            else:
+                override_params['accelerators'] = gpus
         if use_spot is not None:
             override_params['use_spot'] = use_spot
 

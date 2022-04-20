@@ -296,7 +296,7 @@ class Resources:
         if (self.region is None) != (other.region is None):
             # self and other's region should be both None or both not None
             return False
-        
+
         if self.region is not None and self.region != other.region:
             return False
         # self.region <= other.region
