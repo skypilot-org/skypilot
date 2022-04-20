@@ -1907,6 +1907,15 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
             'Must pass in \'-a/--all\' or storage names to \'sky '
             'storage delete\'.')
 
+@cli.group(cls=_NaturalOrderGroup)
+def spot():
+    """Managed spot instances related commands."""
+    pass
+
+@spot.command('launch', cls=_DocumentedCodeCommand)
+def launch():
+    """Launch a managed spot instance."""
+    pass
 
 def main():
     return cli()
