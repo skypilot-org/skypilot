@@ -54,3 +54,15 @@ To get around this, mount the files to a different path, then symlink to them.  
   setup: |
     git clone git@github.com:your-id/your-repo.git ~/code-repo/
     ln -s /tmp/tmp.txt ~/code-repo/
+
+
+How to make Sky clusters use my Weights & Biases credentials?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Install the wandb library on your laptop and login to your account via ``wandb login``.
+Then, add the following lines in your task yaml file:
+
+.. code-block:: yaml
+
+  file_mounts:
+    ~/.netrc: ~/.netrc
