@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import ast
 import colorama
 import datetime
 import enum
@@ -10,6 +11,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 import time
@@ -31,6 +33,7 @@ from sky import global_user_state
 from sky import exceptions
 from sky import sky_logging
 from sky.skylet import log_lib
+from sky.skylet.utils import log_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -46,6 +49,8 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.10.0'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
+SKY_USER_LOCAL_FILE_PATH = '~/.sky/generated/local'
+SKY_USER_LOCAL_CONFIG_PATH = '~/.sky/local'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
@@ -624,6 +629,194 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
+def check_local_installation(ips, auth_config):
+    ssh_user = auth_config['ssh_user']
+    ssh_key = auth_config['ssh_private_key']
+
+    for idx, ip in enumerate(ips):
+        # All nodes must have Ray
+        rc = run_command_on_ip_via_ssh(ip,
+                                       f'ray --version',
+                                       ssh_user=ssh_user,
+                                       ssh_private_key=ssh_key,
+                                       stream_logs=False)
+        if rc:
+            raise ValueError(f'Ray not installed on {ip}')
+
+        # Head Node must have Python3 and Sudo
+        if idx == 0:
+            rc = run_command_on_ip_via_ssh(ip,
+                                           f'python3 --version',
+                                           ssh_user=ssh_user,
+                                           ssh_private_key=ssh_key,
+                                           stream_logs=False)
+            if rc:
+                raise ValueError(f'Python3 not installed on {ip}')
+
+
+def launch_local_cluster(local_template: str,
+                         yaml_config,
+                         custom_resources=None):
+
+    def _fill_local_template(template_name: str,
+                             variables: Dict,
+                             output_path: Optional[str] = None) -> str:
+        """Create a file from a Jinja template and return the filename."""
+        assert template_name.endswith('.j2'), template_name
+        template_path = os.path.join(sky.__root_dir__, 'templates',
+                                     template_name)
+        if not os.path.exists(template_path):
+            raise FileNotFoundError(
+                f'Template "{template_name}" does not exist.')
+        with open(template_path) as fin:
+            template = fin.read()
+        if output_path is None:
+            assert 'cluster_name' in variables, 'cluster_name is required.'
+            cluster_name = variables['cluster_name']
+            output_path = pathlib.Path(
+                os.path.expanduser(
+                    SKY_USER_LOCAL_FILE_PATH)) / f'{cluster_name}.yml'
+            os.makedirs(output_path.parents[0], exist_ok=True)
+            output_path = str(output_path)
+        output_path = os.path.abspath(output_path)
+        template = jinja2.Template(template)
+        content = template.render(**variables)
+        with open(output_path, 'w') as fout:
+            fout.write(content)
+        return output_path
+
+    local_cluster_config = yaml_config['cluster']
+    cluster_name = local_cluster_config['name']
+    ip_list = local_cluster_config['ips']
+    if not isinstance(ip_list, list):
+        ip_list = [ip_list]
+    auth_config = yaml_config['auth']
+    num_nodes = len(ip_list)
+    assert len(ip_list) >= 1, 'Must specify Local IP'
+
+    yaml_path = _fill_local_template(
+        local_template,
+        dict({
+            'cluster_name': cluster_name,
+            'num_nodes': num_nodes,
+            'head_ip': None if ip_list is None else ip_list[0],
+            'worker_ips': None if ip_list is None else ip_list[1:],
+            'custom_resources': custom_resources,
+            # Authentication (optional).
+            'ssh_user': None
+                        if auth_config is None else auth_config['ssh_user'],
+            'ssh_private_key': None if auth_config is None else
+                               auth_config['ssh_private_key'],
+        }))
+
+    ray_cmd_list = ['ray', 'up', '--no-restart', '-y', yaml_path]
+    returncode, stdout, stderr = log_lib.run_with_log(
+        ray_cmd_list,
+        log_path='/dev/null',
+        stream_logs=True,
+        start_streaming_at='Shared connection to',
+        line_processor=log_utils.RayUpLineProcessor(),
+        # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
+        # time during 'ray up' if insufficient capacity occurs.
+        env=dict(os.environ, BOTO_MAX_RETRIES='5'),
+        require_outputs=True)
+
+    handle_returncode(returncode, ' '.join(ray_cmd_list),
+                      'Failed to launched autoscaler.')
+
+
+def get_local_custom_resources(ips: List[str], auth_config):
+
+    ssh_user = auth_config['ssh_user']
+    ssh_key = auth_config['ssh_private_key']
+    remote_resource_path = '~/.sky/resource_group.py'
+    cluster_custom_resources = {}
+
+    def rsync_no_handle(ip, source, target):
+        rsync_command = [
+            'rsync',
+            '-Pavz',
+            '--filter=\'dir-merge,- .gitignore\'',
+        ]
+        ssh_options = ' '.join(ssh_options_list(ssh_key, None))
+        rsync_command.append(f'-e "ssh {ssh_options}"')
+        rsync_command.extend([
+            source,
+            f'{ssh_user}@{ip}:{target}',
+        ])
+        command = ' '.join(rsync_command)
+
+        rc = log_lib.run_with_log(command,
+                                  stream_logs=False,
+                                  log_path='/dev/null',
+                                  shell=True)
+        handle_returncode(rc, command,
+                          f'Failed to rsync {source} -> {ip}:{target}')
+
+    code = \
+    textwrap.dedent(f"""\
+        import os
+        from ray.util.accelerators import *
+
+        # A100 is not defined in Ray 1.10
+        all_ray_accelerators = [NVIDIA_TESLA_V100,
+                                NVIDIA_TESLA_P100,
+                                NVIDIA_TESLA_T4,
+                                NVIDIA_TESLA_P4,
+                                NVIDIA_TESLA_K80,
+                                'A100',]
+        accelerators_dict = {{}}
+        for acc in all_ray_accelerators:
+            output_str = os.popen(f'lspci | grep \\'{{acc}}\\'').read()
+            output_lst = output_str.split('\\n')
+            count = 0
+            for output in output_lst:
+                count += int(acc in output)
+            if count !=0:
+                accelerators_dict[acc] = count
+
+        print(accelerators_dict)
+        """)
+
+    # TODO: Parallelize
+    for ip in ips:
+        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+            fp.write(code)
+            fp.flush()
+            source_file_path = fp.name
+            rsync_no_handle(ip, fp.name, remote_resource_path)
+
+        rc, output, stderr = run_command_on_ip_via_ssh(
+            ip,
+            f'python3 {remote_resource_path}',
+            ssh_user=ssh_user,
+            ssh_private_key=ssh_key,
+            stream_logs=False,
+            require_outputs=True,
+            cloud=clouds)
+
+        if rc:
+            raise ValueError('Failed to execute resource group detector. '
+                             'Check if Python3 is installed correctly.')
+
+        # Convert output into a custom resources dict
+        ip_resources = ast.literal_eval(output)
+        for acc, num_acc in ip_resources.items():
+            if acc not in cluster_custom_resources:
+                cluster_custom_resources[acc] = 0
+            cluster_custom_resources[acc] += num_acc
+    return cluster_custom_resources
+
+
+def save_censored_yaml(yaml_config):
+    del yaml_config['auth']
+    cluster_name = yaml_config['cluster']['name']
+    abs_yaml_path = os.path.expanduser(SKY_USER_LOCAL_CONFIG_PATH)
+    os.makedirs(abs_yaml_path, exist_ok=True)
+    with open(f'{abs_yaml_path}/{cluster_name}.yml', 'w') as f:
+        yaml.dump(yaml_config, f, default_flow_style=False)
+
+
 def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
     """Adds SSH key info to the cluster config.
 
@@ -720,7 +913,10 @@ def wait_until_ray_cluster_ready(
                 ready_workers = local_total_nodes - 1
             else:
                 result = _LAUNCHED_WORKER_PATTERN.findall(output)
-                ready_workers = int(result[0])
+                if (len(result) == 0):
+                    ready_workers = 0
+                else:
+                    ready_workers = int(result[0])
 
             if result:
                 assert len(result) == 1, result

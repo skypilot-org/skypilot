@@ -53,11 +53,11 @@ class Resources:
         self._cloud = cloud
 
         # Check for Local Config
+        self.ips = ips
         if cloud is not None and isinstance(self._cloud, clouds.Local):
             assert instance_type is None and not use_spot and ips, \
             'Resources are passed incorrectly ' + \
             'to Local/On-Prem.'
-            self.ips = ips
 
         self._region: Optional[str] = None
         self._set_region(region)

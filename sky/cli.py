@@ -29,6 +29,7 @@ each other.
 """
 import functools
 import getpass
+import json
 import os
 import shlex
 import sys
@@ -381,9 +382,10 @@ def _create_and_ssh_into_node(
     click.secho(f'rsync -rP {cluster_name}:/remote/path /local/path', bold=True)
 
 
-def _check_yaml(entrypoint: str) -> bool:
+def _check_yaml(entrypoint: str, with_outputs=False) -> bool:
     """Checks if entrypoint is a readable YAML file."""
     is_yaml = True
+    config = None
     shell_splits = shlex.split(entrypoint)
     yaml_file_provided = len(shell_splits) == 1 and \
         (shell_splits[0].endswith('yaml') or shell_splits[0].endswith('.yml'))
@@ -419,6 +421,8 @@ def _check_yaml(entrypoint: str) -> bool:
                 f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
+    if with_outputs:
+        return is_yaml, config
     return is_yaml
 
 
@@ -1910,6 +1914,55 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         raise click.ClickException(
             'Must pass in \'-a/--all\' or storage names to \'sky '
             'storage delete\'.')
+
+
+@cli.command(cls=_DocumentedCodeCommand)
+@click.argument('entrypoint', required=True, type=str, nargs=-1)
+def launch_local(entrypoint: str):
+    steps = 1
+    entrypoint = ' '.join(entrypoint)
+    assert entrypoint
+    is_yaml, yaml_config = _check_yaml(entrypoint, with_outputs=True)
+    if not is_yaml:
+        raise ValueError('Must specify Cluster Config')
+
+    auth_config = yaml_config['auth']
+    ips = yaml_config['cluster']['ips']
+    if not isinstance(ips, list):
+        ips = [ips]
+    local_cluster_name = yaml_config['cluster']['name']
+
+    # Check for Ray
+    click.secho(f'[{steps}/4] Checking On-Premise Environment\n',
+                fg='green',
+                nl=False)
+    backend_utils.check_local_installation(ips, auth_config)
+    steps += 1
+
+    # Detect what GPUs the Cluster has (must be homogeneous)
+    click.secho(f'[{steps}/4] Auto-detecting Cluster Resources\n',
+                fg='green',
+                nl=False)
+    custom_resources = backend_utils.get_local_custom_resources(
+        ips, auth_config)
+    custom_resources = json.dumps(custom_resources, separators=(',', ':'))
+    steps += 1
+
+    # Launching Ray Autoscaler service
+    click.secho(f'[{steps}/4] Launching Autoscaler Service\n',
+                fg='green',
+                nl=False)
+    backend_utils.launch_local_cluster('local-admin.yml.j2', yaml_config,
+                                       custom_resources)
+    steps += 1
+
+    # Generate Censored YAML file to be sent to non-admin users
+    click.secho(f'[{steps}/4] Generating Censored Local YAML File\n',
+                fg='green',
+                nl=False)
+    censored_yaml_path = f'~/.sky/local/{local_cluster_name}.yml'
+    backend_utils.save_censored_yaml(yaml_config)
+    click.secho(f'Saved in {censored_yaml_path} \n', fg='yellow', nl=False)
 
 
 def main():
