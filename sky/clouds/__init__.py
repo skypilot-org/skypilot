@@ -9,20 +9,8 @@ from sky.clouds.gcp import GCP
 __all__ = [
     'AWS',
     'Azure',
-    'CLOUD_REGISTRY',
     'Cloud',
     'GCP',
     'Region',
     'Zone',
-    'from_str',
 ]
-
-CLOUD_REGISTRY = {
-    'aws': AWS(),
-    'gcp': GCP(),
-    'azure': Azure(),
-}
-
-
-def from_str(name: str) -> 'Cloud':
-    return CLOUD_REGISTRY[name.lower()]

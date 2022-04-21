@@ -32,7 +32,7 @@ def _make_resources(
     **resources_kwargs,
 ):
     if enabled_clouds is None:
-        enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
+        enabled_clouds = list(clouds.Cloud.CLOUD_REGISTRY.values())
     monkeypatch.setattr(
         'sky.global_user_state.get_enabled_clouds',
         lambda: enabled_clouds,
