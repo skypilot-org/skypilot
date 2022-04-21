@@ -1,4 +1,5 @@
 """Clouds in Sky."""
+from sky.clouds import cloud
 from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import Region
 from sky.clouds.cloud import Zone
@@ -13,4 +14,7 @@ __all__ = [
     'GCP',
     'Region',
     'Zone',
+    'CLOUD_REGISTRY',
 ]
+
+CLOUD_REGISTRY = cloud.CLOUD_REGISTRY

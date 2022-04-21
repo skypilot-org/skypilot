@@ -12,7 +12,7 @@ def check(quiet: bool = False) -> None:
     echo('Checking credentials to enable clouds for Sky.')
 
     enabled_clouds = []
-    for cloud in clouds.Cloud.CLOUD_REGISTRY.values():
+    for cloud in clouds.CLOUD_REGISTRY.values():
         echo(f'  Checking {cloud}...', nl=False)
         ok, reason = cloud.check_credentials()
         echo('\r', nl=False)

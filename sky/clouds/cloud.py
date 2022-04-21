@@ -21,10 +21,24 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     region: Region
 
 
+class _CloudRegistry(dict):
+    """Registry of clouds."""
+
+    def from_str(self, name: str) -> Optional['Cloud']:
+        return self.get(name.lower())
+
+    def register(self, cloud_cls: 'Cloud') -> None:
+        name = cloud_cls.__name__.lower()
+        assert name not in self, f'{name} already registered'
+        self[name] = cloud_cls()
+        return cloud_cls
+
+
+CLOUD_REGISTRY = _CloudRegistry()
+
+
 class Cloud:
     """A cloud provider."""
-
-    CLOUD_REGISTRY = dict()
 
     #### Regions/Zones ####
 
@@ -66,14 +80,6 @@ class Cloud:
                     break
         """
         raise NotImplementedError
-
-    def __init_subclass__(cls) -> None:
-        if cls.__name__.lower() != 'dummycloud':
-            cls.CLOUD_REGISTRY[cls.__name__.lower()] = cls()
-
-    @classmethod
-    def from_str(cls, name: str) -> Optional['Cloud']:
-        return cls.CLOUD_REGISTRY.get(name.lower())
 
     #### Normal methods ####
 

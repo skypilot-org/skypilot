@@ -98,11 +98,11 @@ def _truncate_long_string(s: str, max_length: int = 35) -> str:
 
 def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
     """Check if cloud is registered and return cloud object."""
-    cloud_obj = clouds.Cloud.from_str(cloud)
+    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
     if cloud is not None and cloud_obj is None:
         raise click.UsageError(
             f'Cloud \'{cloud}\' is not supported. '
-            f'Supported clouds: {list(clouds.Cloud.CLOUD_REGISTRY.keys())}')
+            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
     return cloud_obj
 
 
