@@ -1509,6 +1509,7 @@ def _terminate_or_stop_clusters(
 
 
 @_interactive_node_cli_command
+# pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
             gpus: Optional[str], spot: Optional[bool], screen: Optional[bool],
@@ -1585,6 +1586,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @_interactive_node_cli_command
+# pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
             spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool],
@@ -1657,6 +1659,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @_interactive_node_cli_command
+# pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
             spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool],
@@ -1934,15 +1937,34 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
             'Must pass in \'-a/--all\' or storage names to \'sky '
             'storage delete\'.')
 
+
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
     """Managed spot instances related commands."""
     pass
 
+
 @spot.command('launch', cls=_DocumentedCodeCommand)
-def launch():
+@_add_click_options(_TASK_OPTIONS)
+def spot_launch():
     """Launch a managed spot instance."""
     pass
+
+
+@spot.command('status', cls=_DocumentedCodeCommand)
+def spot_status():
+    """Show status of managed spot jobs."""
+    # TODO(zhwu): Refer to sky.spot.spot_utils.get_spot_jobs()
+    pass
+
+
+@spot.command('down', cls=_DocumentedCodeCommand)
+def spot_down():
+    """Tear down managed spot job."""
+    # TODO(zhwu): consider writing the signal to a file on the controller
+    # instance, and wait until the corresponding controller job to finish.
+    pass
+
 
 def main():
     return cli()
