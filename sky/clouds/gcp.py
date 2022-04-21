@@ -7,7 +7,6 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from google import auth
 
 from sky import clouds
-from sky.clouds import cloud
 from sky.clouds import service_catalog
 
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
@@ -24,7 +23,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-@cloud.CLOUD_REGISTRY.register
+@clouds.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 

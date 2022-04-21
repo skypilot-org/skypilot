@@ -6,7 +6,6 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky.clouds import cloud
 from sky.clouds import service_catalog
 
 if typing.TYPE_CHECKING:
@@ -23,7 +22,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-@cloud.CLOUD_REGISTRY.register
+@clouds.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
     """Amazon Web Services."""
 
