@@ -147,7 +147,8 @@ def run_with_log(
             os.path.dirname(os.path.abspath(job_lib.__file__)),
             'subprocess_daemon.sh')
         daemon_cmd = [
-            '/bin/bash', daemon_script,
+            '/bin/bash',
+            daemon_script,
             str(parent_pid),
             str(proc.pid),
             str(int(with_ray)),
