@@ -165,7 +165,7 @@ def _interactive_node_cli_command(cli_func):
         help=('Type and number of TPUs to use (e.g., --tpus=tpu-v3-8:4 or '
               '--tpus=tpu-v3-8).'))
 
-    spot_option = click.option('--spot',
+    spot_option = click.option('--use-spot',
                                default=None,
                                is_flag=True,
                                help='If true, use spot instances.')
@@ -1511,8 +1511,9 @@ def _terminate_or_stop_clusters(
 @_interactive_node_cli_command
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
-            gpus: Optional[str], spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int]):
+            gpus: Optional[str], use_spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int]):
     """Launch or attach to an interactive GPU node.
 
     Example:
@@ -1558,19 +1559,19 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         name = _default_interactive_node_name('gpunode')
 
     user_requested_resources = not (cloud is None and instance_type is None and
-                                    gpus is None and spot is None)
+                                    gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = _get_cloud(cloud)
     if gpus is None and instance_type is None:
         # Use this request if both gpus and instance_type are not specified.
         gpus = default_resources.accelerators
         instance_type = default_resources.instance_type
-    if spot is None:
-        spot = default_resources.use_spot
+    if use_spot is None:
+        use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
                               accelerators=gpus,
-                              use_spot=spot,
+                              use_spot=use_spot,
                               disk_size=disk_size)
 
     _create_and_ssh_into_node(
@@ -1587,8 +1588,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @_interactive_node_cli_command
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int]):
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int]):
     """Launch or attach to an interactive CPU node.
 
     Example:
@@ -1633,16 +1634,16 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         name = _default_interactive_node_name('cpunode')
 
     user_requested_resources = not (cloud is None and instance_type is None and
-                                    spot is None)
+                                    use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = _get_cloud(cloud)
     if instance_type is None:
         instance_type = default_resources.instance_type
-    if spot is None:
-        spot = default_resources.use_spot
+    if use_spot is None:
+        use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
                               instance_type=instance_type,
-                              use_spot=spot,
+                              use_spot=use_spot,
                               disk_size=disk_size)
 
     _create_and_ssh_into_node(
@@ -1659,8 +1660,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @_interactive_node_cli_command
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
-            spot: Optional[bool], screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int]):
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int]):
     """Launch or attach to an interactive TPU node.
 
     Example:
@@ -1705,18 +1706,18 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         name = _default_interactive_node_name('tpunode')
 
     user_requested_resources = not (instance_type is None and tpus is None and
-                                    spot is None)
+                                    use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     if instance_type is None:
         instance_type = default_resources.instance_type
     if tpus is None:
         tpus = default_resources.accelerators
-    if spot is None:
-        spot = default_resources.use_spot
+    if use_spot is None:
+        use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=sky.GCP(),
                               instance_type=instance_type,
                               accelerators=tpus,
-                              use_spot=spot,
+                              use_spot=use_spot,
                               disk_size=disk_size)
 
     _create_and_ssh_into_node(
@@ -1933,6 +1934,108 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         raise click.ClickException(
             'Must pass in \'-a/--all\' or storage names to \'sky '
             'storage delete\'.')
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def spot():
+    """Spot related commands."""
+    pass
+
+
+@spot.command('launch', cls=_DocumentedCodeCommand)
+@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def spot_launch(
+    entrypoint: str,
+    yes: bool,
+):
+    """Launch jobs on spot instances."""
+    click.echo('spot launch')
+    entrypoint = ' '.join(entrypoint)
+    is_yaml = _check_yaml(entrypoint)
+    # Only accept entrypoint as a yaml for now.
+    assert is_yaml, 'Only accept entrypoint as a yaml.'
+    click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+    click.secho(entrypoint, bold=True)
+
+    if not yes:
+        prompt = 'Launching a new spot job. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    cluster_name = backend_utils.generate_spot_cluster_name()
+    yaml_path = backend_utils._fill_template(
+        'spot-controller.yaml.j2', {
+            'user_yaml_path': entrypoint,
+            'cluster_name': cluster_name,
+            'spot_job_name': cluster_name,
+        }, './spot-controller.yaml')
+    with sky.Dag() as dag:
+        task = sky.Task.from_yaml(yaml_path)
+        assert len(task.resources) == 1
+
+    sky.launch(dag,
+               stream_logs=True,
+               cluster_name=cluster_name,
+               detach_run=False,
+               backend=backends.CloudVmRayBackend())
+
+
+@spot.command('status', cls=_DocumentedCodeCommand)
+@click.argument('cluster', required=True, type=str)
+def spot_status(cluster: str):
+    """Check status of spot jobs."""
+    # TODO: run sky status on spot-manager
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.BadParameter(f'Cluster {cluster!r} not found. '
+                                 'Use `sky spot launch` to provision first.')
+    backend = backend_utils.get_backend_from_handle(handle)
+    entrypoint = 'sky queue'
+    with sky.Dag() as dag:
+        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({sky.Resources()})
+
+    sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=False)
+
+
+@spot.command('down', cls=_DocumentedCodeCommand)
+@click.argument('cluster', required=True, type=str)
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def spot_down(cluster: str, yes: bool):
+    """Terminate spot jobs."""
+
+    if not yes:
+        click.confirm(f'Terminating {cluster}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
+
+    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    if handle is None:
+        raise click.BadParameter(f'Cluster {cluster!r} not found. ')
+    backend = backend_utils.get_backend_from_handle(handle)
+    entrypoint = 'sky down -a -y'
+    with sky.Dag() as dag:
+        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({sky.Resources()})
+
+    sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=False)
+
+    _terminate_or_stop_clusters([cluster],
+                                apply_to_all=False,
+                                terminate=True,
+                                no_confirm=True)
 
 
 def main():
