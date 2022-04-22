@@ -13,10 +13,10 @@ from sky.skylet.utils import log_utils
 logger = sky_logging.init_logger(__name__)
 
 _DB_PATH = pathlib.Path('~/.sky/job.db')
-_DB_PATH.expanduser()
+_DB_PATH = _DB_PATH.expanduser().absolute()
 _DB_PATH.parents[0].mkdir(parents=True, exist_ok=True)
 
-_CONN = sqlite3.connect(_DB_PATH)
+_CONN = sqlite3.connect(str(_DB_PATH))
 _CURSOR = _CONN.cursor()
 
 _CURSOR.execute("""\

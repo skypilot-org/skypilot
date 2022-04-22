@@ -53,7 +53,8 @@ class Strategy:
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
-        while retry_cnt < max_retry:
+        while True:
+            retry_cnt += 1
             try:
                 sky.launch(self.dag,
                            cluster_name=self.cluster_name,
@@ -70,8 +71,11 @@ class Strategy:
                 self.cluster_name, force_refresh=True)
             if cluster_status == global_user_state.ClusterStatus.UP:
                 return
-            retry_cnt += 1
             # TODO(zhwu): maybe exponential backoff is better?
+            if retry_cnt > max_retry:
+                raise RuntimeError(
+                    f'Failed to launch the spot cluster after {max_retry} retries.')
+            logger.info(f'Retrying to launch the spot cluster in {retry_gap_seconds} seconds.')
             time.sleep(retry_gap_seconds)
 
     def recover(self):

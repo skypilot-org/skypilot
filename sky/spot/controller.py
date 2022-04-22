@@ -125,10 +125,11 @@ class SpotController:
         singal_file = pathlib.Path(_SIGNAL_PREFIX.format(self.job_id))
         signal = None
         if singal_file.exists():
-            singal_file.unlink()
             with open(singal_file, 'r') as f:
                 signal = f.read().strip()
                 signal = UserSignal(signal)
+            # Remove the signal file, after reading the signal.
+            singal_file.unlink()
         return signal
 
 
