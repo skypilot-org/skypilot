@@ -126,7 +126,8 @@ class Task:
         self._validate()
 
         dag = sky.DagContext.get_current_dag()
-        dag.add(self)
+        if dag is not None:
+            dag.add(self)
 
     def _validate(self):
         """Checks if the Task fields are valid."""

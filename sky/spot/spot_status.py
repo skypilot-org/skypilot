@@ -5,10 +5,10 @@ import enum
 import pathlib
 import sqlite3
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
-from sky.skylet import log_utils
+from sky.skylet.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -31,10 +31,11 @@ _CURSOR.execute("""\
     end_at INTERGER,
     last_recovered_at INTEGER DEFAULT -1,
     recovery_count INTEGER DEFAULT 0,
-    job_duration INTEGER,)""")
+    job_duration INTEGER DEFAULT 0)""")
 # job_duration is the time a job actually runs, excluding the provision
 # and recovery time. If the job is not finished:
 # total_job_duration = now() - last_recovered_at + job_duration
+_CONN.commit()
 columns = [
     'job_id', 'job_name', 'resources', 'submitted_at', 'status',
     'run_timestamp', 'start_at', 'end_at', 'last_recovered_at',
@@ -62,13 +63,14 @@ def submit(name: str, run_timestamp: str, resources_str: str) -> int:
         """\
         INSERT INTO spot
         (job_id, job_name, resources, submitted_at, status, run_timestamp)
-        VALUES (null, ?, ?, ?, ?, ?))""",
-        (name, resources_str, time.time(), SpotStatus.SUBMITTED, run_timestamp))
+        VALUES (null, ?, ?, ?, ?, ?)""",
+        (name, resources_str, time.time(), SpotStatus.SUBMITTED.value,
+         run_timestamp))
     _CONN.commit()
     job_id = _CURSOR.execute(
         """\
         SELECT job_id FROM spot WHERE run_timestamp = ?""",
-        (run_timestamp,)).fetchone()
+        (run_timestamp,)).fetchone()[0]
     assert job_id is not None, 'Failed to add job'
     return job_id
 
@@ -77,7 +79,7 @@ def starting(job_id: int):
     logger.info('Launching the spot cluster...')
     _CURSOR.execute("""\
         UPDATE spot SET status=(?) WHERE job_id=(?)""",
-                    (SpotStatus.STARTING, job_id))
+                    (SpotStatus.STARTING.value, job_id))
     _CONN.commit()
 
 
@@ -86,7 +88,7 @@ def started(job_id: int):
     _CURSOR.execute(
         """\
         UPDATE spot SET status=(?), start_at=(?) WHERE job_id=(?)""",
-        (SpotStatus.RUNNING, time.time(), job_id))
+        (SpotStatus.RUNNING.value, time.time(), job_id))
     _CONN.commit()
 
 
@@ -96,7 +98,8 @@ def recovering(job_id: int):
         """\
             UPDATE spot SET
             status=(?), job_duration=job_duration+(?)-last_recovered_at
-            WHERE job_id=(?)""", (SpotStatus.RECOVERING, time.time(), job_id))
+            WHERE job_id=(?)""",
+        (SpotStatus.RECOVERING.value, time.time(), job_id))
     _CONN.commit()
 
 
@@ -105,7 +108,7 @@ def recovered(job_id: int):
         """\
         UPDATE spot SET
         status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
-        WHERE job_id=(?)""", (SpotStatus.RUNNING, time.time(), job_id))
+        WHERE job_id=(?)""", (SpotStatus.RUNNING.value, time.time(), job_id))
     _CONN.commit()
     logger.info('==== Recovered. ====')
 
@@ -116,7 +119,7 @@ def succeeded(job_id: int):
         UPDATE spot SET
         status=(?), end_at=(?), job_duration=job_duration+(?)-start_at
         WHERE job_id=(?)""",
-        (SpotStatus.SUCCEEDED, time.time(), time.time(), job_id))
+        (SpotStatus.SUCCEEDED.value, time.time(), time.time(), job_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 
@@ -127,7 +130,7 @@ def failed(job_id: int):
         UPDATE spot SET
         status=(?), end_at=(?), job_duration=job_duration+(?)-start_at
         WHERE job_id=(?)""",
-        (SpotStatus.FAILED, time.time(), time.time(), job_id))
+        (SpotStatus.FAILED.value, time.time(), time.time(), job_id))
     _CONN.commit()
     logger.info('Job failed.')
 
@@ -141,6 +144,16 @@ def cancelled(job_id: int):
         (SpotStatus.CANCELLED, time.time(), time.time(), job_id))
     _CONN.commit()
     logger.info('Job cancelled.')
+
+
+def get_status(job_id: int) -> Optional[SpotStatus]:
+    """Get the status of a job."""
+    status = _CURSOR.execute(
+        """\
+        SELECT status FROM spot WHERE job_id=(?)""", (job_id,)).fetchone()
+    if status is None:
+        return None
+    return SpotStatus(status[0])
 
 
 def get_spot_jobs() -> List[Dict[str, Any]]:

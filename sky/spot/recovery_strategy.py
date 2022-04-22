@@ -21,7 +21,6 @@ class Strategy:
 
     def __init__(self, cluster_name: str, backend: 'Backend',
                  task: 'task_lib.Task') -> None:
-        assert task.use_spot, ('use_spot is required to use spot strategy.')
         self.dag = sky.Dag()
         self.dag.add(task)
         self.cluster_name = cluster_name
@@ -34,17 +33,17 @@ class Strategy:
     def from_task(cls, cluster_name: str, backend: 'Backend',
                   task: 'task_lib.Task') -> 'Strategy':
         """Create a strategy from a task."""
-        resources: 'sky.Resources' = task.resources
+        resources = task.resources
         assert len(resources) == 1, 'Only one resource is supported.'
-        resources = list(resources)[0]
-        assert resources.spot_recovery is not None, (
-            'spot_recovery_strategy is required to use spot strategy.')
+        resources: 'sky.Resources' = list(resources)[0]
 
+        spot_recovery = resources.spot_recovery
+        assert spot_recovery is not None, (
+            'spot_recovery is required to use spot strategy.')
         # Remove the spot_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
         task.set_resources({resources.copy(spot_recovery=None)})
-        return SPOT_STRATEGIES[task.spot_recovery_strategy](cluster_name,
-                                                            backend, task)
+        return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task)
 
     def launch(self, max_retry=3, retry_gap_seconds=60):
         """Launch the spot cluster at the first time.

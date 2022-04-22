@@ -130,6 +130,10 @@ class Resources:
         return self._use_spot
 
     @property
+    def spot_recovery(self) -> Optional[str]:
+        return self._spot_recovery
+
+    @property
     def disk_size(self) -> int:
         return self._disk_size
 
@@ -414,6 +418,7 @@ class Resources:
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', self.use_spot),
+            spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
         )
