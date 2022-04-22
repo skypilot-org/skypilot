@@ -12,7 +12,7 @@ if [[ $OSTYPE == 'darwin'* ]]; then
     # MacOS do not have the ps --forest option, it is enough to do pkill here. (pkill
     # only kills the first level descendant of the process, not recursively find all
     # of the descendants.)
-    pkill -P ${proc_pid}
+    pkill -TERM -P ${proc_pid}
 else
     # Recursively gracefully kill (SIGTERM) all child processes of proc_pid.
     ps --forest -o pid -g $(ps -o sid= -p ${proc_pid}) | tail -n +2 | xargs kill -15
