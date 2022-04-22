@@ -74,8 +74,11 @@ class Strategy:
             # TODO(zhwu): maybe exponential backoff is better?
             if retry_cnt > max_retry:
                 raise RuntimeError(
-                    f'Failed to launch the spot cluster after {max_retry} retries.')
-            logger.info(f'Retrying to launch the spot cluster in {retry_gap_seconds} seconds.')
+                    f'Failed to launch the spot cluster after {max_retry} '
+                    'retries.')
+            logger.info(
+                f'Retrying to launch the spot cluster in {retry_gap_seconds} '
+                'seconds.')
             time.sleep(retry_gap_seconds)
 
     def recover(self):
