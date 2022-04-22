@@ -5,6 +5,7 @@ from typing import Optional
 
 from sky import global_user_state
 from sky import sky_logging
+from sky.spot import spot_status
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.skylet import job_lib
@@ -12,7 +13,7 @@ from sky.spot.recovery_strategy import Strategy
 
 logger = sky_logging.init_logger(__name__)
 
-_JOB_STATUS_CHECK_GAP_SECONDS = 1
+_JOB_STATUS_CHECK_GAP_SECONDS = 60
 
 
 class SpotController:
@@ -32,6 +33,7 @@ class SpotController:
         logger.info(f'Start monitoring spot cluster {self.cluster_name}')
         logger.info('Launching the spot cluster...')
         self.strategy.launch()
+        spot_status.add_job(self.cluster_name, self.backend.run_timestamp)
         while True:
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
@@ -64,9 +66,10 @@ class SpotController:
                 )
             # Failed to connect to the cluster or the cluster is partially down.
             # job_status is None or job_status == job_lib.JobStatus.FAILED
-            logger.info('The cluster is Preempted. Recovering...')
+            logger.info('The cluster is Preempted.')
+            logger.info('=== Recovering... ===')
             self.strategy.recover()
-            logger.info('Recovered.')
+            logger.info('==== Recovered. ====')
         return job_status
 
     def start(self):
@@ -83,11 +86,16 @@ class SpotController:
         It can be INIT, RUNNING, SUCCEEDED, FAILED or CANCELLED."""
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
+        status = None
         try:
-            return self.backend.get_job_status(handle, stream_logs=False)
+            logger.info('=== Checking the job status... ===')
+            status = self.backend.get_job_status(handle, stream_logs=False)
+            logger.info(f'Job status: {status}')
         except SystemExit:
             # Fail to connect to the cluster
-            return None
+            logger.info('Fail to connect to the cluster.')
+        logger.info('=' * 34)
+        return status
 
 
 if __name__ == '__main__':

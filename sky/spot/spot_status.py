@@ -6,7 +6,7 @@ import pathlib
 import sqlite3
 from typing import Any, Dict, List
 
-from sky.skylet import job_lib
+from pendulum import time
 
 _DB_PATH = pathlib.Path('~/.sky/job.db')
 _DB_PATH.expanduser()
@@ -30,10 +30,9 @@ _CURSOR.execute("""\
 # and recovery time. If the job is not finished:
 # total_job_duration = now() - last_recovered_at + job_duration
 
-
 class SpotStatus(enum.Enum):
-    INIT = 'INIT'
-    LAUNCHING = 'LAUNCHING'
+    SUBMITTED = 'SUBMITTED'
+    STARTING = 'STARTING'
     RUNNING = 'RUNNING'
     RECOVERING = 'RECOVERING'
     SUCCEEDED = 'SUCCEEDED'
@@ -41,9 +40,17 @@ class SpotStatus(enum.Enum):
     CANCELLED = 'CANCELLED'
 
 
-def insert_job() -> bool:
+def add_job(name: str, run_timestamp: str) -> bool:
     """Insert a new spot job, returns the success."""
-    raise NotImplemented
+    row = _CURSOR.execute("""\
+        INSERT INTO spot (job_name, submitted_at, status, run_timestamp) 
+        VALUES (?, ?, ?, ?)
+        WHERE NOT EXISTS (
+            SELECT * FROM spot
+            WHERE job_name = (?)
+        )""", (name, time.time(), SpotStatus.SUBMITTED, run_timestamp, name))
+    return row.rowcount == 1
+
 
 
 def set_status(job_name: str, status: SpotStatus) -> bool:

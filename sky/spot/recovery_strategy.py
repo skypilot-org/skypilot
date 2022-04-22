@@ -1,4 +1,4 @@
-"""The strategy to handle each launching/recovery/termination of spot clusters."""
+"""The strategy to handle launching/recovery/termination of spot clusters."""
 from asyncio.log import logger
 import tempfile
 import time
@@ -55,7 +55,7 @@ class Strategy:
         return SPOT_STRATEGIES.get(recovery_strategy)(cluster_name, backend,
                                                       task_config)
 
-    def launch(self, max_retry=1, retry_gap_seconds=1):
+    def launch(self, max_retry=3, retry_gap_seconds=60):
         """Launch the spot cluster at the first time.
 
         It can fail if resource is not available. Need to check the cluster
@@ -70,10 +70,11 @@ class Strategy:
                 sky.launch(dag, cluster_name=self.cluster_name, detach_run=True)
                 logger.info('Spot cluster launched.')
             except SystemExit:
-                # If the launch failes, it will be recovered by the following code.
+                # If the launch failes, it will be recovered by the following
+                # code.
                 logger.info('Failed to launch the spot cluster.')
-            # TODO(zhwu): set the upscaling_speed in ray yaml to be 0 so that ray
-            # will not try to launch another worker if one worker preempted.
+            # TODO(zhwu): set the upscaling_speed in ray yaml to be 0 so that
+            # ray will not try to launch another worker if one worker preempted.
 
             cluster_status = backend_utils.get_cluster_status_with_refresh(
                 self.cluster_name, force_refresh=True)
@@ -86,7 +87,8 @@ class Strategy:
     def recover(self):
         """Relaunch the spot cluster after failure and wait until job starts.
 
-        When recover() is called the cluster should be in STOPPED status (i.e. partially down).
+        When recover() is called the cluster should be in STOPPED status (i.e.
+        partially down).
         """
         self.launch()
 
@@ -99,7 +101,7 @@ class Strategy:
 
 
 class FailoverStrategy(Strategy, name='FAILOVER'):
-    """Failover strategy: Wait in the smae region and failover after timout during recovery."""
+    """Failover strategy: wait in same region and failover after timout."""
 
     _MAX_RETRY_CNT = 3
     _RETRY_GAP_SECONDS = 10
