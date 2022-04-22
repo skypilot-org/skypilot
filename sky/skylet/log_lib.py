@@ -149,7 +149,8 @@ def run_with_log(
         daemon_cmd = [
             '/bin/bash', daemon_script,
             str(parent_pid),
-            str(proc.pid)
+            str(proc.pid),
+            str(int(with_ray)),
         ]
         subprocess.Popen(
             daemon_cmd,
