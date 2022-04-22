@@ -50,7 +50,6 @@ class SpotController:
         self.strategy.launch()
         spot_status.started(self.job_id)
         while True:
-            # TODO(zhwu): Handle sky spot down.
             user_signal = self._check_signal()
             if user_signal == UserSignal.DOWN:
                 logger.info('User sent down signal.')
