@@ -1,9 +1,6 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
-from asyncio.log import logger
-import tempfile
 import time
 import typing
-from typing import Any, Dict
 
 import sky
 from sky import global_user_state
@@ -12,6 +9,7 @@ from sky.backends import backend_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import Backend
+    from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -22,38 +20,31 @@ class Strategy:
     """Handle each launching, recovery and termination of the spot clusters."""
 
     def __init__(self, cluster_name: str, backend: 'Backend',
-                 task_config: Dict[str, Any]):
-        self.task_config = task_config
+                 task: 'task_lib.Task') -> None:
+        assert task.use_spot, ('use_spot is required to use spot strategy.')
+        self.dag = sky.Dag()
+        self.dag.add(task)
         self.cluster_name = cluster_name
-        assert 'resources' in self.task_config, (
-            'resources is required in task_config')
-        assert self.task_config['resources'].get('use_spot'), (
-            'use_spot is required in task_config')
-
-        with tempfile.NamedTemporaryFile('w',
-                                         prefix=f'sky_spot_{self.cluster_name}',
-                                         delete=False) as fp:
-            backend_utils.dump_yaml(fp.name, self.task_config)
-        self.task_yaml = fp.name
         self.backend = backend
 
     def __init_subclass__(cls, name):
         SPOT_STRATEGIES[name] = cls
 
     @classmethod
-    def from_task_config(cls, cluster_name: str, backend: 'Backend',
-                         task_config: Dict[str, Any]) -> 'Strategy':
-        assert 'resources' in task_config, (
-            'resources is required in task_config')
-        assert 'spot_recovery' in task_config['resources'], (
-            'spot_recovery is required in task_config')
-        recovery_strategy = task_config['resources']['spot_recovery'].upper()
-        assert recovery_strategy in SPOT_STRATEGIES, (
-            f'Spot recovery strategy {recovery_strategy} '
-            'is not supported. The strategy should be among '
-            f'{SPOT_STRATEGIES}')
-        return SPOT_STRATEGIES.get(recovery_strategy)(cluster_name, backend,
-                                                      task_config)
+    def from_task(cls, cluster_name: str, backend: 'Backend',
+                  task: 'task_lib.Task') -> 'Strategy':
+        """Create a strategy from a task."""
+        resources: 'sky.Resources' = task.resources
+        assert len(resources) == 1, 'Only one resource is supported.'
+        resources = list(resources)[0]
+        assert resources.spot_recovery is not None, (
+            'spot_recovery_strategy is required to use spot strategy.')
+
+        # Remove the spot_recovery field from the resources, as the strategy
+        # will be handled by the strategy class.
+        task.set_resources({resources.copy(spot_recovery=None)})
+        return SPOT_STRATEGIES[task.spot_recovery_strategy](cluster_name,
+                                                            backend, task)
 
     def launch(self, max_retry=3, retry_gap_seconds=60):
         """Launch the spot cluster at the first time.
@@ -62,12 +53,12 @@ class Strategy:
         status, after calling.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
-        with sky.Dag() as dag:
-            sky.Task.from_yaml(self.task_yaml)
         retry_cnt = 0
         while retry_cnt < max_retry:
             try:
-                sky.launch(dag, cluster_name=self.cluster_name, detach_run=True)
+                sky.launch(self.dag,
+                           cluster_name=self.cluster_name,
+                           detach_run=True)
                 logger.info('Spot cluster launched.')
             except SystemExit:
                 # If the launch failes, it will be recovered by the following

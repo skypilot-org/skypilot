@@ -92,23 +92,6 @@ def _get_cluster_config_template(cloud):
     return cloud_to_template[type(cloud)]
 
 
-def _get_task_demands_dict(
-        task: task_lib.Task) -> Optional[Tuple[Optional[str], int]]:
-    """Returns the accelerator dict of the task"""
-    # TODO: CPU and other memory resources are not supported yet.
-    accelerator_dict = None
-    if task.best_resources is not None:
-        resources = task.best_resources
-    else:
-        # Task may (e.g., sky launch) or may not (e.g., sky exec) have undergone
-        # sky.optimize(), so best_resources may be None.
-        assert len(task.resources) == 1, task.resources
-        resources = list(task.resources)[0]
-    if resources is not None:
-        accelerator_dict = resources.accelerators
-    return accelerator_dict
-
-
 def _path_size_megabytes(path: str) -> int:
     """Returns the size of 'path' (directory or file) in megabytes."""
     git_exclude_filter = ''
@@ -1974,13 +1957,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info('Nothing to run (Task.run not specified).')
             return
 
-        task_demand = _get_task_demands_dict(task)
-        if task_demand is None:
-            resources_str = 'CPU:1'
-        else:
-            resources_str = ', '.join(
-                f'{k}:{v}' for k, v in task_demand.items())
-        resources_str = f'{task.num_nodes}x [{resources_str}]'
+        resources_str = backend_utils.get_task_resources_str(task)
         job_id = self._add_job(handle, task.name, resources_str)
 
         # Case: task_lib.Task(run, num_nodes=1)
@@ -1998,7 +1975,7 @@ class CloudVmRayBackend(backends.Backend):
         log_dir = os.path.join(self.log_dir, 'tasks')
         log_path = os.path.join(log_dir, 'run.log')
 
-        accelerator_dict = _get_task_demands_dict(task)
+        accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
@@ -2010,10 +1987,11 @@ class CloudVmRayBackend(backends.Backend):
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
         command_for_node = task.run if isinstance(task.run, str) else None
-        codegen.add_ray_task(bash_script=command_for_node,
-                             task_name=task.name,
-                             ray_resources_dict=_get_task_demands_dict(task),
-                             log_path=log_path)
+        codegen.add_ray_task(
+            bash_script=command_for_node,
+            task_name=task.name,
+            ray_resources_dict=backend_utils.get_task_demands_dict(task),
+            log_path=log_path)
 
         codegen.add_epilogue()
 
@@ -2031,7 +2009,7 @@ class CloudVmRayBackend(backends.Backend):
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir_base = self.log_dir
         log_dir = os.path.join(log_dir_base, 'tasks')
-        accelerator_dict = _get_task_demands_dict(task)
+        accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)

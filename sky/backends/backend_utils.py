@@ -34,6 +34,7 @@ from sky.skylet import log_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources
+    from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
@@ -1223,3 +1224,30 @@ def safe_console_status(msg: str):
     if threading.current_thread() is threading.main_thread():
         return console.status(msg)
     return NoOpConsole()
+
+
+def get_task_demands_dict(
+        task: 'task_lib.Task') -> Optional[Tuple[Optional[str], int]]:
+    """Returns the accelerator dict of the task"""
+    # TODO: CPU and other memory resources are not supported yet.
+    accelerator_dict = None
+    if task.best_resources is not None:
+        resources = task.best_resources
+    else:
+        # Task may (e.g., sky launch) or may not (e.g., sky exec) have undergone
+        # sky.optimize(), so best_resources may be None.
+        assert len(task.resources) == 1, task.resources
+        resources = list(task.resources)[0]
+    if resources is not None:
+        accelerator_dict = resources.accelerators
+    return accelerator_dict
+
+
+def get_task_resources_str(task: 'task_lib.Task') -> str:
+    resources_dict = get_task_demands_dict(task)
+    if resources_dict is None:
+        resources_str = 'CPU:1'
+    else:
+        resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
+    resources_str = f'{task.num_nodes}x [{resources_str}]'
+    return resources_str
