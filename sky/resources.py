@@ -4,6 +4,7 @@ from typing import Dict, Optional, Union
 from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
+from sky import spot
 
 logger = sky_logging.init_logger(__name__)
 
@@ -36,7 +37,7 @@ class Resources:
         sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
     # Increment this if any fields changed. For backward compatibility.
-    _VERSION = 2
+    _VERSION = 3
 
     def __init__(
         self,
@@ -45,6 +46,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
+        spot_recovery: Optional[bool] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
     ):
@@ -58,6 +60,9 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
+        self._spot_recovery = None
+        if spot_recovery is not None:
+            self._spot_recovery = spot_recovery.upper()
 
         if disk_size is not None:
             if disk_size < 50:
@@ -74,6 +79,7 @@ class Resources:
 
         self._try_validate_instance_type()
         self._try_validate_accelerators()
+        self._try_validate_spot()
 
     def __repr__(self) -> str:
         accelerators = ''
@@ -268,6 +274,16 @@ class Resources:
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
 
+    def _try_validate_spot(self) -> None:
+        if self._spot_recovery is None:
+            return
+        if not self._use_spot:
+            raise ValueError('Cannot specify spot_recovery without use_spot.')
+        if self._spot_recovery not in spot.SPOT_STRATEGIES:
+            raise ValueError(f'Spot recovery strategy {self._spot_recovery} '
+                             'is not supported. The strategy should be among '
+                             f'{spot.SPOT_STRATEGIES}')
+
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -431,4 +447,6 @@ class Resources:
             self._region = None
         elif version < 2:
             self._region = None
+        elif version < 3:
+            self._spot_recovery = None
         self.__dict__.update(state)

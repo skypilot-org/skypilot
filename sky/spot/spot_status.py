@@ -1,7 +1,12 @@
+"""The database for spot jobs status."""
+# TODO(zhwu): maybe use file based status instead of database, so
+# that we can easily switch to a s3-based storage.
 import enum
 import pathlib
 import sqlite3
 from typing import Any, Dict, List
+
+from sky.skylet import job_lib
 
 _DB_PATH = pathlib.Path('~/.sky/job.db')
 _DB_PATH.expanduser()
@@ -31,7 +36,6 @@ class SpotStatus(enum.Enum):
     LAUNCHING = 'LAUNCHING'
     RUNNING = 'RUNNING'
     RECOVERING = 'RECOVERING'
-    PENDING = 'PENDING'
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
     CANCELLED = 'CANCELLED'
@@ -39,6 +43,11 @@ class SpotStatus(enum.Enum):
 
 def insert_job() -> bool:
     """Insert a new spot job, returns the success."""
+    raise NotImplemented
+
+
+def set_status(job_name: str, status: SpotStatus) -> bool:
+    """Set the status of the spot job."""
     raise NotImplemented
 
 

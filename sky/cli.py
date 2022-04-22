@@ -1067,15 +1067,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster}...',
                     fg='yellow')
 
-    code = job_lib.JobLibCodeGen.cancel_jobs(jobs)
-
-    returncode, _, stderr = backend.run_on_head(handle,
-                                                code,
-                                                stream_logs=False,
-                                                require_outputs=True)
-    backend_utils.handle_returncode(
-        returncode, code, f'Failed to cancel jobs on cluster {cluster}.',
-        stderr)
+    backend.cancel_jobs(handle, jobs)
 
 
 @cli.command(cls=_DocumentedCodeCommand)

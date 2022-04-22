@@ -1129,11 +1129,6 @@ def get_head_ip(
 def _ping_cluster_or_set_to_stopped(
         record: Dict[str, Any]) -> global_user_state.ClusterStatus:
     handle = record['handle']
-    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-        return record
-    # Autostop is disabled for the cluster
-    if record['autostop'] < 0:
-        return record
     cluster_name = handle.cluster_name
     try:
         get_node_ips(handle.cluster_yaml, handle.launched_nodes)
@@ -1150,11 +1145,18 @@ def _ping_cluster_or_set_to_stopped(
 
 
 def get_cluster_status_with_refresh(
-        cluster_name: str) -> Optional[global_user_state.ClusterStatus]:
+        cluster_name: str,
+        force_refresh: bool = False
+) -> Optional[global_user_state.ClusterStatus]:
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None
-    record = _ping_cluster_or_set_to_stopped(record)
+
+    handle = record['handle']
+    if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        if force_refresh or record['autostop'] >= 0:
+            # Refresh the status only when force_refresh is True or the cluster has autostopped turned on.
+            record = _ping_cluster_or_set_to_stopped(record)
     return record['status']
 
 
