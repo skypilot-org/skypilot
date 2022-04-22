@@ -96,13 +96,13 @@ def _truncate_long_string(s: str, max_length: int = 35) -> str:
     return ' '.join(splits[:i]) + ' ...'
 
 
-def _get_cloud(cloud: str) -> Optional[clouds.Cloud]:
+def _get_cloud(cloud: Optional[str]) -> Optional[clouds.Cloud]:
     """Check if cloud is registered and return cloud object."""
-    cloud_obj = clouds.Cloud.from_str(cloud)
+    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
     if cloud is not None and cloud_obj is None:
         raise click.UsageError(
-            f'Cloud \'{cloud}\' is not supported. '
-            f'Supported clouds: {list(clouds.Cloud.CLOUD_REGISTRY.keys())}')
+            f'Cloud {cloud!r} is not supported. '
+            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
     return cloud_obj
 
 
@@ -225,14 +225,14 @@ _TASK_OPTIONS = [
         '--cloud',
         required=False,
         type=str,
-        help='The cloud to use. If specified, override the "resources.cloud".'
-        '"none" reset the "resources.cloud".'),
+        help=('The cloud to use. If specified, override the "resources.cloud". '
+              '"none" resets the "resources.cloud".')),
     click.option(
         '--region',
         required=False,
         type=str,
-        help='The region to use. If specified, override the "resources.region".'
-        '"none" reset the "resources.region".'),
+        help=('The region to use. If specified, override the '
+              '"resources.region". "none" resets the "resources.region".')),
     click.option(
         '--gpus',
         required=False,
@@ -246,13 +246,13 @@ _TASK_OPTIONS = [
          ' is seen as the task demand, which must fit the cluster\'s total '
          'resources and is used for scheduling the task. '
          'Overrides the "accelerators" '
-         'config in the YAML if both are supplied.'
-         '"none" reset the "accelerators" config.')),
+         'config in the YAML if both are supplied. '
+         '"none" resets the "accelerators" config.')),
     click.option(
         '--num-nodes',
         required=False,
         type=int,
-        help=('Number of nodes to launch and to execute the task on. '
+        help=('Number of nodes to execute the task on. '
               'Overrides the "num_nodes" config in the YAML if both are '
               'supplied.')),
     click.option(
