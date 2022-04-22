@@ -59,7 +59,6 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 # Timeout for provision a cluster and wait for it to be ready in seconds. (5 min)
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 300
 
-_LOCAL_RAY_INIT_CMD = 'eval $(conda shell.bash hook) && source activate sky-ray-env-{} && '
 _LOCK_FILENAME = '~/.sky/.{}.lock'
 _FILELOCK_TIMEOUT_SECONDS = 10
 
@@ -90,8 +89,9 @@ def _get_cluster_config_template(cloud):
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
-        clouds.Local: 'local-ray.yml.j2',
     }
+    if isinstance(cloud, clouds.Local):
+        return 'local-ray.yml.j2'
     return cloud_to_template[type(cloud)]
 
 
@@ -236,14 +236,14 @@ class RayCodeGen:
             if 'tpu' in acc_name.lower():
                 gpu_dict = dict()
             for bundle in bundles:
-                if isinstance(cloud, clouds.Local):
-                    bundle.update({**gpu_dict})
-                else:
-                    bundle.update({
-                        **accelerator_dict,
-                        # Set the GPU to avoid ray hanging the resources allocation
-                        **gpu_dict,
-                    })
+                # if isinstance(cloud, clouds.Local):
+                #     bundle.update({**gpu_dict})
+                # else:
+                bundle.update({
+                    **accelerator_dict,
+                    # Set the GPU to avoid ray hanging the resources allocation
+                    **gpu_dict,
+                })
 
         pack_mode = 'STRICT_SPREAD'
         self._code += [
@@ -1041,9 +1041,16 @@ class RetryingVmProvisioner(object):
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
+            stream_logs=True,
             use_cached_head_ip=False)
         if returncode == 0:
             return
+
+        launched_resources = handle.launched_resources
+        if isinstance(launched_resources.cloud, clouds.Local):
+            raise ValueError('Ray status errored out on On-premise machine.'
+                             'Check if Ray==1.10.0 is installed correctly.')
+
         backend.run_on_head(handle, f'ray stop', use_cached_head_ip=False)
         log_lib.run_with_log(
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
@@ -1913,8 +1920,6 @@ class CloudVmRayBackend(backends.Backend):
         # Ray Multitenancy is unsupported: https://github.com/ray-project/ray/issues/6800
         # We will do a very complicated workaround...
         ray_command = f'{cd} && {executable} -u {script_path} > {remote_log_path} 2>&1'
-        if isinstance(handle.launched_resources.cloud, clouds.Local):
-            ray_command = _LOCAL_RAY_INIT_CMD.format(ssh_user) + ray_command
 
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(ray_command)
@@ -1949,7 +1954,6 @@ class CloudVmRayBackend(backends.Backend):
             f'ray job submit '
             f'--address=127.0.0.1:8265 --job-id {job_id_hash} --no-wait '
             f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
-        print(job_submit_cmd)
         returncode, a, b = self.run_on_head(handle,
                                             job_submit_cmd,
                                             require_outputs=True,

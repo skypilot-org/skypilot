@@ -68,7 +68,6 @@ _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
 _LAUNCHING_LOCAL_IP_PATTERN = re.compile(
     r'({}): local[._]cluster[._]node'.format(IP_ADDR_REGEX))
-_LOCAL_RAY_INIT_CMD = 'eval $(conda shell.bash hook) && conda activate sky-ray-env-{} && '
 WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 
 
@@ -709,7 +708,8 @@ def launch_local_cluster(local_template: str,
                                auth_config['ssh_private_key'],
         }))
 
-    ray_cmd_list = ['ray', 'up', '--no-restart', '-y', yaml_path]
+    ray_cmd_list = ['ray', 'up', '-y', yaml_path]
+    print(ray_cmd_list)
     returncode, stdout, stderr = log_lib.run_with_log(
         ray_cmd_list,
         log_path='/dev/null',
@@ -831,7 +831,7 @@ def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
         config = auth.setup_gcp_authentication(config)
     elif cloud_type == 'Azure':
         config = auth.setup_azure_authentication(config)
-    elif cloud_type == 'Local':
+    elif config['provider']['type'] == 'local':
         config = config
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
@@ -1137,8 +1137,7 @@ def run_command_on_ip_via_ssh(
         return proc.returncode, '', ''
     if isinstance(cmd, list):
         cmd = ' '.join(cmd)
-    if isinstance(cloud, clouds.Local):
-        cmd = _LOCAL_RAY_INIT_CMD.format(ssh_user) + cmd
+
     # We need this to correctly run the cmd, and get the output.
     command = base_ssh_command + [
         'bash',

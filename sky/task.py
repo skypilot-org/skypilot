@@ -56,6 +56,15 @@ def _is_valid_name(name: str) -> bool:
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
 
 
+def _get_cloud(cloud: str) -> clouds.Cloud:
+    if cloud is not None and cloud not in clouds.CLOUD_REGISTRY:
+        local_cloud = clouds.get_local_cloud(cloud)
+        if local_cloud:
+            return local_cloud
+        raise ValueError(f'Cloud {cloud} is not found.')
+    return clouds.CLOUD_REGISTRY.get(cloud)
+
+
 class Task:
     """Task: a coarse-grained stage in an application."""
 
@@ -272,9 +281,7 @@ class Task:
         resources = config.get('resources')
         if resources is not None:
             if resources.get('cloud') is not None:
-                if resources.get('cloud') == 'local':
-                    task.num_nodes = len(resources['ips'])
-                resources['cloud'] = clouds.CLOUD_REGISTRY[resources['cloud']]
+                resources['cloud'] = _get_cloud(resources['cloud'])
             if resources.get('accelerators') is not None:
                 resources['accelerators'] = resources['accelerators']
             if resources.get('accelerator_args') is not None:

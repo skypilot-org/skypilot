@@ -47,15 +47,15 @@ class Resources:
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
-        ips: Optional[List[str]] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
 
         # Check for Local Config
-        self.ips = ips
+        self.ips = None
         if cloud is not None and isinstance(self._cloud, clouds.Local):
-            assert instance_type is None and not use_spot and ips, \
+            self.ips = clouds.get_local_ips(self._cloud.__repr__())
+            assert instance_type is None and not use_spot and self.ips, \
             'Resources are passed incorrectly ' + \
             'to Local/On-Prem.'
 
@@ -406,7 +406,6 @@ class Resources:
             use_spot=override.pop('use_spot', self.use_spot),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
-            ips=override.pop('ips', self.ips),
         )
         assert len(override) == 0
         return resources
