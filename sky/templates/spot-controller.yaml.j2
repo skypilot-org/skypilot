@@ -1,0 +1,27 @@
+# A minimal example.
+#
+# Runs a task that simply lists the default conda environments.
+#
+# Usage:
+#   sky launch -c min minimal.yaml
+#   sky down min
+
+cluster_name: {{cluster_name}}
+
+name: minispot
+
+resources:
+  cloud: aws
+  instance_type: m4.2xlarge
+
+file_mounts:
+  ~/user_job.yaml: {{user_yaml_path}}
+setup: |
+  echo "running setup"
+
+run: |
+  conda env list
+  sky launch -c {{spot_job_name}}-job ~/user_job.yaml -y
+  sky autostop {{spot_job_name}}-job -i 5
+
+

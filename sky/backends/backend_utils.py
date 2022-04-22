@@ -1052,6 +1052,12 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
+def generate_spot_cluster_name():
+    # TODO: change this ID formatting to something more pleasant.
+    # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
+    return f'sky-spot-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+
+
 def generate_tpu_name(cluster_name):
     return f'{cluster_name}-sky-{uuid.uuid4().hex[:4]}'
 
