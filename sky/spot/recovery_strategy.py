@@ -57,8 +57,11 @@ class Strategy:
 
     def launch(self, max_retry=1, retry_gap_seconds=1):
         """Launch the spot cluster at the first time.
+
         It can fail if resource is not available. Need to check the cluster
-        status, after calling."""
+        status, after calling.
+        """
+        # TODO(zhwu): handle the failure during `preparing sky runtime`.
         with sky.Dag() as dag:
             sky.Task.from_yaml(self.task_yaml)
         retry_cnt = 0
