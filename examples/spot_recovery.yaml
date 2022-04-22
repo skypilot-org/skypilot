@@ -1,0 +1,21 @@
+name: minimal
+
+resources:
+  cloud: aws
+  use_spot: true
+  spot_recovery: failover
+
+setup: |
+  echo "running setup"
+  pip install tqdm
+
+run: |
+  conda env list
+  python -u - << EOF
+  import time
+  import tqdm
+
+  for i in tqdm.trange(1200):
+    time.sleep(1)
+  
+  EOF

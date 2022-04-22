@@ -31,9 +31,12 @@ class SpotController:
         """Busy loop monitoring spot cluster status and handling recovery."""
         logger.info(f'Start monitoring spot cluster {self.cluster_name}')
         logger.info('Launching the spot cluster...')
-        self.strategy.launch()
-
-        logger.info('Spot cluster launched.')
+        try:
+            self.strategy.launch()
+            logger.info('Spot cluster launched.')
+        except Exception:
+            # If the launch failes, it will be recovered by the following code.
+            pass
         while True:
             # NOTE: we do not check cluster status first because race condition can occur,
             # i.e. cluster can be down during the job status check.
@@ -41,7 +44,7 @@ class SpotController:
             # https://docs.google.com/document/d/1vt6yGIK6wFYMkHC9HVTe_oISxPR90ugCliMXZKu762E/edit?usp=sharing
             job_status = self._job_status_check()
             assert (job_status not in [job_lib.JobStatus.INIT, job_lib.JobStatus.CANCELLED]), (f'Job status should not {job_status.value}')
-            if job_status is not None and not job_status == job_lib.JobStatus.RUNNING:
+            if job_status is not None and job_status == job_lib.JobStatus.RUNNING:
                 # The job is normally running, continue to monitor the job status.
                 time.sleep(_JOB_STATUS_CHECK_GAP_SECONDS)
                 continue
