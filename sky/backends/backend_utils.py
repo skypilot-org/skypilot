@@ -633,7 +633,15 @@ def check_local_installation(ips, auth_config):
     ssh_key = auth_config['ssh_private_key']
 
     for idx, ip in enumerate(ips):
-        # All nodes must have Ray
+        # All nodes must have Ray and Python3
+        rc = run_command_on_ip_via_ssh(ip,
+                                       f'python3 --version',
+                                       ssh_user=ssh_user,
+                                       ssh_private_key=ssh_key,
+                                       stream_logs=False)
+        if rc:
+            raise ValueError(f'Python3 not installed on {ip}')
+
         rc = run_command_on_ip_via_ssh(ip,
                                        f'ray --version',
                                        ssh_user=ssh_user,
@@ -642,15 +650,91 @@ def check_local_installation(ips, auth_config):
         if rc:
             raise ValueError(f'Ray not installed on {ip}')
 
-        # Head Node must have Python3 and Sudo
-        if idx == 0:
-            rc = run_command_on_ip_via_ssh(ip,
-                                           f'python3 --version',
-                                           ssh_user=ssh_user,
-                                           ssh_private_key=ssh_key,
-                                           stream_logs=False)
-            if rc:
-                raise ValueError(f'Python3 not installed on {ip}')
+
+def get_local_custom_resources(ips: List[str], auth_config):
+
+    ssh_user = auth_config['ssh_user']
+    ssh_key = auth_config['ssh_private_key']
+    remote_resource_path = '~/.sky/resource_group.py'
+    cluster_custom_resources = {}
+
+    def rsync_no_handle(ip, source, target):
+        rsync_command = [
+            'rsync',
+            '-Pavz',
+            '--filter=\'dir-merge,- .gitignore\'',
+        ]
+        rc = run_command_on_ip_via_ssh(ip,
+                                       f'mkdir -p ~/.sky',
+                                       ssh_user=ssh_user,
+                                       ssh_private_key=ssh_key,
+                                       stream_logs=False)
+        ssh_options = ' '.join(ssh_options_list(ssh_key, None))
+        rsync_command.append(f'-e "ssh {ssh_options}"')
+        rsync_command.extend([
+            source,
+            f'{ssh_user}@{ip}:{target}',
+        ])
+        command = ' '.join(rsync_command)
+        rc = log_lib.run_with_log(command,
+                                  stream_logs=True,
+                                  log_path='/dev/null',
+                                  shell=True)
+        handle_returncode(rc, command,
+                          f'Failed to rsync {source} -> {ip}:{target}')
+
+    code = \
+    textwrap.dedent(f"""\
+        import os
+        from ray.util.accelerators import *
+
+        # A100 is not defined in Ray 1.10
+        all_ray_accelerators = [NVIDIA_TESLA_V100,
+                                NVIDIA_TESLA_P100,
+                                NVIDIA_TESLA_T4,
+                                NVIDIA_TESLA_P4,
+                                NVIDIA_TESLA_K80,
+                                'A100',]
+        accelerators_dict = {{}}
+        for acc in all_ray_accelerators:
+            output_str = os.popen(f'lspci | grep \\'{{acc}}\\'').read()
+            output_lst = output_str.split('\\n')
+            count = 0
+            for output in output_lst:
+                count += int(acc in output)
+            if count !=0:
+                accelerators_dict[acc] = count
+
+        print(accelerators_dict)
+        """)
+
+    ip = ips[0]
+    with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+        fp.write(code)
+        fp.flush()
+        source_file_path = fp.name
+        rsync_no_handle(ip, fp.name, remote_resource_path)
+
+    rc, output, stderr = run_command_on_ip_via_ssh(
+        ip,
+        f'python3 {remote_resource_path}',
+        ssh_user=ssh_user,
+        ssh_private_key=ssh_key,
+        stream_logs=False,
+        require_outputs=True,
+        cloud=clouds)
+
+    if rc:
+        raise ValueError('Failed to execute resource group detector. '
+                         'Check if Python3 is installed correctly.')
+
+    # Convert output into a custom resources dict
+    ip_resources = ast.literal_eval(output)
+    for acc, num_acc in ip_resources.items():
+        if acc not in cluster_custom_resources:
+            cluster_custom_resources[acc] = 0
+        cluster_custom_resources[acc] += num_acc
+    return cluster_custom_resources
 
 
 def launch_local_cluster(local_template: str,
@@ -708,8 +792,7 @@ def launch_local_cluster(local_template: str,
                                auth_config['ssh_private_key'],
         }))
 
-    ray_cmd_list = ['ray', 'up', '-y', yaml_path]
-    print(ray_cmd_list)
+    ray_cmd_list = ['ray', 'up', '-y', '--no-config-cache', yaml_path]
     returncode, stdout, stderr = log_lib.run_with_log(
         ray_cmd_list,
         log_path='/dev/null',
@@ -723,89 +806,6 @@ def launch_local_cluster(local_template: str,
 
     handle_returncode(returncode, ' '.join(ray_cmd_list),
                       'Failed to launched autoscaler.')
-
-
-def get_local_custom_resources(ips: List[str], auth_config):
-
-    ssh_user = auth_config['ssh_user']
-    ssh_key = auth_config['ssh_private_key']
-    remote_resource_path = '~/.sky/resource_group.py'
-    cluster_custom_resources = {}
-
-    def rsync_no_handle(ip, source, target):
-        rsync_command = [
-            'rsync',
-            '-Pavz',
-            '--filter=\'dir-merge,- .gitignore\'',
-        ]
-        ssh_options = ' '.join(ssh_options_list(ssh_key, None))
-        rsync_command.append(f'-e "ssh {ssh_options}"')
-        rsync_command.extend([
-            source,
-            f'{ssh_user}@{ip}:{target}',
-        ])
-        command = ' '.join(rsync_command)
-
-        rc = log_lib.run_with_log(command,
-                                  stream_logs=False,
-                                  log_path='/dev/null',
-                                  shell=True)
-        handle_returncode(rc, command,
-                          f'Failed to rsync {source} -> {ip}:{target}')
-
-    code = \
-    textwrap.dedent(f"""\
-        import os
-        from ray.util.accelerators import *
-
-        # A100 is not defined in Ray 1.10
-        all_ray_accelerators = [NVIDIA_TESLA_V100,
-                                NVIDIA_TESLA_P100,
-                                NVIDIA_TESLA_T4,
-                                NVIDIA_TESLA_P4,
-                                NVIDIA_TESLA_K80,
-                                'A100',]
-        accelerators_dict = {{}}
-        for acc in all_ray_accelerators:
-            output_str = os.popen(f'lspci | grep \\'{{acc}}\\'').read()
-            output_lst = output_str.split('\\n')
-            count = 0
-            for output in output_lst:
-                count += int(acc in output)
-            if count !=0:
-                accelerators_dict[acc] = count
-
-        print(accelerators_dict)
-        """)
-
-    # TODO: Parallelize
-    for ip in ips:
-        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-            fp.write(code)
-            fp.flush()
-            source_file_path = fp.name
-            rsync_no_handle(ip, fp.name, remote_resource_path)
-
-        rc, output, stderr = run_command_on_ip_via_ssh(
-            ip,
-            f'python3 {remote_resource_path}',
-            ssh_user=ssh_user,
-            ssh_private_key=ssh_key,
-            stream_logs=False,
-            require_outputs=True,
-            cloud=clouds)
-
-        if rc:
-            raise ValueError('Failed to execute resource group detector. '
-                             'Check if Python3 is installed correctly.')
-
-        # Convert output into a custom resources dict
-        ip_resources = ast.literal_eval(output)
-        for acc, num_acc in ip_resources.items():
-            if acc not in cluster_custom_resources:
-                cluster_custom_resources[acc] = 0
-            cluster_custom_resources[acc] += num_acc
-    return cluster_custom_resources
 
 
 def save_censored_yaml(yaml_config):
@@ -905,12 +905,13 @@ def wait_until_ray_cluster_ready(
             logger.debug(output)
 
             # Workers that are ready
-            local_total_nodes = 0
             ready_workers = 0
             if isinstance(cloud, clouds.Local):
                 result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
-                local_total_nodes = int(result[0])
-                ready_workers = local_total_nodes - 1
+                if len(result) == 0:
+                    ready_workers = 0
+                else:
+                    ready_workers = int(result[0])
             else:
                 result = _LAUNCHED_WORKER_PATTERN.findall(output)
                 if (len(result) == 0):
@@ -932,7 +933,7 @@ def wait_until_ray_cluster_ready(
                                  f'{ready_workers} out of {num_nodes - 1} '
                                  'workers ready')
 
-            if ready_head + ready_workers == num_nodes or local_total_nodes == num_nodes:
+            if ready_head + ready_workers == num_nodes or ready_workers == num_nodes - 1:
                 # All nodes are up.
                 break
 
@@ -1289,7 +1290,6 @@ def get_node_ips(
             exceptions.FetchIPError.Reason.HEAD) from e
     if len(head_ip) != 1:
         raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
-
     if expected_num_nodes > 1:
         try:
             proc = run(f'ray get-worker-ips {yaml_handle}',

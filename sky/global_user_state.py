@@ -45,7 +45,7 @@ class _SQLiteConn(threading.local):
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS clusters (
             name TEXT PRIMARY KEY,
-            lauched_at INTEGER,
+            launched_at INTEGER,
             handle BLOB,
             last_use TEXT,
             status TEXT)""")
@@ -57,7 +57,7 @@ class _SQLiteConn(threading.local):
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS storage (
             name TEXT PRIMARY KEY,
-            lauched_at INTEGER,
+            launched_at INTEGER,
             handle BLOB,
             last_use TEXT,
             status TEXT)""")
@@ -67,10 +67,6 @@ class _SQLiteConn(threading.local):
         # Add autostop column to clusters table
         db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
                                      'autostop', 'INTEGER DEFAULT -1')
-        db_utils.rename_column(self.cursor, self.conn, 'clusters', 'lauched_at',
-                               'launched_at')
-        db_utils.rename_column(self.cursor, self.conn, 'storage', 'lauched_at',
-                               'launched_at')
 
         self.conn.commit()
 
