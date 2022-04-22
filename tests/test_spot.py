@@ -8,8 +8,10 @@ from sky import spot
 
 def test_spot_controller():
     """Test the spot yaml."""
-    controller = spot.SpotController('test-spot-controller', 'examples/spot_recovery.yaml')
+    controller = spot.SpotController('test-spot-controller',
+                                     'examples/spot_recovery.yaml')
     controller.start()
+
 
 def test_spot_nonexist_strategy():
     """Test the nonexist recovery strategy."""
@@ -21,6 +23,9 @@ def test_spot_nonexist_strategy():
     with tempfile.NamedTemporaryFile() as f:
         f.write(task_yaml)
         f.flush()
-        with pytest.raises(ValueError, match='is not supported. The strategy should be among'):
-            controller = spot.SpotController('test-spot-nonexist-strategy', f.name)
+        with pytest.raises(
+                ValueError,
+                match='is not supported. The strategy should be among'):
+            controller = spot.SpotController('test-spot-nonexist-strategy',
+                                             f.name)
             controller.start()

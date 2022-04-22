@@ -1155,7 +1155,8 @@ def get_cluster_status_with_refresh(
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
         if force_refresh or record['autostop'] >= 0:
-            # Refresh the status only when force_refresh is True or the cluster has autostopped turned on.
+            # Refresh the status only when force_refresh is True or the cluster
+            # has autostopped turned on.
             record = _ping_cluster_or_set_to_stopped(record)
     return record['status']
 

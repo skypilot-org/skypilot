@@ -31,31 +31,26 @@ class SpotController:
         """Busy loop monitoring spot cluster status and handling recovery."""
         logger.info(f'Start monitoring spot cluster {self.cluster_name}')
         logger.info('Launching the spot cluster...')
-        try:
-            self.strategy.launch()
-            logger.info('Spot cluster launched.')
-        except Exception:
-            # If the launch failes, it will be recovered by the following code.
-            pass
+        self.strategy.launch()
         while True:
-            # NOTE: we do not check cluster status first because race condition can occur,
-            # i.e. cluster can be down during the job status check.
+            # NOTE: we do not check cluster status first because race condition
+            # can occur, i.e. cluster can be down during the job status check.
             # Refer to the design doc's Spot Controller Workflow section
-            # https://docs.google.com/document/d/1vt6yGIK6wFYMkHC9HVTe_oISxPR90ugCliMXZKu762E/edit?usp=sharing
+            # https://docs.google.com/document/d/1vt6yGIK6wFYMkHC9HVTe_oISxPR90ugCliMXZKu762E/edit?usp=sharing # pylint: disable=line-too-long
             job_status = self._job_status_check()
-            assert (job_status not in [job_lib.JobStatus.INIT, job_lib.JobStatus.CANCELLED]), (f'Job status should not {job_status.value}')
-            if job_status is not None and job_status == job_lib.JobStatus.RUNNING:
+            assert job_status != job_lib.JobStatus.INIT, (
+                'Job status should not INIT')
+            if job_status is not None and not job_status.is_terminal():
                 # The job is normally running, continue to monitor the job status.
                 time.sleep(_JOB_STATUS_CHECK_GAP_SECONDS)
                 continue
-            
+
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 # The job is done.
                 break
 
             assert job_status is None or job_status == job_lib.JobStatus.FAILED, (
-                f'The job should not be {job_status.value}.'
-            )
+                f'The job should not be {job_status.value}.')
             if job_status == job_lib.JobStatus.FAILED:
                 # Check the status of the spot cluster. It can be STOPPED or UP,
                 # where STOPPED means partially down.
@@ -69,9 +64,9 @@ class SpotController:
                 )
             # Failed to connect to the cluster or the cluster is partially down.
             # job_status is None or job_status == job_lib.JobStatus.FAILED
-            logger.info(f'The cluster is Preempted. Recovering...')
+            logger.info('The cluster is Preempted. Recovering...')
             self.strategy.recover()
-            logger.info(f'Recovered.')
+            logger.info('Recovered.')
         return job_status
 
     def start(self):
@@ -94,6 +89,8 @@ class SpotController:
             # Fail to connect to the cluster
             return None
 
+
 if __name__ == '__main__':
-    controller = SpotController('test-spot-controller', 'examples/spot_recovery.yaml')
+    controller = SpotController('test-spot-controller',
+                                'examples/spot_recovery.yaml')
     controller.start()

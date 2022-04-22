@@ -26,8 +26,8 @@ _CURSOR.execute("""\
     last_recovered_at INTEGER DEFAULT -1,
     recovery_count INTEGER,
     job_duration INTEGER,)""")
-# job_duration is the time a job actually runs, excluding the provision and recovery time.
-# If the job is not finished:
+# job_duration is the time a job actually runs, excluding the provision
+# and recovery time. If the job is not finished:
 # total_job_duration = now() - last_recovered_at + job_duration
 
 

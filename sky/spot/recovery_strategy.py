@@ -1,4 +1,5 @@
-"""The strategy to handle each launching, recovery and termination of the spot clusters."""
+"""The strategy to handle each launching/recovery/termination of spot clusters."""
+from asyncio.log import logger
 import tempfile
 import time
 import typing
@@ -6,10 +7,13 @@ from typing import Any, Dict
 
 import sky
 from sky import global_user_state
+from sky import sky_logging
 from sky.backends import backend_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import Backend
+
+logger = sky_logging.init_logger(__name__)
 
 SPOT_STRATEGIES = dict()
 
@@ -51,14 +55,30 @@ class Strategy:
         return SPOT_STRATEGIES.get(recovery_strategy)(cluster_name, backend,
                                                       task_config)
 
-    def launch(self):
+    def launch(self, max_retry=1, retry_gap_seconds=1):
         """Launch the spot cluster at the first time.
-        It can fail if resource is not available. Need to check the cluster status, after calling."""
+        It can fail if resource is not available. Need to check the cluster
+        status, after calling."""
         with sky.Dag() as dag:
             sky.Task.from_yaml(self.task_yaml)
-        sky.launch(dag, cluster_name=self.cluster_name, detach_run=True)
-        # TODO(zhwu): set the upscaling_speed in ray yaml to be 0 so that ray
-        # will not try to launch another worker if one worker preempted.
+        retry_cnt = 0
+        while retry_cnt < max_retry:
+            try:
+                sky.launch(dag, cluster_name=self.cluster_name, detach_run=True)
+                logger.info('Spot cluster launched.')
+            except SystemExit:
+                # If the launch failes, it will be recovered by the following code.
+                logger.info('Failed to launch the spot cluster.')
+            # TODO(zhwu): set the upscaling_speed in ray yaml to be 0 so that ray
+            # will not try to launch another worker if one worker preempted.
+
+            cluster_status = backend_utils.get_cluster_status_with_refresh(
+                self.cluster_name, force_refresh=True)
+            if cluster_status == global_user_state.ClusterStatus.UP:
+                return
+            retry_cnt += 1
+            # TODO(zhwu): maybe exponential backoff is better?
+            time.sleep(retry_gap_seconds)
 
     def recover(self):
         """Relaunch the spot cluster after failure and wait until job starts.
@@ -92,9 +112,10 @@ class FailoverStrategy(Strategy, name='FAILOVER'):
         # cluster_status = backend_utils.get_cluster_status_with_refresh(
         #     self.cluster_name, force_refresh=True)
         # assert cluster_status == global_user_state.ClusterStatus.STOPPED
-        
+
         # Cluster should be in STOPPED status.
-        handle = global_user_state.get_handle_from_cluster_name(self.cluster_name)
+        handle = global_user_state.get_handle_from_cluster_name(
+            self.cluster_name)
         try:
             self.backend.cancel_jobs(handle, None)
         except SystemExit:
@@ -112,13 +133,5 @@ class FailoverStrategy(Strategy, name='FAILOVER'):
         self.terminate()
 
         # Step 3
-        retry_cnt = 0
-        while retry_cnt < self._MAX_RETRY_CNT:
-            self.launch()
-            cluster_status = backend_utils.get_cluster_status_with_refresh(
-                self.cluster_name, force_refresh=True)
-            if cluster_status == global_user_state.ClusterStatus.UP:
-                return
-            retry_cnt += 1
-            # TODO(zhwu): maybe exponential backoff is better?
-            time.sleep(self._RETRY_GAP_SECONDS)
+        self.launch(max_retry=self._MAX_RETRY_CNT,
+                    retry_gap_seconds=self._RETRY_GAP_SECONDS)
