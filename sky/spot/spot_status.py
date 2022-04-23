@@ -124,7 +124,7 @@ def succeeded(job_id: int):
         UPDATE spot SET
         status=(?), end_at=(?)
         WHERE job_id=(?)""",
-        (SpotStatus.SUCCEEDED.value, time.time(), time.time(), job_id))
+        (SpotStatus.SUCCEEDED.value, time.time(), job_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 
@@ -135,7 +135,7 @@ def failed(job_id: int):
         UPDATE spot SET
         status=(?), end_at=(?)
         WHERE job_id=(?)""",
-        (SpotStatus.FAILED.value, time.time(), time.time(), job_id))
+        (SpotStatus.FAILED.value, time.time(), job_id))
     _CONN.commit()
     logger.info('Job failed.')
 
@@ -146,7 +146,7 @@ def cancelled(job_id: int):
         UPDATE spot SET
         status=(?), end_at=(?)
         WHERE job_id=(?)""",
-        (SpotStatus.CANCELLED, time.time(), time.time(), job_id))
+        (SpotStatus.CANCELLED, time.time(), job_id))
     _CONN.commit()
     logger.info('Job cancelled.')
 
