@@ -138,13 +138,10 @@ class SpotController:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        'task_yaml',
-        type=str,
-        help=
-        'The path to the user spot task yaml file. '
-        'The file name is the spot task name.'
-    )
+    parser.add_argument('task_yaml',
+                        type=str,
+                        help='The path to the user spot task yaml file. '
+                        'The file name is the spot task name.')
     args = parser.parse_args()
     controller = SpotController(args.task_yaml)
     controller.start()

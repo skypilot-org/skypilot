@@ -30,7 +30,6 @@ each other.
 import functools
 import getpass
 import os
-import pathlib
 import shlex
 import sys
 import tempfile
@@ -549,6 +548,15 @@ def cli():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
+@click.option('--autostop-idle-minutes',
+              '-i',
+              default=None,
+              type=int,
+              required=False,
+              help=('Automatically stop the cluster after this many minutes '
+                    'of idleness after setup/file_mounts. This equivalent to '
+                    'run `sky autostop -i minutes` after `sky launch -d`.'
+                    'If not set, the cluster will never be stopped.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -569,6 +577,7 @@ def launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     disk_size: Optional[int],
+    autostop_idle_minutes: Optional[int],
     yes: bool,
 ):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
@@ -665,7 +674,8 @@ def launch(
                stream_logs=True,
                cluster_name=cluster,
                detach_run=detach_run,
-               backend=backend)
+               backend=backend,
+               autostop_idle_minutes=autostop_idle_minutes)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1956,6 +1966,12 @@ def spot():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
+@click.option('--detach-run',
+              '-d',
+              default=False,
+              is_flag=True,
+              help='If True, run setup first (blocking), '
+              'then detach from the job\'s execution.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1973,6 +1989,7 @@ def spot_launch(
     use_spot: Optional[bool],
     spot_recovery: Optional[str],
     disk_size: Optional[int],
+    detach_run: bool,
     yes: bool,
 ):
     """Launch a managed spot instance."""
@@ -2049,14 +2066,13 @@ def spot_launch(
     if name is not None:
         task.name = name
 
-    
     with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
         backend_utils.dump_yaml(f.name, task_config)
 
         controller_name = spot_lib.SPOT_CONTROLLER_NAME
-        yaml_path = backend_utils._fill_template(
+        yaml_path = backend_utils.fill_template(
             'spot-controller.yaml.j2', {
                 'user_yaml_path': f.name,
                 'spot_controller': controller_name,
@@ -2066,12 +2082,16 @@ def spot_launch(
         with sky.Dag() as dag:
             task = sky.Task.from_yaml(yaml_path)
             assert len(task.resources) == 1
-        click.secho(f'Launching managed spot task {name} on spot controller...', fg='yellow')
+        click.secho(f'Launching managed spot task {name} on spot controller...',
+                    fg='yellow')
+        backend = backends.CloudVmRayBackend()
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,
-                   detach_run=False,
-                   backend=backends.CloudVmRayBackend())
+                   detach_run=detach_run,
+                   backend=backend,
+                   autostop_idle_minutes=spot_lib.
+                   SPOT_CONTROLLER_AUTOSTOP_IDLE_MINUTES)
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)

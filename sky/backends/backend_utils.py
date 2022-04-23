@@ -64,9 +64,9 @@ _LAUNCHING_IP_PATTERN = re.compile(
 WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 
 
-def _fill_template(template_name: str,
-                   variables: Dict,
-                   output_path: Optional[str] = None) -> str:
+def fill_template(template_name: str,
+                  variables: Dict,
+                  output_path: Optional[str] = None) -> str:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
@@ -75,7 +75,8 @@ def _fill_template(template_name: str,
     with open(template_path) as fin:
         template = fin.read()
     if output_path is None:
-        assert 'cluster_name' in variables or 'yaml_name' in variables, 'cluster_name or yaml_name is required.'
+        assert ('cluster_name' in variables or 'yaml_name'
+                in variables), ('cluster_name or yaml_name is required.')
         cluster_name = variables.get('yaml_name') or variables.get(
             'cluster_name')
         output_path = pathlib.Path(
@@ -549,7 +550,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
     credentials = sky_check.get_cloud_credential_file_mounts()
     credential_file_mounts, credential_excludes = credentials
-    yaml_path = _fill_template(
+    yaml_path = fill_template(
         cluster_config_template,
         dict(
             resources_vars,
@@ -588,7 +589,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
         scripts = tuple(
-            _fill_template(
+            fill_template(
                 template_name,
                 dict(resources_vars, **{
                     'zones': ','.join(zones),

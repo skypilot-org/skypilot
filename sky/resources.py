@@ -1,5 +1,4 @@
 """Resources: compute requirements of Tasks."""
-import resource
 from typing import Dict, Optional, Union
 
 from sky import clouds
@@ -435,8 +434,8 @@ class Resources:
             return Resources()
         resources_fields = dict()
         if config.get('cloud') is not None:
-            resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(config.pop(
-                'cloud'))
+            resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
+                config.pop('cloud'))
         if config.get('instance_type') is not None:
             resources_fields['instance_type'] = config.pop('instance_type')
         if config.get('accelerators') is not None:

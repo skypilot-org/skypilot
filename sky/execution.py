@@ -36,6 +36,7 @@ class Stage(enum.Enum):
     SYNC_WORKDIR = 2
     SYNC_FILE_MOUNTS = 3
     SETUP = 4
+    AUTOSTOP = 4.5
     EXEC = 5
     TEARDOWN = 6
 
@@ -49,7 +50,8 @@ def _execute(dag: sky.Dag,
              optimize_target: OptimizeTarget = OptimizeTarget.COST,
              stages: Optional[List[Stage]] = None,
              cluster_name: Optional[str] = None,
-             detach_run: bool = False) -> None:
+             detach_run: bool = False,
+             autostop_idle_minutes: Optional[int] = None) -> None:
     """Runs a DAG.
 
     If the DAG has not been optimized yet, this will call sky.optimize() for
@@ -74,6 +76,7 @@ def _execute(dag: sky.Dag,
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
       detach_run: bool; whether to detach the process after the job submitted.
+      autostop
     """
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]
@@ -85,6 +88,13 @@ def _execute(dag: sky.Dag,
         cluster_exists = existing_handle is not None
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
+    if not isinstance(
+            backend,
+            backends.CloudVmRayBackend) and autostop_idle_minutes is not None:
+        # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
+        raise ValueError(
+            f'backend {backend.NAME} does not support autostop, please try '
+            f'{backends.CloudVmRayBackend.NAME}')
 
     if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
         if task.best_resources is None:
@@ -130,6 +140,10 @@ def _execute(dag: sky.Dag,
         if stages is None or Stage.SETUP in stages:
             backend.setup(handle, task)
 
+        if stages is None or Stage.AUTOSTOP in stages:
+            if autostop_idle_minutes is not None:
+                backend.set_autostop(handle, autostop_idle_minutes)
+
         if stages is None or Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
@@ -165,7 +179,8 @@ def launch(dag: sky.Dag,
            backend: Optional[backends.Backend] = None,
            optimize_target: OptimizeTarget = OptimizeTarget.COST,
            cluster_name: Optional[str] = None,
-           detach_run: bool = False) -> None:
+           detach_run: bool = False,
+           autostop_idle_minutes: Optional[int] = None) -> None:
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,
@@ -174,7 +189,8 @@ def launch(dag: sky.Dag,
              backend=backend,
              optimize_target=optimize_target,
              cluster_name=cluster_name,
-             detach_run=detach_run)
+             detach_run=detach_run,
+             autostop_idle_minutes=autostop_idle_minutes)
 
 
 def exec(  # pylint: disable=redefined-builtin
