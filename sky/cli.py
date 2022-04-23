@@ -30,8 +30,10 @@ each other.
 import functools
 import getpass
 import os
+import pathlib
 import shlex
 import sys
+import tempfile
 import typing
 from typing import Any, List, Optional, Tuple
 import yaml
@@ -43,10 +45,11 @@ from rich import progress as rich_progress
 import sky
 from sky import backends
 from sky import check as sky_check
-from sky import global_user_state
-from sky import sky_logging
 from sky import clouds
 from sky import data
+from sky import global_user_state
+from sky import sky_logging
+from sky import spot as spot_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
@@ -1939,53 +1942,144 @@ def spot():
 
 @spot.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              help=_CLUSTER_FLAG_HELP)
+@_add_click_options(_TASK_OPTIONS)
+@click.option('--spot-recovery',
+              default=None,
+              type=str,
+              help='Spot recovery strategy to use for the managed spot task.')
+@click.option('--disk-size',
+              default=None,
+              type=int,
+              required=False,
+              help=('OS disk size in GBs.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@_add_click_options(_TASK_OPTIONS)
 def spot_launch(
     entrypoint: str,
+    cluster: Optional[str],
+    name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    gpus: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    spot_recovery: Optional[str],
+    disk_size: Optional[int],
     yes: bool,
 ):
     """Launch a managed spot instance."""
     click.echo('spot launch')
     entrypoint = ' '.join(entrypoint)
-    is_yaml = _check_yaml(entrypoint)
-    # Only accept entrypoint as a yaml for now.
-    assert is_yaml, 'Only accept entrypoint as a yaml.'
-    click.secho('Task from YAML spec: ', fg='yellow', nl=False)
-    click.secho(entrypoint, bold=True)
+    if entrypoint:
+        is_yaml = _check_yaml(entrypoint)
+        if is_yaml:
+            # Treat entrypoint as a yaml.
+            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+        else:
+            # Treat entrypoint as a bash command.
+            click.secho('Task from command: ', fg='yellow', nl=False)
+        click.secho(entrypoint, bold=True)
+    else:
+        entrypoint = None
+        is_yaml = False
 
     if not yes:
-        prompt = 'Launching a new spot job. Proceed?'
+        cluster_str = '' if cluster is None else f' {cluster!r}'
+        prompt = f'Launching a new spot task{cluster_str}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    cluster_name = backend_utils.generate_spot_cluster_name()
-    yaml_path = backend_utils._fill_template(
-        'spot-controller.yaml.j2', {
-            'user_yaml_path': entrypoint,
-            'cluster_name': cluster_name,
-            'spot_job_name': cluster_name,
-        }, './spot-controller.yaml')
-    with sky.Dag() as dag:
-        task = sky.Task.from_yaml(yaml_path)
-        assert len(task.resources) == 1
+    if is_yaml:
+        task = sky.Task.from_yaml(entrypoint)
+    else:
+        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({sky.Resources()})
+    # Override.
+    if workdir is not None:
+        task.workdir = workdir
 
-    sky.launch(dag,
-               stream_logs=True,
-               cluster_name=cluster_name,
-               detach_run=False,
-               backend=backends.CloudVmRayBackend())
+    override_params = {}
+    if cloud is not None:
+        if cloud.lower() == 'none':
+            override_params['cloud'] = None
+        else:
+            override_params['cloud'] = _get_cloud(cloud)
+    if region is not None:
+        if region.lower() == 'none':
+            override_params['region'] = None
+        else:
+            override_params['region'] = region
+    if gpus is not None:
+        if gpus.lower() == 'none':
+            override_params['accelerators'] = None
+        else:
+            override_params['accelerators'] = gpus
+    if spot_recovery is not None:
+        if spot_recovery.lower() == 'none':
+            override_params['spot_recovery'] = None
+        else:
+            override_params['spot_recovery'] = spot_recovery
+    if use_spot is not None:
+        override_params['use_spot'] = use_spot
+    if disk_size is not None:
+        override_params['disk_size'] = disk_size
+
+    assert len(task.resources) == 1
+    old_resources = list(task.resources)[0]
+    new_resources = old_resources.copy(**override_params)
+    task.set_resources({new_resources})
+
+    if new_resources.spot_recovery is None:
+        raise click.UsageError(
+            'Must specify a spot recovery strategy from '
+            f'{spot_lib.SPOT_STRATEGIES} for a managed spot task.')
+
+    if num_nodes is not None:
+        task.num_nodes = num_nodes
+    if name is not None:
+        task.name = name
+
+    if cluster is None:
+        cluster = backend_utils.generate_cluster_name()
+
+    with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{cluster}',
+                                     mode='w') as f:
+        task_config = task.to_yaml_config()
+        backend_utils.dump_yaml(f.name, task_config)
+
+        controller_name = spot_lib.SPOT_CONTROLLER_NAME
+        yaml_path = backend_utils._fill_template(
+            'spot-controller.yaml.j2', {
+                'user_yaml_path': f.name,
+                'spot_controller': controller_name,
+                'sky_task_name': cluster,
+                'yaml_name': f'sky-spot-{cluster}',
+            })
+        with sky.Dag() as dag:
+            task = sky.Task.from_yaml(yaml_path)
+            assert len(task.resources) == 1
+
+        sky.launch(dag,
+                   stream_logs=True,
+                   cluster_name=controller_name,
+                   detach_run=False,
+                   backend=backends.CloudVmRayBackend())
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)
 @click.argument('cluster', required=True, type=str)
 def spot_status(cluster: str):
-    """Check status of managed spot jobs."""
+    """Check status of managed spot tasks."""
     # TODO: run sky status on spot-manager
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
@@ -2009,7 +2103,7 @@ def spot_status(cluster: str):
               required=False,
               help='Skip confirmation prompt.')
 def spot_down(cluster: str, yes: bool):
-    """Terminate managed spot jobs."""
+    """Terminate managed spot tasks."""
 
     if not yes:
         click.confirm(f'Terminating {cluster}. Proceed?',

@@ -1,4 +1,5 @@
 """Resources: compute requirements of Tasks."""
+import resource
 from typing import Dict, Optional, Union
 
 from sky import clouds
@@ -36,7 +37,10 @@ class Resources:
         # TODO:
         sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
-    # Increment this if any fields changed. For backward compatibility.
+    # If any fields changed:
+    # 1. Increment the version. For backward compatibility.
+    # 2. Change the __setstate__ method to handle the new fields.
+    # 3. Modify the to_config method to handle the new fields.
     _VERSION = 3
 
     def __init__(
@@ -424,6 +428,54 @@ class Resources:
         )
         assert len(override) == 0
         return resources
+
+    @classmethod
+    def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
+        if config is None:
+            return Resources()
+        resources_fields = dict()
+        if config.get('cloud') is not None:
+            resources_fields['cloud'] = clouds.Cloud.CLOUD_REGISTRY[config.pop(
+                'cloud')]
+        if config.get('instance_type') is not None:
+            resources_fields['instance_type'] = config.pop('instance_type')
+        if config.get('accelerators') is not None:
+            resources_fields['accelerators'] = config.pop('accelerators')
+        if config.get('accelerator_args') is not None:
+            resources_fields['accelerator_args'] = dict(
+                config.pop('accelerator_args'))
+        if config.get('use_spot') is not None:
+            resources_fields['use_spot'] = config.pop('use_spot')
+        if config.get('spot_recovery') is not None:
+            resources_fields['spot_recovery'] = config.pop('spot_recovery')
+        if config.get('disk_size') is not None:
+            resources_fields['disk_size'] = config.pop('disk_size')
+        if config.get('region') is not None:
+            resources_fields['region'] = config.pop('region')
+
+        if len(config) > 0:
+            raise ValueError(f'Unknown fields in resources config: {config}')
+        return Resources(**resources_fields)
+
+    def to_yaml_config(self) -> Dict[str, Union[str, int]]:
+        """Returns a yaml-style dict of config for this resource bundle."""
+        config = {}
+
+        def add_if_not_none(key, value):
+            if value is not None:
+                config[key] = str(value)
+
+        add_if_not_none('cloud', self.cloud)
+        add_if_not_none('instance_type', self.instance_type)
+        add_if_not_none('accelerators', self.accelerators)
+        add_if_not_none('accelerator_args', self.accelerator_args)
+
+        if self._use_spot_specified:
+            add_if_not_none('use_spot', self.use_spot)
+        add_if_not_none('spot_recovery', self.spot_recovery)
+        add_if_not_none('disk_size', self.disk_size)
+        add_if_not_none('region', self.region)
+        return config
 
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""

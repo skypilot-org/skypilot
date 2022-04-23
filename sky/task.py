@@ -212,10 +212,7 @@ class Task:
                 # If the src is not a str path, it is likely a dict. Try to
                 # parse storage object.
                 elif isinstance(src, dict):
-                    name = src.get('name')
-                    # Add mount_path as a field for later parsing
-                    src['mount_path'] = dst_path
-                    fm_storages.append(src)
+                    fm_storages.append((dst_path, src))
                 else:
                     raise ValueError(f'Unable to parse file_mount '
                                      f'{dst_path}:{src}')
@@ -224,34 +221,10 @@ class Task:
         task_storage_mounts = {}  # type: Dict[str, Storage]
         all_storages = fm_storages
         for storage in all_storages:
-            name = storage.get('name')
-            source = storage.get('source')
-            store = storage.get('store')
-            mode_str = storage.get('mode')
-            if isinstance(mode_str, str):
-                # Make mode case insensitive, if specified
-                mode = storage_lib.StorageMode(mode_str.upper())
-            else:
-                mode = None
-            persistent = True if storage.get(
-                'persistent') is None else storage['persistent']
-            mount_path = storage.get('mount_path')
+            mount_path = storage[0]
             assert mount_path, \
                 'Storage mount path cannot be empty.'
-            # Validation of the storage object happens on instantiation.
-            storage_obj = storage_lib.Storage(name=name,
-                                              source=source,
-                                              persistent=persistent,
-                                              mode=mode)
-            if store is not None:
-                if store == 's3':
-                    storage_obj.add_store(storage_lib.StoreType.S3)
-                elif store == 'gcs':
-                    storage_obj.add_store(storage_lib.StoreType.GCS)
-                elif store == 'azure_blob':
-                    storage_obj.add_store(storage_lib.StoreType.AZURE)
-                else:
-                    raise ValueError(f'store type {store} is not supported.')
+            storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             task_storage_mounts[mount_path] = storage_obj
         task.set_storage_mounts(task_storage_mounts)
 
@@ -271,24 +244,7 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources = config.get('resources')
-        if resources is not None:
-            if resources.get('cloud') is not None:
-                resources['cloud'] = clouds.Cloud.CLOUD_REGISTRY[
-                    resources['cloud']]
-            if resources.get('accelerators') is not None:
-                resources['accelerators'] = resources['accelerators']
-            if resources.get('accelerator_args') is not None:
-                resources['accelerator_args'] = dict(
-                    resources['accelerator_args'])
-            if resources.get('use_spot') is not None:
-                resources['use_spot'] = resources['use_spot']
-            if resources.get('region') is not None:
-                resources['region'] = resources.pop('region')
-            # FIXME: We should explicitly declare all the parameters
-            # that are sliding through the **resources
-            resources = sky.Resources(**resources)
-        else:
-            resources = sky.Resources()
+        resources = sky.Resources.from_yaml_config(resources)
         if resources.accelerators is not None:
             acc, _ = list(resources.accelerators.items())[0]
             if acc.startswith('tpu-') and task.num_nodes > 1:
@@ -296,6 +252,42 @@ class Task:
                                  f'Got num_nodes={task.num_nodes}')
         task.set_resources({resources})
         return task
+
+    def to_yaml_config(self):
+        """
+        Returns a yaml-style dict representation of the task.
+        """
+        config = dict()
+
+        def add_if_not_none(key, value):
+            if value is not None:
+                config[key] = value
+
+        add_if_not_none('name', self.name)
+
+        if self.resources is not None:
+            assert len(self.resources) == 1
+            resources = list(self.resources)[0]
+            add_if_not_none('resources', resources.to_yaml_config())
+        add_if_not_none('num_nodes', self.num_nodes)
+        add_if_not_none('inputs', self.inputs)
+        add_if_not_none('outputs', self.outputs)
+
+        add_if_not_none('setup', self.setup)
+        add_if_not_none('workdir', self.workdir)
+        add_if_not_none('run', self.run)
+
+        add_if_not_none('file_mounts', [])
+
+        if self.file_mounts is not None:
+            config['file_mounts'] += self.file_mounts
+
+        if self.storage_mounts is not None:
+            config['file_mounts'] += [{
+                mount_path: storage.to_yaml_config()
+                for mount_path, storage in self.storage_mounts.items()
+            }]
+        return config
 
     @property
     def num_nodes(self) -> int:

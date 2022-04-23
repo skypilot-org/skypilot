@@ -75,10 +75,11 @@ def _fill_template(template_name: str,
     with open(template_path) as fin:
         template = fin.read()
     if output_path is None:
-        assert 'cluster_name' in variables, 'cluster_name is required.'
-        cluster_name = variables['cluster_name']
+        assert 'cluster_name' in variables or 'yaml_name' in variables, 'cluster_name or yaml_name is required.'
+        cluster_name = variables.get('yaml_name') or variables.get(
+            'cluster_name')
         output_path = pathlib.Path(
-            os.path.expanduser(SKY_USER_FILE_PATH)) / f'{cluster_name}.yml'
+            SKY_USER_FILE_PATH).expanduser() / f'{cluster_name}.yml'
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
     output_path = os.path.abspath(output_path)

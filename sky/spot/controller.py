@@ -1,5 +1,6 @@
 """The controller module handles the life cycle of a sky spot cluster (job)."""
 
+import argparse
 import enum
 import pathlib
 import time
@@ -30,22 +31,24 @@ class UserSignal(enum.Enum):
 class SpotController:
     """Each spot controller manages the life cycle of one spot cluster (job)."""
 
-    def __init__(self, cluster_name: str, task_yaml: str) -> None:
-        self.cluster_name = cluster_name
+    def __init__(self, task_yaml: str) -> None:
+        self.task_name = pathlib.Path(task_yaml).stem
         self.task = sky.Task.from_yaml(task_yaml)
         # TODO(zhwu): this assumes the specific backend.
         self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
-        self.strategy = Strategy.from_task(cluster_name, self.backend,
-                                           self.task)
         self.job_id = spot_status.submit(
-            self.cluster_name,
+            self.task_name,
             self.backend.run_timestamp,
             resources_str=backend_utils.get_task_resources_str(self.task))
+        self.cluster_name = f'{self.task_name}-{self.job_id}'
+        self.strategy = Strategy.from_task(self.cluster_name, self.backend,
+                                           self.task)
 
     def _run(self):
         """Busy loop monitoring spot cluster status and handling recovery."""
-        logger.info(f'Start monitoring spot cluster {self.cluster_name}')
+        logger.info(
+            f'Start monitoring spot task {self.task_name} (id: {self.job_id})')
         spot_status.starting(self.job_id)
         self.strategy.launch()
         spot_status.started(self.job_id)
@@ -134,6 +137,15 @@ class SpotController:
 
 
 if __name__ == '__main__':
-    controller = SpotController('test-spot-controller',
-                                'examples/spot_recovery.yaml')
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        'task_yaml',
+        type=str,
+        required=True,
+        help=
+        'The path to the user spot task yaml file. '
+        'The file name is the spot task name.'
+    )
+    args = parser.parse_args()
+    controller = SpotController(args.task_yaml)
     controller.start()

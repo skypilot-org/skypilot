@@ -1,27 +1,16 @@
-# A minimal example.
-#
-# Runs a task that simply lists the default conda environments.
-#
-# Usage:
-#   sky launch -c min minimal.yaml
-#   sky down min
+# The template for the spot controller
 
-cluster_name: {{cluster_name}}
-
-name: minispot
+name: {{spot_task_name}}
 
 resources:
-  cloud: aws
-  instance_type: m4.2xlarge
+  # TODO(zhwu): fix this to be able to failvoer across clouds
+  instance_type: t3.xlarge
 
 file_mounts:
-  ~/user_job.yaml: {{user_yaml_path}}
-setup: |
-  echo "running setup"
+  ~/.sky/sky_spot_tasks/{{spot_task_name}}.yaml: {{user_yaml_path}}
 
 run: |
-  conda env list
-  sky launch -c {{spot_job_name}}-job ~/user_job.yaml -y
-  sky autostop {{spot_job_name}}-job -i 5
+  python -u -m sky_controller.spot_controller \
+    ~/.sky/sky_spot_tasks/{{spot_task_name}}.yaml
 
 
