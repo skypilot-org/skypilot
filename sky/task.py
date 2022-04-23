@@ -277,16 +277,16 @@ class Task:
         add_if_not_none('workdir', self.workdir)
         add_if_not_none('run', self.run)
 
-        add_if_not_none('file_mounts', [])
+        add_if_not_none('file_mounts', dict())
 
         if self.file_mounts is not None:
-            config['file_mounts'] += self.file_mounts
+            config['file_mounts'].update(self.file_mounts)
 
         if self.storage_mounts is not None:
-            config['file_mounts'] += [{
+            config['file_mounts'].update({
                 mount_path: storage.to_yaml_config()
                 for mount_path, storage in self.storage_mounts.items()
-            }]
+            })
         return config
 
     @property

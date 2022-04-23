@@ -435,8 +435,8 @@ class Resources:
             return Resources()
         resources_fields = dict()
         if config.get('cloud') is not None:
-            resources_fields['cloud'] = clouds.Cloud.CLOUD_REGISTRY[config.pop(
-                'cloud')]
+            resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(config.pop(
+                'cloud'))
         if config.get('instance_type') is not None:
             resources_fields['instance_type'] = config.pop('instance_type')
         if config.get('accelerators') is not None:
@@ -449,7 +449,7 @@ class Resources:
         if config.get('spot_recovery') is not None:
             resources_fields['spot_recovery'] = config.pop('spot_recovery')
         if config.get('disk_size') is not None:
-            resources_fields['disk_size'] = config.pop('disk_size')
+            resources_fields['disk_size'] = int(config.pop('disk_size'))
         if config.get('region') is not None:
             resources_fields['region'] = config.pop('region')
 

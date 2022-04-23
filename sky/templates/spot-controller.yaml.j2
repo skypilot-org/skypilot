@@ -10,7 +10,7 @@ file_mounts:
   ~/.sky/sky_spot_tasks/{{spot_task_name}}.yaml: {{user_yaml_path}}
 
 run: |
-  python -u -m sky_controller.spot_controller \
+  python -u -m sky.spot.controller \
     ~/.sky/sky_spot_tasks/{{spot_task_name}}.yaml
 
 

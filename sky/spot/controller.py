@@ -141,7 +141,6 @@ if __name__ == '__main__':
     parser.add_argument(
         'task_yaml',
         type=str,
-        required=True,
         help=
         'The path to the user spot task yaml file. '
         'The file name is the spot task name.'

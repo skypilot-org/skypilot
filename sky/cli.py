@@ -1942,11 +1942,10 @@ def spot():
 
 @spot.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
-@click.option('--cluster',
-              '-c',
-              default=None,
-              type=str,
-              help=_CLUSTER_FLAG_HELP)
+# @click.option('--dryrun',
+#               default=False,
+#               is_flag=True,
+#               help='If True, do not actually run the job.')
 @_add_click_options(_TASK_OPTIONS)
 @click.option('--spot-recovery',
               default=None,
@@ -1965,7 +1964,6 @@ def spot():
               help='Skip confirmation prompt.')
 def spot_launch(
     entrypoint: str,
-    cluster: Optional[str],
     name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
@@ -1993,16 +1991,18 @@ def spot_launch(
         entrypoint = None
         is_yaml = False
 
+    if name is None:
+        name = backend_utils.generate_cluster_name()
+
     if not yes:
-        cluster_str = '' if cluster is None else f' {cluster!r}'
-        prompt = f'Launching a new spot task{cluster_str}. Proceed?'
+        prompt = f'Launching a new spot task {name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
     if is_yaml:
         task = sky.Task.from_yaml(entrypoint)
     else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task = sky.Task(name=name, run=entrypoint)
         task.set_resources({sky.Resources()})
     # Override.
     if workdir is not None:
@@ -2049,10 +2049,8 @@ def spot_launch(
     if name is not None:
         task.name = name
 
-    if cluster is None:
-        cluster = backend_utils.generate_cluster_name()
-
-    with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{cluster}',
+    
+    with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
         backend_utils.dump_yaml(f.name, task_config)
@@ -2062,13 +2060,13 @@ def spot_launch(
             'spot-controller.yaml.j2', {
                 'user_yaml_path': f.name,
                 'spot_controller': controller_name,
-                'sky_task_name': cluster,
-                'yaml_name': f'sky-spot-{cluster}',
+                'spot_task_name': name,
+                'yaml_name': f'sky-spot-{name}',
             })
         with sky.Dag() as dag:
             task = sky.Task.from_yaml(yaml_path)
             assert len(task.resources) == 1
-
+        click.secho(f'Launching managed spot task {name} on spot controller...', fg='yellow')
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,
