@@ -79,7 +79,7 @@ def readable_time_duration(start: Optional[int],
         If absolute is specified, returns the accurate time duration,
           e.g. "1h 2m 23s"
     """
-    if start is None:
+    if start is None or start < 0:
         return '-'
     if end is not None:
         end = pendulum.from_timestamp(end)

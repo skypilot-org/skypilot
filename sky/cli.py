@@ -27,6 +27,7 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+from email.policy import default
 import functools
 import getpass
 import os
@@ -2099,59 +2100,69 @@ def spot_launch(
 def spot_status():
     """Check status of managed spot tasks."""
     click.secho('Fetching and parsing managed spot job status...', fg='yellow')
-    status = backend_utils.get_cluster_status_with_refresh(spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
+    status = backend_utils.get_cluster_status_with_refresh(
+        spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
     if status is None:
         click.echo(f'No managed spot job has been runned.')
         return
     if status == global_user_state.ClusterStatus.STOPPED:
-        click.echo(f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} is STOPPED.'
-                   f'\nPlease start it first with: sky start {spot_lib.SPOT_CONTROLLER_NAME}')
+        click.echo(
+            f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} is STOPPED.'
+            f'\nPlease start it first with: sky start {spot_lib.SPOT_CONTROLLER_NAME}'
+        )
         return
-    
-    handle = global_user_state.get_handle_from_cluster_name(spot_lib.SPOT_CONTROLLER_NAME)
+
+    handle = global_user_state.get_handle_from_cluster_name(
+        spot_lib.SPOT_CONTROLLER_NAME)
     assert handle is not None
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     codegen = spot_utils.SpotCodeGen()
     code = codegen.show_jobs()
-    returncode, job_table, stderr = backend.run_on_head(handle, code, require_outputs=True, stream_logs=False)
-    backend_utils.handle_returncode(returncode, code, 'Failed to fetch managed job status', stderr)
+    returncode, job_table, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True,
+                                                        stream_logs=False)
+    backend_utils.handle_returncode(returncode, code,
+                                    'Failed to fetch managed job status',
+                                    stderr)
     click.echo(f'Managed spot jobs:\n{job_table}')
 
 
-@spot.command('down', cls=_DocumentedCodeCommand)
-@click.argument('cluster', required=True, type=str)
+@spot.command('cancel', cls=_DocumentedCodeCommand)
+@click.option('--job-id',
+              '-i',
+              default=None,
+              type=int,
+              required=False,
+              help='Managed sopt job ID to cancel.')
+@click.argument('name', required=False, type=str)
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-def spot_down(cluster: str, yes: bool):
+def spot_cancel(job_id: Optional[int], name: Optional[str], yes: bool):
     """Terminate managed spot tasks."""
 
     if not yes:
-        click.confirm(f'Terminating {cluster}. Proceed?',
+        click.confirm(f'Cancelling managed spot job {name}. Proceed?',
                       default=True,
                       abort=True,
                       show_default=True)
 
-    handle = global_user_state.get_handle_from_cluster_name(cluster)
-    if handle is None:
-        raise click.BadParameter(f'Cluster {cluster!r} not found. ')
-    backend = backend_utils.get_backend_from_handle(handle)
-    entrypoint = 'sky down -a -y'
-    with sky.Dag() as dag:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
+    # handle = global_user_state.get_handle_from_cluster_name(name)
+    # if handle is None:
+    #     raise click.BadParameter(f'Cluster {cluster!r} not found. ')
+    # backend = backend_utils.get_backend_from_handle(handle)
+    # entrypoint = 'sky down -a -y'
+    # with sky.Dag() as dag:
+    #     task = sky.Task(name='sky-cmd', run=entrypoint)
+    #     task.set_resources({sky.Resources()})
 
-    sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=False)
-
-    _terminate_or_stop_clusters([cluster],
-                                apply_to_all=False,
-                                terminate=True,
-                                no_confirm=True)
+    # sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=False)
 
 
 def main():

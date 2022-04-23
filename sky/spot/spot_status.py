@@ -30,7 +30,7 @@ _CURSOR.execute("""\
     run_timestamp TEXT CANDIDATE KEY,
     start_at INTEGER,
     end_at INTERGER,
-    last_recovered_at INTEGER,
+    last_recovered_at INTEGER DEFAULT -1,
     recovery_count INTEGER DEFAULT 0,
     job_duration INTEGER DEFAULT 0)""")
 # job_duration is the time a job actually runs before last_recover,
@@ -182,21 +182,27 @@ def show_jobs() -> str:
         'JOB DURATION', '#RECOVERS', 'STATUS'
     ])
     for job in jobs:
+        job_duration = log_utils.readable_time_duration(
+            job['last_recovered_at'] - job['job_duration'],
+            job['end_at'],
+            absolute=True)
+        if job['status'] == SpotStatus.RECOVERING:
+            # When job is recovering, the job duration is exact job['job_duration']
+            job_duration = log_utils.readable_time_duration(0,
+                                                            job['job_duration'],
+                                                            absolute=True)
+
         job_table.add_row([
             job['job_id'],
             job['job_name'],
             job['resources'],
             log_utils.readable_time_duration(job['submitted_at']),
             log_utils.readable_time_duration(job['start_at']),
-            log_utils.readable_time_duration(job['start_at'],
+            log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
                                              absolute=True),
-            log_utils.readable_time_duration(job['last_recovered_at'] -
-                                             job['job_duration'],
-                                             job['end_at'],
-                                             absolute=True),
+            job_duration,
             job['recovery_count'],
             job['status'].value,
         ])
     return str(job_table)
-
