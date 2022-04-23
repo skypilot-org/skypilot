@@ -494,6 +494,16 @@ def _check_yaml(entrypoint: str) -> bool:
     return is_yaml
 
 
+def _disallow_sky_reserved_cluster_name(cluster_name: Optional[str],
+                                        operation_str: str):
+    if cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
+        raise click.BadParameter(
+            f'Cluster {cluster_name!r} is reserved for the Spot controller.\n'
+            f'{colorama.Fore.RED}{operation_str} is not allowed.'
+            f'{colorama.Style.RESET_ALL}'
+        )
+
+
 class _NaturalOrderGroup(click.Group):
     """Lists commands in the order they are defined in this script.
 
@@ -588,6 +598,7 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
+    _disallow_sky_reserved_cluster_name(cluster, 'Launching task on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
@@ -758,6 +769,7 @@ def exec(
         sky exec mycluster python train_cpu.py
         sky exec mycluster --gpus=V100:1 python train_gpu.py
     """
+    _disallow_sky_reserved_cluster_name(cluster, 'Executing task on it')
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
@@ -1401,10 +1413,16 @@ def _terminate_or_stop_clusters(
             f'sky {command} requires either a cluster name (see `sky status`) '
             'or --all.')
 
+    teardown_verb = 'Terminating' if terminate else 'Stopping'
     to_down = []
     if len(names) > 0:
         names = _get_glob_clusters(names)
         for name in names:
+            try:
+                _disallow_sky_reserved_cluster_name(name, f'{teardown_verb} it')
+            except click.BadParameter as e:
+                click.echo(str(e))
+                continue
             handle = global_user_state.get_handle_from_cluster_name(name)
             to_down.append({'name': name, 'handle': handle})
     if apply_to_all:
@@ -1417,8 +1435,7 @@ def _terminate_or_stop_clusters(
         print('Cluster(s) not found (see `sky status`).')
         return
 
-    if not no_confirm:
-        teardown_verb = 'Terminating' if terminate else 'Stopping'
+    if not no_confirm and len(to_down) > 0:
         cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
         cluster_list = ', '.join([r['name'] for r in to_down])
         click.confirm(
@@ -2099,11 +2116,12 @@ def _is_spot_controller_up(stopped_message: str) -> bool:
         spot_lib.SPOT_CONTROLLER_NAME)
     if controller_status is None:
         click.echo('No managed spot job has been runned.')
-        return
+        return False
     if controller_status != global_user_state.ClusterStatus.UP:
         click.echo(f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
                    f'is {controller_status.value}.\n' + stopped_message)
-        return
+        return False
+    return True
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)

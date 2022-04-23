@@ -5,6 +5,8 @@ import pathlib
 import shlex
 from typing import List
 
+import colorama
+
 from sky.spot import spot_status
 from sky.skylet.utils import log_utils
 
@@ -33,7 +35,7 @@ def cancel_jobs_by_id(job_ids: List[int]) -> str:
             f.flush()
 
     identity_str = f'job ID {job_ids[0]} is'
-    if len(job_ids) > 0:
+    if len(job_ids) > 1:
         identity_str = f'job IDs {job_ids} are'
 
     return (f'Jobs with {identity_str} scheduled to be cancelled within '
@@ -44,10 +46,12 @@ def cancel_job_by_name(job_name: str) -> str:
     """Cancel a job by name."""
     job_ids = spot_status.get_job_ids_by_name(job_name)
     if len(job_ids) == 0:
-        return f'No job found with name {job_name!r}'
+        return (f'{colorama.Fore.RED}No job found with name {job_name!r}'
+                f'{colorama.Style.RESET_ALL}')
     if len(job_ids) > 1:
-        return (f'Multiple jobs found with name {job_name!r}.\n'
-                f'Job IDs: {job_ids}')
+        return (
+            f'{colorama.Fore.RED}Multiple jobs found with name {job_name!r}.\n'
+            f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
     job_id = job_ids[0]
     cancel_jobs_by_id([job_id])
     return (f'Job {job_name!r} is scheduled to be cancelled within '
@@ -96,27 +100,29 @@ class SpotCodeGen:
 
       >> codegen = SpotCodegen().show_jobs(...)
     """
-    _PREFIX = ['from sky.spot import spot_status']
+    _PREFIX = ['from sky.spot import spot_utils']
 
     def __init__(self):
         self._code = []
 
     def show_jobs(self) -> str:
         self._code += [
-            'job_table = spot_status.show_jobs()', 'print(job_table)'
+            'job_table = spot_utils.show_jobs()',
+            'print(job_table)',
         ]
         return self._build()
 
     def cancel_jobs_by_id(self, job_ids: List[int]) -> str:
         self._code += [
-            f'result = cancel_jobs_by_id({job_ids})'
-            'print(result)'
+            f'result = spot_utils.cancel_jobs_by_id({job_ids})',
+            'print(result, end="", flush=True)',
         ]
         return self._build()
 
     def cancel_job_by_name(self, job_name: str) -> str:
         self._code += [
-            f'result = cancel_job_by_name({job_name!r})', 'print(result)'
+            f'result = spot_utils.cancel_job_by_name({job_name!r})',
+            'print(result, end="", flush=True)',
         ]
         return self._build()
 

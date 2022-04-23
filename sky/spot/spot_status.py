@@ -143,7 +143,7 @@ def cancelled(job_id: int):
         """\
         UPDATE spot SET
         status=(?), end_at=MIN(end_at, (?))
-        WHERE job_id=(?)""", (SpotStatus.CANCELLED, time.time(), job_id))
+        WHERE job_id=(?)""", (SpotStatus.CANCELLED.value, time.time(), job_id))
     _CONN.commit()
     logger.info('Job cancelled.')
 
