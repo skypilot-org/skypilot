@@ -3,13 +3,11 @@
 # that we can easily switch to a s3-based storage.
 import enum
 import pathlib
-from shlex import shlex
 import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
-from sky.skylet.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -62,6 +60,7 @@ class SpotStatus(enum.Enum):
         return self in (self.SUCCEEDED, self.FAILED, self.CANCELLED)
 
 
+# === Status transition functions ===
 def submit(name: str, run_timestamp: str, resources_str: str) -> int:
     """Insert a new spot job, returns the success."""
     _CURSOR.execute(
@@ -92,7 +91,8 @@ def started(job_id: int):
     logger.info('Job started.')
     _CURSOR.execute(
         """\
-        UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?) WHERE job_id=(?)""",
+        UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
+        WHERE job_id=(?)""",
         (SpotStatus.RUNNING.value, time.time(), time.time(), job_id))
     _CONN.commit()
 
@@ -123,8 +123,7 @@ def succeeded(job_id: int):
         """\
         UPDATE spot SET
         status=(?), end_at=(?)
-        WHERE job_id=(?)""",
-        (SpotStatus.SUCCEEDED.value, time.time(), job_id))
+        WHERE job_id=(?)""", (SpotStatus.SUCCEEDED.value, time.time(), job_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 
@@ -134,8 +133,7 @@ def failed(job_id: int):
         """\
         UPDATE spot SET
         status=(?), end_at=(?)
-        WHERE job_id=(?)""",
-        (SpotStatus.FAILED.value, time.time(), job_id))
+        WHERE job_id=(?)""", (SpotStatus.FAILED.value, time.time(), job_id))
     _CONN.commit()
     logger.info('Job failed.')
 
@@ -144,11 +142,20 @@ def cancelled(job_id: int):
     _CURSOR.execute(
         """\
         UPDATE spot SET
-        status=(?), end_at=(?)
-        WHERE job_id=(?)""",
-        (SpotStatus.CANCELLED, time.time(), job_id))
+        status=(?), end_at=MIN(end_at, (?))
+        WHERE job_id=(?)""", (SpotStatus.CANCELLED, time.time(), job_id))
     _CONN.commit()
     logger.info('Job cancelled.')
+
+
+# ======== utility functions ========
+
+
+def get_job_ids_by_name(name: str) -> List[int]:
+    rows = _CURSOR.execute('SELECT job_id FROM spot WHERE job_name=(?)',
+                           (name,))
+    job_ids = [row[0] for row in rows if row[0] is not None]
+    return job_ids
 
 
 def get_status(job_id: int) -> Optional[SpotStatus]:
@@ -171,38 +178,3 @@ def get_spot_jobs() -> List[Dict[str, Any]]:
         job_dict['status'] = SpotStatus(job_dict['status'])
         jobs.append(job_dict)
     return jobs
-
-
-def show_jobs() -> str:
-    """Show all spot jobs."""
-    jobs = get_spot_jobs()
-
-    job_table = log_utils.create_table([
-        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'STARTED', 'TOT. DURATION',
-        'JOB DURATION', '#RECOVERS', 'STATUS'
-    ])
-    for job in jobs:
-        job_duration = log_utils.readable_time_duration(
-            job['last_recovered_at'] - job['job_duration'],
-            job['end_at'],
-            absolute=True)
-        if job['status'] == SpotStatus.RECOVERING:
-            # When job is recovering, the job duration is exact job['job_duration']
-            job_duration = log_utils.readable_time_duration(0,
-                                                            job['job_duration'],
-                                                            absolute=True)
-
-        job_table.add_row([
-            job['job_id'],
-            job['job_name'],
-            job['resources'],
-            log_utils.readable_time_duration(job['submitted_at']),
-            log_utils.readable_time_duration(job['start_at']),
-            log_utils.readable_time_duration(job['submitted_at'],
-                                             job['end_at'],
-                                             absolute=True),
-            job_duration,
-            job['recovery_count'],
-            job['status'].value,
-        ])
-    return str(job_table)

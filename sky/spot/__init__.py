@@ -2,6 +2,7 @@
 import pathlib
 from sky.spot.controller import SpotController
 from sky.spot.recovery_strategy import SPOT_STRATEGIES
+from sky.spot.spot_utils import SpotCodeGen
 
 SPOT_CONTROLLER_NAME = 'sky-spot-controller'
 SPOT_CONTROLLER_AUTOSTOP_IDLE_MINUTES = 5
@@ -13,4 +14,5 @@ __all__ = [
     'SpotController',
     'SPOT_STRATEGIES',
     'SPOT_CONTROLLER_NAME',
+    'SpotCodeGen',
 ]

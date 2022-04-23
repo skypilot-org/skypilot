@@ -27,7 +27,6 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
-from email.policy import default
 import functools
 import getpass
 import os
@@ -55,7 +54,6 @@ from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
-from sky.spot import spot_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -2096,20 +2094,24 @@ def spot_launch(
                    SPOT_CONTROLLER_AUTOSTOP_IDLE_MINUTES)
 
 
+def _is_spot_controller_up(stopped_message: str) -> bool:
+    controller_status = backend_utils.get_cluster_status_with_refresh(
+        spot_lib.SPOT_CONTROLLER_NAME)
+    if controller_status is None:
+        click.echo('No managed spot job has been runned.')
+        return
+    if controller_status != global_user_state.ClusterStatus.UP:
+        click.echo(f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
+                   f'is {controller_status.value}.\n' + stopped_message)
+        return
+
+
 @spot.command('status', cls=_DocumentedCodeCommand)
 def spot_status():
     """Check status of managed spot tasks."""
     click.secho('Fetching and parsing managed spot job status...', fg='yellow')
-    status = backend_utils.get_cluster_status_with_refresh(
-        spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
-    if status is None:
-        click.echo(f'No managed spot job has been runned.')
-        return
-    if status == global_user_state.ClusterStatus.STOPPED:
-        click.echo(
-            f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} is STOPPED.'
-            f'\nPlease start it first with: sky start {spot_lib.SPOT_CONTROLLER_NAME}'
-        )
+    if not _is_spot_controller_up('Please start it first with: '
+                                  f'sky start {spot_lib.SPOT_CONTROLLER_NAME}'):
         return
 
     handle = global_user_state.get_handle_from_cluster_name(
@@ -2118,7 +2120,7 @@ def spot_status():
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    codegen = spot_utils.SpotCodeGen()
+    codegen = spot_lib.SpotCodeGen()
     code = codegen.show_jobs()
     returncode, job_table, stderr = backend.run_on_head(handle,
                                                         code,
@@ -2131,38 +2133,56 @@ def spot_status():
 
 
 @spot.command('cancel', cls=_DocumentedCodeCommand)
-@click.option('--job-id',
-              '-i',
-              default=None,
-              type=int,
+@click.option('--name',
+              '-n',
               required=False,
-              help='Managed sopt job ID to cancel.')
-@click.argument('name', required=False, type=str)
+              type=str,
+              help='Managed sopt job name to cancel.')
+@click.argument('job-ids', default=None, type=int, required=False, nargs=-1)
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-def spot_cancel(job_id: Optional[int], name: Optional[str], yes: bool):
+def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
     """Terminate managed spot tasks."""
 
+    if not _is_spot_controller_up('All managed spot jobs should be finished.'):
+        return
+
+    if job_ids and name is not None:
+        raise click.UsageError(
+            'Can only specify one of job-id or --name.'
+            f' Both are specified: job-ids {job_ids}; --name {name!r}.')
+
     if not yes:
-        click.confirm(f'Cancelling managed spot job {name}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
+        job_identity_str = f'with IDs {job_ids}' if job_ids else repr(name)
+        click.confirm(
+            f'Cancelling managed spot job {job_identity_str}. Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
 
-    # handle = global_user_state.get_handle_from_cluster_name(name)
-    # if handle is None:
-    #     raise click.BadParameter(f'Cluster {cluster!r} not found. ')
-    # backend = backend_utils.get_backend_from_handle(handle)
-    # entrypoint = 'sky down -a -y'
-    # with sky.Dag() as dag:
-    #     task = sky.Task(name='sky-cmd', run=entrypoint)
-    #     task.set_resources({sky.Resources()})
+    handle = global_user_state.get_handle_from_cluster_name(
+        spot_lib.SPOT_CONTROLLER_NAME)
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    codegen = spot_lib.SpotCodeGen()
+    if job_ids:
+        code = codegen.cancel_jobs_by_id(job_ids)
+    else:
+        code = codegen.cancel_job_by_name(name)
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     require_outputs=True,
+                                                     stream_logs=False)
+    backend_utils.handle_returncode(returncode, code,
+                                    'Failed to cancel managed spot job', stderr)
 
-    # sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=False)
+    click.echo(stdout)
+    if 'Multiple jobs found with name' in stdout:
+        click.echo('Please specify the job ID instead of the job name.')
 
 
 def main():

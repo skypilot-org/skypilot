@@ -1,7 +1,6 @@
 """The controller module handles the life cycle of a sky spot cluster (job)."""
 
 import argparse
-import enum
 import pathlib
 import time
 from typing import Optional
@@ -13,19 +12,10 @@ from sky.spot import spot_status
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.skylet import job_lib
+from sky.spot import spot_utils
 from sky.spot.recovery_strategy import Strategy
 
 logger = sky_logging.init_logger(__name__)
-
-_JOB_STATUS_CHECK_GAP_SECONDS = 60
-_SIGNAL_PREFIX = '/tmp/sky_spot_controller_singal_{}'
-
-
-class UserSignal(enum.Enum):
-    """The signal to be sent to the user."""
-    DOWN = 'DOWN'
-    # TODO(zhwu): We can have more communication signals here if needed
-    # in the future.
 
 
 class SpotController:
@@ -54,7 +44,7 @@ class SpotController:
         spot_status.started(self.job_id)
         while True:
             user_signal = self._check_signal()
-            if user_signal == UserSignal.DOWN:
+            if user_signal == spot_utils.UserSignal.CANCEL:
                 logger.info('User sent down signal.')
                 spot_status.cancelled(self.job_id)
                 break
@@ -68,7 +58,7 @@ class SpotController:
                 'Job status should not INIT')
             if job_status is not None and not job_status.is_terminal():
                 # The job is normally running, continue to monitor the job status.
-                time.sleep(_JOB_STATUS_CHECK_GAP_SECONDS)
+                time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
                 continue
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
@@ -123,14 +113,15 @@ class SpotController:
         logger.info('=' * 34)
         return status
 
-    def _check_signal(self) -> UserSignal:
+    def _check_signal(self) -> spot_utils.UserSignal:
         """Check if the user has sent down signal."""
-        singal_file = pathlib.Path(_SIGNAL_PREFIX.format(self.job_id))
+        singal_file = pathlib.Path(
+            spot_utils.SIGNAL_FILE_PREFIX.format(self.job_id))
         signal = None
         if singal_file.exists():
             with open(singal_file, 'r') as f:
                 signal = f.read().strip()
-                signal = UserSignal(signal)
+                signal = spot_utils.UserSignal(signal)
             # Remove the signal file, after reading the signal.
             singal_file.unlink()
         return signal
