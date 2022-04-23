@@ -1430,7 +1430,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
                 f'is {dir_size} MB. Try to keep workdir small or use '
                 '.gitignore to exclude large files, as large sizes will slow '
-                'down rsync. {style.RESET_ALL}')
+                f'down rsync.{style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
