@@ -54,6 +54,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.spot import spot_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -2095,21 +2096,28 @@ def spot_launch(
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)
-@click.argument('cluster', required=True, type=str)
-def spot_status(cluster: str):
+def spot_status():
     """Check status of managed spot tasks."""
-    # TODO: run sky status on spot-manager
-    handle = global_user_state.get_handle_from_cluster_name(cluster)
-    if handle is None:
-        raise click.BadParameter(f'Cluster {cluster!r} not found. '
-                                 'Use `sky spot launch` to provision first.')
+    click.secho('Fetching and parsing managed spot job status...', fg='yellow')
+    status = backend_utils.get_cluster_status_with_refresh(spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
+    if status is None:
+        click.echo(f'No managed spot job has been runned.')
+        return
+    if status == global_user_state.ClusterStatus.STOPPED:
+        click.echo(f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} is STOPPED.'
+                   f'\nPlease start it first with: sky start {spot_lib.SPOT_CONTROLLER_NAME}')
+        return
+    
+    handle = global_user_state.get_handle_from_cluster_name(spot_lib.SPOT_CONTROLLER_NAME)
+    assert handle is not None
     backend = backend_utils.get_backend_from_handle(handle)
-    entrypoint = 'sky queue'
-    with sky.Dag() as dag:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
-        task.set_resources({sky.Resources()})
+    assert isinstance(backend, backends.CloudVmRayBackend)
 
-    sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=False)
+    codegen = spot_utils.SpotCodeGen()
+    code = codegen.show_jobs()
+    returncode, job_table, stderr = backend.run_on_head(handle, code, require_outputs=True, stream_logs=False)
+    backend_utils.handle_returncode(returncode, code, 'Failed to fetch managed job status', stderr)
+    click.echo(f'Managed spot jobs:\n{job_table}')
 
 
 @spot.command('down', cls=_DocumentedCodeCommand)
