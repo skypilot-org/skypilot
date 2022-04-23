@@ -44,14 +44,14 @@ def cancel_jobs_by_id(job_ids: List[int]) -> str:
 
 def cancel_job_by_name(job_name: str) -> str:
     """Cancel a job by name."""
-    job_ids = spot_status.get_job_ids_by_name(job_name)
+    job_ids = spot_status.get_nonterminal_job_ids_by_name(job_name)
     if len(job_ids) == 0:
         return (f'{colorama.Fore.RED}No job found with name {job_name!r}'
                 f'{colorama.Style.RESET_ALL}')
     if len(job_ids) > 1:
-        return (
-            f'{colorama.Fore.RED}Multiple jobs found with name {job_name!r}.\n'
-            f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
+        return (f'{colorama.Fore.RED}Multiple running jobs found '
+                f'with name {job_name!r}.\n'
+                f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
     job_id = job_ids[0]
     cancel_jobs_by_id([job_id])
     return (f'Job {job_name!r} is scheduled to be cancelled within '

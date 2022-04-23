@@ -45,7 +45,7 @@ class SpotController:
         while True:
             user_signal = self._check_signal()
             if user_signal == spot_utils.UserSignal.CANCEL:
-                logger.info('User sent down signal.')
+                logger.info(f'User sent {user_signal.value} signal.')
                 spot_status.cancelled(self.job_id)
                 break
 

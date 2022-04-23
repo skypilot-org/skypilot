@@ -500,8 +500,7 @@ def _disallow_sky_reserved_cluster_name(cluster_name: Optional[str],
         raise click.BadParameter(
             f'Cluster {cluster_name!r} is reserved for the Spot controller.\n'
             f'{colorama.Fore.RED}{operation_str} is not allowed.'
-            f'{colorama.Style.RESET_ALL}'
-        )
+            f'{colorama.Style.RESET_ALL}')
 
 
 class _NaturalOrderGroup(click.Group):
@@ -2009,7 +2008,7 @@ def spot_launch(
     detach_run: bool,
     yes: bool,
 ):
-    """Launch a managed spot instance."""
+    """Launch a managed spot task."""
     click.echo('spot launch')
     entrypoint = ' '.join(entrypoint)
     if entrypoint:
@@ -2164,7 +2163,22 @@ def spot_status():
               required=False,
               help='Skip confirmation prompt.')
 def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
-    """Terminate managed spot tasks."""
+    """Cancel managed spot tasks.
+
+    You can provide either a job name or a list of job ids to be cancelled.
+    They are exclusive options.
+
+    Examples:
+
+        .. code-block:: bash
+
+        # Cancel managed spot job with name 'my-job'
+        sky spot cancel -n my-job
+
+        # Cancel managed spot jobs with IDs 1, 2, 3
+        sky spot cancel 1 2 3
+
+    """
 
     if not _is_spot_controller_up('All managed spot jobs should be finished.'):
         return

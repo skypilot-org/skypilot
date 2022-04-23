@@ -59,6 +59,10 @@ class SpotStatus(enum.Enum):
     def is_terminal(self) -> bool:
         return self in (self.SUCCEEDED, self.FAILED, self.CANCELLED)
 
+    @classmethod
+    def terminal_status(cls) -> List['SpotStatus']:
+        return (cls.SUCCEEDED, cls.FAILED, cls.CANCELLED)
+
 
 # === Status transition functions ===
 def submit(name: str, run_timestamp: str, resources_str: str) -> int:
@@ -151,9 +155,15 @@ def cancelled(job_id: int):
 # ======== utility functions ========
 
 
-def get_job_ids_by_name(name: str) -> List[int]:
-    rows = _CURSOR.execute('SELECT job_id FROM spot WHERE job_name=(?)',
-                           (name,))
+def get_nonterminal_job_ids_by_name(name: str) -> List[int]:
+
+    rows = _CURSOR.execute(
+        f"""\
+        SELECT job_id FROM spot
+        WHERE job_name=(?) AND
+        status NOT IN
+        ({", ".join(["?"] * len(SpotStatus.terminal_status()))})""",
+        (name, *[status.value for status in SpotStatus.terminal_status()]))
     job_ids = [row[0] for row in rows if row[0] is not None]
     return job_ids
 
