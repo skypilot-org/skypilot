@@ -1,8 +1,10 @@
 import getpass
 import inspect
+import pathlib
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 from typing import List, Optional, Tuple, NamedTuple
 import uuid
@@ -10,8 +12,8 @@ import uuid
 import colorama
 import pytest
 
+import sky
 from sky import global_user_state
-from sky import spot
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 
@@ -494,3 +496,46 @@ class TestStorageWithCredentials:
         # It should not exist because the bucket was created externally.
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
+
+
+class TestYamlSpecs:
+    _TEST_YAML_PATHS = [
+        'examples/minimal.yaml', 'examples/managed_spot.yaml',
+        'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
+        'examples/multi_hostname.yaml', 'examples/storage_demo.yaml'
+    ]
+
+
+    def _check_dict_same(self, d1, d2):
+        """Check if two dicts are same."""
+        for k, v in d1.items():
+            if k not in d2:
+                assert len(v) == 0, (k, v)
+            if isinstance(v, dict):
+                assert isinstance(d2[k], dict), (k, v, d2)
+                self._check_dict_same(v, d2[k])
+            elif isinstance(v, str):
+                assert v.lower() == d2[k].lower(), (k, v, d2[k])
+            else:
+                assert v == d2[k], (k, v, d2[k])
+
+
+    def _check_equivalent(self, yaml_path):
+        """Check if the yaml is equivalent after load and dump again."""
+        origin_task_config = backend_utils.read_yaml(yaml_path)
+
+        task = sky.Task.from_yaml(yaml_path)
+        new_task_config = task.to_yaml_config()
+        self._check_dict_same(origin_task_config, new_task_config)
+
+
+    def test_load_dump_yaml_config_equivalent(self):
+        """Test if the yaml config is equivalent after load and dump again."""
+        pathlib.Path('~/datasets').expanduser().mkdir(exist_ok=True)
+        pathlib.Path('~/tmpfile').expanduser().touch()
+        pathlib.Path('~/.ssh').expanduser().mkdir(exist_ok=True)
+        pathlib.Path('~/.ssh/id_rsa.pub').expanduser().touch()
+        pathlib.Path('~/tmp-workdir').expanduser().mkdir(exist_ok=True)
+        pathlib.Path('~/Downloads/tpu').expanduser().mkdir(parents=True, exist_ok=True)
+        for yaml_path in self._TEST_YAML_PATHS:
+            self._check_equivalent(yaml_path)

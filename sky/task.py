@@ -175,7 +175,7 @@ class Task:
                 # Symlink to a dir is legal (isdir() follows symlinks).
                 raise ValueError(
                     'Workdir must exist and must be a directory (or '
-                    f'a symlink to a directory). Found: {self.workdir}')
+                    f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
     def from_yaml(yaml_path):
