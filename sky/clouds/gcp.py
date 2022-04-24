@@ -23,6 +23,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
+@clouds.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 

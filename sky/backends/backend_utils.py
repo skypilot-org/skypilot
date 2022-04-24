@@ -1078,7 +1078,7 @@ def run_command_on_ip_via_ssh(
     require_outputs: bool = False,
     log_path: str = '/dev/null',
     # If False, do not redirect stdout/stderr to optimize performance.
-    redirect_stdout_stderr: bool = True,
+    process_stream: bool = True,
     stream_logs: bool = True,
     ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
     ssh_control_name: Optional[str] = None,
@@ -1123,23 +1123,45 @@ def run_command_on_ip_via_ssh(
     if isinstance(cmd, list):
         cmd = ' '.join(cmd)
 
+    log_dir = os.path.expanduser(os.path.dirname(log_path))
+    os.makedirs(log_dir, exist_ok=True)
     # We need this to correctly run the cmd, and get the output.
-    command = base_ssh_command + [
+    command = [
         'bash',
         '--login',
         '-c',
         # Need this `-i` option to make sure `source ~/.bashrc` work.
         '-i',
     ]
+
     command += [
         shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                     f'PYTHONWARNINGS=ignore && ({cmd})'),
+        '2>&1',
     ]
-    return log_lib.run_with_log(command,
+    if not process_stream and ssh_mode == SshMode.NON_INTERACTIVE:
+        command += [
+            # A hack to remove the following bash warnings (twice):
+            #  bash: cannot set terminal process group
+            #  bash: no job control in this shell
+            '| stdbuf -o0 tail -n +5',
+        ]
+
+    command = ' '.join(command)
+    command = base_ssh_command + [shlex.quote(command)]
+
+    if not process_stream:
+        if stream_logs:
+            command += [f'| tee {log_path}']
+        else:
+            command += [f'> {log_path}']
+
+    return log_lib.run_with_log(' '.join(command),
                                 log_path,
                                 stream_logs,
-                                redirect_stdout_stderr=redirect_stdout_stderr,
-                                require_outputs=require_outputs)
+                                process_stream=process_stream,
+                                require_outputs=require_outputs,
+                                shell=True)
 
 
 def handle_returncode(returncode: int,
@@ -1184,6 +1206,12 @@ def run_in_parallel(func: Callable, args: List[Any]):
                 f'Command failed with code {e.returncode}: {e.command}')
             logger.error(e.error_msg)
             sys.exit(e.returncode)
+        except KeyboardInterrupt:
+            print()
+            logger.error(
+                f'{colorama.Fore.RED}Interrupted by user.{colorama.Style.RESET_ALL}'
+            )
+            sys.exit(1)
 
 
 def run(cmd, **kwargs):

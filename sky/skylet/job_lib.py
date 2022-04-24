@@ -7,6 +7,7 @@ import hashlib
 import os
 import pathlib
 import re
+import shlex
 import sqlite3
 import subprocess
 import time
@@ -370,9 +371,27 @@ def log_dir(job_id: int) -> Optional[str]:
             WHERE job_id=(?)""", (job_id,))
     row = _CURSOR.fetchone()
     if row is None:
-        return None, None
+        return None
     run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
     return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
+
+
+def log_dirs_with_globbing(job_id: str) -> List[str]:
+    """Returns the relative paths to the log files for job with globbing."""
+    _CURSOR.execute(
+        """\
+            SELECT * FROM jobs
+            WHERE job_id GLOB (?)""", (job_id,))
+    rows = _CURSOR.fetchall()
+    if len(rows) == 0:
+        return None
+    log_paths = []
+    for row in rows:
+        job_id = row[JobInfoLoc.JOB_ID.value]
+        run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
+        log_path = os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
+        log_paths.append((job_id, log_path))
+    return log_paths
 
 
 class JobLibCodeGen:
@@ -450,7 +469,15 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_log_path_with_globbing(cls, job_id: str) -> str:
+        code = [
+            f'log_dirs = job_lib.log_dirs_with_globbing({job_id!r})',
+            'print(log_dirs, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'python3 -u -c {code!r}'
+        return f'python3 -u -c {shlex.quote(code)}'
