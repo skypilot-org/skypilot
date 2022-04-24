@@ -64,8 +64,6 @@ class Strategy:
                 # If the launch failes, it will be recovered by the following
                 # code.
                 logger.info('Failed to launch the spot cluster.')
-            # TODO(zhwu): set the upscaling_speed in ray yaml to be 0 so that
-            # ray will not try to launch another worker if one worker preempted.
 
             cluster_status = backend_utils.get_cluster_status_with_refresh(
                 self.cluster_name, force_refresh=True)

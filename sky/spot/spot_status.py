@@ -57,7 +57,7 @@ class SpotStatus(enum.Enum):
     CANCELLED = 'CANCELLED'
 
     def is_terminal(self) -> bool:
-        return self in (self.SUCCEEDED, self.FAILED, self.CANCELLED)
+        return self in self.terminal_status()
 
     @classmethod
     def terminal_status(cls) -> List['SpotStatus']:

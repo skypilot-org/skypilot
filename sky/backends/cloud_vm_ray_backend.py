@@ -836,7 +836,7 @@ class RetryingVmProvisioner(object):
             }
             status, stdout, stderr = self._gang_schedule_ray_up(
                 to_provision.cloud, num_nodes, cluster_config_file,
-                log_abs_path, stream_logs, logging_info)
+                log_abs_path, stream_logs, logging_info, to_provision.use_spot)
 
             # The cluster is not ready.
             if status == self.GangSchedulingStatus.CLUSTER_READY:
@@ -905,7 +905,8 @@ class RetryingVmProvisioner(object):
     def _gang_schedule_ray_up(
             self, to_provision_cloud: clouds.Cloud, num_nodes: int,
             cluster_config_file: str, log_abs_path: str, stream_logs: bool,
-            logging_info: dict) -> Tuple[GangSchedulingStatus, str, str]:
+            logging_info: dict,
+            use_spot: bool) -> Tuple[GangSchedulingStatus, str, str]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
         Returns:
@@ -918,7 +919,7 @@ class RetryingVmProvisioner(object):
 
         style = colorama.Style
 
-        def ray_up(start_streaming_at):
+        def ray_up():
             # Redirect stdout/err to the file and streaming (if stream_logs).
             # With stdout/err redirected, 'ray up' will have no color and
             # different order from directly running in the console. The
@@ -937,7 +938,7 @@ class RetryingVmProvisioner(object):
                 ['ray', 'up', '-y', '--no-restart', cluster_config_file],
                 log_abs_path,
                 stream_logs=False,
-                start_streaming_at=start_streaming_at,
+                start_streaming_at='Shared connection to',
                 line_processor=log_utils.RayUpLineProcessor(),
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
@@ -951,8 +952,7 @@ class RetryingVmProvisioner(object):
         logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
-        returncode, stdout, stderr = ray_up(
-            start_streaming_at='Shared connection to')
+        returncode, stdout, stderr = ray_up()
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
         # Only 1 node or head node provisioning failure.
@@ -974,6 +974,19 @@ class RetryingVmProvisioner(object):
             nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT)
         if cluster_ready:
             cluster_status = self.GangSchedulingStatus.CLUSTER_READY
+            # ray up --no-restart again with upscaling_speed=0 after cluster is
+            # ready to ensure cluster will not scale up after preemption (spot).
+            # Skip for non-spot as this takes extra time to provision (~1min).
+            if use_spot:
+                ray_config = backend_utils.read_yaml(cluster_config_file)
+                ray_config['upscaling_speed'] = 0
+                backend_utils.dump_yaml(cluster_config_file, ray_config)
+                start = time.time()
+                returncode, stdout, stderr = ray_up()
+                logger.debug(
+                    f'Upscaling reset takes {time.time() - start} seconds.')
+                if returncode != 0:
+                    return self.GangSchedulingStatus.GANG_FAILED, stdout, stderr
         else:
             cluster_status = self.GangSchedulingStatus.GANG_FAILED
         # Do not need stdout/stderr if gang scheduling failed.
