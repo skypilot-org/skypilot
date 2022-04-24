@@ -19,13 +19,21 @@ auth:
   ssh_user: {{ssh_user}}
   ssh_private_key: {{ssh_private_key}}
 
-head_node_type: ray.head.default
+initialization_commands: []
+setup_commands: []
+head_setup_commands: []
+worker_setup_commands: []
+file_mounts: {}
+cluster_synced_files: []
+file_mounts_sync_continuously: false
+rsync_exclude: []
+rsync_filter: []
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
   - if [ -f ~/ray_bootstrap_config.yaml ]; then mv -vn ~/ray_bootstrap_config.yaml ~/admin_ray_config.yaml; fi
   - ray stop
-  - ray start --head --port=6379 --object-manager-port=8076 --dashboard-port 8265 --autoscaling-config=~/admin_ray_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}}
+  - ray start --head --port=6379 --object-manager-port=8076 --dashboard-port 8265 {{"--resources='%s'" % custom_resources if custom_resources}}
 
 # Command to start ray on the worker node. Assumes, worker node resources = head node
 {%- if num_nodes > 1 %}

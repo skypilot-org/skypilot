@@ -8,6 +8,7 @@ from multiprocessing import pool
 import os
 import pathlib
 import re
+import rich
 import shlex
 import subprocess
 import sys
@@ -681,7 +682,7 @@ def get_local_custom_resources(ips: List[str], auth_config):
                                   log_path='/dev/null',
                                   shell=True)
         handle_returncode(rc, command,
-                          f'Failed to rsync {source} -> {ip}:{target}')
+                          f'Failed to rsync {source} -> {ip} : {target}')
 
     code = \
     textwrap.dedent(f"""\
@@ -769,43 +770,75 @@ def launch_local_cluster(local_template: str,
         return output_path
 
     local_cluster_config = yaml_config['cluster']
-    cluster_name = local_cluster_config['name']
     ip_list = local_cluster_config['ips']
     if not isinstance(ip_list, list):
         ip_list = [ip_list]
     auth_config = yaml_config['auth']
-    num_nodes = len(ip_list)
+    ssh_user = auth_config['ssh_user']
+    ssh_key = auth_config['ssh_private_key']
     assert len(ip_list) >= 1, 'Must specify Local IP'
 
-    yaml_path = _fill_local_template(
-        local_template,
-        dict({
-            'cluster_name': cluster_name,
-            'num_nodes': num_nodes,
-            'head_ip': None if ip_list is None else ip_list[0],
-            'worker_ips': None if ip_list is None else ip_list[1:],
-            'custom_resources': custom_resources,
-            # Authentication (optional).
-            'ssh_user': None
-                        if auth_config is None else auth_config['ssh_user'],
-            'ssh_private_key': None if auth_config is None else
-                               auth_config['ssh_private_key'],
-        }))
+    # yaml_path = _fill_local_template(
+    #     local_template,
+    #     dict({
+    #         'cluster_name': cluster_name,
+    #         'num_nodes': num_nodes,
+    #         'head_ip': None if ip_list is None else ip_list[0],
+    #         'worker_ips': None if ip_list is None else ip_list[1:],
+    #         'custom_resources': custom_resources,
+    #         # Authentication (optional).
+    #         'ssh_user': None
+    #                     if auth_config is None else auth_config['ssh_user'],
+    #         'ssh_private_key': None if auth_config is None else
+    #                            auth_config['ssh_private_key'],
+    #     }))
 
-    ray_cmd_list = ['ray', 'up', '-y', '--no-config-cache', yaml_path]
-    returncode, stdout, stderr = log_lib.run_with_log(
-        ray_cmd_list,
-        log_path='/dev/null',
-        stream_logs=True,
-        start_streaming_at='Shared connection to',
-        line_processor=log_utils.RayUpLineProcessor(),
-        # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
-        # time during 'ray up' if insufficient capacity occurs.
-        env=dict(os.environ, BOTO_MAX_RETRIES='5'),
-        require_outputs=True)
+    # ray_cmd_list = ['ray', 'up', '-y', '--no-config-cache', yaml_path]
 
-    handle_returncode(returncode, ' '.join(ray_cmd_list),
-                      'Failed to launched autoscaler.')
+    display = rich.status.Status('[bold cyan]Launching Ray Cluster on Head')
+    display.start()
+
+    head_ip = ip_list[0]
+    head_cmd = f'ray stop; ray start --head --port=6379 --object-manager-port=8076 --dashboard-port 8265 --resources={custom_resources!r}'
+    rc, _, _ = run_command_on_ip_via_ssh(head_ip,
+                                         head_cmd,
+                                         ssh_user=ssh_user,
+                                         ssh_private_key=ssh_key,
+                                         stream_logs=False,
+                                         require_outputs=True,
+                                         cloud=clouds)
+
+    handle_returncode(rc, head_cmd, 'Failed to launch Ray on Head node.')
+    display.stop()
+
+    num_workers = 0
+    total_workers = len(ip_list[1:])
+    for worker_idx in range(1, len(ip_list)):
+        display = rich.status.Status(
+            f'[bold cyan]Workers {worker_idx-1}/{total_workers} Ready')
+        display.start()
+
+        worker_ip = ip_list[worker_idx]
+        worker_cmd = f'ray stop; ray start --address={head_ip}:6379 --object-manager-port=8076 --resources={custom_resources!r}'
+        rc, _, _ = run_command_on_ip_via_ssh(worker_ip,
+                                             worker_cmd,
+                                             ssh_user=ssh_user,
+                                             ssh_private_key=ssh_key,
+                                             stream_logs=False,
+                                             require_outputs=True,
+                                             cloud=clouds)
+
+        handle_returncode(rc, worker_cmd,
+                          'Failed to launch Ray on Worker node:')
+
+        display.stop()
+
+    if total_workers > 0:
+        display = rich.status.Status(
+            f'[bold cyan]Workers {total_workers}/{total_workers} Ready')
+        display.start()
+        time.sleep(0)
+        display.stop()
 
 
 def save_censored_yaml(yaml_config):
@@ -907,6 +940,7 @@ def wait_until_ray_cluster_ready(
             # Workers that are ready
             ready_workers = 0
             if isinstance(cloud, clouds.Local):
+                break
                 result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
                 if len(result) == 0:
                     ready_workers = 0

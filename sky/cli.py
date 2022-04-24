@@ -1952,9 +1952,7 @@ def launch_local(entrypoint: str):
     steps += 1
 
     # Launching Ray Autoscaler service
-    click.secho(f'[{steps}/4] Launching Autoscaler Service\n',
-                fg='green',
-                nl=False)
+    click.secho(f'[{steps}/4] Launching Sky Service\n', fg='green', nl=False)
     backend_utils.launch_local_cluster('local-admin.yml.j2', yaml_config,
                                        custom_resources)
     steps += 1

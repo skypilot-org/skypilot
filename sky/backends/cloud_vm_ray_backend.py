@@ -356,9 +356,6 @@ class RayCodeGen:
 
         log_path = {log_path!r}
         log_path = os.path.expanduser(log_path)
-        dirname = os.path.dirname(log_path)
-        os.makedirs(dirname, exist_ok=True)
-        os.system(f"touch {{log_path}} && chmod a+rwx {{log_path}}")
 
         if script is not None:
             node_export_sky_env_vars = (export_sky_env_vars +

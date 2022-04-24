@@ -45,7 +45,8 @@ def redirect_process_output(
         dirname = os.path.dirname(log_path)
         os.makedirs(dirname, exist_ok=True)
     except:
-        pass
+        os.system(f'sudo mkdir -p {dirname} && sudo touch {log_path} '
+                  f'&& sudo chmod a+rwx {log_path}')
 
     sel = selectors.DefaultSelector()
     out_io = io.TextIOWrapper(proc.stdout,
