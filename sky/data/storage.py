@@ -456,9 +456,9 @@ class Storage(object):
         elif self.source is not None:
             source, is_local_source = Storage._validate_source(
                 self.source, self.mode)
-            if is_local_source:
-                # Expand user in source path
-                self.source = os.path.abspath(os.path.expanduser(self.source))
+            # if is_local_source:
+            #     # Expand user in source path
+            #     self.source = os.path.abspath(os.path.expanduser(self.source))
             if not self.name:
                 if is_local_source:
                     raise exceptions.StorageNameError(
@@ -642,6 +642,7 @@ class Storage(object):
         if len(self.stores) > 0:
             stores = ','.join([store.value for store in self.stores])
         add_if_not_none('store', stores)
+        add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
         return config
 
@@ -734,7 +735,8 @@ class S3Store(AbstractStore):
         increase parallelism, modify max_concurrent_requests in your aws config
         file (Default path: ~/.aws/config).
         """
-        sync_command = f'aws s3 sync {self.source} s3://{self.name}/'
+        source = os.path.abspath(os.path.expanduser(self.source))
+        sync_command = f'aws s3 sync {source} s3://{self.name}/'
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{self.source} to s3://{self.name}/'):
@@ -1013,7 +1015,8 @@ class GcsStore(AbstractStore):
 
     def sync_local_dir(self) -> None:
         """Syncs a local directory to a GCS bucket."""
-        sync_command = f'gsutil -m rsync -d -r {self.source} gs://{self.name}/'
+        source = os.path.abspath(os.path.expanduser(self.source))
+        sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
         logger.info(f'Executing: {sync_command}')
         with subprocess.Popen(sync_command.split(' '),
                               stderr=subprocess.PIPE) as process:

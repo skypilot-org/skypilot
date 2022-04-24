@@ -11,6 +11,7 @@ import colorama
 import pytest
 
 from sky import global_user_state
+from sky import spot
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 
@@ -356,6 +357,29 @@ def test_cancel():
     run_one_test(test)
 
 
+# ---------- Testing managed spot ----------
+def test_managed_spot():
+    """Test the spot yaml."""
+    name = _get_cluster_name() + f'-{int(time.time())}'
+    test = Test('managed_spot', [
+        f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
+        f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
+        'sleep 60',
+        f'sky spot status | grep {name}-1 | grep RUNNING',
+        f'sky spot status | grep {name}-2 | grep RUNNING',
+        f'sky spot cancel -y -n {name}-1',
+        'sleep 5',
+        f'sky spot status | grep {name}-1 | grep CANCELLED',
+        f'sky spot status | grep {name}-2 | grep RUNNING',
+        'sleep 60',
+        f'sky queue sky-spot-controller | grep {name}-1 | grep SUCCEEDED',
+        f'sky queue sky-spot-controller | grep {name}-2 | grep RUNNING',
+        'sleep 60',
+        f'sky queue sky-spot-controller | grep {name}-2 | grep SUCCEEDED',
+    ])
+    run_one_test(test)
+
+
 @pytest.mark.slow
 def test_azure_start_stop_two_nodes():
     name = _get_cluster_name()
@@ -376,6 +400,7 @@ def test_azure_start_stop_two_nodes():
     run_one_test(test)
 
 
+# ---------- Testing Storage ----------
 class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
 

@@ -270,8 +270,14 @@ class Task:
             resources = list(self.resources)[0]
             add_if_not_none('resources', resources.to_yaml_config())
         add_if_not_none('num_nodes', self.num_nodes)
-        add_if_not_none('inputs', self.inputs)
-        add_if_not_none('outputs', self.outputs)
+
+        if self.inputs is not None:
+            add_if_not_none('inputs',
+                            {self.inputs: self.estimated_inputs_size_gigabytes})
+        if self.outputs is not None:
+            add_if_not_none(
+                'outputs',
+                {self.outputs: self.estimated_outputs_size_gigabytes})
 
         add_if_not_none('setup', self.setup)
         add_if_not_none('workdir', self.workdir)

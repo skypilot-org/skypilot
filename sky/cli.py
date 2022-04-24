@@ -1533,6 +1533,8 @@ def _terminate_or_stop_clusters(
     with progress:
         backend_utils.run_in_parallel(_terminate_or_stop, to_down)
         progress.live.transient = False
+        # Make sure the progress bar not mess up the terminal.
+        progress.refresh()
 
 
 @_interactive_node_cli_command
@@ -2032,6 +2034,8 @@ def spot_launch(
 
     if name is None:
         name = backend_utils.generate_cluster_name()
+    else:
+        backend_utils.check_cluster_name_is_valid(name)
 
     if not yes:
         prompt = f'Launching a new spot task {name!r}. Proceed?'

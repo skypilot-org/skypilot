@@ -461,10 +461,10 @@ class Resources:
         config = {}
 
         def add_if_not_none(key, value):
-            if value is not None:
-                config[key] = str(value)
+            if value is not None and value != 'None':
+                config[key] = value
 
-        add_if_not_none('cloud', self.cloud)
+        add_if_not_none('cloud', str(self.cloud))
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('accelerators', self.accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
@@ -472,7 +472,10 @@ class Resources:
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
         add_if_not_none('spot_recovery', self.spot_recovery)
-        add_if_not_none('disk_size', self.disk_size)
+        disk_size = self.disk_size
+        if disk_size == _DEFAULT_DISK_SIZE_GB:
+            disk_size = None
+        add_if_not_none('disk_size', disk_size)
         add_if_not_none('region', self.region)
         return config
 

@@ -1259,3 +1259,20 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
         resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
+
+
+def check_cluster_name_is_valid(cluster_name: str) -> None:
+    """Errors out on invalid cluster names not supported by cloud providers.
+
+    Bans (including but not limited to) names that:
+    - are digits-only
+    - contain underscore (_)
+    """
+    if cluster_name is None:
+        return
+    # GCP errors return this exact regex.  An informal description is also at:
+    # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
+    valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
+    if re.fullmatch(valid_regex, cluster_name) is None:
+        raise ValueError(f'Cluster name "{cluster_name}" is invalid; '
+                         f'ensure it is fully matched by regex: {valid_regex}')

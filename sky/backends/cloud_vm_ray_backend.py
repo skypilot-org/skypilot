@@ -9,7 +9,6 @@ import inspect
 import json
 import os
 import pathlib
-import re
 import sys
 import subprocess
 import tempfile
@@ -64,23 +63,6 @@ _FILELOCK_TIMEOUT_SECONDS = 10
 _RSYNC_DISPLAY_OPTION = '-Pavz'
 _RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
 _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
-
-
-def _check_cluster_name_is_valid(cluster_name: str) -> None:
-    """Errors out on invalid cluster names not supported by cloud providers.
-
-    Bans (including but not limited to) names that:
-    - are digits-only
-    - contain underscore (_)
-    """
-    if cluster_name is None:
-        return
-    # GCP errors return this exact regex.  An informal description is also at:
-    # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
-    valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
-    if re.fullmatch(valid_regex, cluster_name) is None:
-        raise ValueError(f'Cluster name "{cluster_name}" is invalid; '
-                         f'ensure it is fully matched by regex: {valid_regex}')
 
 
 def _get_cluster_config_template(cloud):
@@ -1275,7 +1257,7 @@ class CloudVmRayBackend(backends.Backend):
         # Try to launch the exiting cluster first
         if cluster_name is None:
             cluster_name = backend_utils.generate_cluster_name()
-        _check_cluster_name_is_valid(cluster_name)
+        backend_utils.check_cluster_name_is_valid(cluster_name)
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.

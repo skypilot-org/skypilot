@@ -23,14 +23,14 @@ _CURSOR.execute("""\
     job_id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_name TEXT,
     resources TEXT,
-    submitted_at INTEGER,
+    submitted_at FLOAT,
     status TEXT,
     run_timestamp TEXT CANDIDATE KEY,
-    start_at INTEGER,
-    end_at INTERGER,
-    last_recovered_at INTEGER DEFAULT -1,
+    start_at FLOAT,
+    end_at FLOAT,
+    last_recovered_at FLOAT DEFAULT -1,
     recovery_count INTEGER DEFAULT 0,
-    job_duration INTEGER DEFAULT 0)""")
+    job_duration FLOAT DEFAULT 0)""")
 # job_duration is the time a job actually runs before last_recover,
 # excluding the provision and recovery time.
 # If the job is not finished:
