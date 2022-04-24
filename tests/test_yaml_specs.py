@@ -7,7 +7,7 @@ import sky
 from sky.backends import backend_utils
 
 _TEST_YAML_PATHS = [
-    'examples/minimal.yaml', 'examples/spot_recovery.yaml',
+    'examples/minimal.yaml', 'examples/managed_spot.yaml',
     'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
     'examples/multi_hostname.yaml', 'examples/storage_demo.yaml'
 ]

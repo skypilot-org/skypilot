@@ -2,9 +2,9 @@
 
 name: {{spot_task_name}}
 
-resources:
-  # TODO(zhwu): fix this to be able to failvoer across clouds
-  instance_type: t3.xlarge
+# TODO(zhwu): Fix this to be able to failvoer across clouds with cheaper instance.
+# resources:
+#  instance_type: t3.xlarge
 
 file_mounts:
   ~/.sky/sky_spot_tasks/{{spot_task_name}}.yaml: {{user_yaml_path}}
