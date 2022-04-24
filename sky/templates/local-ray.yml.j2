@@ -37,6 +37,7 @@ rsync_exclude: [
 ]
 
 # List of shell commands to run to set up nodes.
+# TODO check if need patch
 setup_commands:
   - (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;

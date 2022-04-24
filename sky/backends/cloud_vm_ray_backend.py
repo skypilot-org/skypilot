@@ -1068,6 +1068,9 @@ class RetryingVmProvisioner(object):
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
         num_nodes = to_provision_config.num_nodes
+        resources = to_provision_config.resources
+        if isinstance(resources.cloud, clouds.Local):
+            num_nodes = len(resources.ips)
         cluster_exists = to_provision_config.cluster_exists
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
@@ -1951,10 +1954,11 @@ class CloudVmRayBackend(backends.Backend):
         job_id_hash = hashlib.sha256(
             f'{cluster_name}-{job_id}'.encode()).hexdigest()
         job_submit_cmd = (
-            f'ray job submit '
+            'ray job submit -v '
             f'--address=127.0.0.1:8265 --job-id {job_id_hash} --no-wait '
             f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
-        returncode, a, b = self.run_on_head(handle,
+        print(job_submit_cmd)
+        returncode, _, _ = self.run_on_head(handle,
                                             job_submit_cmd,
                                             require_outputs=True,
                                             stream_logs=False)
