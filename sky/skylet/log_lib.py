@@ -40,14 +40,6 @@ def process_subprocess_stream(
     if line_processor is None:
         line_processor = log_utils.LineProcessor()
 
-    try:
-        log_path = os.path.expanduser(log_path)
-        dirname = os.path.dirname(log_path)
-        os.makedirs(dirname, exist_ok=True)
-    except OSError:
-        os.system(f'sudo mkdir -p {dirname} && sudo touch {log_path} '
-                  f'&& sudo chmod a+rwx {log_path}')
-
     sel = selectors.DefaultSelector()
     out_io = io.TextIOWrapper(proc.stdout,
                               encoding='utf-8',
@@ -131,9 +123,14 @@ def run_with_log(
     assert process_stream or not require_outputs, (
         process_stream, require_outputs,
         'require_outputs should be False when process_stream is False')
-    log_path = os.path.expanduser(log_path)
-    dirname = os.path.dirname(log_path)
-    os.makedirs(dirname, exist_ok=True)
+
+    try:
+        log_path = os.path.expanduser(log_path)
+        dirname = os.path.dirname(log_path)
+        os.makedirs(dirname, exist_ok=True)
+    except OSError:
+        os.system(f'sudo mkdir -p {dirname} && sudo touch {log_path} '
+                  f'&& sudo chmod a+rwx {log_path}')
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout = stderr = None
@@ -245,8 +242,7 @@ def run_bash_command_with_log(bash_command: str,
             ['sudo', '-H', 'su', '-', username, '-c', inner_command],
             log_path,
             stream_logs=stream_logs,
-            with_ray=with_ray,
-            shell=True)
+            with_ray=with_ray)
 
 
 def _follow_job_logs(file,

@@ -894,7 +894,7 @@ def wait_until_ray_cluster_ready(
                 if len(result) == 0:
                     ready_workers = 0
                 else:
-                    ready_workers = int(result[0]) - 1
+                    ready_workers = len(result)
             else:
                 result = _LAUNCHED_WORKER_PATTERN.findall(output)
                 if len(result) == 0:
@@ -902,8 +902,8 @@ def wait_until_ray_cluster_ready(
                 else:
                     ready_workers = int(result[0])
 
-            if result:
-                assert len(result) == 1, result
+                if result:
+                    assert len(result) == 1, result
 
             result = _LAUNCHED_HEAD_PATTERN.findall(output)
             ready_head = 0
