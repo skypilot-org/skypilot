@@ -505,7 +505,6 @@ class TestYamlSpecs:
         'examples/multi_hostname.yaml', 'examples/storage_demo.yaml'
     ]
 
-
     def _check_dict_same(self, d1, d2):
         """Check if two dicts are same."""
         for k, v in d1.items():
@@ -519,7 +518,6 @@ class TestYamlSpecs:
             else:
                 assert v == d2[k], (k, v, d2[k])
 
-
     def _check_equivalent(self, yaml_path):
         """Check if the yaml is equivalent after load and dump again."""
         origin_task_config = backend_utils.read_yaml(yaml_path)
@@ -528,7 +526,6 @@ class TestYamlSpecs:
         new_task_config = task.to_yaml_config()
         self._check_dict_same(origin_task_config, new_task_config)
 
-
     def test_load_dump_yaml_config_equivalent(self):
         """Test if the yaml config is equivalent after load and dump again."""
         pathlib.Path('~/datasets').expanduser().mkdir(exist_ok=True)
@@ -536,6 +533,7 @@ class TestYamlSpecs:
         pathlib.Path('~/.ssh').expanduser().mkdir(exist_ok=True)
         pathlib.Path('~/.ssh/id_rsa.pub').expanduser().touch()
         pathlib.Path('~/tmp-workdir').expanduser().mkdir(exist_ok=True)
-        pathlib.Path('~/Downloads/tpu').expanduser().mkdir(parents=True, exist_ok=True)
+        pathlib.Path('~/Downloads/tpu').expanduser().mkdir(parents=True,
+                                                           exist_ok=True)
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)

@@ -4,6 +4,7 @@ import textwrap
 
 import sky
 
+
 def test_spot_nonexist_strategy():
     """Test the nonexist recovery strategy."""
     task_yaml = textwrap.dedent("""\
