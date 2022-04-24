@@ -1688,7 +1688,7 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.handle_returncode(returncode, code,
                                         'Failed to sync logs.', stderr)
         log_dirs = ast.literal_eval(log_dirs)
-        if len(log_dirs) == 0:
+        if not log_dirs or len(log_dirs) == 0:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
                         f'{colorama.Style.RESET_ALL}')

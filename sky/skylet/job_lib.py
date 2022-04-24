@@ -428,7 +428,7 @@ class JobLibCodeGen:
     @classmethod
     def get_log_path_with_globbing(cls, job_id: str) -> str:
         code = [
-            f'log_dirs = job_lib.log_dirs_with_globbing(\'{job_id}\')',
+            f'log_dirs = job_lib.log_dirs_with_globbing({job_id!r})',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)
