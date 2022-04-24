@@ -17,7 +17,6 @@ import textwrap
 import time
 import typing
 from typing import Dict, List, Optional, Tuple, Union
-import uuid
 
 import colorama
 import filelock
@@ -56,7 +55,7 @@ logger = sky_logging.init_logger(__name__)
 
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
-# Timeout for provision a cluster and wait for it to be ready in seconds. (5 min)
+# Timeout for provision a cluster and wait for it to be ready in seconds.
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 300
 
 _LOCK_FILENAME = '~/.sky/.{}.lock'
@@ -213,7 +212,6 @@ class RayCodeGen:
         self,
         num_nodes: int,
         accelerator_dict: Dict[str, int],
-        cloud: clouds.Cloud,
     ) -> None:
         """Create the gang scheduling placement group for a Task."""
         assert self._has_prologue, ('Call add_prologue() before '
@@ -446,7 +444,7 @@ class RetryingVmProvisioner(object):
         if region.name in self._blocked_regions:
             return True
         # We do not keep track of zones in Azure.
-        if isinstance(cloud, clouds.Azure) or isinstance(cloud, clouds.Local):
+        if isinstance(cloud, (clouds.Azure, clouds.Local)):
             return False
         assert zones, (cloud, region, zones)
         for zone in zones:
@@ -1034,7 +1032,7 @@ class RetryingVmProvisioner(object):
 
         returncode = backend.run_on_head(
             handle,
-            f'ray status',
+            'ray status',
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
@@ -1048,7 +1046,7 @@ class RetryingVmProvisioner(object):
             raise ValueError('Ray status errored out on On-premise machine.'
                              'Check if Ray==1.10.0 is installed correctly.')
 
-        backend.run_on_head(handle, f'ray stop', use_cached_head_ip=False)
+        backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
         log_lib.run_with_log(
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
@@ -1909,7 +1907,7 @@ class CloudVmRayBackend(backends.Backend):
 
         backend_utils.run_command_on_ip_via_ssh(
             head_ip,
-            f"mkdir -p {remote_log_dir}",
+            f'mkdir -p {remote_log_dir}',
             ssh_user=ssh_user,
             ssh_private_key=ssh_private_key,
             ssh_control_name=self._ssh_control_name(handle))
@@ -1917,9 +1915,11 @@ class CloudVmRayBackend(backends.Backend):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        # Ray Multitenancy is unsupported: https://github.com/ray-project/ray/issues/6800
-        # We will do a very complicated workaround...
-        ray_command = f'{cd} && {executable} -u {script_path} > {remote_log_path} 2>&1'
+        # Ray Multitenancy is unsupported
+        # (Git Issue) https://github.com/ray-project/ray/issues/6800
+        # Temporary workaround
+        ray_command = (f'{cd} && {executable} -u {script_path} '
+                       f'> {remote_log_path} 2>&1')
 
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(ray_command)
@@ -1934,17 +1934,16 @@ class CloudVmRayBackend(backends.Backend):
 
         _, stdout, _ = backend_utils.run_command_on_ip_via_ssh(
             head_ip,
-            f"chmod a+rwx {remote_run_file}; echo $HOME",
+            f'chmod a+rwx {remote_run_file}; echo $HOME',
             ssh_user=ssh_user,
             ssh_private_key=ssh_private_key,
             redirect_stdout_stderr=True,
             ssh_control_name=self._ssh_control_name(handle),
-            require_outputs=True,
-            cloud=handle.launched_resources.cloud)
+            require_outputs=True)
 
         head_home_path = stdout.strip()
-        remote_log_path = remote_log_path.replace("~", head_home_path)
-        script_path = script_path.replace("~", head_home_path)
+        remote_log_path = remote_log_path.replace('~', head_home_path)
+        script_path = script_path.replace('~', head_home_path)
         remote_run_file = remote_run_file.replace('~', head_home_path)
 
         cluster_name = handle.cluster_name
@@ -1954,7 +1953,6 @@ class CloudVmRayBackend(backends.Backend):
             'ray job submit -v '
             f'--address=127.0.0.1:8265 --job-id {job_id_hash} --no-wait '
             f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
-        print(job_submit_cmd)
         returncode, _, _ = self.run_on_head(handle,
                                             job_submit_cmd,
                                             require_outputs=True,
@@ -2072,8 +2070,7 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
-        cloud = handle.launched_resources.cloud
-        codegen.add_gang_scheduling_placement_group(1, accelerator_dict, cloud)
+        codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -2106,9 +2103,8 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
-        cloud = handle.launched_resources.cloud
         codegen.add_gang_scheduling_placement_group(task.num_nodes,
-                                                    accelerator_dict, cloud)
+                                                    accelerator_dict)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -2442,5 +2438,4 @@ class CloudVmRayBackend(backends.Backend):
             stream_logs=stream_logs,
             ssh_mode=ssh_mode,
             ssh_control_name=self._ssh_control_name(handle),
-            require_outputs=require_outputs,
-            cloud=handle.launched_resources.cloud)
+            require_outputs=require_outputs)

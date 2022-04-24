@@ -1,6 +1,4 @@
-"""Amazon Web Services."""
-import copy
-import json
+"""Local/On-Premise."""
 import os
 import subprocess
 import typing
@@ -8,7 +6,6 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import yaml
 
 from sky import clouds
-from sky.clouds import service_catalog
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
@@ -25,9 +22,7 @@ def _run_output(cmd):
 
 
 def get_local_cloud(cloud: str):
-    SKY_USER_LOCAL_FILE_PATH = '~/.sky/local'
-    if not os.path.exists(
-            os.path.expanduser(f'{SKY_USER_LOCAL_FILE_PATH}/{cloud}.yml')):
+    if not os.path.exists(os.path.expanduser(f'~/.sky/local/{cloud}.yml')):
         return None
     local_cloud_type = clouds.Local()
     local_cloud_type.set_cloud_name(cloud)
@@ -35,9 +30,7 @@ def get_local_cloud(cloud: str):
 
 
 def get_local_ips(cloud: str):
-    SKY_USER_LOCAL_FILE_PATH = '~/.sky/local'
-    local_cluster_path = os.path.expanduser(
-        f'{SKY_USER_LOCAL_FILE_PATH}/{cloud}.yml')
+    local_cluster_path = os.path.expanduser(f'~/.sky/local/{cloud}.yml')
     with open(local_cluster_path, 'r') as f:
         config = yaml.safe_load(f)
     ips = config['cluster']['ips']
@@ -71,6 +64,7 @@ class Local(clouds.Cloud):
         use_spot: bool,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         del accelerators  # unused
+        assert instance_type is None and not use_spot
         for region in cls.regions():
             yield region, region.zones
 

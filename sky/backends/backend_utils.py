@@ -8,7 +8,6 @@ from multiprocessing import pool
 import os
 import pathlib
 import re
-import rich
 import shlex
 import subprocess
 import sys
@@ -24,6 +23,7 @@ import yaml
 import jinja2
 import rich.console as rich_console
 import rich.progress as rich_progress
+import rich.status as rich_status
 
 import sky
 from sky import authentication as auth
@@ -34,7 +34,6 @@ from sky import global_user_state
 from sky import exceptions
 from sky import sky_logging
 from sky.skylet import log_lib
-from sky.skylet.utils import log_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -60,7 +59,7 @@ RESET_BOLD = '\033[0m'
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
-_LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) local[._]cluster[._]node')
+_LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
@@ -527,8 +526,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
         region = cloud.get_default_region()
         zones = region.zones
     else:
-        assert isinstance(cloud, clouds.Azure) or isinstance(
-            cloud, clouds.Local
+        assert isinstance(
+            cloud, (clouds.Azure, clouds.Local)
         ) or zones is not None, 'Set either both or neither for: region, zones.'
     region = region.name
     if isinstance(cloud, clouds.AWS):
@@ -633,10 +632,10 @@ def check_local_installation(ips, auth_config):
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
 
-    for idx, ip in enumerate(ips):
+    for ip in ips:
         # All nodes must have Ray and Python3
         rc = run_command_on_ip_via_ssh(ip,
-                                       f'python3 --version',
+                                       'python3 --version',
                                        ssh_user=ssh_user,
                                        ssh_private_key=ssh_key,
                                        stream_logs=False)
@@ -644,7 +643,7 @@ def check_local_installation(ips, auth_config):
             raise ValueError(f'Python3 not installed on {ip}')
 
         rc = run_command_on_ip_via_ssh(ip,
-                                       f'ray --version',
+                                       'ray --version',
                                        ssh_user=ssh_user,
                                        ssh_private_key=ssh_key,
                                        stream_logs=False)
@@ -666,7 +665,7 @@ def get_local_custom_resources(ips: List[str], auth_config):
             '--filter=\'dir-merge,- .gitignore\'',
         ]
         rc = run_command_on_ip_via_ssh(ip,
-                                       f'mkdir -p ~/.sky',
+                                       'mkdir -p ~/.sky',
                                        ssh_user=ssh_user,
                                        ssh_private_key=ssh_key,
                                        stream_logs=False)
@@ -685,7 +684,7 @@ def get_local_custom_resources(ips: List[str], auth_config):
                           f'Failed to rsync {source} -> {ip} : {target}')
 
     code = \
-    textwrap.dedent(f"""\
+    textwrap.dedent("""\
         import os
         from ray.util.accelerators import *
 
@@ -713,17 +712,14 @@ def get_local_custom_resources(ips: List[str], auth_config):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         fp.write(code)
         fp.flush()
-        source_file_path = fp.name
         rsync_no_handle(ip, fp.name, remote_resource_path)
 
-    rc, output, stderr = run_command_on_ip_via_ssh(
-        ip,
-        f'python3 {remote_resource_path}',
-        ssh_user=ssh_user,
-        ssh_private_key=ssh_key,
-        stream_logs=False,
-        require_outputs=True,
-        cloud=clouds)
+    rc, output, _ = run_command_on_ip_via_ssh(ip,
+                                              f'python3 {remote_resource_path}',
+                                              ssh_user=ssh_user,
+                                              ssh_private_key=ssh_key,
+                                              stream_logs=False,
+                                              require_outputs=True)
 
     if rc:
         raise ValueError('Failed to execute resource group detector. '
@@ -738,36 +734,7 @@ def get_local_custom_resources(ips: List[str], auth_config):
     return cluster_custom_resources
 
 
-def launch_local_cluster(local_template: str,
-                         yaml_config,
-                         custom_resources=None):
-
-    def _fill_local_template(template_name: str,
-                             variables: Dict,
-                             output_path: Optional[str] = None) -> str:
-        """Create a file from a Jinja template and return the filename."""
-        assert template_name.endswith('.j2'), template_name
-        template_path = os.path.join(sky.__root_dir__, 'templates',
-                                     template_name)
-        if not os.path.exists(template_path):
-            raise FileNotFoundError(
-                f'Template "{template_name}" does not exist.')
-        with open(template_path) as fin:
-            template = fin.read()
-        if output_path is None:
-            assert 'cluster_name' in variables, 'cluster_name is required.'
-            cluster_name = variables['cluster_name']
-            output_path = pathlib.Path(
-                os.path.expanduser(
-                    SKY_USER_LOCAL_FILE_PATH)) / f'{cluster_name}.yml'
-            os.makedirs(output_path.parents[0], exist_ok=True)
-            output_path = str(output_path)
-        output_path = os.path.abspath(output_path)
-        template = jinja2.Template(template)
-        content = template.render(**variables)
-        with open(output_path, 'w') as fout:
-            fout.write(content)
-        return output_path
+def launch_local_cluster(yaml_config, custom_resources=None):
 
     local_cluster_config = yaml_config['cluster']
     ip_list = local_cluster_config['ips']
@@ -776,57 +743,41 @@ def launch_local_cluster(local_template: str,
     auth_config = yaml_config['auth']
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
-    assert len(ip_list) >= 1, 'Must specify Local IP'
+    assert len(ip_list) >= 1, 'Must specify at least one Local IP'
 
-    # yaml_path = _fill_local_template(
-    #     local_template,
-    #     dict({
-    #         'cluster_name': cluster_name,
-    #         'num_nodes': num_nodes,
-    #         'head_ip': None if ip_list is None else ip_list[0],
-    #         'worker_ips': None if ip_list is None else ip_list[1:],
-    #         'custom_resources': custom_resources,
-    #         # Authentication (optional).
-    #         'ssh_user': None
-    #                     if auth_config is None else auth_config['ssh_user'],
-    #         'ssh_private_key': None if auth_config is None else
-    #                            auth_config['ssh_private_key'],
-    #     }))
-
-    # ray_cmd_list = ['ray', 'up', '-y', '--no-config-cache', yaml_path]
-
-    display = rich.status.Status('[bold cyan]Launching Ray Cluster on Head')
+    display = rich_status.Status('[bold cyan]Launching Ray Cluster on Head')
     display.start()
 
     head_ip = ip_list[0]
-    head_cmd = f'ray stop; ray start --head --port=6379 --object-manager-port=8076 --dashboard-port 8265 --resources={custom_resources!r}'
+    head_cmd = ('ray stop; ray start --head --port=6379'
+                '--object-manager-port=8076 --dashboard-port 8265 '
+                f'--resources={custom_resources!r}')
     rc, _, _ = run_command_on_ip_via_ssh(head_ip,
                                          head_cmd,
                                          ssh_user=ssh_user,
                                          ssh_private_key=ssh_key,
                                          stream_logs=False,
-                                         require_outputs=True,
-                                         cloud=clouds)
+                                         require_outputs=True)
 
     handle_returncode(rc, head_cmd, 'Failed to launch Ray on Head node.')
     display.stop()
 
-    num_workers = 0
     total_workers = len(ip_list[1:])
     for worker_idx in range(1, len(ip_list)):
-        display = rich.status.Status(
+        display = rich_status.Status(
             f'[bold cyan]Workers {worker_idx-1}/{total_workers} Ready')
         display.start()
 
         worker_ip = ip_list[worker_idx]
-        worker_cmd = f'ray stop; ray start --address={head_ip}:6379 --object-manager-port=8076 --resources={custom_resources!r}'
+        worker_cmd = (f'ray stop; ray start --address={head_ip}:6379 '
+                      '--object-manager-port=8076 '
+                      f'--resources={custom_resources!r}')
         rc, _, _ = run_command_on_ip_via_ssh(worker_ip,
                                              worker_cmd,
                                              ssh_user=ssh_user,
                                              ssh_private_key=ssh_key,
                                              stream_logs=False,
-                                             require_outputs=True,
-                                             cloud=clouds)
+                                             require_outputs=True)
 
         handle_returncode(rc, worker_cmd,
                           'Failed to launch Ray on Worker node:')
@@ -834,10 +785,10 @@ def launch_local_cluster(local_template: str,
         display.stop()
 
     if total_workers > 0:
-        display = rich.status.Status(
+        display = rich_status.Status(
             f'[bold cyan]Workers {total_workers}/{total_workers} Ready')
         display.start()
-        time.sleep(0)
+        time.sleep(1)
         display.stop()
 
 
@@ -865,7 +816,7 @@ def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
     elif cloud_type == 'Azure':
         config = auth.setup_azure_authentication(config)
     elif config['provider']['type'] == 'local':
-        config = config
+        pass
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
     dump_yaml(cluster_config_file, config)
@@ -926,13 +877,12 @@ def wait_until_ray_cluster_ready(
         while True:
             rc, output, stderr = run_command_on_ip_via_ssh(
                 head_ip,
-                f'ray status',
+                'ray status',
                 ssh_user=ssh_user,
                 ssh_private_key=ssh_key,
                 log_path=log_path,
                 stream_logs=False,
-                require_outputs=True,
-                cloud=cloud)
+                require_outputs=True)
             handle_returncode(rc, 'ray status',
                               'Failed to run ray status on head node.', stderr)
             logger.debug(output)
@@ -940,15 +890,14 @@ def wait_until_ray_cluster_ready(
             # Workers that are ready
             ready_workers = 0
             if isinstance(cloud, clouds.Local):
-                break
                 result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
                 if len(result) == 0:
                     ready_workers = 0
                 else:
-                    ready_workers = int(result[0])
+                    ready_workers = int(result[0]) - 1
             else:
                 result = _LAUNCHED_WORKER_PATTERN.findall(output)
-                if (len(result) == 0):
+                if len(result) == 0:
                     ready_workers = 0
                 else:
                     ready_workers = int(result[0])
@@ -967,7 +916,8 @@ def wait_until_ray_cluster_ready(
                                  f'{ready_workers} out of {num_nodes - 1} '
                                  'workers ready')
 
-            if ready_head + ready_workers == num_nodes or ready_workers == num_nodes - 1:
+            if ready_head + ready_workers == num_nodes or \
+            ready_workers == num_nodes - 1:
                 # All nodes are up.
                 break
 
@@ -1002,7 +952,8 @@ def wait_until_ray_cluster_ready(
                     'Timed out when waiting for workers to be provisioned.')
                 return False  # failed
 
-            if '(no pending nodes)' in output and '(no failures)' in output and not isinstance(
+            if '(no pending nodes)' in output and \
+            '(no failures)' in output and not isinstance(
                     cloud, clouds.Local):
                 # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
                 # that GCP can satisfy only by half, the worker node would be
@@ -1131,7 +1082,6 @@ def run_command_on_ip_via_ssh(
     stream_logs: bool = True,
     ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
     ssh_control_name: Optional[str] = None,
-    cloud: clouds.Cloud = None,
 ) -> Union[int, Tuple[int, str, str]]:
     """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -1331,8 +1281,8 @@ def get_node_ips(
                        stderr=subprocess.PIPE)
             out = proc.stdout.decode()
             worker_ips = re.findall(IP_ADDR_REGEX, out)
-            # Bug for Ray Autoscaler On-prem; ray-get-worker-ips outputs nothing!
-            # Workaround: List of IPs in Stderr
+            # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
+            # Workaround: List of IPs are shown in Stderr
             if read_yaml(yaml_handle)['provider']['type'] == 'local':
                 out = proc.stderr.decode()
                 worker_ips = re.findall(IP_ADDR_REGEX, out)

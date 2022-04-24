@@ -44,7 +44,7 @@ def redirect_process_output(
         log_path = os.path.expanduser(log_path)
         dirname = os.path.dirname(log_path)
         os.makedirs(dirname, exist_ok=True)
-    except:
+    except OSError:
         os.system(f'sudo mkdir -p {dirname} && sudo touch {log_path} '
                   f'&& sudo chmod a+rwx {log_path}')
 
@@ -219,7 +219,7 @@ def run_bash_command_with_log(bash_command: str,
         if len(gpu_list) > 0:
             gpu_list = [str(gpu_id) for gpu_id in gpu_list]
             inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(
-                gpu_list) + " " + inner_command
+                gpu_list) + ' ' + inner_command
         return run_with_log(
             # Need this `-i` option to make sure `source ~/.bashrc` work.
             # Do not use shell=True because it will cause the environment

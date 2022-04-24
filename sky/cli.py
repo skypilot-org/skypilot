@@ -1953,8 +1953,7 @@ def launch_local(entrypoint: str):
 
     # Launching Ray Autoscaler service
     click.secho(f'[{steps}/4] Launching Sky Service\n', fg='green', nl=False)
-    backend_utils.launch_local_cluster('local-admin.yml.j2', yaml_config,
-                                       custom_resources)
+    backend_utils.launch_local_cluster(yaml_config, custom_resources)
     steps += 1
 
     # Generate Censored YAML file to be sent to non-admin users
