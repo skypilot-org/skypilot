@@ -612,10 +612,7 @@ def launch(
             click.secho('Task from command: ', fg='yellow', nl=False)
         click.secho(entrypoint, bold=True)
     else:
-        # Should not be None, so that spot controller will submit the empty task
-        # as a job to the spot cluster, and the job queue can be used to detect
-        # the job's completion.
-        entrypoint = ''
+        entrypoint = None
         is_yaml = False
 
     if not yes:
@@ -2085,6 +2082,12 @@ def spot_launch(
     new_resources = old_resources.copy(**override_params)
     task.set_resources({new_resources})
 
+    if task.run is None:
+        click.secho(
+            'Skipped the managed spot task as run section is not specified.',
+            fg='green')
+        return
+
     if new_resources.spot_recovery is None:
         raise click.UsageError(
             'Must specify a spot recovery strategy from '
@@ -2114,6 +2117,8 @@ def spot_launch(
         click.secho(f'Launching managed spot task {name} on spot controller...',
                     fg='yellow')
         backend = backends.CloudVmRayBackend()
+        # TODO(zhwu): Remove the hint messages after launch finished as it is
+        # not related.
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,
