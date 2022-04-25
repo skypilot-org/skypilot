@@ -488,6 +488,8 @@ class Resources:
         version = state.pop('_version', None)
         # Handle old version(s) here.
         if version is None:
+            version = -1
+        if version < 0:
             cloud = state.pop('cloud')
             state['_cloud'] = cloud
 
@@ -503,9 +505,9 @@ class Resources:
             disk_size = state.pop('disk_size')
             state['_disk_size'] = disk_size
 
+        if version < 2:
             self._region = None
-        elif version < 2:
-            self._region = None
-        elif version < 3:
+
+        if version < 3:
             self._spot_recovery = None
         self.__dict__.update(state)
