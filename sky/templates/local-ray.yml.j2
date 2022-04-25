@@ -44,8 +44,6 @@ setup_commands:
   - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
   - pip3 uninstall sky -y &> /dev/null; pip3 install {{sky_remote_path}}/*.whl 
 
-#  && python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
-
 head_setup_commands:
   - (ps aux | grep "-m sky.skylet.skylet" | grep -q python) || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 & # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
 
