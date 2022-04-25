@@ -324,8 +324,8 @@ def test_autostop():
         'autostop',
         [
             f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
-            f'sky autostop {name} -i 0',
-            f'sky status --refresh | grep {name} | grep -q "0 min"',  # Ensure the cluster is STOPPED.
+            f'sky autostop {name} -i 1',
+            f'sky status | grep {name} | grep -q "1 min"',  # Ensure autostop is set.
             'sleep 120',
             f'sky status --refresh | grep {name} | grep -q STOPPED',  # Ensure the cluster is STOPPED.
             f'sky start -y {name}',
@@ -366,7 +366,7 @@ def test_managed_spot():
     test = Test('managed_spot', [
         f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
         f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
-        'sleep 60',
+        'sleep 180',
         f'sky spot status | grep {name}-1 | grep RUNNING',
         f'sky spot status | grep {name}-2 | grep RUNNING',
         f'sky spot cancel -y -n {name}-1',
