@@ -695,9 +695,9 @@ def get_local_custom_resources(ips: List[str], auth_config):
                                 NVIDIA_TESLA_P4,
                                 NVIDIA_TESLA_K80,
                                 'A100',]
-        accelerators_dict = {{}}
+        accelerators_dict = {}
         for acc in all_ray_accelerators:
-            output_str = os.popen(f'lspci | grep \\'{{acc}}\\'').read()
+            output_str = os.popen(f'lspci | grep \\'{acc}\\'').read()
             output_lst = output_str.split('\\n')
             count = 0
             for output in output_lst:
@@ -749,7 +749,7 @@ def launch_local_cluster(yaml_config, custom_resources=None):
     display.start()
 
     head_ip = ip_list[0]
-    head_cmd = ('ray stop; ray start --head --port=6379'
+    head_cmd = ('ray stop; ray start --head --port=6379 '
                 '--object-manager-port=8076 --dashboard-port 8265 '
                 f'--resources={custom_resources!r}')
     rc, _, _ = run_command_on_ip_via_ssh(head_ip,
