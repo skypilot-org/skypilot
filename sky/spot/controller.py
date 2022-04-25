@@ -54,7 +54,9 @@ class SpotController:
             try:
                 backend_utils.check_network_connection()
             except exceptions.NetworkError:
-                logger.info('Network is not available.')
+                logger.info(
+                    'Network is not available. Retry again in '
+                    f'{spot_utils.JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
                 continue
 
             # NOTE: we do not check cluster status first because race condition
