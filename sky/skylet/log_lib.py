@@ -26,7 +26,7 @@ _SKY_LOG_TAILING_GAP_SECONDS = 0.2
 logger = sky_logging.init_logger(__name__)
 
 
-def redirect_process_output(
+def process_subprocess_stream(
     proc,
     log_path: str,
     stream_logs: bool,
@@ -36,9 +36,6 @@ def redirect_process_output(
     line_processor: Optional[log_utils.LineProcessor] = None
 ) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
-    log_path = os.path.expanduser(log_path)
-    dirname = os.path.dirname(log_path)
-    os.makedirs(dirname, exist_ok=True)
 
     if line_processor is None:
         line_processor = log_utils.LineProcessor()
@@ -105,20 +102,34 @@ def run_with_log(
     require_outputs: bool = False,
     shell: bool = False,
     with_ray: bool = False,
-    redirect_stdout_stderr: bool = True,
+    process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
 
+    Args:
+        cmd: The command to run.
+        log_path: The path to the log file.
+        stream_logs: Whether to stream the logs to stdout/stderr.
+        require_outputs: Whether to return the stdout/stderr of the command.
+        process_stream: Whether to post-process the stdout/stderr of the
+          command. If enabled, lines are printed only when '\r' or '\n' is
+          found.
+
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-    assert redirect_stdout_stderr or log_path == '/dev/null'
+    assert process_stream or not require_outputs, (
+        process_stream, require_outputs,
+        'require_outputs should be False when process_stream is False')
+    log_path = os.path.expanduser(log_path)
+    dirname = os.path.dirname(log_path)
+    os.makedirs(dirname, exist_ok=True)
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout = stderr = None
-    if redirect_stdout_stderr:
+    if process_stream:
         stdout = subprocess.PIPE
         stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
     with subprocess.Popen(cmd,
@@ -136,9 +147,11 @@ def run_with_log(
             os.path.dirname(os.path.abspath(job_lib.__file__)),
             'subprocess_daemon.sh')
         daemon_cmd = [
-            '/bin/bash', daemon_script,
+            '/bin/bash',
+            daemon_script,
             str(parent_pid),
-            str(proc.pid)
+            str(proc.pid),
+            str(int(with_ray)),
         ]
         subprocess.Popen(
             daemon_cmd,
@@ -149,10 +162,11 @@ def run_with_log(
         )
         stdout = ''
         stderr = ''
-        if redirect_stdout_stderr:
+        if process_stream:
             # We need this even if the log_path is '/dev/null' to ensure the
             # progress bar is shown.
-            stdout, stderr = redirect_process_output(
+            # NOTE: Lines are printed only when '\r' or '\n' is found.
+            stdout, stderr = process_subprocess_stream(
                 proc,
                 log_path,
                 stream_logs,
@@ -160,7 +174,7 @@ def run_with_log(
                 # Skip these lines caused by `-i` option of bash. Failed to find
                 # other way to turn off these two warning.
                 # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-                # TODO(zongheng,zhwu): ssh -T -i -tt seems to get rid of these.
+                # `ssh -T -i -tt` still cause the problem.
                 skip_lines=[
                     'bash: cannot set terminal process group',
                     'bash: no job control in this shell',
@@ -211,11 +225,11 @@ def run_bash_command_with_log(bash_command: str,
             # Do not use shell=True because it will cause the environment
             # set in this task visible to other tasks. shell=False requires
             # the cmd to be a list.
-            ['/bin/bash', '-i', script_path],
+            f'/bin/bash -i {script_path}',
             log_path,
             stream_logs=stream_logs,
             with_ray=with_ray,
-        )
+            shell=True)
 
 
 def _follow_job_logs(file,

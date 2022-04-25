@@ -22,6 +22,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
+@clouds.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
     """Amazon Web Services."""
 

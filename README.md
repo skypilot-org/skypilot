@@ -25,7 +25,7 @@ pip install -r requirements-dev.txt
 ### Submitting pull requests
 - After you commit, format your code with [`format.sh`](./format.sh).
 - In the PR description, write a `Tested:` section to describe relevant tests performed.
-- For changes that touch the core system, run the [smoke tests](./examples/run_smoke_tests.sh) and ensure they pass.
+- For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
 - Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
 
 ### Some general engineering practice suggestions
