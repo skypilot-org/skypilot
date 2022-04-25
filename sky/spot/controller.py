@@ -6,6 +6,7 @@ import time
 from typing import Optional
 
 import sky
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.spot import spot_status
@@ -50,6 +51,12 @@ class SpotController:
                 spot_status.cancelled(self.job_id)
                 break
 
+            try:
+                backend_utils.check_network_connection()
+            except exceptions.NetworkError:
+                logger.info('Network is not available.')
+                continue
+
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
             # Refer to the design doc's Spot Controller Workflow section
@@ -57,7 +64,12 @@ class SpotController:
             job_status = self._job_status_check()
             assert job_status != job_lib.JobStatus.INIT, (
                 'Job status should not INIT')
-            if job_status is not None and not job_status.is_terminal():
+            if job_status is None:
+                logger.info(
+                    'Job has not been submitted to the cluster yet. Waiting...')
+                continue
+
+            if not job_status.is_terminal():
                 # The job is normally running, continue to monitor the job status.
                 continue
 
@@ -66,7 +78,7 @@ class SpotController:
                 spot_status.succeeded(self.job_id)
                 break
 
-            assert job_status is None or job_status == job_lib.JobStatus.FAILED, (
+            assert job_status == job_lib.JobStatus.FAILED, (
                 f'The job should not be {job_status.value}.')
             if job_status == job_lib.JobStatus.FAILED:
                 # Check the status of the spot cluster. It can be STOPPED or UP,

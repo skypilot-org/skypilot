@@ -2,6 +2,7 @@
 import colorama
 import datetime
 import enum
+import http.client as httplib
 import getpass
 from multiprocessing import pool
 import os
@@ -62,6 +63,11 @@ _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
 WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
+
+# We use fixed IP address to avoid DNS lookup blocking the check, for machine
+# with no internet connection.
+# Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
+_TEST_IP = '1.1.1.1'
 
 
 def fill_template(template_name: str,
@@ -1135,10 +1141,22 @@ def get_head_ip(
     return head_ip
 
 
+def check_network_connection():
+    conn = httplib.HTTPSConnection(_TEST_IP, timeout=1)
+    try:
+        conn.request('HEAD', '/')
+    except OSError as e:
+        raise exceptions.NetworkError(
+            'Could not refresh the cluster. Network is down.') from e
+
+
 def _ping_cluster_or_set_to_stopped(
         record: Dict[str, Any]) -> global_user_state.ClusterStatus:
     handle = record['handle']
     cluster_name = handle.cluster_name
+
+    check_network_connection()
+
     try:
         get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         return record
