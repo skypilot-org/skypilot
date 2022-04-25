@@ -43,6 +43,7 @@ class SpotController:
         self.strategy.launch()
         spot_status.started(self.job_id)
         while True:
+            time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
             user_signal = self._check_signal()
             if user_signal == spot_utils.UserSignal.CANCEL:
                 logger.info(f'User sent {user_signal.value} signal.')
@@ -58,7 +59,6 @@ class SpotController:
                 'Job status should not INIT')
             if job_status is not None and not job_status.is_terminal():
                 # The job is normally running, continue to monitor the job status.
-                time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
                 continue
 
             if job_status == job_lib.JobStatus.SUCCEEDED:

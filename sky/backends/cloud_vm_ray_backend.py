@@ -1757,12 +1757,13 @@ class CloudVmRayBackend(backends.Backend):
                        job_id: Optional[int] = None,
                        stream_logs: bool = True) -> Optional[job_lib.JobStatus]:
         code = job_lib.JobLibCodeGen.get_job_status(job_id)
-        returncode, stdout, stderr = self.run_on_head(handle,
+        # All error messages should have been redirected to stdout.
+        returncode, stdout, _ = self.run_on_head(handle,
                                                       code,
                                                       stream_logs=stream_logs,
                                                       require_outputs=True)
         backend_utils.handle_returncode(returncode, code,
-                                        'Failed to get job status.', stderr)
+                                        'Failed to get job status.', stdout)
         result = stdout.strip()
         if result == 'None':
             return None
@@ -1771,13 +1772,14 @@ class CloudVmRayBackend(backends.Backend):
     def cancel_jobs(self, handle: ResourceHandle, jobs: Optional[List[int]]):
         code = job_lib.JobLibCodeGen.cancel_jobs(jobs)
 
-        returncode, _, stderr = self.run_on_head(handle,
+        # All error messages should have been redirected to stdout.
+        returncode, stdout, _ = self.run_on_head(handle,
                                                  code,
                                                  stream_logs=False,
                                                  require_outputs=True)
         backend_utils.handle_returncode(
             returncode, code,
-            f'Failed to cancel jobs on cluster {handle.cluster_name}.', stderr)
+            f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
     def sync_down_logs(self, handle: ResourceHandle, job_ids: str) -> None:
         code = job_lib.JobLibCodeGen.get_log_path_with_globbing(job_ids)

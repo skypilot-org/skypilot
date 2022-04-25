@@ -612,7 +612,10 @@ def launch(
             click.secho('Task from command: ', fg='yellow', nl=False)
         click.secho(entrypoint, bold=True)
     else:
-        entrypoint = None
+        # Should not be None, so that spot controller will submit the empty task
+        # as a job to the spot cluster, and the job queue can be used to detect
+        # the job's completion.
+        entrypoint = ''
         is_yaml = False
 
     if not yes:
@@ -2172,6 +2175,7 @@ def spot_status():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+# TODO(zhwu): Add --all option.
 def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
     """Cancel managed spot tasks.
 
