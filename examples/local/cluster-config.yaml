@@ -1,0 +1,18 @@
+# Local/On-Premise Cluster Config.
+#
+# Created by the system administrator to launch Ray cluster over on-premise machines.
+# Requirements:
+#   1) Python (> 3.6) on all nodes   
+#   2) Ray CLI (= 1.10.0) on all nodes
+#
+# Example usage:
+#   >> sky launch-local cluster-config.yaml
+
+cluster:
+  ips: [3.142.141.133, 3.144.206.91]
+  name: dev-production 
+
+# Authentication into Local cluster nodes
+auth:
+  ssh_user: ubuntu
+  ssh_private_key: ~/.ssh/ubuntu.pem

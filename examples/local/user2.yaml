@@ -1,0 +1,70 @@
+# Multitenancy Example for Sky On-Prem
+# 
+# Sky will automaticlaly handle and schedule jobs submitted by different users.
+# Sky On-prem operates under the assumption that an admin with sudo access setups
+# Sky services on the local cluster.
+#
+# Multi-tenancy Setup:
+# 1) Admin registers Sky services on the local cluster `dev-production` 
+#    (sky launch local cluster-config.yaml)
+# 2) Admin sends generated cluster config to User 1 (Alice, in examples/local/user1.yaml)
+#    and User 2 (Bob, in examples/local/user2.yaml)
+# 3) Both users use Sky and place cluster config in ~/.sky/local/
+# 4) Alice and Bob both run `sky launch -c [user] [user].yaml`
+
+name: user2-workload
+
+# Accelerators here mean task resource specs, not total cluster resources
+# E.g. Detectron training will take 2 V100 GPUs
+resources:
+  cloud: dev-production
+  accelerators: V100:1
+
+# Authentication into local cluster
+auth:
+  ssh_user: bob
+  ssh_private_key: ~/.ssh/bob.pem
+
+setup: |
+  pip install --upgrade pip
+
+  conda activate d2
+
+  if [ $? -eq 0 ]; then
+    echo "conda env exists"
+  else
+    conda create -n d2 python=3.7 -y
+    conda activate d2
+    pip install torch torchvision
+    git clone https://github.com/facebookresearch/detectron2
+    cd detectron2
+    pip install -e .
+  fi
+
+  cd tools
+  mkdir -p datasets/coco
+  cd datasets/coco
+
+  wget http://images.cocodataset.org/zips/train2017.zip
+  wget http://images.cocodataset.org/zips/val2017.zip
+
+  unzip train2017.zip
+  unzip val2017.zip
+
+  rm train2017.zip
+  rm val2017.zip
+
+  wget http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+  wget http://images.cocodataset.org/annotations/stuff_annotations_trainval2017.zip
+
+  unzip annotations_trainval2017.zip
+  unzip stuff_annotations_trainval2017.zip
+
+  rm annotations_trainval2017.zip
+  rm stuff_annotations_trainval2017.zip
+
+run: |
+  conda activate d2
+  
+  cd detectron2/tools
+  python train_net.py --config-file ../configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_1x.yaml --num-gpus 1 SOLVER.IMS_PER_BATCH 2 SOLVER.BASE_LR 0.0025 SOLVER.MAX_ITER 100

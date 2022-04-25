@@ -1952,9 +1952,23 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
             'storage delete\'.')
 
 
-@cli.command(cls=_DocumentedCodeCommand)
+@cli.group(cls=_NaturalOrderGroup)
+def local():
+    """Local/On-Premise Sky Commands."""
+    pass
+
+
+@local.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 def launch_local(entrypoint: str):
+    """Register Sky on a local cluster.
+
+    Example:
+
+    .. code-block:: bash
+
+        sky local launch examples/local/cluster-config.yaml
+    """
     steps = 1
     entrypoint = ' '.join(entrypoint)
     assert entrypoint

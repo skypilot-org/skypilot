@@ -1,0 +1,54 @@
+# Resnet Training Example of On-Premise Task YAML
+# 
+# To register a local cluster into Sky:
+#   Case 1) Single User Cluster
+#       - Create cluster config file (see examples/local/cluster-config.yaml)
+#       - Run `sky launch-local cluster-config.yaml`.
+#   Case 2) Shared Multitenant Cluster
+#       - Receive cluster config from system admins
+#       - Move cluster config to ~/.sky/local/
+
+name: user1-workload
+workdir: ~/Downloads/tpu
+
+# Accelerators here mean task resource specs, not total cluster resources
+# E.g. Resnet training will take 2 V100 GPUs
+resources:
+  cloud: dev-production
+  accelerators: V100:2
+
+# Authentication into local cluster
+auth:
+  ssh_user: alice
+  ssh_private_key: ~/.ssh/alice.pem
+
+setup: |
+  . $(conda info --base)/etc/profile.d/conda.sh
+  pip install --upgrade pip
+
+  conda activate resnet
+
+  if [ $? -eq 0 ]; then
+    echo "conda env exists"
+  else
+    conda create -n resnet python=3.7 -y
+    conda activate resnet
+    conda install cudatoolkit=11.0 -y
+    pip install tensorflow==2.4.0 pyyaml
+    cd models
+    pip install -e .
+  fi
+
+run: |
+  . $(conda info --base)/etc/profile.d/conda.sh
+  conda activate resnet
+
+  export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
+  export PYTHONPATH="$PYTHONPATH:./models"
+  rm -rf resnet-model-dir-ubuntu
+  python -u models/official/resnet/resnet_main.py --use_tpu=False \
+      --mode=train --train_batch_size=256 --train_steps=1000 \
+      --iterations_per_loop=125 \
+      --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
+      --model_dir=resnet-model-dir-ubuntu \
+      --amp --xla --loss_scale=128
