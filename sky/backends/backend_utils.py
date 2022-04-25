@@ -1142,11 +1142,11 @@ def _ping_cluster_or_set_to_stopped(
     try:
         get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         return record
-    except exceptions.FetchIPError as e:
+    except exceptions.FetchIPError:
         # Set the cluster status to STOPPED, even the head node is still alive,
         # since it will be stopped as soon as the workers are stopped.
         logger.debug('Refreshing status: Failed to get IPs from cluster '
-                    f'{cluster_name!r}, set to STOPPED')
+                     f'{cluster_name!r}, set to STOPPED')
     global_user_state.remove_cluster(cluster_name, terminate=False)
     auth_config = read_yaml(handle.cluster_yaml)['auth']
     SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
