@@ -1759,9 +1759,9 @@ class CloudVmRayBackend(backends.Backend):
         code = job_lib.JobLibCodeGen.get_job_status(job_id)
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
-                                                      code,
-                                                      stream_logs=stream_logs,
-                                                      require_outputs=True)
+                                                 code,
+                                                 stream_logs=stream_logs,
+                                                 require_outputs=True)
         backend_utils.handle_returncode(returncode, code,
                                         'Failed to get job status.', stdout)
         result = stdout.strip()
