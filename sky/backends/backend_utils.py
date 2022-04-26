@@ -677,7 +677,7 @@ def get_local_custom_resources(ips: List[str], auth_config):
         ])
         command = ' '.join(rsync_command)
         rc = log_lib.run_with_log(command,
-                                  stream_logs=True,
+                                  stream_logs=False,
                                   log_path='/dev/null',
                                   shell=True)
         handle_returncode(rc, command,
@@ -1393,6 +1393,11 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
         record = _ping_cluster_or_set_to_stopped(record)
         updated_records.append(record)
     return updated_records
+
+
+def get_local_clusters() -> List[Dict[str, Any]]:
+    records = global_user_state.get_local_clusters()
+    return records
 
 
 def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:

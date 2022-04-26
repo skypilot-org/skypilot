@@ -1,6 +1,7 @@
 """Resources: compute requirements of Tasks."""
 from typing import Dict, Optional, Union
 
+from sky.backends import backend_utils
 from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
@@ -53,6 +54,7 @@ class Resources:
 
         # Check for Local Config
         self.ips = None
+        self.cluster_resources = None
         if cloud is not None and isinstance(self._cloud, clouds.Local):
             self.ips = clouds.get_local_ips(self._cloud.__repr__())
             assert instance_type is None and not use_spot and self.ips, \
@@ -84,6 +86,8 @@ class Resources:
         self._try_validate_accelerators()
 
     def __repr__(self) -> str:
+        if isinstance(self.cloud, clouds.Local):
+            return f'(Local) {self.cloud}'
         accelerators = ''
         accelerator_args = ''
         if self.accelerators is not None:
@@ -288,6 +292,12 @@ class Resources:
                 self.accelerators)
         return hourly_cost * hours
 
+    def set_local_cluster_resources(self, auth_config):
+        assert isinstance(self.cloud, clouds.Local), 'Must be local cloud.'
+        custom_resources = backend_utils.get_local_custom_resources(
+            self.ips, auth_config)
+        self.cluster_resources = custom_resources
+
     def is_same_resources(self, other: 'Resources') -> bool:
         """Returns whether two resources are the same.
 
@@ -416,6 +426,9 @@ class Resources:
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
         )
+        if isinstance(self.cloud, clouds.Local):
+            resources.cluster_resources = self.cluster_resources
+            return resources
         assert len(override) == 0
         return resources
 

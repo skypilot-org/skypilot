@@ -2012,6 +2012,59 @@ def launch_local(entrypoint: str):
     click.secho(f'Saved in {censored_yaml_path} \n', fg='yellow', nl=False)
 
 
+@local.command('status', cls=_DocumentedCodeCommand)
+def status_local():
+    """List all local clusters and users.
+    """
+    clusters_status = backend_utils.get_local_clusters()
+    columns = [
+        'NAME',
+        'LAUNCHED',
+        'CLUSTER',
+        'CLUSTER_USER',
+        'CLUSTER_RESOURCES',
+        'COMMAND',
+    ]
+
+    cluster_table = log_utils.create_table(columns)
+
+    for cluster_status in clusters_status:
+        launched_at = cluster_status['launched_at']
+        handle = cluster_status['handle']
+        resources = handle.launched_resources
+        config_path = handle.cluster_yaml
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            username = config['auth']['ssh_user']
+
+        if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+            if (handle.launched_nodes is not None and
+                    handle.launched_resources is not None):
+                resources_str = (f'{handle.launched_nodes}x '
+                                 f'{resources.cluster_resources}')
+        else:
+            raise ValueError(f'Unknown handle type {type(handle)} encountered.')
+        row = [
+            # NAME
+            cluster_status['name'],
+            # LAUNCHED
+            log_utils.readable_time_duration(launched_at),
+            # CLUSTER
+            str(resources.cloud),
+            # CLUSTER USER
+            username,
+            # CLUSTER RESOURCES
+            resources_str,
+            # COMMAND
+            cluster_status['last_use'],
+        ]
+        cluster_table.add_row(row)
+    if clusters_status:
+        click.echo(cluster_table)
+    else:
+        click.echo('No existing clusters.')
+
+
 def main():
     return cli()
 

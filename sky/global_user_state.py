@@ -249,15 +249,36 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for name, launched_at, handle, last_use, status, autostop in rows:
         # TODO: use namedtuple instead of dict
+        handle = pickle.loads(handle)
+        if isinstance(handle.launched_resources.cloud, clouds.Local):
+            continue
         record = {
             'name': name,
             'launched_at': launched_at,
-            'handle': pickle.loads(handle),
+            'handle': handle,
             'last_use': last_use,
             'status': ClusterStatus[status],
             'autostop': autostop,
         }
         records.append(record)
+    return records
+
+
+def get_local_clusters() -> List[Dict[str, Any]]:
+    rows = _DB.cursor.execute('select * from clusters')
+    records = []
+    for name, launched_at, handle, last_use, status, autostop in rows:
+        handle = pickle.loads(handle)
+        if isinstance(handle.launched_resources.cloud, clouds.Local):
+            record = {
+                'name': name,
+                'launched_at': launched_at,
+                'handle': handle,
+                'last_use': last_use,
+                'status': ClusterStatus[status],
+                'autostop': autostop,
+            }
+            records.append(record)
     return records
 
 

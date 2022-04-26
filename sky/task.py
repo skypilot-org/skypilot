@@ -361,6 +361,13 @@ class Task:
         """
         if isinstance(resources, sky.Resources):
             resources = {resources}
+
+        # Automatically fill out custom resources
+        for resource in resources:
+            if isinstance(resource.cloud,
+                          clouds.Local) and not resource.cluster_resources:
+                resource.set_local_cluster_resources(self.auth_config)
+
         self.resources = resources
         return self
 

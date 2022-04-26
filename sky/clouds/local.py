@@ -40,7 +40,7 @@ def get_local_ips(cloud: str):
 
 
 class Local(clouds.Cloud):
-    """Amazon Web Services."""
+    """Local/On-premise."""
 
     _REPR = 'Local'
     _regions: List[clouds.Region] = [clouds.Region('Local')]
