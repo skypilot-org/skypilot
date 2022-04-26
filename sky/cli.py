@@ -2091,7 +2091,7 @@ def spot_launch(
     if new_resources.spot_recovery is None:
         raise click.UsageError(
             'Must specify a spot recovery strategy from '
-            f'{spot_lib.SPOT_STRATEGIES} for a managed spot task.')
+            f'{list(spot_lib.SPOT_STRATEGIES.keys())} for a managed spot task.')
 
     if num_nodes is not None:
         task.num_nodes = num_nodes

@@ -191,18 +191,18 @@ class Task:
 
         # TODO: perform more checks on yaml and raise meaningful errors.
         task = Task(
-            config.get('name'),
-            run=config.get('run'),
-            workdir=config.get('workdir'),
-            setup=config.get('setup'),
-            num_nodes=config.get('num_nodes'),
+            config.pop('name', None),
+            run=config.pop('run', None),
+            workdir=config.pop('workdir', None),
+            setup=config.pop('setup', None),
+            num_nodes=config.pop('num_nodes', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
         # These are retained in dicts in the YAML schema and later parsed to
         # storage objects with the storage/storage_mount objects.
         fm_storages = []
-        file_mounts = config.get('file_mounts')
+        file_mounts = config.pop('file_mounts', None)
         if file_mounts is not None:
             copy_mounts = dict()
             for dst_path, src in file_mounts.items():
@@ -229,7 +229,7 @@ class Task:
         task.set_storage_mounts(task_storage_mounts)
 
         if config.get('inputs') is not None:
-            inputs_dict = config['inputs']
+            inputs_dict = config.pop('inputs')
             inputs = list(inputs_dict.keys())[0]
             estimated_size_gigabytes = list(inputs_dict.values())[0]
             # TODO: allow option to say (or detect) no download/egress cost.
@@ -237,19 +237,21 @@ class Task:
                             estimated_size_gigabytes=estimated_size_gigabytes)
 
         if config.get('outputs') is not None:
-            outputs_dict = config['outputs']
+            outputs_dict = config.pop('outputs')
             outputs = list(outputs_dict.keys())[0]
             estimated_size_gigabytes = list(outputs_dict.values())[0]
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
-        resources = config.get('resources')
+        resources = config.pop('resources', None)
         resources = sky.Resources.from_yaml_config(resources)
         if resources.accelerators is not None:
             acc, _ = list(resources.accelerators.items())[0]
             if acc.startswith('tpu-') and task.num_nodes > 1:
                 raise ValueError('Multi-node TPU cluster not supported. '
                                  f'Got num_nodes={task.num_nodes}')
+        if len(config) > 0:
+            raise ValueError(f'Unknown fields in in YAML: {config}')
         task.set_resources({resources})
         return task
 
