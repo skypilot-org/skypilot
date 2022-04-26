@@ -9,6 +9,7 @@ import os
 import pathlib
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import tempfile
@@ -737,9 +738,13 @@ def get_local_custom_resources(ips: List[str], auth_config):
 def launch_local_cluster(yaml_config, custom_resources=None):
 
     local_cluster_config = yaml_config['cluster']
+    if local_cluster_config['name'] in ['aws', 'gcp', 'azure']:
+        raise ValueError('Local Cluster Name cannot be an existing cloud.')
     ip_list = local_cluster_config['ips']
     if not isinstance(ip_list, list):
         ip_list = [ip_list]
+    ip_list = [socket.gethostbyname(ip) for ip in ip_list]
+    yaml_config['cluster']['ips'] = ip_list
     auth_config = yaml_config['auth']
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']

@@ -1273,12 +1273,24 @@ class CloudVmRayBackend(backends.Backend):
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, handle.launched_resources, handle.launched_nodes,
                 True)
-        logger.info(
-            f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
-            f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
-            'Tip: to reuse an existing cluster, '
-            'specify --cluster (-c). '
-            'Run `sky status` to see existing clusters.')
+        cloud = to_provision.cloud
+        ssh_user = task.auth_config['ssh_user']
+        if isinstance(to_provision.cloud, clouds.Local):
+            logger.info(
+                f'{colorama.Fore.CYAN}Creating a new local context: '
+                f'"{cluster_name}" [Local Cluster: {cloud}, '
+                f'Username: {ssh_user}].{colorama.Style.RESET_ALL}\n'
+                'Tip: to reuse an existing context, '
+                'specify -c. '
+                'Run `sky local status` to see existing local contexts.')
+        else:
+            logger.info(
+                f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
+                f'[{task.num_nodes}x {to_provision}].'
+                f'{colorama.Style.RESET_ALL}\n'
+                'Tip: to reuse an existing cluster, '
+                'specify --cluster (-c). '
+                'Run `sky status` to see existing clusters.')
         return RetryingVmProvisioner.ToProvisionConfig(cluster_name,
                                                        to_provision,
                                                        task.num_nodes)
