@@ -66,12 +66,8 @@ class SpotController:
             job_status = self._job_status_check()
             assert job_status != job_lib.JobStatus.INIT, (
                 'Job status should not INIT')
-            if job_status is None:
-                logger.info(
-                    'Job has not been submitted to the cluster yet. Waiting...')
-                continue
 
-            if not job_status.is_terminal():
+            if job_status is not None and not job_status.is_terminal():
                 # The job is normally running, continue to monitor the job status.
                 continue
 
@@ -80,7 +76,7 @@ class SpotController:
                 spot_status.succeeded(self.job_id)
                 break
 
-            assert job_status == job_lib.JobStatus.FAILED, (
+            assert job_status is None or job_status == job_lib.JobStatus.FAILED, (
                 f'The job should not be {job_status.value}.')
             if job_status == job_lib.JobStatus.FAILED:
                 # Check the status of the spot cluster. It can be STOPPED or UP,
