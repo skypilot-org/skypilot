@@ -1,0 +1,42 @@
+name: resnet-app-storage
+
+resources:
+  cloud: aws
+  accelerators: V100
+  use_spot: true
+  spot_recovery: FAILOVER
+
+file_mounts:
+  /tmp/imagenet:
+    name: imagenet-bucket
+    mode: MOUNT
+
+setup: |
+  git clone https://github.com/concretevitamin/tpu || true
+  cd tpu
+  git checkout 9459fee
+
+  pip install --upgrade pip
+  conda activate resnet
+  if [ $? -eq 0 ]; then
+    echo "conda env exists"
+  else
+    conda create -n resnet python=3.7 -y
+    conda activate resnet
+    conda install cudatoolkit=11.0 -y
+    pip install tensorflow==2.4.0 pyyaml
+    cd models
+    pip install -e .
+  fi
+
+run: |
+  cd tpu
+  conda activate resnet
+
+  export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
+  python -u models/official/resnet/resnet_main.py --use_tpu=False \
+      --mode=train --train_batch_size=256 --train_steps=250000 \
+      --iterations_per_loop=125 \
+      --data_dir=/tmp/imagenet \
+      --model_dir=resnet-model-dir \
+      --amp --xla --loss_scale=128

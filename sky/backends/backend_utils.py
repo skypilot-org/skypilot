@@ -1150,7 +1150,7 @@ def check_network_connection():
             'Could not refresh the cluster. Network is down.') from e
 
 
-def _ping_cluster_or_set_to_stopped(
+def _ping_cluster_to_set_status(
         record: Dict[str, Any]) -> global_user_state.ClusterStatus:
     handle = record['handle']
     cluster_name = handle.cluster_name
@@ -1159,6 +1159,8 @@ def _ping_cluster_or_set_to_stopped(
 
     try:
         get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        # If we get node ips correctly, the cluster is UP.
+        record['status'] = global_user_state.ClusterStatus.UP
         return record
     except exceptions.FetchIPError:
         # Set the cluster status to STOPPED, even the head node is still alive,
@@ -1181,10 +1183,13 @@ def get_cluster_status_with_refresh(
 
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-        if force_refresh or record['autostop'] >= 0:
-            # Refresh the status only when force_refresh is True or the cluster
-            # has autostopped turned on.
-            record = _ping_cluster_or_set_to_stopped(record)
+        # Should not refresh the cluster is INIT, since it may be launching
+        # and be set falsely to STOPPED.
+        if record['status'] != global_user_state.ClusterStatus.INIT:
+            if force_refresh or record['autostop'] >= 0:
+                # Refresh the status only when force_refresh is True or the cluster
+                # has autostopped turned on.
+                record = _ping_cluster_to_set_status(record)
     return record['status']
 
 
@@ -1195,7 +1200,7 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
     updated_records = []
     for record in rich_progress.track(records,
                                       description='Refreshing cluster status'):
-        record = _ping_cluster_or_set_to_stopped(record)
+        record = _ping_cluster_to_set_status(record)
         updated_records.append(record)
     return updated_records
 
