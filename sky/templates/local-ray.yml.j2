@@ -19,8 +19,6 @@ auth:
   ssh_user: {{ssh_user}}
   ssh_private_key: {{ssh_private_key}}
 
-head_node_type: ray.head.default
-
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
   "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
@@ -37,7 +35,7 @@ rsync_exclude: [
 ]
 
 # List of shell commands to run to set up nodes.
-# TODO check if need patch
+# (Bug) This will run only on head...
 setup_commands:
   - (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
