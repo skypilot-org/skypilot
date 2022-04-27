@@ -355,6 +355,7 @@ def test_cancel():
     )
     run_one_test(test)
 
+
 # ---------- Testing `sky cancel` ----------
 def test_cancel_pytorch():
     name = _get_cluster_name()
@@ -373,6 +374,7 @@ def test_cancel_pytorch():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
 
 @pytest.mark.slow
 def test_azure_start_stop_two_nodes():
