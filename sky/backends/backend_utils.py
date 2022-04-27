@@ -527,7 +527,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
         zones = region.zones
     else:
         assert isinstance(
-            cloud, clouds.Azure
+            cloud, (clouds.Azure, clouds.Local)
         ) or zones is not None, 'Set either both or neither for: region, zones.'
     region = region.name
     if isinstance(cloud, clouds.AWS):
