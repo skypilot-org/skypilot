@@ -1060,12 +1060,6 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def generate_spot_cluster_name():
-    # TODO: change this ID formatting to something more pleasant.
-    # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-    return f'sky-spot-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
-
-
 def generate_tpu_name(cluster_name):
     return f'{cluster_name}-sky-{uuid.uuid4().hex[:4]}'
 
@@ -1150,8 +1144,11 @@ def check_network_connection():
             'Could not refresh the cluster. Network is down.') from e
 
 
-def _ping_cluster_to_set_status(
+def _ping_cluster_and_set_status(
         record: Dict[str, Any]) -> global_user_state.ClusterStatus:
+    assert record['status'] != global_user_state.ClusterStatus.INIT, (
+        'Should not change the status for INIT clusters with this function, as the cluster maybe partially UP.'
+    )
     handle = record['handle']
     cluster_name = handle.cluster_name
 
@@ -1159,14 +1156,19 @@ def _ping_cluster_to_set_status(
 
     try:
         get_node_ips(handle.cluster_yaml, handle.launched_nodes)
-        # If we get node ips correctly, the cluster is UP.
+        # If we get node ips correctly, the cluster is UP. It is safe to
+        # set the status to UP, as the `get_node_ips` function uses ray
+        # to fetch IPs and starting ray is the final step of sky launch.
         record['status'] = global_user_state.ClusterStatus.UP
         return record
     except exceptions.FetchIPError:
-        # Set the cluster status to STOPPED, even the head node is still alive,
-        # since it will be stopped as soon as the workers are stopped.
         logger.debug('Refreshing status: Failed to get IPs from cluster '
                      f'{cluster_name!r}, set to STOPPED')
+    # Set the cluster status to STOPPED. It is safe to do so, even if the
+    # cluster is still partially UP:
+    # 1. Autostop case: the whole cluster will be properly stopped soon.
+    # 2. Managed spot case: We will soon relaunch the cluster by the strategy
+    #    on the same region or terminate the cluster.
     global_user_state.remove_cluster(cluster_name, terminate=False)
     auth_config = read_yaml(handle.cluster_yaml)['auth']
     SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
@@ -1183,13 +1185,13 @@ def get_cluster_status_with_refresh(
 
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-        # Should not refresh the cluster is INIT, since it may be launching
-        # and be set falsely to STOPPED.
+        # Should not refresh the cluster if INIT, since it may be launching
+        # and would be set falsely to STOPPED.
         if record['status'] != global_user_state.ClusterStatus.INIT:
             if force_refresh or record['autostop'] >= 0:
                 # Refresh the status only when force_refresh is True or the cluster
                 # has autostopped turned on.
-                record = _ping_cluster_to_set_status(record)
+                record = _ping_cluster_and_set_status(record)
     return record['status']
 
 
@@ -1200,7 +1202,7 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
     updated_records = []
     for record in rich_progress.track(records,
                                       description='Refreshing cluster status'):
-        record = _ping_cluster_to_set_status(record)
+        record = _ping_cluster_and_set_status(record)
         updated_records.append(record)
     return updated_records
 
@@ -1305,6 +1307,6 @@ def disallow_sky_reserved_cluster_name(cluster_name: Optional[str],
                                        operation_str: str):
     if cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
         raise ValueError(
-            f'Cluster {cluster_name!r} is reserved for the Spot controller.\n'
+            f'Cluster {cluster_name!r} is reserved for the spot controller.\n'
             f'{colorama.Fore.RED}{operation_str} is not allowed.'
             f'{colorama.Style.RESET_ALL}')
