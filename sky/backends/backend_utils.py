@@ -31,6 +31,7 @@ from sky import clouds
 from sky import global_user_state
 from sky import exceptions
 from sky import sky_logging
+from sky import spot as spot_lib
 from sky.skylet import log_lib
 
 if typing.TYPE_CHECKING:
@@ -1299,3 +1300,12 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
     if re.fullmatch(valid_regex, cluster_name) is None:
         raise ValueError(f'Cluster name "{cluster_name}" is invalid; '
                          f'ensure it is fully matched by regex: {valid_regex}')
+
+
+def disallow_sky_reserved_cluster_name(cluster_name: Optional[str],
+                                       operation_str: str):
+    if cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
+        raise ValueError(
+            f'Cluster {cluster_name!r} is reserved for the Spot controller.\n'
+            f'{colorama.Fore.RED}{operation_str} is not allowed.'
+            f'{colorama.Style.RESET_ALL}')

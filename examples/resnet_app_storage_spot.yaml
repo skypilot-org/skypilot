@@ -8,6 +8,9 @@ resources:
 
 file_mounts:
   /tmp/imagenet:
+    # A public s3 bucket for the imagenet data in tfrecord format created by sky team.
+    # The bucket is available at https://s3.console.aws.amazon.com/s3/buckets/imagenet-bucket?region=us-east-2&tab=objects.
+    # This bucket is for demonstration purposes only.
     name: imagenet-bucket
     mode: MOUNT
 

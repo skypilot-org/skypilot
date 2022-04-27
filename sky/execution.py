@@ -22,6 +22,7 @@ from sky import backends
 from sky import global_user_state
 from sky import sky_logging
 from sky import optimizer
+from sky.backends import backend_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -31,14 +32,14 @@ OptimizeTarget = optimizer.OptimizeTarget
 class Stage(enum.Enum):
     """Stages for a run of a sky.Task."""
     # TODO: rename actual methods to be consistent.
-    OPTIMIZE = 0
-    PROVISION = 1
-    SYNC_WORKDIR = 2
-    SYNC_FILE_MOUNTS = 3
-    SETUP = 4
-    AUTOSTOP = 4.5
-    EXEC = 5
-    TEARDOWN = 6
+    OPTIMIZE = enum.auto()
+    PROVISION = enum.auto()
+    SYNC_WORKDIR = enum.auto()
+    SYNC_FILE_MOUNTS = enum.auto()
+    SETUP = enum.auto()
+    PRE_EXEC = enum.auto()
+    EXEC = enum.auto()
+    TEARDOWN = enum.auto()
 
 
 def _execute(dag: sky.Dag,
@@ -93,7 +94,7 @@ def _execute(dag: sky.Dag,
             backends.CloudVmRayBackend) and autostop_idle_minutes is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
         raise ValueError(
-            f'backend {backend.NAME} does not support autostop, please try '
+            f'Backend {backend.NAME} does not support autostop, please try '
             f'{backends.CloudVmRayBackend.NAME}')
 
     if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
@@ -140,7 +141,7 @@ def _execute(dag: sky.Dag,
         if stages is None or Stage.SETUP in stages:
             backend.setup(handle, task)
 
-        if stages is None or Stage.AUTOSTOP in stages:
+        if stages is None or Stage.PRE_EXEC in stages:
             if autostop_idle_minutes is not None:
                 backend.set_autostop(handle, autostop_idle_minutes)
 
@@ -180,7 +181,11 @@ def launch(dag: sky.Dag,
            optimize_target: OptimizeTarget = OptimizeTarget.COST,
            cluster_name: Optional[str] = None,
            detach_run: bool = False,
-           autostop_idle_minutes: Optional[int] = None) -> None:
+           autostop_idle_minutes: Optional[int] = None,
+           skip_reserved_cluster_check: bool = False) -> None:
+    if not skip_reserved_cluster_check:
+        backend_utils.disallow_sky_reserved_cluster_name(
+            cluster_name, 'sky.launch')
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,
@@ -203,6 +208,8 @@ def exec(  # pylint: disable=redefined-builtin
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
 ) -> None:
+    backend_utils.disallow_sky_reserved_cluster_name(cluster_name, 'sky.exec')
+
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         logger.error(f'Cluster {cluster_name!r} not found.  '

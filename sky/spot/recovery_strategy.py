@@ -101,9 +101,6 @@ class Strategy:
 class FailoverStrategy(Strategy, name='FAILOVER'):
     """Failover strategy: wait in same region and failover after timout."""
 
-    _MAX_RETRY_CNT = 3
-    _RETRY_GAP_SECONDS = 10
-
     def recover(self):
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.

@@ -115,19 +115,21 @@ def set_status(job_id: int, status: JobStatus) -> None:
     _CONN.commit()
 
 
-def get_status(job_id: int) -> JobStatus:
+def get_status(job_id: int) -> Optional[JobStatus]:
     rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (status,) in rows:
-        assert status is not None
+        if status is None:
+            return None
         return JobStatus[status]
 
 
-def get_last_status() -> JobStatus:
+def get_latest_job_status() -> Optional[JobStatus]:
     rows = _CURSOR.execute(
         'SELECT status FROM jobs ORDER BY job_id DESC LIMIT 1')
     for (status,) in rows:
-        assert status is not None
+        if status is None:
+            return None
         return JobStatus[status]
 
 
@@ -451,7 +453,7 @@ class JobLibCodeGen:
     def get_job_status(cls, job_id: Optional[str] = None) -> str:
         # Prints "Job <id> <status>" for UX; caller should parse the last token.
         if job_id is None:
-            code = ['job_status = job_lib.get_last_status()']
+            code = ['job_status = job_lib.get_latest_job_status()']
         else:
             code = [f'job_status = job_lib.get_status({job_id})']
         code += [

@@ -49,7 +49,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        spot_recovery: Optional[bool] = None,
+        spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
     ):
@@ -285,11 +285,12 @@ class Resources:
         if self._spot_recovery is None:
             return
         if not self._use_spot:
-            raise ValueError('Cannot specify spot_recovery without use_spot.')
+            raise ValueError(
+                'Cannot specify spot_recovery without use_spot set to True.')
         if self._spot_recovery not in spot.SPOT_STRATEGIES:
             raise ValueError(f'Spot recovery strategy {self._spot_recovery} '
                              'is not supported. The strategy should be among '
-                             f'{spot.SPOT_STRATEGIES}')
+                             f'{list(spot.SPOT_STRATEGIES.keys())}')
 
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
@@ -471,11 +472,8 @@ class Resources:
 
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
-        add_if_not_none('spot_recovery', self.spot_recovery)
-        disk_size = self.disk_size
-        if disk_size == _DEFAULT_DISK_SIZE_GB:
-            disk_size = None
-        add_if_not_none('disk_size', disk_size)
+        config['spot_recovery'] = self.spot_recovery
+        config['disk_size'] = self.disk_size
         add_if_not_none('region', self.region)
         return config
 

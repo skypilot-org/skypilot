@@ -494,15 +494,6 @@ def _check_yaml(entrypoint: str) -> bool:
     return is_yaml
 
 
-def _disallow_sky_reserved_cluster_name(cluster_name: Optional[str],
-                                        operation_str: str):
-    if cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
-        raise click.BadParameter(
-            f'Cluster {cluster_name!r} is reserved for the Spot controller.\n'
-            f'{colorama.Fore.RED}{operation_str} is not allowed.'
-            f'{colorama.Style.RESET_ALL}')
-
-
 class _NaturalOrderGroup(click.Group):
     """Lists commands in the order they are defined in this script.
 
@@ -557,15 +548,16 @@ def cli():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--autostop-idle-minutes',
-              '-i',
-              default=None,
-              type=int,
-              required=False,
-              help=('Automatically stop the cluster after this many minutes '
-                    'of idleness after setup/file_mounts. This equivalent to '
-                    'run `sky autostop -i minutes` after `sky launch -d`.'
-                    'If not set, the cluster will never be stopped.'))
+@click.option(
+    '--autostop-idle-minutes',
+    '-i',
+    default=None,
+    type=int,
+    required=False,
+    help=('Automatically stop the cluster after this many minutes '
+          'of idleness after setup/file_mounts. This is equivalent to '
+          'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
+          'If not set, the cluster will not be auto-stopped.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -597,7 +589,8 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
-    _disallow_sky_reserved_cluster_name(cluster, 'Launching task on it')
+    backend_utils.disallow_sky_reserved_cluster_name(cluster,
+                                                     'Launching task on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
@@ -768,7 +761,8 @@ def exec(
         sky exec mycluster python train_cpu.py
         sky exec mycluster --gpus=V100:1 python train_gpu.py
     """
-    _disallow_sky_reserved_cluster_name(cluster, 'Executing task on it')
+    backend_utils.disallow_sky_reserved_cluster_name(cluster,
+                                                     'Executing task on it')
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
@@ -1424,7 +1418,8 @@ def _terminate_or_stop_clusters(
         names = _get_glob_clusters(names)
         for name in names:
             try:
-                _disallow_sky_reserved_cluster_name(name, f'{teardown_verb} it')
+                backend_utils.disallow_sky_reserved_cluster_name(
+                    name, f'{teardown_verb} it')
             except click.BadParameter as e:
                 click.echo(str(e))
                 continue
@@ -1976,10 +1971,7 @@ def spot():
 
 @spot.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
-# @click.option('--dryrun',
-#               default=False,
-#               is_flag=True,
-#               help='If True, do not actually run the job.')
+# TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS)
 @click.option('--spot-recovery',
               default=None,
@@ -2017,7 +2009,6 @@ def spot_launch(
     yes: bool,
 ):
     """Launch a managed spot task."""
-    click.echo('spot launch')
     entrypoint = ' '.join(entrypoint)
     if entrypoint:
         is_yaml = _check_yaml(entrypoint)
@@ -2080,6 +2071,10 @@ def spot_launch(
     assert len(task.resources) == 1
     old_resources = list(task.resources)[0]
     new_resources = old_resources.copy(**override_params)
+    if new_resources.spot_recovery is None:
+        logger.info(
+            'No spot recovery strategy specified. Defaulting to FAILOVER.')
+        new_resources = new_resources.copy(spot_recovery='FAILOVER')
     task.set_resources({new_resources})
 
     if task.run is None:
@@ -2087,11 +2082,6 @@ def spot_launch(
             'Skipped the managed spot task as run section is not specified.',
             fg='green')
         return
-
-    if new_resources.spot_recovery is None:
-        raise click.UsageError(
-            'Must specify a spot recovery strategy from '
-            f'{list(spot_lib.SPOT_STRATEGIES.keys())} for a managed spot task.')
 
     if num_nodes is not None:
         task.num_nodes = num_nodes
@@ -2125,7 +2115,8 @@ def spot_launch(
                    detach_run=detach_run,
                    backend=backend,
                    autostop_idle_minutes=spot_lib.
-                   SPOT_CONTROLLER_AUTOSTOP_IDLE_MINUTES)
+                   SPOT_CONTROLLER_AUTOSTOP_IDLE_MINUTES,
+                   skip_reserved_cluster_check=True)
 
 
 def _is_spot_controller_up(stopped_message: str) -> bool:
@@ -2135,8 +2126,13 @@ def _is_spot_controller_up(stopped_message: str) -> bool:
         click.echo('No managed spot job has been runned.')
         return False
     if controller_status != global_user_state.ClusterStatus.UP:
-        click.echo(f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
-                   f'is {controller_status.value}.\n' + stopped_message)
+        msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
+               f'is {controller_status.value}.')
+        if controller_status == global_user_state.ClusterStatus.STOPPED:
+            msg += f'\n{stopped_message}'
+        if controller_status == global_user_state.ClusterStatus.INIT:
+            msg += '\nPlease wait for the controller to be ready.'
+        click.echo(msg)
         return False
     return True
 
@@ -2145,6 +2141,8 @@ def _is_spot_controller_up(stopped_message: str) -> bool:
 def spot_status():
     """Check status of managed spot tasks."""
     click.secho('Fetching and parsing managed spot job status...', fg='yellow')
+    # TODO(zhwu): Enable status check when spot controller is in INIT state and
+    # actually UP.
     if not _is_spot_controller_up('Please start it first with: '
                                   f'sky start {spot_lib.SPOT_CONTROLLER_NAME}'):
         return

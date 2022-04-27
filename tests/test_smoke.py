@@ -4,7 +4,6 @@ import pathlib
 import subprocess
 import sys
 import tempfile
-import textwrap
 import time
 from typing import List, Optional, Tuple, NamedTuple
 import uuid
@@ -14,6 +13,7 @@ import pytest
 
 import sky
 from sky import global_user_state
+from sky import resources
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 
@@ -505,14 +505,17 @@ class TestYamlSpecs:
         'examples/multi_hostname.yaml', 'examples/storage_demo.yaml'
     ]
 
-    def _check_dict_same(self, d1, d2):
-        """Check if two dicts are same."""
+    def _is_dict_subset(self, d1, d2):
+        """Check if d1 is the subset of d2."""
         for k, v in d1.items():
             if k not in d2:
-                assert len(v) == 0, (k, v)
-            if isinstance(v, dict):
+                if isinstance(v, list) or isinstance(v, dict):
+                    assert len(v) == 0, (k, v)
+                else:
+                    assert False, (k, v)
+            elif isinstance(v, dict):
                 assert isinstance(d2[k], dict), (k, v, d2)
-                self._check_dict_same(v, d2[k])
+                self._is_dict_subset(v, d2[k])
             elif isinstance(v, str):
                 assert v.lower() == d2[k].lower(), (k, v, d2[k])
             else:
@@ -524,7 +527,8 @@ class TestYamlSpecs:
 
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()
-        self._check_dict_same(origin_task_config, new_task_config)
+        # d1 <= d2
+        self._is_dict_subset(origin_task_config, new_task_config)
 
     def test_load_dump_yaml_config_equivalent(self):
         """Test if the yaml config is equivalent after load and dump again."""
