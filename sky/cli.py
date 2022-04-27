@@ -1101,7 +1101,7 @@ def _terminate_or_stop_benchmark(benchmark, except_clusters, terminate, yes):
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
 
-    clusters = benchmark_state.get_clusters_from_benchmark(benchmark)
+    clusters = global_user_state.get_clusters_from_benchmark(benchmark)
     running = [
         cluster['name'] for cluster in clusters
         if cluster['status'] == global_user_state.ClusterStatus.UP
