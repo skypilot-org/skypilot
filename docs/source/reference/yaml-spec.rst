@@ -1,5 +1,5 @@
 .. _yaml-spec:
-YAML Configuration
+Task YAML Configuration
 ==================
 
 Sky provides the ability to specify a task, its resource requirements, and take
