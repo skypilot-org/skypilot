@@ -1107,7 +1107,7 @@ def _terminate_or_stop_benchmark(benchmark, except_clusters, terminate, yes):
         if cluster['status'] == global_user_state.ClusterStatus.UP
     ]
 
-    logger_name = ['logger']
+    logger_name = record['logger']
     benchmark_utils.download_logs(benchmark, logger_name, running)
 
     to_stop = [cluster['name'] for cluster in clusters
