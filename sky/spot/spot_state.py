@@ -65,7 +65,7 @@ class SpotStatus(enum.Enum):
 
 
 # === Status transition functions ===
-def submit(job_id: int, name: str, run_timestamp: str, resources_str: str):
+def init(job_id: int, name: str, run_timestamp: str, resources_str: str):
     """Insert a new spot job, returns the success."""
     _CURSOR.execute(
         """\

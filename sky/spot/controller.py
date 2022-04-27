@@ -31,7 +31,7 @@ class SpotController:
         # TODO(zhwu): this assumes the specific backend.
         self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
-        spot_state.submit(self._job_id,
+        spot_state.init(self._job_id,
                           self._task_name,
                           self.backend.run_timestamp,
                           resources_str=backend_utils.get_task_resources_str(
