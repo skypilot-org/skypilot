@@ -2060,7 +2060,7 @@ def local_status():
 
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Listing all local '
                f'clusters:{colorama.Style.RESET_ALL}')
-    if clusters_status:
+    if clusters_status or all_local_clusters:
         click.echo(cluster_table)
     else:
         click.echo('No existing clusters.')
