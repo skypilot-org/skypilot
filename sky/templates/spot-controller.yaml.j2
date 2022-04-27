@@ -12,6 +12,7 @@ file_mounts:
 
 run: |
   python -u -m sky.spot.controller \
-    ~/.sky/sky_spot_tasks/{{spot_task_name}}.yaml
+    ~/.sky/sky_spot_tasks/{{spot_task_name}}.yaml \
+    --job-id $SKY_JOB_ID
 
 

@@ -22,13 +22,15 @@ logger = sky_logging.init_logger(__name__)
 class SpotController:
     """Each spot controller manages the life cycle of one spot cluster (job)."""
 
-    def __init__(self, task_yaml: str) -> None:
+    def __init__(self, job_id: int, task_yaml: str) -> None:
+        self.job_id = job_id
         self.task_name = pathlib.Path(task_yaml).stem
         self.task = sky.Task.from_yaml(task_yaml)
         # TODO(zhwu): this assumes the specific backend.
         self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
-        self.job_id = spot_status.submit(
+        spot_status.submit(
+            self.job_id,
             self.task_name,
             self.backend.run_timestamp,
             resources_str=backend_utils.get_task_resources_str(self.task))
@@ -139,10 +141,11 @@ class SpotController:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--job-id', required=True, type=int, help='Job id for the controller job.')
     parser.add_argument('task_yaml',
                         type=str,
                         help='The path to the user spot task yaml file. '
                         'The file name is the spot task name.')
     args = parser.parse_args()
-    controller = SpotController(args.task_yaml)
+    controller = SpotController(args.job_id, args.task_yaml)
     controller.start()

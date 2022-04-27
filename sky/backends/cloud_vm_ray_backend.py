@@ -313,7 +313,8 @@ class RayCodeGen:
 
         if script is not None:
             node_export_sky_env_vars = (export_sky_env_vars +
-                                        'export SKY_NODE_RANK={gang_scheduling_id}\\n')
+                                        'export SKY_NODE_RANK={gang_scheduling_id}\\n'
+                                        'export SKY_JOB_ID={self.job_id}\\n')
             futures.append(run_bash_command_with_log \\
                     .options({name_str}{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(

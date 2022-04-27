@@ -65,22 +65,16 @@ class SpotStatus(enum.Enum):
 
 
 # === Status transition functions ===
-def submit(name: str, run_timestamp: str, resources_str: str) -> int:
+def submit(job_id: int, name: str, run_timestamp: str, resources_str: str):
     """Insert a new spot job, returns the success."""
     _CURSOR.execute(
         """\
         INSERT INTO spot
         (job_id, job_name, resources, submitted_at, status, run_timestamp)
-        VALUES (null, ?, ?, ?, ?, ?)""",
-        (name, resources_str, time.time(), SpotStatus.SUBMITTED.value,
+        VALUES (?, ?, ?, ?, ?, ?)""",
+        (job_id, name, resources_str, time.time(), SpotStatus.SUBMITTED.value,
          run_timestamp))
     _CONN.commit()
-    job_id = _CURSOR.execute(
-        """\
-        SELECT job_id FROM spot WHERE run_timestamp = ?""",
-        (run_timestamp,)).fetchone()[0]
-    assert job_id is not None, 'Failed to add job'
-    return job_id
 
 
 def starting(job_id: int):
