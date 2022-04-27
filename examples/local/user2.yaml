@@ -1,16 +1,16 @@
 # Multitenancy Example for Sky On-Prem
 # 
-# Sky will automaticlaly handle and schedule jobs submitted by different users.
+# Sky will automatically handle and schedule jobs submitted by different users.
 # Sky On-prem operates under the assumption that an admin with sudo access setups
 # Sky services on the local cluster.
 #
 # Multi-tenancy Setup:
 # 1) Admin registers Sky services on the local cluster `dev-production` 
-#    (sky launch local cluster-config.yaml)
+#    (sky local launch cluster-config.yaml)
 # 2) Admin sends generated cluster config to User 1 (Alice, in examples/local/user1.yaml)
 #    and User 2 (Bob, in examples/local/user2.yaml)
-# 3) Both users use Sky and place cluster config in ~/.sky/local/
-# 4) Alice and Bob both run `sky launch -c [user] [user].yaml`
+# 3) Both users use Sky and store cluster config in ~/.sky/local/
+# 4) Alice and Bob both run `sky launch -c [user] [user].yaml` on their laptops.
 
 name: user2-workload
 

@@ -99,7 +99,7 @@ class Local(clouds.Cloud):
 
     def make_deploy_resources_variables(self,
                                         resources: 'resources_lib.Resources'):
-        return
+        return {}
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):

@@ -521,14 +521,13 @@ def write_cluster_config(to_provision: 'resources.Resources',
     cloud = to_provision.cloud
     resources_vars = cloud.make_deploy_resources_variables(to_provision)
     config_dict = {}
-
     if region is None:
         assert zones is None, 'Set either both or neither for: region, zones.'
         region = cloud.get_default_region()
         zones = region.zones
     else:
         assert isinstance(
-            cloud, (clouds.Azure, clouds.Local)
+            cloud, clouds.Azure
         ) or zones is not None, 'Set either both or neither for: region, zones.'
     region = region.name
     if isinstance(cloud, clouds.AWS):
@@ -560,8 +559,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
     credentials = sky_check.get_cloud_credential_file_mounts()
     credential_file_mounts, credential_excludes = credentials
-    if resources_vars is None:
-        resources_vars = {}
     ip_list = to_provision.ips
     yaml_path = _fill_template(
         cluster_config_template,
@@ -687,17 +684,15 @@ def get_local_custom_resources(ips: List[str], auth_config):
     code = \
     textwrap.dedent("""\
         import os
-        from ray.util.accelerators import *
 
-        # A100 is not defined in Ray 1.10
-        all_ray_accelerators = [NVIDIA_TESLA_V100,
-                                NVIDIA_TESLA_P100,
-                                NVIDIA_TESLA_T4,
-                                NVIDIA_TESLA_P4,
-                                NVIDIA_TESLA_K80,
+        all_accelerators = ['V100',
+                                'P100',
+                                'T4',
+                                'P4',
+                                'K80',
                                 'A100',]
         accelerators_dict = {}
-        for acc in all_ray_accelerators:
+        for acc in all_accelerators:
             output_str = os.popen(f'lspci | grep \\'{acc}\\'').read()
             output_lst = output_str.split('\\n')
             count = 0
