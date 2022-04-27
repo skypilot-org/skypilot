@@ -27,11 +27,14 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+from datetime import datetime
 import functools
 import getpass
 import os
 import shlex
+import subprocess
 import sys
+import time
 import typing
 from typing import Any, List, Optional, Tuple
 import yaml
@@ -42,6 +45,8 @@ from rich import progress as rich_progress
 
 import sky
 from sky import backends
+from sky import benchmark_state
+from sky import benchmark_utils
 from sky import check as sky_check
 from sky import global_user_state
 from sky import sky_logging
@@ -58,6 +63,8 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+SKY_CLOUD_BENCHMARK_DIR = '~/sky_benchmark_dir'
+SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
 provision a new cluster with that name. Otherwise provision a new cluster with
@@ -783,6 +790,17 @@ def benchmark():
 
 @benchmark.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.option('--benchmark',
+              '-b',
+              required=True,
+              type=str,
+              help='Benchmark name.')
+@click.option('--logger',
+              '-l',
+              'logger_name',
+              required=True,
+              type=click.Choice(['wandb', 'tensorboard']),  # TODO: add none
+              help='Logger to track the task progress.')
 @click.option(
     '--workdir',
     required=False,
@@ -805,6 +823,12 @@ def benchmark():
               required=True,
               type=str,
               help='The GPU types to benchmark.')
+@click.option('--num-nodes',
+              required=False,
+              type=int,
+              help=('Number of nodes to launch and to execute the task on. '
+                    'Overrides the "num_nodes" config in the YAML if both are '
+                    'supplied.'))
 @click.option('--name',
               '-n',
               required=False,
@@ -824,15 +848,22 @@ def benchmark():
               help='Skip confirmation prompt.')
 def benchmark_launch(
     entrypoint: str,
+    benchmark: str,
+    logger_name: str,
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
     gpus: Optional[str],
+    num_nodes: Optional[int],
     name: Optional[str],
     disk_size: Optional[int],
     yes: bool,
-):
+) -> None:
     """Benchmark a task on different GPU types."""
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is not None:
+        raise click.BadParameter(f'Benchmark {benchmark} already exists.')
+
     entrypoint = ' '.join(entrypoint)
     if entrypoint:
         is_yaml = _check_yaml(entrypoint)
@@ -859,7 +890,6 @@ def benchmark_launch(
         prompt = f'Launching {len(gpus)} cluster{plural}. Proceed?'
         click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    backend = backends.CloudVmRayBackend()
     override_params = {}
     if cloud is not None:
         override_params['cloud'] = _get_cloud(cloud)
@@ -868,10 +898,10 @@ def benchmark_launch(
     if disk_size is not None:
         override_params['disk_size'] = disk_size
 
-    cluster_names = []
     dags = []
+    cluster_names = []
     for gpu in gpus:
-        cluster_name = f'benchmark-{gpu}'  # FIXME
+        cluster_name = f'{benchmark}-{gpu.lower()}'  # FIXME
         override_params['accelerators'] = gpu
         with sky.Dag() as dag:
             if is_yaml:
@@ -879,42 +909,280 @@ def benchmark_launch(
             else:
                 task = sky.Task(name='sky-cmd', run=entrypoint)
                 task.set_resources({sky.Resources()})
+
             # Override.
-            if workdir is not None:
-                task.workdir = workdir
-
-            task_name = task.name if name is None else name
-            task.name = f'benchmark-{task_name}-{gpu}'
-
             assert len(task.resources) == 1
             old_resources = list(task.resources)[0]
             new_resources = old_resources.copy(**override_params)
             task.set_resources({new_resources})
 
+            if workdir is not None:
+                task.workdir = workdir
+            if num_nodes is not None:
+                task.num_nodes = num_nodes
+            if name is not None:
+                task.name = name
+
+            # Create a benchmark log directory.
+            if task.setup is None:
+                task.setup = f'mkdir -p {SKY_CLOUD_BENCHMARK_DIR}'
+            else:
+                task.setup = (f'mkdir -p {SKY_CLOUD_BENCHMARK_DIR}\n'
+                              f'{task.setup}')
+
+            if task.name is None:
+                raise ValueError('Task name is not set.')
+            task_name = task.name
+
         dags.append(dag)
         cluster_names.append(cluster_name)
 
-    import ray  # pylint: disable=import-outside-toplevel
-
-    @ray.remote
-    def _launch_benchmark(dag, cluster_name):
+    # Launch the benchmarking clusters in parallel.
+    def _launch_benchmark(dag, cluster_name, backend, wait):
+        time.sleep(wait)
         sky.launch(dag,
                    stream_logs=False,
                    detach_run=True,
                    backend=backend,
                    cluster_name=cluster_name)
+        global_user_state.set_cluster_benchmark_name(cluster_name, benchmark)
 
-    ray.get([
-        _launch_benchmark.remote(dag, cluster_name)
-        for dag, cluster_name in zip(dags, cluster_names)
-    ])
-    autostop(tuple(cluster_names), all=False, idle_minutes=0, cancel=False)
+    # Clusters should not share a backend obejct
+    # because each backend has its own log directory.
+    ray_backends = [backends.CloudVmRayBackend() for _ in gpus]
+    backend_utils.run_in_parallel(
+        lambda arg: _launch_benchmark(*arg),
+        list(zip(dags, cluster_names, ray_backends, range(len(gpus)))),
+    )
+
+    benchmark_state.add_benchmark(benchmark, task_name, logger_name)
+    clusters = global_user_state.get_clusters_from_benchmark(benchmark)
+    for cluster in clusters:
+        benchmark_state.add_benchmark_result(benchmark, cluster['handle'])
 
 
-@benchmark.command('report', cls=_DocumentedCodeCommand)
-def benchmark_report():
-    """Generate a report of benchmark results."""
-    pass
+@benchmark.command('ls', cls=_DocumentedCodeCommand)
+def benchmark_ls() -> None:
+    """List the benchmark history."""
+    benchmarks = benchmark_state.get_benchmarks()
+    columns = [
+        'BENCHMARK',
+        'TASK',
+        'LAUNCHED',
+        'STATUS',
+        'RESOURCES',
+    ]
+    benchmark_table = log_utils.create_table(columns)
+    for benchmark in benchmarks:
+        benchmark_results = benchmark_state.get_benchmark_results(benchmark['name'])
+        benchmark_resources = [
+            f'{b["num_nodes"]}x {b["resources"]}' for b in benchmark_results]
+        row = [
+            # BENCHMARK
+            benchmark['name'],
+            # TASK
+            benchmark['task'],
+            # LAUNCHED
+            datetime.fromtimestamp(benchmark['launched_at']),
+            # STATUS
+            benchmark['status'].value,
+            # RESOURCES,
+            ', '.join(benchmark_resources),
+        ]
+        benchmark_table.add_row(row)
+    if benchmarks:
+        click.echo(benchmark_table)
+    else:
+        click.echo('No benchmark history found.')
+
+
+@benchmark.command('show', cls=_DocumentedCodeCommand)
+@click.argument('benchmark', required=True, type=str)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+def benchmark_show(benchmark: str, all: bool) -> None:  # pylint: disable=redefined-builtin
+    """Show a benchmark report."""
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is None:
+        raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
+
+    if record['status'] == benchmark_state.BenchmarkStatus.RUNNING:
+        clusters = global_user_state.get_clusters_from_benchmark(benchmark)
+        running = [
+            cluster['name'] for cluster in clusters
+            if cluster['status'] == global_user_state.ClusterStatus.UP
+        ]
+
+        benchmark_dir = f'{SKY_LOCAL_BENCHMARK_DIR}/{benchmark}'
+        logger_name = record['logger']
+        benchmark_utils.download_logs(benchmark, logger_name, running)
+
+        if logger_name not in ['wandb', 'tensorboard']:
+            raise ValueError(f'Unknown logger {logger_name}')
+        for cluster in running:
+            log_dir = os.path.join(benchmark_dir, cluster)
+            if logger_name == 'wandb':
+                start_ts, first_ts, last_ts, iters = benchmark_utils.parse_wandb(log_dir)
+            elif logger_name == 'tensorboard':
+                start_ts, first_ts, last_ts, iters = benchmark_utils.parse_tensorboard(log_dir)
+            benchmark_state.update_benchmark_result(
+                benchmark, cluster, start_ts, first_ts, last_ts, iters)
+
+    # Generate a report.
+    columns = [
+        'NAME',
+        'RESOURCES',
+        'RUNTIME (min)',
+        '#ITERS',
+        'SEC/ITER',
+        '$/ITER',
+    ]
+    if all:
+        columns += [
+            'START_TIMESTAMP',
+            'FIRST_TIMESTAMP',
+            'LAST_TIMESTAMP',
+        ]
+
+    cluster_table = log_utils.create_table(columns)
+    benchmark_results = benchmark_state.get_benchmark_results(benchmark)
+    for result in benchmark_results:
+        num_nodes = result['num_nodes']
+        resources = result['resources']
+        start_ts = result['start_ts']
+        last_ts = result['last_ts']
+        iters = result['iters']
+
+        if last_ts is not None and start_ts is not None:
+            run_time = last_ts - start_ts
+            sec_per_iter = run_time / iters
+        else:
+            run_time = 0
+            sec_per_iter = 0
+
+        row = [
+            # NAME
+            result['cluster'],
+            # RESOURCES
+            f'{num_nodes}x {resources}',
+            # RUNTIME (min)
+            f'{run_time / 60:.2f}',
+            # ITERS
+            iters,
+            # SEC/ITER
+            f'{sec_per_iter:.2f}',
+            # $/ITER
+            f'{num_nodes * resources.get_cost(sec_per_iter):.6f}',
+        ]
+        if all:
+            first_ts = result['first_ts']
+            if first_ts is None:
+                first_ts = '-'
+            else:
+                first_ts = datetime.fromtimestamp(first_ts)
+            row += [
+                # START_TIMESTAMP
+                datetime.fromtimestamp(start_ts),
+                # FIRST_TIMESTAMP
+                first_ts,
+                # LAST_TIMESTAMP
+                datetime.fromtimestamp(last_ts),
+            ]
+        cluster_table.add_row(row)
+    click.echo(cluster_table)
+
+
+def _terminate_or_stop_benchmark(benchmark, except_clusters, terminate, yes):
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is None:
+        raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
+
+    clusters = benchmark_state.get_clusters_from_benchmark(benchmark)
+    running = [
+        cluster['name'] for cluster in clusters
+        if cluster['status'] == global_user_state.ClusterStatus.UP
+    ]
+
+    logger_name = ['logger']
+    benchmark_utils.download_logs(benchmark, logger_name, running)
+
+    to_stop = [cluster['name'] for cluster in clusters
+                if cluster['name'] not in except_clusters]
+    _terminate_or_stop_clusters(to_stop,
+                                apply_to_all=False,
+                                terminate=terminate,
+                                no_confirm=yes)
+    benchmark_state.finish_benchmark(benchmark)
+
+
+@benchmark.command('stop', cls=_DocumentedCodeCommand)
+@click.argument('benchmark', required=True, type=str)
+@click.option('--except',
+              '-e',
+              'except_clusters',
+              required=False,
+              type=str,
+              multiple=True,
+              help='Cluster names to exclude from stopping.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def benchmark_stop(
+    benchmark: str,
+    except_clusters: List[str],
+    yes: bool,
+) -> None:
+    """Stop the benchmarking clusters."""
+    _terminate_or_stop_benchmark(benchmark, except_clusters, terminate=False, yes=yes)
+
+
+@benchmark.command('down', cls=_DocumentedCodeCommand)
+@click.argument('benchmark', required=True, type=str)
+@click.option('--except',
+              '-e',
+              'except_clusters',
+              required=False,
+              type=str,
+              multiple=True,
+              help='Cluster names to exclude from termination.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def benchmark_down(
+    benchmark: str,
+    except_clusters: List[str],
+    yes: bool,
+) -> None:
+    """Terminate the benchmarking clusters."""
+    _terminate_or_stop_benchmark(benchmark, except_clusters, terminate=True, yes=yes)
+
+
+@benchmark.command('delete', cls=_DocumentedCodeCommand)
+@click.argument('benchmark', required=True, type=str)
+def benchmark_delete(benchmark: str) -> None:
+    """Delete a benchmark from the history."""
+    clusters = global_user_state.get_clusters_from_benchmark(benchmark)
+    for cluster in clusters:
+        global_user_state.set_cluster_benchmark_name(cluster['name'], None)
+    
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is None:
+        raise click.BadParameter(f'Benchmark {benchmark} not found.')
+
+    benchmark_state.delete_benchmark(benchmark)
+    subprocess.run(
+        ['rm', '-rf', f'{SKY_LOCAL_BENCHMARK_DIR}/{benchmark}'], check=False)
+    click.secho(f'Benchmark {benchmark} deleted.', fg='green') # FIXME
 
 
 @cli.command()
@@ -948,6 +1216,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
         columns.extend([
             'HOURLY_PRICE',
             'REGION',
+            'BENCHMARK',
         ])
 
     cluster_table = log_utils.create_table(columns)
@@ -993,11 +1262,16 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
                 * handle.launched_nodes
             price_str = f'$ {hourly_cost:.3f}'
             region = handle.launched_resources.region
+            benchmark_str = '-'
+            if cluster_status['benchmark'] is not None:
+                benchmark_str = cluster_status['benchmark']
             row.extend([
                 # HOURLY PRICE
                 price_str,
                 # REGION
                 region,
+                # BENCHMARK,
+                benchmark_str,
             ])
         cluster_table.add_row(row)
     if clusters_status:
