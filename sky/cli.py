@@ -53,6 +53,7 @@ from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -840,81 +841,9 @@ def exec(
               help='Query remote clusters for their latest autostop settings.')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
-    # TODO(zhwu): Update the information for auto-stop clusters.
-    show_all = all
-    clusters_status = backend_utils.get_clusters(refresh)
-    columns = [
-        'NAME',
-        'LAUNCHED',
-        'RESOURCES',
-        'STATUS',
-        'AUTOSTOP',
-        'COMMAND',
-    ]
-
-    if all:
-        columns.extend([
-            'HOURLY_PRICE',
-            'REGION',
-        ])
-
-    cluster_table = log_utils.create_table(columns)
-
-    for cluster_status in clusters_status:
-        launched_at = cluster_status['launched_at']
-        handle = cluster_status['handle']
-        resources_str = '<initializing>'
-        if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
-            resources_str = 'docker'
-        elif isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-            if (handle.launched_nodes is not None and
-                    handle.launched_resources is not None):
-                launched_resource_str = str(handle.launched_resources)
-                if not show_all:
-                    launched_resource_str = _truncate_long_string(
-                        launched_resource_str)
-                resources_str = (f'{handle.launched_nodes}x '
-                                 f'{launched_resource_str}')
-        else:
-            raise ValueError(f'Unknown handle type {type(handle)} encountered.')
-        autostop_str = '-'
-        if cluster_status['autostop'] >= 0:
-            # TODO(zhwu): check the status of the autostop cluster.
-            autostop_str = str(cluster_status['autostop']) + ' min'
-        row = [
-            # NAME
-            cluster_status['name'],
-            # LAUNCHED
-            log_utils.readable_time_duration(launched_at),
-            # RESOURCES
-            resources_str,
-            # STATUS
-            cluster_status['status'].value,
-            # AUTOSTOP
-            autostop_str,
-            # COMMAND
-            cluster_status['last_use']
-            if show_all else _truncate_long_string(cluster_status['last_use']),
-        ]
-        if all:
-            hourly_cost = handle.launched_resources.get_cost(3600) \
-                * handle.launched_nodes
-            price_str = f'$ {hourly_cost:.3f}'
-            region = handle.launched_resources.region
-            row.extend([
-                # HOURLY PRICE
-                price_str,
-                # REGION
-                region,
-            ])
-        cluster_table.add_row(row)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Listing all cloud '
                f'clusters:{colorama.Style.RESET_ALL}')
-    if clusters_status:
-        click.echo(cluster_table)
-    else:
-        click.echo('No existing clusters.')
-
+    status_utils.show_status_table(all, refresh)
     backend_utils.run('sky local status')
 
 
