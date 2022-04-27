@@ -3,7 +3,7 @@ import inspect
 import os
 import re
 import typing
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 import yaml
 
 import sky
@@ -255,10 +255,8 @@ class Task:
         task.set_resources({resources})
         return task
 
-    def to_yaml_config(self):
-        """
-        Returns a yaml-style dict representation of the task.
-        """
+    def to_yaml_config(self) -> Dict[str, Any]:
+        """Returns a yaml-style dict representation of the task."""
         config = dict()
 
         def add_if_not_none(key, value):

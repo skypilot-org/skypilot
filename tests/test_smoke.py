@@ -498,6 +498,9 @@ class TestStorageWithCredentials:
         assert storage_obj.name not in out.decode('utf-8')
 
 
+# ---------- Testing YAML Specs ----------
+# Our sky storage requires credentials to check the bucket existance when
+# loading a task from the yaml file, so we cannot make it a unit test.
 class TestYamlSpecs:
     _TEST_YAML_PATHS = [
         'examples/minimal.yaml', 'examples/managed_spot.yaml',
