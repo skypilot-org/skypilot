@@ -343,6 +343,7 @@ def test_cancel():
         'cancel',
         [
             f'sky launch -c {name} examples/resnet_app.yaml -y -d',
+            # Wait the GPU process to start.
             'sleep 60',
             f'sky exec {name} "nvidia-smi | grep python"',
             f'sky logs {name} 2 --status',
@@ -363,6 +364,7 @@ def test_cancel_pytorch():
         'cancel',
         [
             f'sky launch -c {name} examples/resnet_distributed_torch.yaml -y -d',
+            # Wait the GPU process to start.
             'sleep 60',
             f'sky exec {name} "nvidia-smi | grep python"',
             f'sky logs {name} 2 --status',
