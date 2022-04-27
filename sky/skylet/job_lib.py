@@ -457,7 +457,8 @@ class JobLibCodeGen:
         else:
             code = [f'job_status = job_lib.get_status({job_id})']
         code += [
-            f'print("Job", {job_id}, job_status.value, flush=True)',
+            'status_str = None if job_status is None else job_status.value',
+            f'print("Job", {job_id}, status_str, flush=True)',
         ]
         return cls._build(code)
 

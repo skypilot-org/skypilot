@@ -77,7 +77,8 @@ def _execute(dag: sky.Dag,
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
       detach_run: bool; whether to detach the process after the job submitted.
-      autostop
+      autostop_idle_minutes: int; if provided, the cluster will be set to
+        autostop after this many minutes of idleness.
     """
     assert len(dag) == 1, 'Sky assumes 1 task for now.'
     task = dag.tasks[0]

@@ -94,7 +94,7 @@ class StrategyExecutor:
         When recover() is called the cluster should be in STOPPED status (i.e.
         partially down).
         """
-        self.launch()
+        raise NotImplementedError
 
     def terminate_cluster(self):
         """Terminate the spot cluster."""
@@ -107,6 +107,9 @@ class StrategyExecutor:
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
     """Failover strategy: wait in same region and failover after timout."""
 
+    _MAX_RETRY_CNT = 3
+    _RETRY_GAP_SECONDS = 60
+
     def recover(self):
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.
@@ -115,9 +118,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         #    original user specification.
 
         # Step 1
-        # cluster_status = backend_utils.get_cluster_status_with_refresh(
-        #     self.cluster_name, force_refresh=True)
-        # assert cluster_status == global_user_state.ClusterStatus.STOPPED
 
         # Cluster should be in STOPPED status.
         handle = global_user_state.get_handle_from_cluster_name(

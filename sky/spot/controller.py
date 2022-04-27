@@ -5,6 +5,8 @@ import pathlib
 import time
 from typing import Optional
 
+import filelock
+
 import sky
 from sky import exceptions
 from sky import global_user_state
@@ -13,7 +15,7 @@ from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.skylet import job_lib
 from sky.spot import recovery_strategy
-from sky.spot import spot_status
+from sky.spot import spot_state
 from sky.spot import spot_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -23,42 +25,41 @@ class SpotController:
     """Each spot controller manages the life cycle of one spot cluster (job)."""
 
     def __init__(self, job_id: int, task_yaml: str) -> None:
-        self.job_id = job_id
-        self.task_name = pathlib.Path(task_yaml).stem
-        self.task = sky.Task.from_yaml(task_yaml)
+        self._job_id = job_id
+        self._task_name = pathlib.Path(task_yaml).stem
+        self._task = sky.Task.from_yaml(task_yaml)
         # TODO(zhwu): this assumes the specific backend.
         self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
-        spot_status.submit(self.job_id,
-                           self.task_name,
-                           self.backend.run_timestamp,
-                           resources_str=backend_utils.get_task_resources_str(
-                               self.task))
-        self.cluster_name = f'{self.task_name}-{self.job_id}'
-        self.strategy = recovery_strategy.StrategyExecutor.make(
-            self.cluster_name, self.backend, self.task)
+        spot_state.submit(self._job_id,
+                          self._task_name,
+                          self.backend.run_timestamp,
+                          resources_str=backend_utils.get_task_resources_str(
+                              self._task))
+        self._cluster_name = f'{self._task_name}-{self._job_id}'
+        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
+            self._cluster_name, self.backend, self._task)
 
     def _run(self):
         """Busy loop monitoring spot cluster status and handling recovery."""
-        logger.info(
-            f'Started monitoring spot task {self.task_name} (id: {self.job_id})'
-        )
-        spot_status.set_starting(self.job_id)
-        self.strategy.launch()
-        spot_status.set_started(self.job_id)
+        logger.info(f'Started monitoring spot task {self._task_name} '
+                    f'(id: {self._job_id})')
+        spot_state.set_starting(self._job_id)
+        self._strategy_executor.launch()
+        spot_state.set_started(self._job_id)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
             user_signal = self._check_signal()
             if user_signal == spot_utils.UserSignal.CANCEL:
                 logger.info(f'User sent {user_signal.value} signal.')
-                spot_status.set_cancelled(self.job_id)
+                spot_state.set_cancelled(self._job_id)
                 break
 
             try:
                 backend_utils.check_network_connection()
             except exceptions.NetworkError:
                 logger.info(
-                    'Network is not available. Retry again in '
+                    'Network is not available. Retrying again in '
                     f'{spot_utils.JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
                 continue
 
@@ -72,7 +73,7 @@ class SpotController:
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 # The job is done.
-                spot_status.set_succeeded(self.job_id)
+                spot_state.set_succeeded(self._job_id)
                 break
 
             assert (job_status is None or
@@ -82,30 +83,32 @@ class SpotController:
                 # Check the status of the spot cluster. It can be STOPPED or UP,
                 # where STOPPED means partially down.
                 cluster_status = backend_utils.get_cluster_status_with_refresh(
-                    self.cluster_name, force_refresh=True)
+                    self._cluster_name, force_refresh=True)
                 if cluster_status == global_user_state.ClusterStatus.UP:
                     # The user code has probably crashed.
-                    spot_status.set_failed(self.job_id)
+                    spot_state.set_failed(self._job_id)
                     break
                 assert (cluster_status == global_user_state.ClusterStatus.
                         STOPPED), ('The cluster should be STOPPED, but is '
                                    f'{cluster_status.value}.')
             # Failed to connect to the cluster or the cluster is partially down.
             # job_status is None or job_status == job_lib.JobStatus.FAILED
-            logger.info('The cluster is Preempted.')
-            spot_status.set_recovering(self.job_id)
-            self.strategy.recover()
-            spot_status.set_recovered(self.job_id)
+            logger.info('The cluster is preempted.')
+            spot_state.set_recovering(self._job_id)
+            self._strategy_executor.recover()
+            spot_state.set_recovered(self._job_id)
 
     def start(self):
         """Start the controller."""
         try:
             self._run()
         finally:
-            self.strategy.terminate_cluster()
-            status = spot_status.get_status(self.job_id)
-            if not status.is_terminal():
-                spot_status.set_failed(self.job_id)
+            self._strategy_executor.terminate_cluster()
+            job_status = spot_state.get_status(self._job_id)
+            # The job can be non-terminal if the controller exited abnormally,
+            # e.g. failed to launch cluster after reaching the MAX_RETRY.
+            if not job_status.is_terminal():
+                spot_state.set_failed(self._job_id)
 
     def _job_status_check(self) -> Optional['job_lib.JobStatus']:
         """Check the status of the job running on the spot cluster.
@@ -113,7 +116,7 @@ class SpotController:
         It can be None, RUNNING, SUCCEEDED, FAILED or CANCELLED.
         """
         handle = global_user_state.get_handle_from_cluster_name(
-            self.cluster_name)
+            self._cluster_name)
         status = None
         try:
             logger.info('=== Checking the job status... ===')
@@ -127,17 +130,23 @@ class SpotController:
         logger.info('=' * 34)
         return status
 
-    def _check_signal(self) -> spot_utils.UserSignal:
+    def _check_signal(self) -> Optional[spot_utils.UserSignal]:
         """Check if the user has sent down signal."""
-        singal_file = pathlib.Path(
-            spot_utils.SIGNAL_FILE_PREFIX.format(self.job_id))
+        signal_file = pathlib.Path(
+            spot_utils.SIGNAL_FILE_PREFIX.format(self._job_id))
         signal = None
-        if singal_file.exists():
-            with open(singal_file, 'r') as f:
-                signal = f.read().strip()
-                signal = spot_utils.UserSignal(signal)
-            # Remove the signal file, after reading the signal.
-            singal_file.unlink()
+        if signal_file.exists():
+            # Filelock is needed to prevent race condition with concurrent
+            # signal writing.
+            # TODO(mraheja): remove pylint disabling when filelock version
+            # updated
+            # pylint: disable=abstract-class-instantiated
+            with filelock.FileLock(str(signal_file) + '.lock'):
+                with signal_file.open(mode='r') as f:
+                    signal = f.read().strip()
+                    signal = spot_utils.UserSignal(signal)
+                # Remove the signal file, after reading the signal.
+                signal_file.unlink()
         return signal
 
 

@@ -6,11 +6,12 @@ import shlex
 from typing import List
 
 import colorama
+import filelock
 
-from sky.spot import spot_status
 from sky.skylet.utils import log_utils
+from sky.spot import spot_state
 
-SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_singal_{}'
+SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 JOB_STATUS_CHECK_GAP_SECONDS = 60
 
 
@@ -30,9 +31,14 @@ def cancel_jobs_by_id(job_ids: List[int]) -> str:
         return 'No job to cancel.'
     for job_id in job_ids:
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
-        with signal_file.open('w') as f:
-            f.write(UserSignal.CANCEL.value)
-            f.flush()
+        # Filelock is needed to prevent race condition between signal
+        # check/removal and signal writing.
+        # TODO(mraheja): remove pylint disabling when filelock version updated
+        # pylint: disable=abstract-class-instantiated
+        with filelock.FileLock(str(signal_file) + '.lock'):
+            with signal_file.open('w') as f:
+                f.write(UserSignal.CANCEL.value)
+                f.flush()
 
     identity_str = f'job ID {job_ids[0]} is'
     if len(job_ids) > 1:
@@ -44,34 +50,33 @@ def cancel_jobs_by_id(job_ids: List[int]) -> str:
 
 def cancel_job_by_name(job_name: str) -> str:
     """Cancel a job by name."""
-    job_ids = spot_status.get_nonterminal_job_ids_by_name(job_name)
+    job_ids = spot_state.get_nonterminal_job_ids_by_name(job_name)
     if len(job_ids) == 0:
-        return (f'{colorama.Fore.RED}No job found with name {job_name!r}'
+        return (f'{colorama.Fore.RED}No job found with name {job_name!r}.'
                 f'{colorama.Style.RESET_ALL}')
     if len(job_ids) > 1:
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    job_id = job_ids[0]
-    cancel_jobs_by_id([job_id])
+    cancel_jobs_by_id(job_ids)
     return (f'Job {job_name!r} is scheduled to be cancelled within '
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
 
 
 def show_jobs() -> str:
     """Show all spot jobs."""
-    jobs = spot_status.get_spot_jobs()
+    jobs = spot_state.get_spot_jobs()
 
     job_table = log_utils.create_table([
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'STARTED', 'TOT. DURATION',
-        'JOB DURATION', '#RECOVERS', 'STATUS'
+        'JOB DURATION', '#RECOVERIES', 'STATUS'
     ])
     for job in jobs:
         job_duration = log_utils.readable_time_duration(
             job['last_recovered_at'] - job['job_duration'],
             job['end_at'],
             absolute=True)
-        if job['status'] == spot_status.SpotStatus.RECOVERING:
+        if job['status'] == spot_state.SpotStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = log_utils.readable_time_duration(0,
                                                             job['job_duration'],
