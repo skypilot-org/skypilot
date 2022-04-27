@@ -32,10 +32,10 @@ class SpotController:
         self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
         spot_state.init(self._job_id,
-                          self._task_name,
-                          self.backend.run_timestamp,
-                          resources_str=backend_utils.get_task_resources_str(
-                              self._task))
+                        self._task_name,
+                        self.backend.run_timestamp,
+                        resources_str=backend_utils.get_task_resources_str(
+                            self._task))
         self._cluster_name = f'{self._task_name}-{self._job_id}'
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             self._cluster_name, self.backend, self._task)
@@ -83,7 +83,7 @@ class SpotController:
                 # Check the status of the spot cluster. It can be STOPPED or UP,
                 # where STOPPED means partially down.
                 cluster_status = backend_utils.get_cluster_status_with_refresh(
-                    self._cluster_name, force_refresh=True)
+                    self._cluster_name, force_refresh=True)[0]
                 if cluster_status == global_user_state.ClusterStatus.UP:
                     # The user code has probably crashed.
                     spot_state.set_failed(self._job_id)

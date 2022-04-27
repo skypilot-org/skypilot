@@ -71,7 +71,7 @@ class StrategyExecutor:
                 # code.
                 logger.info('Failed to launch the spot cluster.')
 
-            cluster_status = backend_utils.get_cluster_status_with_refresh(
+            cluster_status, _ = backend_utils.get_cluster_status_with_refresh(
                 self.cluster_name, force_refresh=True)
             if cluster_status == global_user_state.ClusterStatus.UP:
                 return
@@ -131,7 +131,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
 
         self.launch(raise_on_failure=False)
 
-        cluster_status = backend_utils.get_cluster_status_with_refresh(
+        cluster_status, _ = backend_utils.get_cluster_status_with_refresh(
             self.cluster_name, force_refresh=True)
         if cluster_status == global_user_state.ClusterStatus.UP:
             return

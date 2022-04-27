@@ -1144,26 +1144,29 @@ def check_network_connection():
             'Could not refresh the cluster. Network is down.') from e
 
 
-def _ping_cluster_and_set_status(
-        record: Dict[str, Any]) -> global_user_state.ClusterStatus:
-    assert record['status'] != global_user_state.ClusterStatus.INIT, (
-        'Should not change the status for INIT clusters with this function, as the cluster maybe partially UP.'
-    )
+def _ping_cluster_and_set_status(record: Dict[str, Any]) -> Dict[str, Any]:
     handle = record['handle']
     cluster_name = handle.cluster_name
 
     check_network_connection()
 
+    record['ips'] = None
+
     try:
-        get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         # If we get node ips correctly, the cluster is UP. It is safe to
         # set the status to UP, as the `get_node_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
         record['status'] = global_user_state.ClusterStatus.UP
+        handle.head_ip = ips[0]
         return record
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
                      f'{cluster_name!r}, set to STOPPED')
+    if record['status'] == global_user_state.ClusterStatus.INIT:
+        # Should not set the cluster to STOPPED if INIT, since it may be
+        # still launching.
+        return record
     # Set the cluster status to STOPPED. It is safe to do so, even if the
     # cluster is still partially UP:
     # 1. Autostop case: the whole cluster will be properly stopped soon.
@@ -1176,22 +1179,23 @@ def _ping_cluster_and_set_status(
 
 
 def get_cluster_status_with_refresh(
-        cluster_name: str,
-        force_refresh: bool = False
-) -> Optional[global_user_state.ClusterStatus]:
+    cluster_name: str,
+    force_refresh: bool = False
+) -> Union[Optional[global_user_state.ClusterStatus],
+           Tuple[Optional[global_user_state.ClusterStatus],
+                 backends.Backend.ResourceHandle]]:
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None
 
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-        # Should not refresh the cluster if INIT, since it may be launching
-        # and would be set falsely to STOPPED.
-        if record['status'] != global_user_state.ClusterStatus.INIT:
-            if force_refresh or record['autostop'] >= 0:
-                # Refresh the status only when force_refresh is True or the cluster
-                # has autostopped turned on.
-                record = _ping_cluster_and_set_status(record)
+        if force_refresh or record['autostop'] >= 0:
+            # Refresh the status only when force_refresh is True or the cluster
+            # has autostopped turned on.
+            record = _ping_cluster_and_set_status(record)
+    if force_refresh:
+        return record['status'], handle
     return record['status']
 
 

@@ -1421,8 +1421,9 @@ def _terminate_or_stop_clusters(
                 backend_utils.disallow_sky_reserved_cluster_name(
                     name, f'{teardown_verb} it')
             except ValueError as e:
-                click.echo(str(e))
-                continue
+                if not purge:
+                    click.echo(str(e))
+                    continue
             handle = global_user_state.get_handle_from_cluster_name(name)
             to_down.append({'name': name, 'handle': handle})
     if apply_to_all:
@@ -2123,12 +2124,13 @@ def spot_launch(
                    skip_reserved_cluster_check=True)
 
 
-def _is_spot_controller_up(stopped_message: str) -> bool:
-    controller_status = backend_utils.get_cluster_status_with_refresh(
-        spot_lib.SPOT_CONTROLLER_NAME)
+def _is_spot_controller_up(
+        stopped_message: str) -> Optional[backends.Backend.ResourceHandle]:
+    controller_status, handle = backend_utils.get_cluster_status_with_refresh(
+        spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
     if controller_status is None:
         click.echo('No managed spot job has been run.')
-        return False
+        return None
     if controller_status != global_user_state.ClusterStatus.UP:
         msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
@@ -2137,8 +2139,8 @@ def _is_spot_controller_up(stopped_message: str) -> bool:
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
         click.echo(msg)
-        return False
-    return True
+        return None
+    return handle
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)
@@ -2147,13 +2149,12 @@ def spot_status():
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     # TODO(zhwu): Enable status check when spot controller is in INIT state and
     # actually UP.
-    if not _is_spot_controller_up('Please start it first with: '
-                                  f'sky start {spot_lib.SPOT_CONTROLLER_NAME}'):
+    handle = _is_spot_controller_up(
+        'Please start it first with: '
+        f'sky start {spot_lib.SPOT_CONTROLLER_NAME}')
+    if handle is None:
         return
 
-    handle = global_user_state.get_handle_from_cluster_name(
-        spot_lib.SPOT_CONTROLLER_NAME)
-    assert handle is not None
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
