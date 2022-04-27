@@ -77,7 +77,7 @@ def submit(job_id: int, name: str, run_timestamp: str, resources_str: str):
     _CONN.commit()
 
 
-def starting(job_id: int):
+def set_starting(job_id: int):
     logger.info('Launching the spot cluster...')
     _CURSOR.execute("""\
         UPDATE spot SET status=(?) WHERE job_id=(?)""",
@@ -85,7 +85,7 @@ def starting(job_id: int):
     _CONN.commit()
 
 
-def started(job_id: int):
+def set_started(job_id: int):
     logger.info('Job started.')
     _CURSOR.execute(
         """\
@@ -95,7 +95,7 @@ def started(job_id: int):
     _CONN.commit()
 
 
-def recovering(job_id: int):
+def set_recovering(job_id: int):
     logger.info('=== Recovering... ===')
     _CURSOR.execute(
         """\
@@ -106,7 +106,7 @@ def recovering(job_id: int):
     _CONN.commit()
 
 
-def recovered(job_id: int):
+def set_recovered(job_id: int):
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -116,7 +116,7 @@ def recovered(job_id: int):
     logger.info('==== Recovered. ====')
 
 
-def succeeded(job_id: int):
+def set_succeeded(job_id: int):
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -126,7 +126,7 @@ def succeeded(job_id: int):
     logger.info('Job succeeded.')
 
 
-def failed(job_id: int):
+def set_failed(job_id: int):
     _CURSOR.execute(
         """\
         UPDATE spot SET
@@ -136,7 +136,7 @@ def failed(job_id: int):
     logger.info('Job failed.')
 
 
-def cancelled(job_id: int):
+def set_cancelled(job_id: int):
     _CURSOR.execute(
         """\
         UPDATE spot SET

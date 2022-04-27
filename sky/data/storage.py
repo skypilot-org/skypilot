@@ -456,9 +456,7 @@ class Storage(object):
         elif self.source is not None:
             source, is_local_source = Storage._validate_source(
                 self.source, self.mode)
-            # if is_local_source:
-            #     # Expand user in source path
-            #     self.source = os.path.abspath(os.path.expanduser(self.source))
+
             if not self.name:
                 if is_local_source:
                     raise exceptions.StorageNameError(

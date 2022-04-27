@@ -14,9 +14,10 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 SPOT_STRATEGIES = dict()
+SPOT_DEFAULT_STRATEGY = None
 
 
-class Strategy:
+class StrategyExecutor:
     """Handle each launching, recovery and termination of the spot clusters."""
 
     def __init__(self, cluster_name: str, backend: 'Backend',
@@ -26,12 +27,17 @@ class Strategy:
         self.cluster_name = cluster_name
         self.backend = backend
 
-    def __init_subclass__(cls, name):
+    def __init_subclass__(cls, name: str, default: bool = False):
         SPOT_STRATEGIES[name] = cls
+        if default:
+            global SPOT_DEFAULT_STRATEGY
+            assert SPOT_DEFAULT_STRATEGY is None, (
+                'Only one strategy can be default.')
+            SPOT_DEFAULT_STRATEGY = name
 
     @classmethod
-    def from_task(cls, cluster_name: str, backend: 'Backend',
-                  task: 'task_lib.Task') -> 'Strategy':
+    def make(cls, cluster_name: str, backend: 'Backend',
+             task: 'task_lib.Task') -> 'StrategyExecutor':
         """Create a strategy from a task."""
         resources = task.resources
         assert len(resources) == 1, 'Only one resource is supported.'
@@ -46,7 +52,7 @@ class Strategy:
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task)
 
     def launch(self, max_retry=3, retry_gap_seconds=60, raise_on_failure=True):
-        """Launch the spot cluster at the first time.
+        """Launch the spot cluster for the first time.
 
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
@@ -61,7 +67,7 @@ class Strategy:
                            detach_run=True)
                 logger.info('Spot cluster launched.')
             except SystemExit:
-                # If the launch failes, it will be recovered by the following
+                # If the launch fails, it will be recovered by the following
                 # code.
                 logger.info('Failed to launch the spot cluster.')
 
@@ -90,7 +96,7 @@ class Strategy:
         """
         self.launch()
 
-    def terminate(self):
+    def terminate_cluster(self):
         """Terminate the spot cluster."""
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
@@ -98,7 +104,7 @@ class Strategy:
             self.backend.teardown(handle, terminate=True)
 
 
-class FailoverStrategy(Strategy, name='FAILOVER'):
+class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
     """Failover strategy: wait in same region and failover after timout."""
 
     def recover(self):
@@ -131,7 +137,7 @@ class FailoverStrategy(Strategy, name='FAILOVER'):
             return
 
         # Step 2
-        self.terminate()
+        self.terminate_cluster()
 
         # Step 3
         self.launch(max_retry=self._MAX_RETRY_CNT,

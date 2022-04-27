@@ -301,6 +301,10 @@ class Task:
     def num_nodes(self) -> int:
         return self._num_nodes
 
+    @property
+    def need_spot_recovery(self) -> bool:
+        return any(r.spot_recovery is not None for r in self.resources)
+
     @num_nodes.setter
     def num_nodes(self, num_nodes: Optional[int]) -> None:
         if num_nodes is None:

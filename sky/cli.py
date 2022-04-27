@@ -2009,6 +2009,8 @@ def spot_launch(
     yes: bool,
 ):
     """Launch a managed spot task."""
+    # TODO(zhwu): Refactor this function with sky launch, extracting common
+    # code.
     entrypoint = ' '.join(entrypoint)
     if entrypoint:
         is_yaml = _check_yaml(entrypoint)
@@ -2072,14 +2074,15 @@ def spot_launch(
     old_resources = list(task.resources)[0]
     new_resources = old_resources.copy(**override_params)
     if new_resources.spot_recovery is None:
-        logger.info(
-            'No spot recovery strategy specified. Defaulting to FAILOVER.')
-        new_resources = new_resources.copy(spot_recovery='FAILOVER')
+        logger.info('No spot recovery strategy specified. Defaulting to '
+                    f'{spot_lib.SPOT_DEFAULT_STRATEGY}.')
+        new_resources = new_resources.copy(
+            spot_recovery=spot_lib.SPOT_DEFAULT_STRATEGY)
     task.set_resources({new_resources})
 
     if task.run is None:
         click.secho(
-            'Skipped the managed spot task as run section is not specified.',
+            'Skipping the managed spot task as the run section is not set.',
             fg='green')
         return
 
@@ -2095,17 +2098,18 @@ def spot_launch(
 
         controller_name = spot_lib.SPOT_CONTROLLER_NAME
         yaml_path = backend_utils.fill_template(
-            'spot-controller.yaml.j2', {
+            spot_lib.SPOT_CONTROLLER_TEMPLATE, {
                 'user_yaml_path': f.name,
                 'spot_controller': controller_name,
-                'spot_task_name': name,
-                'yaml_name': f'sky-spot-{name}',
-            })
+                'cluster_name': name,
+            },
+            output_prefix=spot_lib.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as dag:
             task = sky.Task.from_yaml(yaml_path)
             assert len(task.resources) == 1
-        click.secho(f'Launching managed spot task {name} on spot controller...',
-                    fg='yellow')
+        click.secho(
+            f'Launching managed spot task {name} from spot controller...',
+            fg='yellow')
         backend = backends.CloudVmRayBackend()
         # TODO(zhwu): Remove the hint messages after launch finished as it is
         # not related.
@@ -2123,7 +2127,7 @@ def _is_spot_controller_up(stopped_message: str) -> bool:
     controller_status = backend_utils.get_cluster_status_with_refresh(
         spot_lib.SPOT_CONTROLLER_NAME)
     if controller_status is None:
-        click.echo('No managed spot job has been runned.')
+        click.echo('No managed spot job has been run.')
         return False
     if controller_status != global_user_state.ClusterStatus.UP:
         msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
@@ -2139,8 +2143,8 @@ def _is_spot_controller_up(stopped_message: str) -> bool:
 
 @spot.command('status', cls=_DocumentedCodeCommand)
 def spot_status():
-    """Check status of managed spot tasks."""
-    click.secho('Fetching and parsing managed spot job status...', fg='yellow')
+    """Show statuses of managed spot jobs."""
+    click.secho('Fetching managed spot job statuses...', fg='yellow')
     # TODO(zhwu): Enable status check when spot controller is in INIT state and
     # actually UP.
     if not _is_spot_controller_up('Please start it first with: '
@@ -2160,7 +2164,7 @@ def spot_status():
                                                         require_outputs=True,
                                                         stream_logs=False)
     backend_utils.handle_returncode(returncode, code,
-                                    'Failed to fetch managed job status',
+                                    'Failed to fetch managed job statuses',
                                     stderr)
     click.echo(f'Managed spot jobs:\n{job_table}')
 
@@ -2171,7 +2175,7 @@ def spot_status():
               required=False,
               type=str,
               help='Managed sopt job name to cancel.')
-@click.argument('job-ids', default=None, type=int, required=False, nargs=-1)
+@click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2180,7 +2184,7 @@ def spot_status():
               help='Skip confirmation prompt.')
 # TODO(zhwu): Add --all option.
 def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
-    """Cancel managed spot tasks.
+    """Cancel managed spot jobs.
 
     You can provide either a job name or a list of job ids to be cancelled.
     They are exclusive options.
@@ -2197,16 +2201,18 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
 
     """
 
-    if not _is_spot_controller_up('All managed spot jobs should be finished.'):
+    if not _is_spot_controller_up(
+            'All managed spot jobs should have finished.'):
         return
 
+    job_id_str = ','.join(map(str, job_ids))
     if job_ids and name is not None:
         raise click.UsageError(
-            'Can only specify one of job-id or --name.'
-            f' Both are specified: job-ids {job_ids}; --name {name!r}.')
+            'Can only specify one of JOB_IDS or --name.'
+            f' Both are specified: JOB_IDS {job_id_str}; --name {name!r}.')
 
     if not yes:
-        job_identity_str = f'with IDs {job_ids}' if job_ids else repr(name)
+        job_identity_str = f'with IDs {job_id_str}' if job_ids else repr(name)
         click.confirm(
             f'Cancelling managed spot job {job_identity_str}. Proceed?',
             default=True,

@@ -73,7 +73,8 @@ _TEST_IP = '1.1.1.1'
 
 def fill_template(template_name: str,
                   variables: Dict,
-                  output_path: Optional[str] = None) -> str:
+                  output_path: Optional[str] = None,
+                  output_prefix: str = SKY_USER_FILE_PATH) -> str:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
@@ -82,12 +83,10 @@ def fill_template(template_name: str,
     with open(template_path) as fin:
         template = fin.read()
     if output_path is None:
-        assert ('cluster_name' in variables or 'yaml_name'
-                in variables), ('cluster_name or yaml_name is required.')
-        cluster_name = variables.get('yaml_name') or variables.get(
-            'cluster_name')
+        assert ('cluster_name' in variables), ('cluster_name is required.')
+        cluster_name = variables.get('cluster_name')
         output_path = pathlib.Path(
-            SKY_USER_FILE_PATH).expanduser() / f'{cluster_name}.yml'
+            output_prefix).expanduser() / f'{cluster_name}.yml'
         os.makedirs(output_path.parents[0], exist_ok=True)
         output_path = str(output_path)
     output_path = os.path.abspath(output_path)

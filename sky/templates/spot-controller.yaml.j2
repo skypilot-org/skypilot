@@ -1,6 +1,6 @@
 # The template for the spot controller
 
-name: {{spot_task_name}}
+name: {{cluster_name}}
 
 resources:
   disk_size: 50
@@ -8,11 +8,11 @@ resources:
 #  instance_type: t3.xlarge
 
 file_mounts:
-  ~/.sky/sky_spot_tasks/{{spot_task_name}}.yaml: {{user_yaml_path}}
+  ~/.sky/sky_spot_tasks/{{cluster_name}}.yaml: {{user_yaml_path}}
 
 run: |
   python -u -m sky.spot.controller \
-    ~/.sky/sky_spot_tasks/{{spot_task_name}}.yaml \
+    ~/.sky/sky_spot_tasks/{{cluster_name}}.yaml \
     --job-id $SKY_JOB_ID
 
 
