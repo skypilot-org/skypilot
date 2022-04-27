@@ -17,8 +17,9 @@ name: user2-workload
 # Accelerators here mean task resource specs, not total cluster resources
 # E.g. Detectron training will take 2 V100 GPUs
 resources:
-  cloud: dev-production
-  accelerators: V100:1
+  cloud: local
+  local_cluster: dev-production
+  accelerators: V100:2
 
 # Authentication into local cluster
 auth:

@@ -1050,9 +1050,9 @@ class RetryingVmProvisioner(object):
                         ])
                         command = ' '.join(rsync_command)
                         log_lib.run_with_log(command,
-                                             stream_logs=True,
+                                             stream_logs=False,
                                              log_path='/dev/null',
-                                             shell=False)
+                                             shell=True)
 
                     cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
                     backend_utils.run_command_on_ip_via_ssh(
@@ -1060,7 +1060,7 @@ class RetryingVmProvisioner(object):
                         cmd,
                         ssh_user=ssh_user,
                         ssh_private_key=ssh_key,
-                        stream_logs=True)
+                        stream_logs=False)
 
                 backend_utils.run_in_parallel(_ray_up_local_worker, worker_ips)
 
@@ -1072,6 +1072,9 @@ class RetryingVmProvisioner(object):
 
         logger.info(f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing head VM. Waiting for workers.{style.RESET_ALL}')
+
+        if isinstance(to_provision_cloud, clouds.Local):
+            local_cloud_ray_up()
 
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
@@ -1087,8 +1090,6 @@ class RetryingVmProvisioner(object):
         else:
             cluster_status = self.GangSchedulingStatus.GANG_FAILED
 
-        if isinstance(to_provision_cloud, clouds.Local):
-            local_cloud_ray_up()
         # Do not need stdout/stderr if gang scheduling failed.
         # gang_succeeded = False, if head OK, but workers failed.
         return cluster_status, '', ''
