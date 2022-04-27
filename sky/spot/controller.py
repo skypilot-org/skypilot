@@ -29,11 +29,11 @@ class SpotController:
         # TODO(zhwu): this assumes the specific backend.
         self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
-        spot_status.submit(
-            self.job_id,
-            self.task_name,
-            self.backend.run_timestamp,
-            resources_str=backend_utils.get_task_resources_str(self.task))
+        spot_status.submit(self.job_id,
+                           self.task_name,
+                           self.backend.run_timestamp,
+                           resources_str=backend_utils.get_task_resources_str(
+                               self.task))
         self.cluster_name = f'{self.task_name}-{self.job_id}'
         self.strategy = Strategy.from_task(self.cluster_name, self.backend,
                                            self.task)
@@ -141,7 +141,10 @@ class SpotController:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--job-id', required=True, type=int, help='Job id for the controller job.')
+    parser.add_argument('--job-id',
+                        required=True,
+                        type=int,
+                        help='Job id for the controller job.')
     parser.add_argument('task_yaml',
                         type=str,
                         help='The path to the user spot task yaml file. '

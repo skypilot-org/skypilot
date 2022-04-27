@@ -45,7 +45,7 @@ class Strategy:
         task.set_resources({resources.copy(spot_recovery=None)})
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task)
 
-    def launch(self, max_retry=3, retry_gap_seconds=60):
+    def launch(self, max_retry=3, retry_gap_seconds=60, raise_on_failure=True):
         """Launch the spot cluster at the first time.
 
         It can fail if resource is not available. Need to check the cluster
@@ -71,9 +71,12 @@ class Strategy:
                 return
             # TODO(zhwu): maybe exponential backoff is better?
             if retry_cnt > max_retry:
-                raise RuntimeError(
-                    f'Failed to launch the spot cluster after {max_retry} '
-                    'retries.')
+                if raise_on_failure:
+                    raise RuntimeError(
+                        f'Failed to launch the spot cluster after {max_retry} '
+                        'retries.')
+                else:
+                    return
             logger.info(
                 f'Retrying to launch the spot cluster in {retry_gap_seconds} '
                 'seconds.')
@@ -122,7 +125,8 @@ class FailoverStrategy(Strategy, name='FAILOVER'):
             # Ignore the failure as the cluster can be totally stopped, and the
             # job canceling can get connection error.
             pass
-        self.launch()
+
+        self.launch(raise_on_failure=False)
 
         cluster_status = backend_utils.get_cluster_status_with_refresh(
             self.cluster_name, force_refresh=True)
