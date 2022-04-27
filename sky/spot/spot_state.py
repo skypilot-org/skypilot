@@ -26,8 +26,8 @@ _CURSOR.execute("""\
     submitted_at FLOAT,
     status TEXT,
     run_timestamp TEXT CANDIDATE KEY,
-    start_at FLOAT,
-    end_at FLOAT,
+    start_at FLOAT DEFAULT NULL,
+    end_at FLOAT DEFAULT NULL,
     last_recovered_at FLOAT DEFAULT -1,
     recovery_count INTEGER DEFAULT 0,
     job_duration FLOAT DEFAULT 0)""")
@@ -121,7 +121,8 @@ def set_succeeded(job_id: int):
         """\
         UPDATE spot SET
         status=(?), end_at=(?)
-        WHERE job_id=(?)""", (SpotStatus.SUCCEEDED.value, time.time(), job_id))
+        WHERE job_id=(?) AND end_at=null""",
+        (SpotStatus.SUCCEEDED.value, time.time(), job_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 
@@ -131,7 +132,8 @@ def set_failed(job_id: int):
         """\
         UPDATE spot SET
         status=(?), end_at=(?)
-        WHERE job_id=(?)""", (SpotStatus.FAILED.value, time.time(), job_id))
+        WHERE job_id=(?) AND end_at=null""",
+        (SpotStatus.FAILED.value, time.time(), job_id))
     _CONN.commit()
     logger.info('Job failed.')
 
@@ -140,8 +142,9 @@ def set_cancelled(job_id: int):
     _CURSOR.execute(
         """\
         UPDATE spot SET
-        status=(?), end_at=MIN(end_at, (?))
-        WHERE job_id=(?)""", (SpotStatus.CANCELLED.value, time.time(), job_id))
+        status=(?), end_at=(?)
+        WHERE job_id=(?) AND end_at=null""",
+        (SpotStatus.CANCELLED.value, time.time(), job_id))
     _CONN.commit()
     logger.info('Job cancelled.')
 

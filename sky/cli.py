@@ -1420,7 +1420,7 @@ def _terminate_or_stop_clusters(
             try:
                 backend_utils.disallow_sky_reserved_cluster_name(
                     name, f'{teardown_verb} it')
-            except click.BadParameter as e:
+            except ValueError as e:
                 click.echo(str(e))
                 continue
             handle = global_user_state.get_handle_from_cluster_name(name)
