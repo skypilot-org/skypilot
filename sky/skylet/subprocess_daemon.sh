@@ -20,6 +20,7 @@ if [ kill -s 0 ${proc_pid} ]; then
         pkill -TERM -P ${proc_pid}
     else
         # Recursively gracefully kill (SIGTERM) all child processes of proc_pid.
+        # Uses pgid instead of sid, since sid can be changed by other processes.
         ps --forest -o pid -g $(ps -o pgid= -p ${proc_pid}) | tail -n +2 | xargs kill -15
     fi
     # Wait the processes to gracefully exit
