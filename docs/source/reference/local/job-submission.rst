@@ -9,6 +9,27 @@ To register a local cluster in Sky, regulars users should obtain a **distributab
 
 The cluster YAML should be stored in :code:`~/.sky/local/`.
 
+Listing Registered Clusters
+-------------------
+
+To list all registered local clusters, run:
+
+.. code-block:: console
+
+  $ sky local status my-local-cluster
+
+This may show multiple local clusters, if you have created several:
+
+.. code-block::
+
+  Listing all local clusters:
+  NAME              CLUSTER_USER  CLUSTER_RESOURCES  COMMAND                                                  
+  my-local-cluster  my_user       2x {'V100': 4}     sky launch -c my-local-cluster ..
+  ml-research       daniel        3x {'K80': 8}      sky exec ml-research ..
+  test              -             -                  -
+
+Local clusters that have ben ran with ``sky launch`` have all table columns populated.
+
 
 Launching Task YAML
 -------------------
@@ -22,12 +43,8 @@ Copy the following YAML into a ``local_example.yaml`` file:
 .. code-block:: yaml
   
   resources:
-    # Local clusters fall under local cloud
+    # All local clusters fall under local cloud
     cloud: local
-    # Name of the local cluster. Must be registered under ~/.sky/local
-    #
-    # (Optional) Can be specified in `sky launch -c my-local-cluster`
-    local_cluster: my-local-cluster
     # Task resources: 1x NVIDIA V100 GPU
     accelerators: V100:1
 
@@ -49,33 +66,15 @@ Copy the following YAML into a ``local_example.yaml`` file:
     echo "Hello, Sky on Prem!"
     conda env list
 
-This defines a task to be run on ``my-local-cluster``. The task takes up 1 V100 GPU.
+This defines a task to be run on the Local cloud. The task takes up 1 V100 GPU.
 
-To connect to the local cluster and run a task, use :code:`sky launch`:
+To connect to the local cluster ``my-local-cluster`` and run a task, use :code:`sky launch`:
 
 .. code-block:: console
 
   $ sky launch -c my-local-cluster local_example.yaml
 
 The above command sets up the user's work environment on ``my_user`` and runs the task. Here, the name of the cluster **must match** the name of the local cluster.
-
-Listing Local Clusters
--------------------
-
-To list all registered local clusters, run:
-
-.. code-block:: console
-
-  $ sky launch -c my-local-cluster local_example.yaml
-
-This may show multiple local clusters, if you have created several:
-
-.. code-block::
-
-  Listing all local clusters:
-  NAME              CLUSTER_USER  CLUSTER_RESOURCES  COMMAND                                                  
-  my-local-cluster  my_user       2x {'V100': 4}     sky launch -c my-local-cluster ..
-  ml-research       daniel        3x {'K80': 8}      sky exec ml-research ..
 
 
 Executing Multiple Jobs
