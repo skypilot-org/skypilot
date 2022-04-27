@@ -101,10 +101,20 @@ def _truncate_long_string(s: str, max_length: int = 35) -> str:
 def _get_cloud(cloud: Optional[str],
                cluster_name: Optional[str]) -> Optional[clouds.Cloud]:
     """Check if cloud is registered and return cloud object."""
+
+    if cluster_name in _list_local_clusters():
+        if cloud in ['aws', 'gcp', 'azure']:
+            raise click.UsageError(f'Local Cluster {cluster_name} is '
+                                   f'not part of Cloud {cloud}.')
+        elif cloud is None:
+            cloud = 'local'
+    elif cluster_name is None and cloud.lower == 'local':
+        raise click.UsageError('Cloud is local. Must specify a cluster name.')
+
     cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
     if (cloud is None and cluster_name is not None) or \
         (cloud is not None and cloud_obj is None):
-        if cloud == 'local':
+        if cloud.lower() == 'local':
             local_cloud = clouds.get_local_cloud(cluster_name)
             if local_cloud:
                 return local_cloud
@@ -505,6 +515,13 @@ def _check_yaml(entrypoint: str, with_outputs=False) -> bool:
     return is_yaml
 
 
+def _list_local_clusters():
+    local_dir = os.path.expanduser('~/.sky/local')
+    local_clusters = [os.path.basename(f) for f in os.listdir(local_dir) \
+    if os.path.isfile(os.path.join(local_dir, f))]
+    return [clus.split('.')[0] for clus in local_clusters]
+
+
 class _NaturalOrderGroup(click.Group):
     """Lists commands in the order they are defined in this script.
 
@@ -607,8 +624,12 @@ def launch(
         is_yaml = False
         yaml_config = None
 
-    if cloud is None and yaml_config:
-        if yaml_config['resources']['cloud'] == 'local':
+    if cluster in _list_local_clusters():
+        cloud = 'local'
+
+    if cloud is None:
+        # Check if yaml file specifies local cloud
+        if yaml_config and yaml_config['resources']['cloud'] == 'local':
             cloud = 'local'
 
     if not yes:
@@ -618,7 +639,10 @@ def launch(
         prompt = None
         if maybe_status is None:
             cluster_str = '' if cluster is None else f' {cluster!r}'
-            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
+            if cloud == 'local':
+                prompt = f'Connecting to local cluster{cluster_str}. Proceed?'
+            else:
+                prompt = f'Launching a new cluster{cluster_str}. Proceed?'
         elif maybe_status == global_user_state.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
@@ -659,12 +683,6 @@ def launch(
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
         task.set_resources({new_resources})
-
-        local_cluster_name = new_resources.local_cluster
-        if new_resources.local_cluster is not None:
-            assert cluster == local_cluster_name, \
-            f'Cluster name {cluster} must match ' + \
-            f'local cluster {local_cluster_name}.'
 
         if num_nodes is not None:
             task.num_nodes = num_nodes
@@ -772,6 +790,10 @@ def exec(
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
+        if cluster in _list_local_clusters():
+            raise click.BadParameter(
+                f'Found local cluster {cluster!r}. '
+                'Use `sky launch` to set up local cluster.')
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -942,6 +964,10 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
     cluster_name = cluster
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
+        if cluster in _list_local_clusters():
+            raise click.BadParameter(
+                f'Found local cluster {cluster!r}. '
+                'Use `sky launch` to set up local cluster.')
         raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
                                  ' (see `sky status`).')
     if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
@@ -1004,6 +1030,10 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
+        if cluster in _list_local_clusters():
+            raise click.BadParameter(
+                f'Found local cluster {cluster!r}. '
+                'Use `sky launch` to set up local cluster.')
         raise click.BadParameter(f'Cluster {cluster!r} not found'
                                  ' (see `sky status`).')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1520,6 +1550,9 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
+    if name in _list_local_clusters():
+        raise click.BadParameter(
+            f'Local cluster {cluster!r} conflicts with cluster name {name}')
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
@@ -1595,6 +1628,9 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
+    if name in _list_local_clusters():
+        raise click.BadParameter(
+            f'Local cluster {cluster!r} conflicts with cluster name {name}')
     if name is None:
         name = _default_interactive_node_name('cpunode')
 
@@ -1667,6 +1703,9 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
+    if name in _list_local_clusters():
+        raise click.BadParameter(
+            f'Local cluster {cluster!r} conflicts with cluster name {name}')
     if name is None:
         name = _default_interactive_node_name('tpunode')
 
@@ -1974,7 +2013,7 @@ def local_status():
     ]
 
     cluster_table = log_utils.create_table(columns)
-
+    names = []
     for cluster_status in clusters_status:
         handle = cluster_status['handle']
         resources = handle.launched_resources
@@ -1990,9 +2029,10 @@ def local_status():
                                  f'{resources.cluster_resources}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
+        cluster_name = str(resources.cloud)
         row = [
             # NAME
-            str(resources.cloud),
+            cluster_name,
             # CLUSTER USER
             username,
             # CLUSTER RESOURCES
@@ -2000,7 +2040,24 @@ def local_status():
             # COMMAND
             cluster_status['last_use'],
         ]
+        names.append(cluster_name)
         cluster_table.add_row(row)
+
+    all_local_clusters = _list_local_clusters()
+    for clus in all_local_clusters:
+        if clus not in names:
+            row = [
+                # NAME
+                clus,
+                # CLUSTER USER
+                '-',
+                # CLUSTER RESOURCES
+                '-',
+                # COMMAND
+                '-',
+            ]
+            cluster_table.add_row(row)
+
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Listing all local '
                f'clusters:{colorama.Style.RESET_ALL}')
     if clusters_status:
