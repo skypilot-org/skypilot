@@ -5,10 +5,17 @@ parent_pid=$1
 proc_pid=$2
 remote=${3:-0}
 
-while [ kill -s 0 ${parent_pid} -a kill -s 0 ${proc_pid} ]; do sleep 1; done 
+while kill -s 0 ${parent_pid}; do
+    kill -s 0 ${proc_pid}
+    if [ $? -ne 0 ]; then
+        break
+    fi
+    sleep 1
+done 
 
 # We should not kill the do anything if the process with proc_id is already dead.
-if [ kill -s 0 ${proc_pid} ]; then
+kill -s 0 ${proc_pid}
+if [ $? -eq 0 ]; then
     if [ ${remote} -eq 0 ]; then
         # This is to avoid the PIPE outputing to the console after being killed in next line.
         pkill -PIPE -P ${proc_pid}
