@@ -97,13 +97,18 @@ def _truncate_long_string(s: str, max_length: int = 35) -> str:
     return ' '.join(splits[:i]) + ' ...'
 
 
-def _get_cloud(cloud: Optional[str]) -> Optional[clouds.Cloud]:
+def _get_cloud(cloud: Optional[str],
+               cluster_name: Optional[str]) -> Optional[clouds.Cloud]:
     """Check if cloud is registered and return cloud object."""
     cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
-    if cloud is not None and cloud_obj is None:
-        local_cloud = clouds.get_local_cloud(cloud)
-        if local_cloud:
-            return local_cloud
+    if (cloud is None and cluster_name is not None) or \
+        (cloud is not None and cloud_obj is None):
+        if cloud == 'local':
+            local_cloud = clouds.get_local_cloud(cluster_name)
+            if local_cloud:
+                return local_cloud
+            raise click.UsageError(
+                f'Local cluster \'{cluster_name}\' does not exist.')
         raise click.UsageError(
             f'Cloud \'{cloud}\' is not supported. '
             f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
@@ -588,7 +593,7 @@ def launch(
 
     entrypoint = ' '.join(entrypoint)
     if entrypoint:
-        is_yaml = _check_yaml(entrypoint)
+        is_yaml, yaml_config = _check_yaml(entrypoint, with_outputs=True)
         if is_yaml:
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
@@ -599,6 +604,11 @@ def launch(
     else:
         entrypoint = None
         is_yaml = False
+        yaml_config = None
+
+    if cloud is None and yaml_config:
+        if yaml_config['resources']['cloud'] == 'local':
+            cloud = 'local'
 
     if not yes:
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
@@ -628,7 +638,7 @@ def launch(
             if cloud.lower() == 'none':
                 override_params['cloud'] = None
             else:
-                override_params['cloud'] = _get_cloud(cloud)
+                override_params['cloud'] = _get_cloud(cloud, cluster)
         if region is not None:
             if region.lower() == 'none':
                 override_params['region'] = None
@@ -648,6 +658,12 @@ def launch(
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
         task.set_resources({new_resources})
+
+        local_cluster_name = new_resources.local_cluster
+        if new_resources.local_cluster is not None:
+            assert cluster == local_cluster_name, \
+            f'Cluster name {cluster} must match ' + \
+            f'local cluster {local_cluster_name}.'
 
         if num_nodes is not None:
             task.num_nodes = num_nodes
@@ -781,7 +797,7 @@ def exec(
             if cloud.lower() == 'none':
                 override_params['cloud'] = None
             else:
-                override_params['cloud'] = _get_cloud(cloud)
+                override_params['cloud'] = _get_cloud(cloud, cluster)
         if region is not None:
             if region.lower() == 'none':
                 override_params['region'] = None
@@ -892,10 +908,14 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
                 region,
             ])
         cluster_table.add_row(row)
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Listing all cloud '
+               f'clusters:{colorama.Style.RESET_ALL}')
     if clusters_status:
         click.echo(cluster_table)
     else:
         click.echo('No existing clusters.')
+
+    backend_utils.run('sky local status')
 
 
 @cli.command()
@@ -928,7 +948,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
             global_user_state.get_handle_from_cluster_name(c) for c in clusters
         ]
     else:
-        cluster_infos = global_user_state.get_clusters()
+        cluster_infos = global_user_state.get_clusters(ignore_local=False)
         clusters = [c['name'] for c in cluster_infos]
         handles = [c['handle'] for c in cluster_infos]
 
@@ -1577,7 +1597,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     gpus is None and spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    cloud_provider = _get_cloud(cloud)
+    cloud_provider = _get_cloud(cloud, cluster)
     if gpus is None and instance_type is None:
         # Use this request if both gpus and instance_type are not specified.
         gpus = default_resources.accelerators
@@ -1652,7 +1672,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
-    cloud_provider = _get_cloud(cloud)
+    cloud_provider = _get_cloud(cloud, cluster)
     if instance_type is None:
         instance_type = default_resources.instance_type
     if spot is None:
@@ -1960,7 +1980,7 @@ def local():
 
 @local.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
-def launch_local(entrypoint: str):
+def local_launch(entrypoint: str):
     """Register Sky on a local cluster.
 
     Example:
@@ -2013,14 +2033,12 @@ def launch_local(entrypoint: str):
 
 
 @local.command('status', cls=_DocumentedCodeCommand)
-def status_local():
+def local_status():
     """List all local clusters and users.
     """
     clusters_status = backend_utils.get_local_clusters()
     columns = [
         'NAME',
-        'LAUNCHED',
-        'CLUSTER',
         'CLUSTER_USER',
         'CLUSTER_RESOURCES',
         'COMMAND',
@@ -2029,7 +2047,6 @@ def status_local():
     cluster_table = log_utils.create_table(columns)
 
     for cluster_status in clusters_status:
-        launched_at = cluster_status['launched_at']
         handle = cluster_status['handle']
         resources = handle.launched_resources
         config_path = handle.cluster_yaml
@@ -2046,10 +2063,6 @@ def status_local():
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
         row = [
             # NAME
-            cluster_status['name'],
-            # LAUNCHED
-            log_utils.readable_time_duration(launched_at),
-            # CLUSTER
             str(resources.cloud),
             # CLUSTER USER
             username,
@@ -2059,6 +2072,8 @@ def status_local():
             cluster_status['last_use'],
         ]
         cluster_table.add_row(row)
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Listing all local '
+               f'clusters:{colorama.Style.RESET_ALL}')
     if clusters_status:
         click.echo(cluster_table)
     else:

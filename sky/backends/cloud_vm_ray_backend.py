@@ -871,7 +871,7 @@ class RetryingVmProvisioner(object):
                 'zone_str': zone_str,
             }
             status, stdout, stderr = self._gang_schedule_ray_up(
-                to_provision.cloud, handle, num_nodes, cluster_config_file,
+                to_provision.cloud, num_nodes, cluster_config_file,
                 log_abs_path, stream_logs, logging_info)
             # The cluster is not ready.
             if status == self.GangSchedulingStatus.CLUSTER_READY:
@@ -938,8 +938,7 @@ class RetryingVmProvisioner(object):
         raise exceptions.ResourcesUnavailableError()
 
     def _gang_schedule_ray_up(
-            self, to_provision_cloud: clouds.Cloud,
-            handle: 'CloudVmRayBackend.ResourceHandle', num_nodes: int,
+            self, to_provision_cloud: clouds.Cloud, num_nodes: int,
             cluster_config_file: str, log_abs_path: str, stream_logs: bool,
             logging_info: dict) -> Tuple[GangSchedulingStatus, str, str]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
@@ -981,6 +980,17 @@ class RetryingVmProvisioner(object):
                 require_outputs=True)
             return returncode, stdout, stderr
 
+        region_name = logging_info['region_name']
+        zone_str = logging_info['zone_str']
+
+        logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
+                    f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
+        start = time.time()
+        returncode, stdout, stderr = ray_up(
+            start_streaming_at='Shared connection to')
+
+        logger.debug(f'Ray up takes {time.time() - start} seconds.')
+
         def local_cloud_ray_up():
             with open(cluster_config_file, 'r') as f:
                 config = yaml.safe_load(f)
@@ -1002,22 +1012,24 @@ class RetryingVmProvisioner(object):
 
                 # Ray Autoscaler Bug :(
                 # Filemounting on worker IPs + Setup Script
-                for dst, src in file_mounts.items():
-                    if not os.path.isabs(dst) and not dst.startswith('~/'):
-                        dst = f'~/{dst}'
-                    wrapped_dst = dst
-                    if not dst.startswith('~/') and not dst.startswith('/tmp/'):
-                        wrapped_dst = backend_utils.FileMountHelper.wrap_file_mount(
-                            dst)
-                    full_src = os.path.abspath(os.path.expanduser(src))
-                    if os.path.isfile(full_src):
-                        mkdir_for_wrapped_dst = \
-                            f'mkdir -p {os.path.dirname(wrapped_dst)}'
-                    else:
-                        full_src = f'{full_src}/'
-                        mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
-
-                    def _ray_up_filemounting(ip):
+                def _ray_up_local_worker(ip):
+                    for dst, src in file_mounts.items():
+                        if not os.path.isabs(dst) and \
+                        not dst.startswith('~/'):
+                            dst = f'~/{dst}'
+                        wrapped_dst = dst
+                        if not dst.startswith('~/') and not dst.startswith(
+                                '/tmp/'):
+                            wrapped_dst = \
+                            backend_utils.FileMountHelper.wrap_file_mount(
+                                dst)
+                        full_src = os.path.abspath(os.path.expanduser(src))
+                        if os.path.isfile(full_src):
+                            mkdir_for_wrapped_dst = \
+                                f'mkdir -p {os.path.dirname(wrapped_dst)}'
+                        else:
+                            full_src = f'{full_src}/'
+                            mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
                         backend_utils.run_command_on_ip_via_ssh(
                             ip,
                             mkdir_for_wrapped_dst,
@@ -1037,37 +1049,20 @@ class RetryingVmProvisioner(object):
                             f'{ssh_user}@{ip}:{wrapped_dst}',
                         ])
                         command = ' '.join(rsync_command)
-                        rc = log_lib.run_with_log(command,
-                                                  stream_logs=False,
-                                                  log_path='/dev/null',
-                                                  shell=True)
+                        log_lib.run_with_log(command,
+                                             stream_logs=True,
+                                             log_path='/dev/null',
+                                             shell=False)
 
-                    backend_utils.run_in_parallel(_ray_up_filemounting,
-                                                  worker_ips)
+                    cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+                    backend_utils.run_command_on_ip_via_ssh(
+                        ip,
+                        cmd,
+                        ssh_user=ssh_user,
+                        ssh_private_key=ssh_key,
+                        stream_logs=True)
 
-            def _ray_up_setup(ip):
-                # Need this `-i` option to make sure `source ~/.bashrc` work
-                cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-                returncode = backend_utils.run_command_on_ip_via_ssh(
-                    ip,
-                    cmd,
-                    ssh_user=ssh_user,
-                    ssh_private_key=ssh_key,
-                    stream_logs=True)
-
-            backend_utils.run_in_parallel(_ray_up_setup, worker_ips)
-            return
-
-        region_name = logging_info['region_name']
-        zone_str = logging_info['zone_str']
-
-        logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
-                    f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
-        start = time.time()
-        returncode, stdout, stderr = ray_up(
-            start_streaming_at='Shared connection to')
-
-        logger.debug(f'Ray up takes {time.time() - start} seconds.')
+                backend_utils.run_in_parallel(_ray_up_local_worker, worker_ips)
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
@@ -1360,12 +1355,12 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user = task.auth_config['ssh_user']
         if isinstance(to_provision.cloud, clouds.Local):
             logger.info(
-                f'{colorama.Fore.CYAN}Creating a new local context: '
+                f'{colorama.Fore.CYAN}Connecting to existing local cluster: '
                 f'"{cluster_name}" [Local Cluster: {cloud}, '
                 f'Username: {ssh_user}].{colorama.Style.RESET_ALL}\n'
-                'Tip: to reuse an existing context, '
-                'specify -c. '
-                'Run `sky local status` to see existing local contexts.')
+                'Tip: to reuse an existing cluster, '
+                'specify --cluster (-c). '
+                'Run `sky local status` to see existing local clusters.')
         else:
             logger.info(
                 f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '

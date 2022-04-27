@@ -244,13 +244,14 @@ def get_cluster_from_name(
         return record
 
 
-def get_clusters() -> List[Dict[str, Any]]:
+def get_clusters(ignore_local=True) -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from clusters')
     records = []
     for name, launched_at, handle, last_use, status, autostop in rows:
         # TODO: use namedtuple instead of dict
         handle = pickle.loads(handle)
-        if isinstance(handle.launched_resources.cloud, clouds.Local):
+        if isinstance(handle.launched_resources.cloud,
+                      clouds.Local) and ignore_local:
             continue
         record = {
             'name': name,

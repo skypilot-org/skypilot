@@ -48,11 +48,17 @@ class Resources:
         use_spot: Optional[bool] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
+        local_cluster: Optional[str] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
 
         # Check for Local Config
+        self.local_cluster = local_cluster
+        if self.local_cluster:
+            assert cloud is None or isinstance(self._cloud, clouds.Local), \
+            f'Local cluster {local_cluster} is defined. ' + \
+            'Must specify local cloud.'
         self.ips = None
         self.cluster_resources = None
         if cloud is not None and isinstance(self._cloud, clouds.Local):
@@ -425,6 +431,7 @@ class Resources:
             use_spot=override.pop('use_spot', self.use_spot),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
+            local_cluster=override.pop('local_cluster', self.local_cluster),
         )
         if isinstance(self.cloud, clouds.Local):
             resources.cluster_resources = self.cluster_resources
