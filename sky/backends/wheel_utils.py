@@ -74,13 +74,23 @@ def build_sky_wheel() -> pathlib.Path:
 
     Caller is responsible for removing the wheel.
     """
+
+    def _get_latest_modification_time(path: pathlib.Path) -> float:
+        if not path.exists():
+            return -1.
+        try:
+            return max(os.path.getmtime(root) for root, _, _ in os.walk(path))
+        except ValueError:
+            return -1.
+
     with filelock.FileLock(WHEEL_DIR.parent / '.wheels_lock'):
-        last_modification_time = max(
-            os.path.getmtime(root) for root, _, _ in os.walk(SKY_PACKAGE_PATH))
-        last_wheel_modification_time = max(
-            os.path.getmtime(root) for root, _, _ in os.walk(WHEEL_DIR))
+        last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
+        last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
+
         # only build wheels if the wheel is outdated
         if last_wheel_modification_time < last_modification_time:
+            if not WHEEL_DIR.exists():
+                WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             _build_sky_wheel()
 
         # Use a newly made, unique temporary dir because there may be many
