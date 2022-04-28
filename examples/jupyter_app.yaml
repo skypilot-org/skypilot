@@ -1,0 +1,29 @@
+# A minimal example.
+#
+# Runs a task that simply lists the default conda environments.
+#
+# Usage:
+#   sky launch -c min minimal.yaml
+#   sky down min
+
+name: jupyter
+
+resources:
+  cloud: aws
+
+file_mounts:
+  /covid:
+    source: s3://fah-public-data-covid19-cryptic-pockets
+    mode: MOUNT
+
+setup: |
+  pip install --upgrade pip
+  conda init bash
+  conda activate jupyter
+  conda create -n jupyter python=3.9 -y
+  conda activate jupyter
+  pip install jupyter
+
+run: |
+  conda activate jupyter
+  jupyter notebook --port 8888

@@ -138,7 +138,8 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
             if cluster in local_clusters:
                 print(
                     f'Local Cluster {cluster} is not initialized.\n'
-                    f'Run `sky launch -c {cluster} ...` to initalize cluster.')
+                    f'Run a task with `sky launch -c {cluster} ...` to '
+                    f'initialize the cluster.')
             else:
                 print(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
