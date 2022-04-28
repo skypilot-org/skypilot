@@ -837,7 +837,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
     # TODO(zhwu): Update the information for auto-stop clusters.
     show_all = all
-    clusters_status = backend_utils.get_clusters(refresh)
+    cluster_records = backend_utils.get_clusters(refresh)
     columns = [
         'NAME',
         'LAUNCHED',
@@ -855,9 +855,15 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
 
     cluster_table = log_utils.create_table(columns)
 
-    for cluster_status in clusters_status:
-        launched_at = cluster_status['launched_at']
-        handle = cluster_status['handle']
+    for record in cluster_records:
+        try:
+            backend_utils.disallow_sky_reserved_cluster_name(record['name'], '')
+        except ValueError:
+            # Skip the reserved cluster names in the status table.
+            if not all:
+                continue
+        launched_at = record['launched_at']
+        handle = record['handle']
         resources_str = '<initializing>'
         if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
             resources_str = 'docker'
@@ -873,23 +879,23 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
         autostop_str = '-'
-        if cluster_status['autostop'] >= 0:
+        if record['autostop'] >= 0:
             # TODO(zhwu): check the status of the autostop cluster.
-            autostop_str = str(cluster_status['autostop']) + ' min'
+            autostop_str = str(record['autostop']) + ' min'
         row = [
             # NAME
-            cluster_status['name'],
+            record['name'],
             # LAUNCHED
             log_utils.readable_time_duration(launched_at),
             # RESOURCES
             resources_str,
             # STATUS
-            cluster_status['status'].value,
+            record['status'].value,
             # AUTOSTOP
             autostop_str,
             # COMMAND
-            cluster_status['last_use']
-            if show_all else _truncate_long_string(cluster_status['last_use']),
+            record['last_use']
+            if show_all else _truncate_long_string(record['last_use']),
         ]
         if all:
             hourly_cost = handle.launched_resources.get_cost(3600) \
@@ -903,7 +909,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
                 region,
             ])
         cluster_table.add_row(row)
-    if clusters_status:
+    if cluster_records:
         click.echo(cluster_table)
     else:
         click.echo('No existing clusters.')
