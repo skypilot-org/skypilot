@@ -2109,6 +2109,7 @@ def spot_launch(
                 'user_yaml_path': f.name,
                 'spot_controller': controller_name,
                 'cluster_name': name,
+                'sky_remote_path': backend_utils.SKY_REMOTE_PATH,
             },
             output_prefix=spot_lib.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as dag:
