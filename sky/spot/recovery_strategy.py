@@ -124,7 +124,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             self.cluster_name)
         try:
             self.backend.cancel_jobs(handle, None)
-        except RuntimeError:
+        except SystemExit:
             # Ignore the failure as the cluster can be totally stopped, and the
             # job canceling can get connection error.
             pass
