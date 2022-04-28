@@ -389,9 +389,9 @@ def test_managed_spot():
         f'sky spot status | grep {name}-1 | grep -q STARTING',
         f'sky spot status | grep {name}-2 | grep -q STARTING',
         f'sky spot cancel -y -n {name}-1',
-        'sleep 100',
+        'sleep 200',
         f'sky spot status | grep {name}-1 | grep -q CANCELLED',
-        f'sky spot status | grep {name}-2 | grep -q RUNNING',
+        f'sky spot status | grep {name}-2 | grep -q "RUNNING\|SUCCEEDED"',
     ])
     run_one_test(test)
 
