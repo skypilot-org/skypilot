@@ -143,7 +143,7 @@ class Optimizer:
         source = [t for t in dag.tasks if t.name == _DUMMY_SOURCE_NAME]
         sink = [t for t in dag.tasks if t.name == _DUMMY_SINK_NAME]
         if len(source) == len(sink) == 0:
-            return dag
+            return
         assert len(source) == len(sink) == 1, dag.tasks
         dag.remove(source[0])
         dag.remove(sink[0])
