@@ -1183,9 +1183,11 @@ def get_cluster_status_with_refresh(
     force_refresh: bool = False
 ) -> Union[Optional[global_user_state.ClusterStatus],
            Tuple[Optional[global_user_state.ClusterStatus],
-                 backends.Backend.ResourceHandle]]:
+                 Optional[backends.Backend.ResourceHandle]]]:
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
+        if force_refresh:
+            return None, None
         return None
 
     handle = record['handle']
