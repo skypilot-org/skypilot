@@ -291,14 +291,15 @@ def _follow_job_logs(file,
             status = job_lib.get_status(job_id)
 
 
-def tail_logs(cluster_name: str, job_id: int, log_dir: Optional[str]) -> None:
+def tail_logs(cluster_name: str, ssh_user: str, job_id: int,
+              log_dir: Optional[str]) -> None:
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
-    status = job_lib.query_job_status(cluster_name, [job_id])[0]
+    status = job_lib.query_job_status(cluster_name, ssh_user, [job_id])[0]
 
     # Wait for the log to be written. This is needed due to the `ray submit`
     # will take some time to start the job and write the log.
@@ -320,7 +321,7 @@ def tail_logs(cluster_name: str, job_id: int, log_dir: Optional[str]) -> None:
         print(f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
-        status = job_lib.query_job_status(cluster_name, [job_id])[0]
+        status = job_lib.query_job_status(cluster_name, ssh_user, [job_id])[0]
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         try:

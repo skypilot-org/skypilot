@@ -10,11 +10,11 @@
 #
 # Multi-tenancy Setup:
 # 1) Admin registers Sky services on the local cluster `dev-production` 
-#    (sky local launch cluster-config.yaml)
+#    (sky local launch dev-production.yaml)
 # 2) Admin sends generated cluster config to User 1 (Alice, in examples/local/user1.yaml)
 #    and User 2 (Bob, in examples/local/user2.yaml)
-# 3) Both users use Sky and store cluster config in ~/.sky/local/
-# 4) Alice and Bob both run `sky launch -c [user] [user].yaml` on their laptops.
+# 3) Both users use Sky and store cluster config in ~/.sky/local/dev-production.yaml
+# 4) Alice and Bob both run `sky launch -c dev-production [user].yaml` on their laptops.
 
 name: user1-workload
 workdir: ~/Downloads/tpu
@@ -23,7 +23,6 @@ workdir: ~/Downloads/tpu
 # E.g. Resnet training will take 2 V100 GPUs
 resources:
   cloud: local
-  local_cluster: dev-production
   accelerators: V100:2
 
 # Authentication into local cluster

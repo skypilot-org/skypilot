@@ -57,7 +57,7 @@ logger = sky_logging.init_logger(__name__)
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout for provision a cluster and wait for it to be ready in seconds.
-_NODES_LAUNCHING_PROGRESS_TIMEOUT = 300
+_NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 
 _LOCK_FILENAME = '~/.sky/.{}.lock'
 _FILELOCK_TIMEOUT_SECONDS = 10
@@ -89,9 +89,8 @@ def _get_cluster_config_template(cloud):
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
+        clouds.Local: 'local-ray.yml.j2',
     }
-    if isinstance(cloud, clouds.Local):
-        return 'local-ray.yml.j2'
     return cloud_to_template[type(cloud)]
 
 
@@ -235,9 +234,6 @@ class RayCodeGen:
             if 'tpu' in acc_name.lower():
                 gpu_dict = dict()
             for bundle in bundles:
-                # if isinstance(cloud, clouds.Local):
-                #     bundle.update({**gpu_dict})
-                # else:
                 bundle.update({
                     **accelerator_dict,
                     # Set the GPU to avoid ray hanging the resources allocation
@@ -353,8 +349,7 @@ class RayCodeGen:
         if run_fn is not None:
             script = run_fn({gang_scheduling_id}, ip_list)
 
-        log_path = {log_path!r}
-        log_path = os.path.expanduser(log_path)
+        log_path = os.path.expanduser({log_path!r})
 
         if script is not None:
             node_export_sky_env_vars = (export_sky_env_vars +
@@ -444,7 +439,7 @@ class RetryingVmProvisioner(object):
     def _in_blocklist(self, cloud, region, zones):
         if region.name in self._blocked_regions:
             return True
-        # We do not keep track of zones in Azure.
+        # We do not keep track of zones in Azure and Local
         if isinstance(cloud, (clouds.Azure, clouds.Local)):
             return False
         assert zones, (cloud, region, zones)
@@ -633,7 +628,7 @@ class RetryingVmProvisioner(object):
                         region = config['provider']['location']
                         zones = None
                     elif cloud.is_same_cloud(sky.Local()):
-                        region = 'Local'
+                        region = clouds.Local.LOCAL_REGION.name
                         zones = None
                     else:
                         assert False, cloud
@@ -1115,21 +1110,21 @@ class RetryingVmProvisioner(object):
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
-            stream_logs=True,
+            stream_logs=False,
             use_cached_head_ip=False)
         if returncode == 0:
             return
+        else:
+            launched_resources = handle.launched_resources
+            if isinstance(launched_resources.cloud, clouds.Local):
+                raise ValueError('Ray status errored out on On-premise machine.'
+                                 'Check if Ray==1.10.0 is installed correctly.')
 
-        launched_resources = handle.launched_resources
-        if isinstance(launched_resources.cloud, clouds.Local):
-            raise ValueError('Ray status errored out on On-premise machine.'
-                             'Check if Ray==1.10.0 is installed correctly.')
-
-        backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
-        log_lib.run_with_log(
-            ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
-            log_abs_path,
-            stream_logs=False)
+            backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
+            log_lib.run_with_log(
+                ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
+                log_abs_path,
+                stream_logs=False)
 
     def provision_with_retries(
         self,
@@ -1282,7 +1277,7 @@ class CloudVmRayBackend(backends.Backend):
                     sky.AWS()):
                 region = provider['region']
             elif cloud.is_same_cloud(sky.Local()):
-                region = 'Local'
+                region = clouds.Local.LOCAL_REGION.name
 
             self.launched_resources = self.launched_resources.copy(
                 region=region)
@@ -1476,7 +1471,13 @@ class CloudVmRayBackend(backends.Backend):
                 # update_status will query the ray job status for all INIT /
                 # PENDING / RUNNING jobs for the real status, since we do not
                 # know the actual previous status of the cluster.
-                cmd = job_lib.JobLibCodeGen.update_status(cluster_name)
+                cluster_yaml = handle.cluster_yaml
+                with open(os.path.expanduser(cluster_yaml), 'r') as f:
+                    cluster_config = yaml.safe_load(f)
+                # User name is guaranteed to exist (on all jinja files)
+                ssh_user = cluster_config['auth']['ssh_user']
+                cmd = job_lib.JobLibCodeGen.update_status(
+                    cluster_name, ssh_user)
                 with backend_utils.safe_console_status(
                         '[bold cyan]Preparing Job Queue'):
                     returncode, _, stderr = self.run_on_head(
@@ -2046,16 +2047,16 @@ class CloudVmRayBackend(backends.Backend):
             ssh_user=ssh_user,
             ssh_private_key=ssh_private_key,
             ssh_control_name=self._ssh_control_name(handle),
+            stream_logs=False,
             require_outputs=True)
 
         head_home_path = stdout.strip()
         remote_log_path = remote_log_path.replace('~', head_home_path)
-        script_path = script_path.replace('~', head_home_path)
         remote_run_file = remote_run_file.replace('~', head_home_path)
 
         cluster_name = handle.cluster_name
         job_id_hash = hashlib.sha256(
-            f'{cluster_name}-{job_id}'.encode()).hexdigest()
+            f'{cluster_name}-{job_id}-{ssh_user}'.encode()).hexdigest()
         job_submit_cmd = (
             'ray job submit -v '
             f'--address=127.0.0.1:8265 --job-id {job_id_hash} --no-wait '
@@ -2091,7 +2092,15 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.RESET_BOLD}')
 
     def tail_logs(self, handle: ResourceHandle, job_id: int) -> None:
-        code = job_lib.JobLibCodeGen.tail_logs(handle.cluster_name, job_id)
+        # Get user name
+        cluster_yaml = handle.cluster_yaml
+        with open(os.path.expanduser(cluster_yaml), 'r') as f:
+            cluster_config = yaml.safe_load(f)
+        # User name is guaranteed to exist (on all jinja files)
+        ssh_user = cluster_config['auth']['ssh_user']
+
+        code = job_lib.JobLibCodeGen.tail_logs(handle.cluster_name, ssh_user,
+                                               job_id)
         logger.info(f'{colorama.Fore.YELLOW}Start streaming logs...'
                     f'{colorama.Style.RESET_ALL}')
         # With interactive mode, the ctrl-c will send directly to the running

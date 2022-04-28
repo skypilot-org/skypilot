@@ -54,10 +54,10 @@ class Resources:
 
         # Check for Local Config
         self.ips = None
-        self.cluster_resources = None
+        self.local_node_resources = None
         if cloud is not None and isinstance(self._cloud, clouds.Local) \
             and str(self._cloud)!= 'Local':
-            self.ips = clouds.get_local_ips(str(self._cloud))
+            self.ips = cloud.get_local_ips()
             assert instance_type is None and not use_spot and self.ips, \
             'Resources are passed incorrectly ' + \
             'to Local/On-Prem.'
@@ -293,11 +293,11 @@ class Resources:
                 self.accelerators)
         return hourly_cost * hours
 
-    def set_local_cluster_resources(self, auth_config):
+    def set_local_node_resources(self, auth_config):
         assert isinstance(self.cloud, clouds.Local), 'Must be local cloud.'
         custom_resources = backend_utils.get_local_custom_resources(
             self.ips, auth_config)
-        self.cluster_resources = custom_resources
+        self.local_node_resources = custom_resources
 
     def is_same_resources(self, other: 'Resources') -> bool:
         """Returns whether two resources are the same.
@@ -428,7 +428,7 @@ class Resources:
             region=override.pop('region', self.region),
         )
         if isinstance(self.cloud, clouds.Local):
-            resources.cluster_resources = self.cluster_resources
+            resources.local_node_resources = self.local_node_resources
             return resources
         assert len(override) == 0
         return resources

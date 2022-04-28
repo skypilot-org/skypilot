@@ -472,7 +472,9 @@ def _create_and_ssh_into_node(
 
 
 def _check_yaml(entrypoint: str, with_outputs=False) -> bool:
-    """Checks if entrypoint is a readable YAML file."""
+    """Checks if entrypoint is a readable YAML file.
+    If `with_outputs` is True, also returns the YAML dict.
+    """
     is_yaml = True
     config = None
     shell_splits = shlex.split(entrypoint)
@@ -517,6 +519,7 @@ def _check_yaml(entrypoint: str, with_outputs=False) -> bool:
 
 def _list_local_clusters():
     local_dir = os.path.expanduser('~/.sky/local')
+    os.makedirs(local_dir, exist_ok=True)
     local_clusters = [os.path.basename(f) for f in os.listdir(local_dir) \
     if os.path.isfile(os.path.join(local_dir, f))]
     return [clus.split('.')[0] for clus in local_clusters]
@@ -1059,7 +1062,16 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster}...',
                     fg='yellow')
 
-    code = job_lib.JobLibCodeGen.cancel_jobs(handle.cluster_name, jobs)
+    # Get user name
+    cluster_yaml = handle.cluster_yaml
+    with open(os.path.expanduser(cluster_yaml), 'r') as f:
+        cluster_config = yaml.safe_load(f)
+
+    # User name is guaranteed to exist (on all jinja files)
+    user_name = cluster_config['auth']['ssh_user']
+
+    code = job_lib.JobLibCodeGen.cancel_jobs(handle.cluster_name, user_name,
+                                             jobs)
 
     returncode, _, stderr = backend.run_on_head(handle,
                                                 code,
@@ -1295,12 +1307,9 @@ def start(clusters: Tuple[str], yes: bool):
     for record in to_start:
         name = record['name']
         handle = record['handle']
-        with open(handle.cluster_yaml, 'r') as f:
-            ray_yaml = yaml.safe_load(f)
 
         with sky.Dag():
-            dummy_task = sky.Task(auth_config=ray_yaml['auth']).set_resources(
-                handle.launched_resources)
+            dummy_task = sky.Task().set_resources(handle.launched_resources)
             dummy_task.num_nodes = handle.launched_nodes
         backend.provision(dummy_task,
                           to_provision=handle.launched_resources,
@@ -1949,7 +1958,12 @@ def local():
 @local.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 def local_launch(entrypoint: str):
-    """Register Sky on a local cluster.
+    """Launches Sky on a local cluster.
+
+    Performs preflight checks (environment setup, cluster resources)
+    and launches Ray to serve sky tasks on the cluster. Finally
+    generates a public distributable YAML that must be used by multiple
+    users sharing the cluster resources.
 
     Example:
 
@@ -1996,7 +2010,7 @@ def local_launch(entrypoint: str):
                 fg='green',
                 nl=False)
     censored_yaml_path = f'~/.sky/local/{local_cluster_name}.yml'
-    backend_utils.save_censored_yaml(yaml_config)
+    backend_utils.save_distributable_yaml(yaml_config)
     click.secho(f'Saved in {censored_yaml_path} \n', fg='yellow', nl=False)
 
 
@@ -2026,7 +2040,7 @@ def local_status():
             if (handle.launched_nodes is not None and
                     handle.launched_resources is not None):
                 resources_str = (f'{handle.launched_nodes}x '
-                                 f'{resources.cluster_resources}')
+                                 f'{resources.local_node_resources}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
         cluster_name = str(resources.cloud)

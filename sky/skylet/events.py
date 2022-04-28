@@ -67,7 +67,9 @@ class JobUpdateEvent(SkyletEvent):
         with open(self.ray_yaml_path, 'r') as f:
             config = yaml.safe_load(f)
             cluster_name = config['cluster_name']
+            ssh_user = config['auth']['ssh_user']
         job_lib.update_status(cluster_name,
+                              ssh_user,
                               submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
 
 

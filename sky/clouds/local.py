@@ -29,21 +29,12 @@ def get_local_cloud(cloud: str):
     return local_cloud_type
 
 
-def get_local_ips(cloud: str):
-    local_cluster_path = os.path.expanduser(f'~/.sky/local/{cloud}.yml')
-    with open(local_cluster_path, 'r') as f:
-        config = yaml.safe_load(f)
-    ips = config['cluster']['ips']
-    if isinstance(ips, str):
-        ips = [ips]
-    return ips
-
-
 class Local(clouds.Cloud):
     """Local/On-premise."""
 
+    LOCAL_REGION = clouds.Region('Local')
     _REPR = 'Local'
-    _regions: List[clouds.Region] = [clouds.Region('Local')]
+    _regions: List[clouds.Region] = [LOCAL_REGION]
 
     def __init__(self):
         self.cloud_name = Local._REPR
@@ -116,3 +107,13 @@ class Local(clouds.Cloud):
 
     def region_exists(self, region: str) -> bool:
         return True
+
+    def get_local_ips(self):
+        cloud = self.cloud_name
+        local_cluster_path = os.path.expanduser(f'~/.sky/local/{cloud}.yml')
+        with open(local_cluster_path, 'r') as f:
+            config = yaml.safe_load(f)
+        ips = config['cluster']['ips']
+        if isinstance(ips, str):
+            ips = [ips]
+        return ips

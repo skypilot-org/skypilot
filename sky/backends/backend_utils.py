@@ -626,7 +626,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def check_local_installation(ips, auth_config):
+def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
+    """Checks if the Sky dependencies are properly installed on the machine."""
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
 
@@ -649,12 +650,19 @@ def check_local_installation(ips, auth_config):
             raise ValueError(f'Ray not installed on {ip}')
 
 
-def get_local_custom_resources(ips: List[str], auth_config):
+def get_local_custom_resources(ips: List[str],
+                               auth_config: Dict[str, str]) -> Dict[str, int]:
+    """Gets the custom accelerators for the local cluster.
+    Assumes that the cluster is homogeneous (all nodes are
+    the same).
+
+    Returns a dictionary mapping accelerators and its count.
+    """
 
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
     remote_resource_path = '~/.sky/resource_group.py'
-    cluster_custom_resources = {}
+    node_custom_resources = {}
 
     def rsync_no_handle(ip, source, target):
         rsync_command = [
@@ -724,13 +732,14 @@ def get_local_custom_resources(ips: List[str], auth_config):
     # Convert output into a custom resources dict
     ip_resources = ast.literal_eval(output)
     for acc, num_acc in ip_resources.items():
-        if acc not in cluster_custom_resources:
-            cluster_custom_resources[acc] = 0
-        cluster_custom_resources[acc] += num_acc
-    return cluster_custom_resources
+        if acc not in node_custom_resources:
+            node_custom_resources[acc] = 0
+        node_custom_resources[acc] += num_acc
+    return node_custom_resources
 
 
-def launch_local_cluster(yaml_config, custom_resources=None):
+def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
+                         custom_resources: Dict[str, int] = None):
 
     local_cluster_config = yaml_config['cluster']
     if local_cluster_config['name'] in ['aws', 'gcp', 'azure']:
@@ -763,16 +772,16 @@ def launch_local_cluster(yaml_config, custom_resources=None):
     display.stop()
 
     total_workers = len(ip_list[1:])
-    for worker_idx in range(1, len(ip_list)):
+    worker_ips = ip_list[1:]
+    for idx, ip in enumerate(worker_ips):
         display = rich_status.Status(
-            f'[bold cyan]Workers {worker_idx-1}/{total_workers} Ready')
+            f'[bold cyan]Workers {idx}/{total_workers} Ready')
         display.start()
 
-        worker_ip = ip_list[worker_idx]
         worker_cmd = (f'ray stop; ray start --address={head_ip}:6379 '
                       '--object-manager-port=8076 '
                       f'--resources={custom_resources!r}')
-        rc, _, _ = run_command_on_ip_via_ssh(worker_ip,
+        rc, _, _ = run_command_on_ip_via_ssh(ip,
                                              worker_cmd,
                                              ssh_user=ssh_user,
                                              ssh_private_key=ssh_key,
@@ -788,11 +797,11 @@ def launch_local_cluster(yaml_config, custom_resources=None):
         display = rich_status.Status(
             f'[bold cyan]Workers {total_workers}/{total_workers} Ready')
         display.start()
-        time.sleep(1)
         display.stop()
 
 
-def save_censored_yaml(yaml_config):
+def save_distributable_yaml(yaml_config: Dict[str, Dict[str, object]]):
+    """Generates a distributable yaml for the system admin to send to users."""
     del yaml_config['auth']
     cluster_name = yaml_config['cluster']['name']
     abs_yaml_path = os.path.expanduser(SKY_USER_LOCAL_CONFIG_PATH)
@@ -815,7 +824,8 @@ def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
         config = auth.setup_gcp_authentication(config)
     elif cloud_type == 'Azure':
         config = auth.setup_azure_authentication(config)
-    elif config['provider']['type'] == 'local':
+    elif cloud_type == config['cluster_name']:
+        # Local cluster case
         pass
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')

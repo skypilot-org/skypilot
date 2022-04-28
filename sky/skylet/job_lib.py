@@ -192,7 +192,8 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     return records
 
 
-def query_job_status(cluster_name: str, job_ids: List[int]) -> List[JobStatus]:
+def query_job_status(cluster_name: str, ssh_user: str,
+                     job_ids: List[int]) -> List[JobStatus]:
     """Return the status of the jobs based on the `ray job status` command.
 
     Though we update job status actively in ray program and job cancelling,
@@ -204,7 +205,8 @@ def query_job_status(cluster_name: str, job_ids: List[int]) -> List[JobStatus]:
 
     # TODO: if too slow, directly query against redis.
     jobs_hash = [
-        hashlib.sha256(f'{cluster_name}-{job_id}'.encode()).hexdigest()
+        hashlib.sha256(
+            f'{cluster_name}-{job_id}-{ssh_user}'.encode()).hexdigest()
         for job_id in job_ids
     ]
     test_cmd = [
@@ -259,7 +261,9 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status(cluster_name: str, submitted_gap_sec: int = 0) -> None:
+def update_status(cluster_name: str,
+                  ssh_user: str,
+                  submitted_gap_sec: int = 0) -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
@@ -272,7 +276,7 @@ def update_status(cluster_name: str, submitted_gap_sec: int = 0) -> None:
         submitted_gap_sec=submitted_gap_sec)
     running_job_ids = [job['job_id'] for job in running_jobs]
 
-    job_status = query_job_status(cluster_name, running_job_ids)
+    job_status = query_job_status(cluster_name, ssh_user, running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
         # Do not update the status if the ray job status is RUNNING,
@@ -332,7 +336,8 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
     _show_job_queue(jobs)
 
 
-def cancel_jobs(cluster_name: str, jobs: Optional[List[int]]) -> None:
+def cancel_jobs(cluster_name: str, ssh_user: str,
+                jobs: Optional[List[int]]) -> None:
     """Cancel the jobs.
 
     Args:
@@ -347,7 +352,8 @@ def cancel_jobs(cluster_name: str, jobs: Optional[List[int]]) -> None:
 
     jobs = [job['job_id'] for job in job_records]
     jobs_hash = [
-        hashlib.sha256(f'{cluster_name}-{job_id}'.encode()).hexdigest()
+        hashlib.sha256(
+            f'{cluster_name}-{job_id}-{ssh_user}'.encode()).hexdigest()
         for job_id in jobs
     ]
     # TODO(zhwu): `ray job stop` will wait for the jobs to be killed, but
@@ -420,9 +426,9 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def update_status(cls, cluster_name: str) -> str:
+    def update_status(cls, cluster_name: str, ssh_user: str) -> str:
         code = [
-            f'job_lib.update_status({cluster_name!r})',
+            f'job_lib.update_status({cluster_name!r}, {ssh_user!r})',
         ]
         return cls._build(code)
 
@@ -432,9 +438,11 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs(cls, cluster_name: str,
+    def cancel_jobs(cls, cluster_name: str, ssh_user: str,
                     job_ids: Optional[List[int]]) -> str:
-        code = [f'job_lib.cancel_jobs({cluster_name!r},{job_ids!r})']
+        code = [
+            f'job_lib.cancel_jobs({cluster_name!r},{ssh_user!r},{job_ids!r})'
+        ]
         return cls._build(code)
 
     @classmethod
@@ -444,10 +452,11 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def tail_logs(cls, cluster_name: str, job_id: int) -> str:
+    def tail_logs(cls, cluster_name: str, ssh_user: str, job_id: int) -> str:
         code = [
             f'log_dir = job_lib.log_dir({job_id})',
-            f'log_lib.tail_logs({cluster_name!r},{job_id}, log_dir)',
+            f'log_lib.tail_logs({cluster_name!r},{ssh_user!r},{job_id}, '
+            'log_dir)',
         ]
         return cls._build(code)
 
