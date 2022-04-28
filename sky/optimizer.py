@@ -84,14 +84,18 @@ class Optimizer:
                  raise_error: bool = False):
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
-        dag = Optimizer._add_dummy_source_sink_nodes(dag)
-        optimized_dag, unused_best_plan = Optimizer._optimize_objective(
-            dag,
-            minimize_cost=minimize == OptimizeTarget.COST,
-            blocked_launchable_resources=blocked_launchable_resources,
-            raise_error=raise_error)
-        optimized_dag = Optimizer._remove_dummy_source_sink_nodes(optimized_dag)
-        return optimized_dag
+        Optimizer._add_dummy_source_sink_nodes(dag)
+        try:
+            unused_best_plan = Optimizer._optimize_objective(
+                dag,
+                minimize_cost=minimize == OptimizeTarget.COST,
+                blocked_launchable_resources=blocked_launchable_resources,
+                raise_error=raise_error)
+        finally:
+            # Make sure to remove the dummy source/sink nodes, even if the optimization
+            # fails.
+            Optimizer._remove_dummy_source_sink_nodes(dag)
+        return dag
 
     @staticmethod
     def _add_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
@@ -132,17 +136,17 @@ class Optimizer:
             sink = make_dummy(_DUMMY_SINK_NAME)
             for real_sink_node in zero_outdegree_nodes:
                 real_sink_node >> sink  # pylint: disable=pointless-statement
-        return dag
 
     @staticmethod
     def _remove_dummy_source_sink_nodes(dag: 'dag_lib.Dag'):
         """Removes special Source and Sink nodes."""
         source = [t for t in dag.tasks if t.name == _DUMMY_SOURCE_NAME]
         sink = [t for t in dag.tasks if t.name == _DUMMY_SINK_NAME]
+        if len(source) == len(sink) == 0:
+            return dag
         assert len(source) == len(sink) == 1, dag.tasks
         dag.remove(source[0])
         dag.remove(sink[0])
-        return dag
 
     @staticmethod
     def _get_egress_info(
@@ -678,7 +682,7 @@ class Optimizer:
         blocked_launchable_resources: Optional[List[
             resources_lib.Resources]] = None,
         raise_error: bool = False,
-    ) -> Tuple['dag_lib.Dag', Dict[Task, resources_lib.Resources]]:
+    ) -> Dict[Task, resources_lib.Resources]:
         """Finds the optimal task-resource mapping for the entire DAG.
 
         The optimal mapping should consider the egress cost/time so that
@@ -717,7 +721,7 @@ class Optimizer:
         Optimizer.print_optimized_plan(graph, best_plan, total_time, total_cost,
                                        node_to_cost_map, minimize_cost)
         Optimizer._print_candidates(node_to_candidate_map)
-        return dag, best_plan
+        return best_plan
 
 
 class DummyResources(resources_lib.Resources):

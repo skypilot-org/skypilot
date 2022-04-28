@@ -81,7 +81,7 @@ def _execute(dag: sky.Dag,
       autostop_idle_minutes: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
     """
-    assert len(dag) == 1, 'Sky assumes 1 task for now.'
+    assert len(dag) == 1, f'Sky assumes 1 task for now. {dag}'
     task = dag.tasks[0]
 
     if task.need_spot_recovery:
