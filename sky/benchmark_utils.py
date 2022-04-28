@@ -7,18 +7,21 @@ from sky.backends import backend_utils
 from sky.skylet import log_lib
 
 
-# FIXME
 SKY_CLOUD_BENCHMARK_DIR = '~/sky_benchmark_dir'
 SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 
 
 def _download_benchmark_log(benchmark: str, cluster_name: str, logger_name: str) -> None:
     """Download the benchmark logs from the cluster."""
-    # FIXME: Download only the log file, not others.
+    if logger_name not in ['wandb', 'tensorboard']:
+        raise ValueError(f'Unknown logger {logger_name}')
+
+    # FIXME: Download only the necessary file, not others.
     cmd = [
         'rsync',
         '-Pavz',
         # FIXME: use ssh hostname instead.
+        # FIXME: test on multi-node clusters.
     ]
     if logger_name == 'wandb':
         cmd += [
@@ -43,17 +46,15 @@ def _download_benchmark_log(benchmark: str, cluster_name: str, logger_name: str)
     )
 
 
-def download_logs(benchmark, logger_name, clusters):
-    benchmark_dir = f'{SKY_LOCAL_BENCHMARK_DIR}/{benchmark}'
+def download_benchmark_logs_in_parallel(benchmark, logger_name, clusters):
+    benchmark_dir = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark)
     subprocess.run(['mkdir', '-p', benchmark_dir], check=False)
-
-    # Download the log files.
     with backend_utils.safe_console_status('[bold cyan]Downloading logs[/]'):
         backend_utils.run_in_parallel(
             lambda cluster: _download_benchmark_log(benchmark, cluster, logger_name), clusters)
 
 
-def parse_tensorboard(log_dir: str) -> Tuple[int, int, int, int]:
+def _parse_tensorboard(log_dir: str) -> Tuple[int, int, int, int]:
     import pandas as pd
     from tensorboard.backend.event_processing import event_accumulator
 
@@ -77,7 +78,7 @@ def parse_tensorboard(log_dir: str) -> Tuple[int, int, int, int]:
     return start_ts, first_ts, last_ts, iters
 
 
-def parse_wandb(log_dir: str) -> Tuple[int, int, int, int]:
+def _parse_wandb(log_dir: str) -> Tuple[int, int, int, int]:
     import pandas as pd
 
     wandb_summary = os.path.join(log_dir, 'wandb-summary.json')
@@ -90,3 +91,22 @@ def parse_wandb(log_dir: str) -> Tuple[int, int, int, int]:
     start_ts = last_ts - summary['_runtime']
     first_ts = None  # run.scan_history(keys=['_timestamp'], max_step=1)
     return start_ts, first_ts, last_ts, iters
+
+
+def parse_benchmark_log(benchmark: str, logger_name: str, cluster):
+    """Parse the locally saved benchmark log."""
+    if logger_name not in ['wandb', 'tensorboard']:
+        raise ValueError(f'Unknown logger {logger_name}')
+
+    log_dir = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
+    if logger_name == 'wandb':
+        return _parse_wandb(log_dir)
+    elif logger_name == 'tensorboard':
+        return  _parse_tensorboard(log_dir)
+    else:
+        assert False
+
+
+def remove_benchmark_logs(benchmark: str):
+    log_dir = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark)
+    subprocess.run(['rm', '-rf', log_dir], check=False)
