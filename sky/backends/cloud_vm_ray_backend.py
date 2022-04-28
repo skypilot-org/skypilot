@@ -198,7 +198,7 @@ class RayCodeGen:
             # FIXME: This is a hack to make sure that the functions can be found
             # by ray.remote. This should be removed once we have a better way to
             # specify dependencies for ray.
-            inspect.getsource(log_lib.redirect_process_output),
+            inspect.getsource(log_lib.process_subprocess_stream),
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.make_task_bash_script),
             inspect.getsource(log_lib.run_bash_command_with_log),
@@ -1024,7 +1024,7 @@ class RetryingVmProvisioner(object):
         log_lib.run_with_log(
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
-            stream_logs=True)
+            stream_logs=False)
 
     def provision_with_retries(
         self,
@@ -1430,7 +1430,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
                 f'is {dir_size} MB. Try to keep workdir small or use '
                 '.gitignore to exclude large files, as large sizes will slow '
-                'down rsync. {style.RESET_ALL}')
+                f'down rsync.{style.RESET_ALL}')
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
@@ -1757,6 +1757,7 @@ class CloudVmRayBackend(backends.Backend):
                     ssh_user=ssh_user,
                     ssh_private_key=ssh_key,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
+                    process_stream=False,
                     ssh_control_name=self._ssh_control_name(handle))
                 backend_utils.handle_returncode(
                     returncode=returncode,
@@ -1768,9 +1769,7 @@ class CloudVmRayBackend(backends.Backend):
             plural = 's' if num_nodes > 1 else ''
             logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
                         f'{style.RESET_ALL}')
-            with backend_utils.safe_console_status(
-                    '[bold cyan]Running setup[/]'):
-                backend_utils.run_in_parallel(_setup_node, ip_list)
+            backend_utils.run_in_parallel(_setup_node, ip_list)
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
@@ -1789,29 +1788,42 @@ class CloudVmRayBackend(backends.Backend):
             return None
         return job_lib.JobStatus(result.split(' ')[-1])
 
-    def sync_down_logs(self, handle: ResourceHandle, job_id: int) -> None:
-        code = job_lib.JobLibCodeGen.get_log_path(job_id)
-        returncode, log_dir, stderr = self.run_on_head(handle,
-                                                       code,
-                                                       stream_logs=False,
-                                                       require_outputs=True)
+    def sync_down_logs(self, handle: ResourceHandle, job_ids: str) -> None:
+        code = job_lib.JobLibCodeGen.get_log_path_with_globbing(job_ids)
+        returncode, log_dirs, stderr = self.run_on_head(handle,
+                                                        code,
+                                                        stream_logs=False,
+                                                        require_outputs=True)
         backend_utils.handle_returncode(returncode, code,
                                         'Failed to sync logs.', stderr)
-        log_dir = log_dir.strip()
+        log_dirs = ast.literal_eval(log_dirs)
+        if not log_dirs or len(log_dirs) == 0:
+            logger.info(f'{colorama.Fore.YELLOW}'
+                        'No matching log directories found'
+                        f'{colorama.Style.RESET_ALL}')
+            return
 
-        local_log_dir = os.path.expanduser(log_dir)
-        remote_log_dir = log_dir
+        job_ids = [log_dir[0] for log_dir in log_dirs]
+        local_log_dirs = [
+            os.path.expanduser(log_dir[1]) for log_dir in log_dirs
+        ]
+        remote_log_dirs = [log_dir[1] for log_dir in log_dirs]
 
         style = colorama.Style
         fore = colorama.Fore
-        logger.info(f'{fore.CYAN}Logs Directory: '
-                    f'{style.BRIGHT}{local_log_dir}{style.RESET_ALL}')
+        logger.info(f'{fore.CYAN}Logs Directories: {style.RESET_ALL}')
+        for job_id, log_dir in zip(job_ids, local_log_dirs):
+            logger.info(f'{fore.CYAN}'
+                        f'{style.BRIGHT}Job ID: {style.NORMAL}{job_id}'
+                        f' {style.BRIGHT}Path: {style.NORMAL}{log_dir}'
+                        f'{style.RESET_ALL}')
 
         ips = backend_utils.get_node_ips(handle.cluster_yaml,
                                          handle.launched_nodes,
                                          handle=handle)
 
-        def rsync_down(ip: str) -> None:
+        def rsync_down(ip: str, local_log_dir: str,
+                       remote_log_dir: str) -> None:
             from ray.autoscaler import sdk  # pylint: disable=import-outside-toplevel
             sdk.rsync(
                 handle.cluster_yaml,
@@ -1824,21 +1836,26 @@ class CloudVmRayBackend(backends.Backend):
             )
 
         # Call the ray sdk to rsync the logs back to local.
-        for i, ip in enumerate(ips):
-            try:
-                # Disable the output of rsync.
-                with open('/dev/null', 'a') as f, contextlib.redirect_stdout(
-                        f), contextlib.redirect_stderr(f):
-                    rsync_down(ip)
-                logger.info(f'{fore.CYAN}Job {job_id} logs: Downloaded from '
-                            f'node-{i} ({ip}){style.RESET_ALL}')
-            except click.exceptions.ClickException as e:
-                # Raised by rsync_down. Remote log dir may not exist, since
-                # the job can be run on some part of the nodes.
-                if 'SSH command failed' in str(e):
-                    logger.debug(f'node-{i} ({ip}) does not have the tasks/*.')
-                else:
-                    raise e
+        for job_id, local_log_dir, remote_log_dir in zip(
+                job_ids, local_log_dirs, remote_log_dirs):
+            for i, ip in enumerate(ips):
+                try:
+                    # Disable the output of rsync.
+                    with open('/dev/null',
+                              'a') as f, contextlib.redirect_stdout(
+                                  f), contextlib.redirect_stderr(f):
+                        rsync_down(ip, local_log_dir, remote_log_dir)
+                    logger.info(
+                        f'{fore.CYAN}Job {job_id} logs: Downloaded from '
+                        f'node-{i} ({ip}){style.RESET_ALL}')
+                except click.exceptions.ClickException as e:
+                    # Raised by rsync_down. Remote log dir may not exist, since
+                    # the job can be run on some part of the nodes.
+                    if 'SSH command failed' in str(e):
+                        logger.debug(
+                            f'node-{i} ({ip}) does not have the tasks/*.')
+                    else:
+                        raise e
 
     def _exec_code_on_head(
         self,
@@ -1914,7 +1931,7 @@ class CloudVmRayBackend(backends.Backend):
             handle,
             code,
             stream_logs=True,
-            redirect_stdout_stderr=False,
+            process_stream=False,
             # Allocate a pseudo-terminal to disable output buffering. Otherwise,
             # there may be 5 minutes delay in logging.
             ssh_mode=backend_utils.SshMode.INTERACTIVE)
@@ -2333,7 +2350,7 @@ class CloudVmRayBackend(backends.Backend):
         *,
         port_forward: Optional[List[str]] = None,
         log_path: str = '/dev/null',
-        redirect_stdout_stderr: bool = True,
+        process_stream: bool = True,
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
         ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
@@ -2354,7 +2371,7 @@ class CloudVmRayBackend(backends.Backend):
             ssh_private_key=ssh_private_key,
             port_forward=port_forward,
             log_path=log_path,
-            redirect_stdout_stderr=redirect_stdout_stderr,
+            process_stream=process_stream,
             stream_logs=stream_logs,
             ssh_mode=ssh_mode,
             ssh_control_name=self._ssh_control_name(handle),

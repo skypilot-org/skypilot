@@ -21,6 +21,24 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     region: Region
 
 
+class _CloudRegistry(dict):
+    """Registry of clouds."""
+
+    def from_str(self, name: Optional[str]) -> Optional['Cloud']:
+        if name is None:
+            return None
+        return self.get(name.lower())
+
+    def register(self, cloud_cls: 'Cloud') -> None:
+        name = cloud_cls.__name__.lower()
+        assert name not in self, f'{name} already registered'
+        self[name] = cloud_cls()
+        return cloud_cls
+
+
+CLOUD_REGISTRY = _CloudRegistry()
+
+
 class Cloud:
     """A cloud provider."""
 

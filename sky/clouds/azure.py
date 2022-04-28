@@ -18,6 +18,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
+@clouds.CLOUD_REGISTRY.register
 class Azure(clouds.Cloud):
     """Azure."""
 
