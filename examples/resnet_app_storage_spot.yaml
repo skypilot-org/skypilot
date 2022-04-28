@@ -4,7 +4,7 @@ resources:
   cloud: aws
   accelerators: V100
   use_spot: true
-  spot_recovery: FAILOVER
+  spot_recovery: failover
 
 file_mounts:
   /tmp/imagenet:
