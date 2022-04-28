@@ -119,7 +119,9 @@ def _get_cloud(cloud: Optional[str],
             if local_cloud:
                 return local_cloud
             raise click.UsageError(
-                f'Local cluster \'{cluster_name}\' does not exist.')
+                f'Local cluster \'{cluster_name}\' does not exist. \n'
+                'Specify -c [local_cluster] to launch on a local cluster. \n'
+                'See `sky status` for local cluster name(s).')
         raise click.UsageError(
             f'Cloud \'{cloud}\' is not supported. '
             f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
@@ -891,8 +893,6 @@ def exec(
               help='Query remote clusters for their latest autostop settings.')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
-    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Listing all cloud '
-               f'clusters:{colorama.Style.RESET_ALL}')
     status_utils.show_status_table(all, refresh)
     backend_utils.run('sky local status')
 
@@ -2054,7 +2054,7 @@ def local_status():
     columns = [
         'NAME',
         'CLUSTER_USER',
-        'CLUSTER_RESOURCES',
+        'RESOURCES',
         'COMMAND',
     ]
 
@@ -2081,7 +2081,7 @@ def local_status():
             cluster_name,
             # CLUSTER USER
             username,
-            # CLUSTER RESOURCES
+            # RESOURCES
             resources_str,
             # COMMAND
             cluster_status['last_use'],
@@ -2097,15 +2097,15 @@ def local_status():
                 clus,
                 # CLUSTER USER
                 '-',
-                # CLUSTER RESOURCES
+                # RESOURCES
                 '-',
                 # COMMAND
                 '-',
             ]
             cluster_table.add_row(row)
 
-    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Listing all local '
-               f'clusters:{colorama.Style.RESET_ALL}')
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Local '
+               f'Clusters:{colorama.Style.RESET_ALL}')
     if clusters_status or all_local_clusters:
         click.echo(cluster_table)
     else:

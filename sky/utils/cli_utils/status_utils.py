@@ -69,6 +69,7 @@ def show_status_table(show_all: bool, refresh: bool):
                 '\n'
                 f'You have {pending_autostop} clusters with autostop scheduled.'
                 ' Refresh statuses with: `sky status --refresh`.')
+        click.echo('\n')
     else:
         click.echo('No existing clusters.')
 

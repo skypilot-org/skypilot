@@ -1348,8 +1348,8 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name, handle.launched_resources, handle.launched_nodes,
                 True)
         cloud = to_provision.cloud
-        ssh_user = task.auth_config['ssh_user']
         if isinstance(to_provision.cloud, clouds.Local):
+            ssh_user = task.auth_config['ssh_user']
             logger.info(
                 f'{colorama.Fore.CYAN}Connecting to existing local cluster: '
                 f'"{cluster_name}" [Local Cluster: {cloud}, '
