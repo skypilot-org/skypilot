@@ -92,8 +92,8 @@ class Optimizer:
                 blocked_launchable_resources=blocked_launchable_resources,
                 raise_error=raise_error)
         finally:
-            # Make sure to remove the dummy source/sink nodes, even if the optimization
-            # fails.
+            # Make sure to remove the dummy source/sink nodes, even if the
+            # optimization fails.
             Optimizer._remove_dummy_source_sink_nodes(dag)
         return dag
 
