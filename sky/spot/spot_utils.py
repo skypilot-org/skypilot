@@ -1,9 +1,11 @@
 """User interfaces with managed spot jobs."""
 
 import enum
+import json
 import pathlib
 import shlex
-from typing import List
+import time
+from typing import List, Tuple
 
 import colorama
 import filelock
@@ -13,6 +15,8 @@ from sky.spot import spot_state
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 JOB_STATUS_CHECK_GAP_SECONDS = 60
+
+_SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
 
 class UserSignal(enum.Enum):
@@ -135,3 +139,19 @@ class SpotCodeGen:
         code = self._PREFIX + self._code
         code = '; '.join(code)
         return f'python3 -u -c {shlex.quote(code)}'
+
+
+def dump_job_table_cache(job_table):
+    """Dump job table cache to file."""
+    cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
+    with cache_file.open('w') as f:
+        json.dump((time.time(), job_table), f)
+
+
+def load_job_table_cache() -> Tuple[str, str]:
+    """Load job table cache from file."""
+    cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
+    if not cache_file.exists():
+        return None
+    with cache_file.open('r') as f:
+        return json.load(f)

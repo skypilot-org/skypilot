@@ -2121,11 +2121,13 @@ def spot_launch(
                    backend=backend,
                    autostop_idle_minutes=spot_lib.
                    SPOT_CONTROLLER_AUTOSTOP_IDLE_MINUTES,
-                   skip_reserved_cluster_check=True)
+                   is_spot_controller_task=True)
 
 
 def _is_spot_controller_up(
-        stopped_message: str) -> Optional[backends.Backend.ResourceHandle]:
+    stopped_message: str,
+    message_before_hint: Optional[str] = None
+) -> Optional[backends.Backend.ResourceHandle]:
     controller_status, handle = backend_utils.get_cluster_status_with_refresh(
         spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
     if controller_status is None:
@@ -2134,6 +2136,8 @@ def _is_spot_controller_up(
     if controller_status != global_user_state.ClusterStatus.UP:
         msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
+        if message_before_hint is not None:
+            msg += f'\n{message_before_hint}'
         if controller_status == global_user_state.ClusterStatus.STOPPED:
             msg += f'\n{stopped_message}'
         if controller_status == global_user_state.ClusterStatus.INIT:
@@ -2149,9 +2153,17 @@ def spot_status():
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     # TODO(zhwu): Enable status check when spot controller is in INIT state and
     # actually UP.
+    cache = spot_lib.load_job_table_cache()
+    job_table_str = 'No cached job status table found.'
+    if cache is not None:
+        readable_time = log_utils.readable_time_duration(cache[0])
+        job_table_str = (
+            f'\nCached job status table [last updated: {readable_time}]:\n'
+            f'{cache[1]}\n')
     handle = _is_spot_controller_up(
-        'Please start it first with: '
-        f'sky start {spot_lib.SPOT_CONTROLLER_NAME}')
+        'To view the latest job table, please start the controller first with: '
+        f'sky start {spot_lib.SPOT_CONTROLLER_NAME}',
+        message_before_hint=job_table_str)
     if handle is None:
         return
 
@@ -2160,14 +2172,14 @@ def spot_status():
 
     codegen = spot_lib.SpotCodeGen()
     code = codegen.show_jobs()
-    returncode, job_table, stderr = backend.run_on_head(handle,
-                                                        code,
-                                                        require_outputs=True,
-                                                        stream_logs=False)
+    returncode, job_table_str, stderr = backend.run_on_head(
+        handle, code, require_outputs=True, stream_logs=False)
     backend_utils.handle_returncode(returncode, code,
                                     'Failed to fetch managed job statuses',
                                     stderr)
-    click.echo(f'Managed spot jobs:\n{job_table}')
+
+    spot_lib.dump_job_table_cache(job_table_str)
+    click.echo(f'Managed spot jobs:\n{job_table_str}')
 
 
 @spot.command('cancel', cls=_DocumentedCodeCommand)
