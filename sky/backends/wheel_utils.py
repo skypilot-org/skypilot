@@ -30,11 +30,6 @@ def cleanup_wheels_dir(wheel_dir: pathlib.Path,
                 f.unlink()
 
 
-def _get_sky_package_path() -> pathlib.Path:
-    package_root = pathlib.Path(sky.__file__).parent.parent
-    return package_root / 'sky'
-
-
 def _get_latest_built_wheel() -> pathlib.Path:
     try:
         latest_wheel = max(WHEEL_DIR.glob('sky-*.whl'), key=os.path.getctime)
@@ -45,10 +40,9 @@ def _get_latest_built_wheel() -> pathlib.Path:
 
 def _build_sky_wheel() -> pathlib.Path:
     """Build a wheel for Sky."""
-    sky_package_path = _get_sky_package_path()
     # prepare files
-    (WHEEL_DIR / 'sky').symlink_to(sky_package_path, target_is_directory=True)
-    setup_files_dir = sky_package_path / 'setup_files'
+    (WHEEL_DIR / 'sky').symlink_to(SKY_PACKAGE_PATH, target_is_directory=True)
+    setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
     for f in setup_files_dir.iterdir():
         if f.is_file():
             shutil.copy(str(f), str(WHEEL_DIR))
