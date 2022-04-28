@@ -979,9 +979,21 @@ def benchmark_ls() -> None:
         'TASK',
         'LAUNCHED',
         'STATUS',
-        'RESOURCES',
     ]
+
+    max_num_candidates = 1
+    for benchmark in benchmarks:
+        benchmark_results = benchmark_state.get_benchmark_results(benchmark['name'])
+        num_candidates = len(benchmark_results)
+        if num_candidates > max_num_candidates:
+            max_num_candidates = num_candidates
+
+    if max_num_candidates == 1:
+        columns += ['RESOURCES']
+    else:
+        columns += [f'RESOURCES {i}' for i in range(1, max_num_candidates + 1)]
     benchmark_table = log_utils.create_table(columns)
+
     for benchmark in benchmarks:
         benchmark_results = benchmark_state.get_benchmark_results(benchmark['name'])
         benchmark_resources = [
@@ -995,9 +1007,11 @@ def benchmark_ls() -> None:
             datetime.fromtimestamp(benchmark['launched_at']),
             # STATUS
             benchmark['status'].value,
-            # RESOURCES,
-            ', '.join(benchmark_resources),
         ]
+        # RESOURCES
+        for resources in benchmark_resources:
+            row.append(resources)
+        row += [''] * (max_num_candidates - len(benchmark_resources))
         benchmark_table.add_row(row)
     if benchmarks:
         click.echo(benchmark_table)
