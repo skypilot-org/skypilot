@@ -1032,6 +1032,10 @@ def _download_and_update_benchmark_logs(benchmark: str, logger_name: str, cluste
 
 @benchmark.command('show', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
+@click.option('--total-iters',
+              type=int,
+              required=False,
+              help='Total number of iterations.')
 @click.option('--force-download',
               default=False,
               is_flag=True,
@@ -1044,7 +1048,7 @@ def _download_and_update_benchmark_logs(benchmark: str, logger_name: str, cluste
               required=False,
               help='Show all information in full.')
 # pylint: disable=redefined-builtin
-def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
+def benchmark_show(benchmark: str, total_iters: Optional[int], force_download: bool, all: bool) -> None:
     """Show a benchmark report."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is None:
@@ -1069,6 +1073,11 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
         'SEC/ITER',
         '$/ITER',
     ]
+    if total_iters is not None:
+        columns += [
+            'TOTAL_TIME (hr)',
+            'TOTAL_COST ($)',
+        ]
     if all:
         columns += [
             'START_TIMESTAMP',
@@ -1098,8 +1107,10 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
 
         if run_time > 0 and iters is not None:
             sec_per_iter = run_time / (iters - 1)
+            cost_per_iter = num_nodes * resources.get_cost(sec_per_iter)
         else:
             sec_per_iter = 0
+            cost_per_iter = 0
 
         row = [
             # NAME
@@ -1115,8 +1126,18 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
             # SEC/ITER
             f'{sec_per_iter:.2f}',
             # $/ITER
-            f'{num_nodes * resources.get_cost(sec_per_iter):.6f}',
+            f'{cost_per_iter:.6f}',
         ]
+        if total_iters is not None:
+            total_time = init_time + sec_per_iter * total_iters
+            total_cost = num_nodes * resources.get_cost(total_time)
+            row += [
+                # TOTAL_TIME (hr)
+                f'{total_time / 3600:.2f}',
+                # TOTAL_COST ($)
+                f'{total_cost:.4f}',
+            ]
+
         if all:
             if first_ts is None:
                 first_ts = '-'
