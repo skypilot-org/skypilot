@@ -106,7 +106,7 @@ def update_benchmark_result(benchmark_name: str,
 
 
 def finish_benchmark(benchmark_name: str):
-    """Finish a benchmark."""
+    """Mark a benchmark state as finished."""
     _BENCHMARK_DB.cursor.execute(
         'UPDATE benchmark SET status=(?) WHERE name=(?)',
         (BenchmarkStatus.FINISHED.value, benchmark_name))
