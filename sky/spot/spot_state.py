@@ -128,12 +128,27 @@ def set_succeeded(job_id: int):
 
 
 def set_failed(job_id: int):
+    end_time = time.time()
+    filed_to_set = {
+        'end_at': end_time,
+        'status': SpotStatus.FAILED.value,
+    }
+    previsou_status = _CURSOR.execute(
+        'SELECT status FROM spot WHERE job_id=(?)', (job_id,)).fetchone()
+    previsou_status = SpotStatus(previsou_status[0])
+    if previsou_status in [SpotStatus.RECOVERING]:
+        # If the job is recovering, we should set the
+        # last_recovered_at to the end_time, so that the
+        # end_at - last_recovered_at will not be affect the job duration
+        # calculation.
+        filed_to_set['last_recovered_at'] = end_time
+    set_str = ', '.join(f'{k}=(?)' for k in filed_to_set)
     _CURSOR.execute(
-        """\
+        f"""\
         UPDATE spot SET
-        status=(?), end_at=(?)
+        {set_str}
         WHERE job_id=(?) AND end_at IS null""",
-        (SpotStatus.FAILED.value, time.time(), job_id))
+        (*list(filed_to_set.values()), job_id))
     _CONN.commit()
     logger.info('Job failed.')
 

@@ -49,12 +49,15 @@ class SpotController:
         spot_state.set_started(self._job_id)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
+            # Handle the signal if it is sent by the user.
             user_signal = self._check_signal()
             if user_signal == spot_utils.UserSignal.CANCEL:
                 logger.info(f'User sent {user_signal.value} signal.')
                 spot_state.set_cancelled(self._job_id)
                 break
 
+            # Check the network connection to avoid false alarm for job failure.
+            # Network glitch was observed even in the VM.
             try:
                 backend_utils.check_network_connection()
             except exceptions.NetworkError:
@@ -102,6 +105,8 @@ class SpotController:
         """Start the controller."""
         try:
             self._run()
+        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+            logger.error(f'Unexpected error occured: Exception {type(e)}({e})')
         finally:
             self._strategy_executor.terminate_cluster()
             job_status = spot_state.get_status(self._job_id)

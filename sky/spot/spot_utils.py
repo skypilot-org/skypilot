@@ -72,7 +72,7 @@ def show_jobs() -> str:
     jobs = spot_state.get_spot_jobs()
 
     job_table = log_utils.create_table([
-        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'STARTED', 'TOT. DURATION',
+        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'STARTED',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
     ])
     for job in jobs:
@@ -90,11 +90,14 @@ def show_jobs() -> str:
             job['job_id'],
             job['job_name'],
             job['resources'],
+            # SUBMITTED
             log_utils.readable_time_duration(job['submitted_at']),
-            log_utils.readable_time_duration(job['start_at']),
+            # TOT. DURATION
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
                                              absolute=True),
+            # STARTED
+            log_utils.readable_time_duration(job['start_at']),
             job_duration,
             job['recovery_count'],
             job['status'].value,
