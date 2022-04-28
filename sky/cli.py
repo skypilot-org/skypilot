@@ -828,10 +828,9 @@ def benchmark():
     type=str,
     help='The region to use. If specified, override the "resources.region".')
 @click.option('--gpus',
-              multiple=True,
               required=True,
               type=str,
-              help='The GPU types to benchmark.')
+              help='The comma-separated GPU types to benchmark.')
 @click.option('--num-nodes',
               required=False,
               type=int,
@@ -887,6 +886,8 @@ def benchmark_launch(
         entrypoint = None
         is_yaml = False
 
+    gpus = gpus.split(',')
+    gpus = [gpu.strip() for gpu in gpus]
     click.secho('Benchmarking: ', fg='yellow', nl=False)
     click.secho(f'{", ".join(gpus)}', bold=True)
 
