@@ -238,6 +238,7 @@ def test_tpu():
         'tpu_app',
         [
             f'sky launch -y -c {name} examples/tpu_app.yaml',
+            f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -326,7 +327,7 @@ def test_autostop():
             f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
             f'sky autostop {name} -i 1',
             f'sky status | grep {name} | grep -q "1 min"',  # Ensure autostop is set.
-            'sleep 120',
+            'sleep 180',
             f'sky status --refresh | grep {name} | grep -q STOPPED',  # Ensure the cluster is STOPPED.
             f'sky start -y {name}',
             f'sky status | grep {name} | grep -q UP',  # Ensure the cluster is UP.
@@ -348,12 +349,10 @@ def test_cancel():
             f'sky launch -c {name} examples/resnet_app.yaml -y -d',
             # Wait the GPU process to start.
             'sleep 60',
-            f'sky exec {name} "nvidia-smi | grep python"',
-            f'sky logs {name} 2 --status',
+            f'sky exec {name} "nvidia-smi | grep -q python"',
             f'sky cancel {name} 1',
-            'sleep 5',
-            f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
-            f'sky logs {name} 3 --status',
+            'sleep 60',
+            f'sky exec {name} "nvidia-smi | grep -q \'No running process\'"',
         ],
         f'sky down -y {name}',
     )
@@ -369,12 +368,10 @@ def test_cancel_pytorch():
             f'sky launch -c {name} examples/resnet_distributed_torch.yaml -y -d',
             # Wait the GPU process to start.
             'sleep 60',
-            f'sky exec {name} "nvidia-smi | grep python"',
-            f'sky logs {name} 2 --status',
+            f'sky exec {name} "nvidia-smi | grep -q python"',
             f'sky cancel {name} 1',
-            'sleep 5',
-            f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
-            f'sky logs {name} 3 --status',
+            'sleep 60',
+            f'sky exec {name} "nvidia-smi | grep -q \'No running process\'"',
         ],
         f'sky down -y {name}',
     )
@@ -388,18 +385,13 @@ def test_managed_spot():
     test = Test('managed_spot', [
         f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
         f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
-        'sleep 180',
-        f'sky spot status | grep {name}-1 | grep RUNNING',
-        f'sky spot status | grep {name}-2 | grep RUNNING',
+        'sleep 5',
+        f'sky spot status | grep {name}-1 | grep -q STARTING',
+        f'sky spot status | grep {name}-2 | grep -q STARTING',
         f'sky spot cancel -y -n {name}-1',
-        'sleep 60',
-        f'sky spot status | grep {name}-1 | grep CANCELLED',
-        f'sky spot status | grep {name}-2 | grep RUNNING',
-        'sleep 60',
-        f'sky queue sky-spot-controller | grep {name}-1 | grep SUCCEEDED',
-        f'sky queue sky-spot-controller | grep {name}-2 | grep RUNNING',
-        'sleep 60',
-        f'sky queue sky-spot-controller | grep {name}-2 | grep SUCCEEDED',
+        'sleep 100',
+        f'sky spot status | grep {name}-1 | grep -q CANCELLED',
+        f'sky spot status | grep {name}-2 | grep -q RUNNING',
     ])
     run_one_test(test)
 
