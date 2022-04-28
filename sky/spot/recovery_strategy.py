@@ -51,11 +51,16 @@ class StrategyExecutor:
         task.set_resources({resources.copy(spot_recovery=None)})
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task)
 
-    def launch(self, max_retry=3, retry_gap_seconds=60, raise_on_failure=True):
+    def launch(self,
+               max_retry=3,
+               retry_gap_seconds=60,
+               raise_on_failure=True) -> bool:
         """Launch the spot cluster for the first time.
 
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
+
+        Returns: True if the cluster is successfully launched.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
@@ -71,10 +76,10 @@ class StrategyExecutor:
                 # code.
                 logger.info('Failed to launch the spot cluster.')
 
-            cluster_status, _ = backend_utils.get_cluster_status_with_refresh(
+            cluster_status, _ = backend_utils.refresh_cluster_status_handle(
                 self.cluster_name, force_refresh=True)
             if cluster_status == global_user_state.ClusterStatus.UP:
-                return
+                return True
             # TODO(zhwu): maybe exponential backoff is better?
             if retry_cnt > max_retry:
                 if raise_on_failure:
@@ -82,7 +87,7 @@ class StrategyExecutor:
                         f'Failed to launch the spot cluster after {max_retry} '
                         'retries.')
                 else:
-                    return
+                    return False
             logger.info(
                 f'Retrying to launch the spot cluster in {retry_gap_seconds} '
                 'seconds.')
@@ -129,11 +134,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             # job canceling can get connection error.
             pass
 
-        self.launch(raise_on_failure=False)
-
-        cluster_status, _ = backend_utils.get_cluster_status_with_refresh(
-            self.cluster_name, force_refresh=True)
-        if cluster_status == global_user_state.ClusterStatus.UP:
+        is_launched = self.launch(raise_on_failure=False)
+        if is_launched:
             return
 
         # Step 2

@@ -85,7 +85,7 @@ class SpotController:
             if job_status == job_lib.JobStatus.FAILED:
                 # Check the status of the spot cluster. It can be STOPPED or UP,
                 # where STOPPED means partially down.
-                cluster_status = backend_utils.get_cluster_status_with_refresh(
+                cluster_status = backend_utils.refresh_cluster_status_handle(
                     self._cluster_name, force_refresh=True)[0]
                 if cluster_status == global_user_state.ClusterStatus.UP:
                     # The user code has probably crashed.

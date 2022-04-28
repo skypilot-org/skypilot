@@ -568,7 +568,9 @@ class RetryingVmProvisioner(object):
         zones = None
         # Try loading previously launched region/zones and try them first,
         # because we may have an existing cluster there.
-        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        # Get the *previous* cluster status and handle.
+        cluster_status, handle = backend_utils.refresh_cluster_status_handle(
+            cluster_name)
         if handle is not None:
             try:
                 config = backend_utils.read_yaml(handle.cluster_yaml)
@@ -600,9 +602,7 @@ class RetryingVmProvisioner(object):
             if zones is not None:
                 zones = [clouds.Zone(name=zone) for zone in zones.split(',')]
                 region.set_zones(zones)
-            # Get the *previous* cluster status.
-            cluster_status = backend_utils.get_cluster_status_with_refresh(
-                cluster_name)
+
             if cluster_status != global_user_state.ClusterStatus.UP:
                 logger.info(
                     f'Cluster {cluster_name!r} (status: {cluster_status.value})'
@@ -762,8 +762,8 @@ class RetryingVmProvisioner(object):
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
         # Get previous cluster status
-        prev_cluster_status = backend_utils.get_cluster_status_with_refresh(
-            cluster_name)
+        prev_cluster_status = backend_utils.refresh_cluster_status_handle(
+            cluster_name)[0]
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
@@ -1273,8 +1273,8 @@ class CloudVmRayBackend(backends.Backend):
             if not dryrun:  # dry run doesn't need to check existing cluster.
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
-                prev_cluster_status = (
-                    backend_utils.get_cluster_status_with_refresh(cluster_name))
+                prev_cluster_status, _ = (
+                    backend_utils.refresh_cluster_status_handle(cluster_name))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
             # TODO(suquark): once we have sky on PYPI, we should directly
@@ -2129,7 +2129,7 @@ class CloudVmRayBackend(backends.Backend):
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
-        prev_status = backend_utils.get_cluster_status_with_refresh(
+        prev_status, _ = backend_utils.refresh_cluster_status_handle(
             handle.cluster_name)
         cluster_name = handle.cluster_name
         if terminate and isinstance(cloud, clouds.Azure):

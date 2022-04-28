@@ -381,27 +381,6 @@ def test_cancel_pytorch():
     run_one_test(test)
 
 
-# ---------- Testing `sky cancel` ----------
-def test_cancel_pytorch():
-    name = _get_cluster_name()
-    test = Test(
-        'cancel',
-        [
-            f'sky launch -c {name} examples/resnet_distributed_torch.yaml -y -d',
-            # Wait the GPU process to start.
-            'sleep 60',
-            f'sky exec {name} "nvidia-smi | grep python"',
-            f'sky logs {name} 2 --status',
-            f'sky cancel {name} 1',
-            'sleep 5',
-            f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
-            f'sky logs {name} 3 --status',
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
-
-
 # ---------- Testing managed spot ----------
 def test_managed_spot():
     """Test the spot yaml."""
@@ -413,7 +392,7 @@ def test_managed_spot():
         f'sky spot status | grep {name}-1 | grep RUNNING',
         f'sky spot status | grep {name}-2 | grep RUNNING',
         f'sky spot cancel -y -n {name}-1',
-        'sleep 5',
+        'sleep 60',
         f'sky spot status | grep {name}-1 | grep CANCELLED',
         f'sky spot status | grep {name}-2 | grep RUNNING',
         'sleep 60',

@@ -1150,8 +1150,6 @@ def _ping_cluster_and_set_status(record: Dict[str, Any]) -> Dict[str, Any]:
 
     check_network_connection()
 
-    record['ips'] = None
-
     try:
         ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         # If we get node ips correctly, the cluster is UP. It is safe to
@@ -1178,17 +1176,14 @@ def _ping_cluster_and_set_status(record: Dict[str, Any]) -> Dict[str, Any]:
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def get_cluster_status_with_refresh(
+def refresh_cluster_status_handle(
     cluster_name: str,
     force_refresh: bool = False
-) -> Union[Optional[global_user_state.ClusterStatus],
-           Tuple[Optional[global_user_state.ClusterStatus],
-                 Optional[backends.Backend.ResourceHandle]]]:
+) -> Tuple[Optional[global_user_state.ClusterStatus],
+           Optional[backends.Backend.ResourceHandle]]:
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
-        if force_refresh:
-            return None, None
-        return None
+        return None, None
 
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
@@ -1196,9 +1191,7 @@ def get_cluster_status_with_refresh(
             # Refresh the status only when force_refresh is True or the cluster
             # has autostopped turned on.
             record = _ping_cluster_and_set_status(record)
-    if force_refresh:
-        return record['status'], handle
-    return record['status']
+    return record['status'], handle
 
 
 def get_clusters(refresh: bool) -> List[Dict[str, Any]]:

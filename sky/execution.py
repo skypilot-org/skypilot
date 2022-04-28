@@ -224,13 +224,11 @@ def exec(  # pylint: disable=redefined-builtin
 ) -> None:
     backend_utils.disallow_sky_reserved_cluster_name(cluster_name, 'sky.exec')
 
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    status, handle = backend_utils.refresh_cluster_status_handle(cluster_name)
     if handle is None:
         logger.error(f'Cluster {cluster_name!r} not found.  '
                      'Use `sky launch` to provision first.')
         sys.exit(1)
-    status = backends.backend_utils.get_cluster_status_with_refresh(
-        cluster_name)
     if status != global_user_state.ClusterStatus.UP:
         logger.error(f'Cluster {cluster_name!r} is not up.  '
                      'Use `sky status` to check the status.')

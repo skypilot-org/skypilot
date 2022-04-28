@@ -364,7 +364,8 @@ def _create_and_ssh_into_node(
         task.set_resources(resources)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
+        cluster_name)
     if handle is not None:
         # Avoid reusing clusters with requested resource mismatches.
         _check_interactive_node_resources_match(node_type, resources,
@@ -375,8 +376,6 @@ def _create_and_ssh_into_node(
 
         # This handles stopped interactive nodes where they are restarted by
         # skipping sky start and directly calling sky [cpu|tpu|gpu]node.
-        cluster_status = backend_utils.get_cluster_status_with_refresh(
-            cluster_name)
         if cluster_status == global_user_state.ClusterStatus.STOPPED:
             assert handle.launched_resources is not None, handle
             to_provision = None
@@ -596,7 +595,7 @@ def launch(
     if not yes:
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
         # it exists but is STOPPED.
-        maybe_status = backend_utils.get_cluster_status_with_refresh(cluster)
+        maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
         prompt = None
         if maybe_status is None:
             cluster_str = '' if cluster is None else f' {cluster!r}'
@@ -849,25 +848,19 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
     if clusters:
         clusters = _get_glob_clusters(clusters)
-        handles = [
-            global_user_state.get_handle_from_cluster_name(c) for c in clusters
-        ]
     else:
         cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
-        handles = [c['handle'] for c in cluster_infos]
 
     unsupported_clusters = []
-    for cluster, handle in zip(clusters, handles):
-        if handle is None:
-            print(f'Cluster {cluster} was not found. Skipping.')
-            continue
+    for cluster in clusters:
+        cluster_status, handle = backend_utils.refresh_cluster_status_handle(
+            cluster)
         backend = backend_utils.get_backend_from_handle(handle)
         if isinstance(backend, backends.LocalDockerBackend):
             # LocalDockerBackend does not support job queues
             unsupported_clusters.append(cluster)
             continue
-        cluster_status = backend_utils.get_cluster_status_with_refresh(cluster)
         if cluster_status != global_user_state.ClusterStatus.UP:
             print(f'Cluster {cluster} is not up. Skipping.')
             continue
@@ -916,21 +909,21 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
 def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
     """Tail the log of a job."""
     cluster_name = cluster
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
+        cluster_name)
     if handle is None:
         raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
                                  ' (see `sky status`).')
-    if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+    backend = backend_utils.get_backend_from_handle(handle)
+    if isinstance(backend, backends.LocalDockerBackend):
         raise click.UsageError('Sky logs is not available with '
                                'LocalDockerBackend.')
-    cluster_status = backend_utils.get_cluster_status_with_refresh(cluster_name)
     if cluster_status != global_user_state.ClusterStatus.UP:
         click.secho(
             f'Cluster {cluster_name} (status: {cluster_status}) '
             'is not up.',
             fg='red')
         return
-    backend = backend_utils.get_backend_from_handle(handle)
 
     if sync_down and status:
         raise click.UsageError(
@@ -978,7 +971,9 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             'sky cancel requires either a job id '
             f'(see `sky queue {cluster} -s`) or the --all flag.')
 
-    handle = global_user_state.get_handle_from_cluster_name(cluster)
+    # Check the status of the cluster.
+    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
+        cluster)
     if handle is None:
         raise click.BadParameter(f'Cluster {cluster!r} not found'
                                  ' (see `sky status`).')
@@ -988,8 +983,6 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             'Job cancelling is only supported for '
             f'{backends.CloudVmRayBackend.NAME}, but cluster {cluster!r} '
             f'is created by {backend.NAME}.')
-    # Check the status of the cluster.
-    cluster_status = backend_utils.get_cluster_status_with_refresh(cluster)
     if cluster_status != global_user_state.ClusterStatus.UP:
         click.secho(
             f'Cluster {cluster} (status: {cluster_status}) '
@@ -1171,7 +1164,8 @@ def start(clusters: Tuple[str], yes: bool):
         clusters = _get_glob_clusters(clusters)
 
         for name in clusters:
-            cluster_status = backend_utils.get_cluster_status_with_refresh(name)
+            (cluster_status,
+             handle) = backend_utils.refresh_cluster_status_handle(name)
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
@@ -1213,7 +1207,7 @@ def start(clusters: Tuple[str], yes: bool):
                 global_user_state.ClusterStatus.STOPPED), cluster_status
             to_start.append({
                 'name': name,
-                'handle': global_user_state.get_handle_from_cluster_name(name)
+                'handle': handle,
             })
     if not to_start:
         return
@@ -1392,7 +1386,8 @@ def _terminate_or_stop_clusters(
                 f'{colorama.Style.BRIGHT}sky down {name}'
                 f'{colorama.Style.RESET_ALL}')
         elif idle_minutes_to_autostop is not None:
-            cluster_status = backend_utils.get_cluster_status_with_refresh(name)
+            (cluster_status,
+             handle) = backend_utils.refresh_cluster_status_handle(name)
             if not isinstance(backend, backends.CloudVmRayBackend):
                 message = (f'{colorama.Fore.YELLOW}{operation} cluster '
                            f'{name}... skipped{colorama.Style.RESET_ALL}'
@@ -2045,7 +2040,7 @@ def _is_spot_controller_up(
     stopped_message: str,
     message_before_hint: Optional[str] = None
 ) -> Optional[backends.Backend.ResourceHandle]:
-    controller_status, handle = backend_utils.get_cluster_status_with_refresh(
+    controller_status, handle = backend_utils.refresh_cluster_status_handle(
         spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
     if controller_status is None:
         click.echo('No managed spot job has been run.')
