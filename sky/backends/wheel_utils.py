@@ -83,7 +83,13 @@ def build_sky_wheel() -> pathlib.Path:
         except ValueError:
             return -1.
 
+    # This lock prevents that the wheel is updated while being copied.
+    # Although the current caller already uses a lock, we still lock it here
+    # to guarantee inherent consistency.
     with filelock.FileLock(WHEEL_DIR.parent / '.wheels_lock'):
+        # This implements a classic "compare, update and clone" consistency
+        # protocol. "compare, update and clone" has to be atomic to avoid
+        # race conditions.
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
 
