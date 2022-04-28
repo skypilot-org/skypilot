@@ -5,7 +5,7 @@ from typing import Optional
 import colorama
 import pendulum
 import prettytable
-import rich.status
+# import rich.status
 
 from sky import sky_logging
 
@@ -26,6 +26,7 @@ class LineProcessor(object):
         pass
 
 
+# FIXME: the rich status library is turned off because it is not thread-safe.
 class RayUpLineProcessor(LineProcessor):
     """A processor for `ray up` log lines."""
 
