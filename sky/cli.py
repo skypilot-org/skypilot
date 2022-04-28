@@ -64,8 +64,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-SKY_CLOUD_BENCHMARK_DIR = '~/sky_benchmark_dir'
-SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
 provision a new cluster with that name. Otherwise provision a new cluster with
@@ -937,9 +935,9 @@ def benchmark_launch(
 
             # Create a benchmark log directory.
             if task.setup is None:
-                task.setup = f'mkdir -p {SKY_CLOUD_BENCHMARK_DIR}'
+                task.setup = f'mkdir -p {benchmark_utils.SKY_CLOUD_BENCHMARK_DIR}'
             else:
-                task.setup = (f'mkdir -p {SKY_CLOUD_BENCHMARK_DIR}\n'
+                task.setup = (f'mkdir -p {benchmark_utils.SKY_CLOUD_BENCHMARK_DIR}\n'
                               f'{task.setup}')
 
             if task.name is None:
@@ -1008,6 +1006,16 @@ def benchmark_ls() -> None:
         click.echo('No benchmark history found.')
 
 
+def _download_and_update_benchmark_logs(benchmark: str, logger_name: str, clusters) -> None:
+    benchmark_utils.download_benchmark_logs_in_parallel(
+        benchmark, logger_name, clusters)
+    for cluster in clusters:
+        start_ts, first_ts, last_ts, iters = benchmark_utils.parse_benchmark_log(
+            benchmark, logger_name, cluster)
+        benchmark_state.update_benchmark_result(
+            benchmark, cluster, start_ts, first_ts, last_ts, iters)
+
+
 @benchmark.command('show', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
 @click.option('--all',
@@ -1022,27 +1030,14 @@ def benchmark_show(benchmark: str, all: bool) -> None:  # pylint: disable=redefi
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
 
+    logger_name = record['logger']
     if record['status'] == benchmark_state.BenchmarkStatus.RUNNING:
         clusters = global_user_state.get_clusters_from_benchmark(benchmark)
         running = [
             cluster['name'] for cluster in clusters
             if cluster['status'] == global_user_state.ClusterStatus.UP
         ]
-
-        benchmark_dir = f'{SKY_LOCAL_BENCHMARK_DIR}/{benchmark}'
-        logger_name = record['logger']
-        benchmark_utils.download_logs(benchmark, logger_name, running)
-
-        if logger_name not in ['wandb', 'tensorboard']:
-            raise ValueError(f'Unknown logger {logger_name}')
-        for cluster in running:
-            log_dir = os.path.join(benchmark_dir, cluster)
-            if logger_name == 'wandb':
-                start_ts, first_ts, last_ts, iters = benchmark_utils.parse_wandb(log_dir)
-            elif logger_name == 'tensorboard':
-                start_ts, first_ts, last_ts, iters = benchmark_utils.parse_tensorboard(log_dir)
-            benchmark_state.update_benchmark_result(
-                benchmark, cluster, start_ts, first_ts, last_ts, iters)
+        _download_and_update_benchmark_logs(benchmark, logger_name, running)
 
     # Generate a report.
     columns = [
@@ -1120,7 +1115,7 @@ def _terminate_or_stop_benchmark(benchmark, except_clusters, terminate, yes):
     ]
 
     logger_name = record['logger']
-    benchmark_utils.download_logs(benchmark, logger_name, running)
+    _download_and_update_benchmark_logs(benchmark, logger_name, running)
 
     to_stop = [cluster['name'] for cluster in clusters
                 if cluster['name'] not in except_clusters]
@@ -1192,8 +1187,7 @@ def benchmark_delete(benchmark: str) -> None:
         raise click.BadParameter(f'Benchmark {benchmark} not found.')
 
     benchmark_state.delete_benchmark(benchmark)
-    subprocess.run(
-        ['rm', '-rf', f'{SKY_LOCAL_BENCHMARK_DIR}/{benchmark}'], check=False)
+    benchmark_utils.remove_benchmark_logs(benchmark)
     click.secho(f'Benchmark {benchmark} deleted.', fg='green') # FIXME
 
 
