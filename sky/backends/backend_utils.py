@@ -686,8 +686,11 @@ def get_local_custom_resources(ips: List[str],
                                   stream_logs=False,
                                   log_path='/dev/null',
                                   shell=True)
-        handle_returncode(rc, command,
-                          f'Failed to rsync {source} -> {ip} : {target}')
+        handle_returncode(
+            rc, command, 'Failed to rsync files onto local cluster. '
+            'Check if: \n'
+            '\t1) SSH Key is correct and has the right permissions.\n'
+            '\t2) Local cluster node IPs are correct.')
 
     code = \
     textwrap.dedent("""\

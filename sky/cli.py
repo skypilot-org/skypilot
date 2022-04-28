@@ -129,12 +129,26 @@ def _get_cloud(cloud: Optional[str],
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
+    local_clusters = _list_local_clusters()
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
-            print(f'Cluster {cluster} not found.')
+            if cluster in local_clusters:
+                print(
+                    f'Local Cluster {cluster} is not initialized.\n'
+                    f'Run `sky launch -c {cluster} ...` to initalize cluster.')
+            else:
+                print(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
+
+
+def _error_if_local_cluster(cluster: str, local_clusters: List[str],
+                            error_msg: str) -> bool:
+    if cluster in local_clusters:
+        print(error_msg)
+        return False
+    return True
 
 
 def _interactive_node_cli_command(cli_func):
@@ -627,12 +641,23 @@ def launch(
         is_yaml = False
         yaml_config = None
 
+    yaml_cloud = None
+    if yaml_config:
+        if yaml_config.get('resources'):
+            if yaml_config['resources'].get('cloud'):
+                yaml_cloud = yaml_config['resources']['cloud']
+
     if cluster in _list_local_clusters():
-        cloud = 'local'
+        public_clouds = ['aws', 'gcp', 'azure']
+        if yaml_cloud in public_clouds or cloud in public_clouds:
+            raise ValueError(f'Detected Local cluster {cluster}. Must specify '
+                             'cloud: local.')
+        else:
+            cloud = 'local'
 
     if cloud is None:
         # Check if yaml file specifies local cloud
-        if yaml_config and yaml_config['resources']['cloud'] == 'local':
+        if yaml_cloud == 'local':
             cloud = 'local'
 
     if not yes:
@@ -1239,10 +1264,13 @@ def start(clusters: Tuple[str], yes: bool):
       sky start cluster1 cluster2
 
     """
+    local_clusters = _list_local_clusters()
     to_start = []
     if clusters:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
+        clusters = [c for c in clusters if _error_if_local_cluster(c, \
+            local_clusters, f'Local Cluster {c} does not support `sky start`.')]
 
         for name in clusters:
             cluster_status = backend_utils.get_cluster_status_with_refresh(name)
@@ -1402,8 +1430,12 @@ def _terminate_or_stop_clusters(
             'or --all.')
 
     to_down = []
+    local_clusters = _list_local_clusters()
     if len(names) > 0:
         names = _get_glob_clusters(names)
+        names = [c for c in names if _error_if_local_cluster(c, \
+            local_clusters, f'Local Cluster {c} does not support '
+            '`sky stop/down`.')]
         for name in names:
             handle = global_user_state.get_handle_from_cluster_name(name)
             to_down.append({'name': name, 'handle': handle})
@@ -1561,7 +1593,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     name = cluster
     if name in _list_local_clusters():
         raise click.BadParameter(
-            f'Local cluster {cluster!r} conflicts with cluster name {name}')
+            f'Local cluster {cluster!r} conflicts with gpunode {name}')
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
@@ -1639,7 +1671,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     name = cluster
     if name in _list_local_clusters():
         raise click.BadParameter(
-            f'Local cluster {cluster!r} conflicts with cluster name {name}')
+            f'Local cluster {cluster!r} conflicts with cpunode {name}')
     if name is None:
         name = _default_interactive_node_name('cpunode')
 
@@ -1714,7 +1746,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     name = cluster
     if name in _list_local_clusters():
         raise click.BadParameter(
-            f'Local cluster {cluster!r} conflicts with cluster name {name}')
+            f'Local cluster {cluster!r} conflicts with tpunode {name}')
     if name is None:
         name = _default_interactive_node_name('tpunode')
 
