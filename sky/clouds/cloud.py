@@ -24,7 +24,9 @@ class Zone(collections.namedtuple('Zone', ['name'])):
 class _CloudRegistry(dict):
     """Registry of clouds."""
 
-    def from_str(self, name: str) -> Optional['Cloud']:
+    def from_str(self, name: Optional[str]) -> Optional['Cloud']:
+        if name is None:
+            return None
         return self.get(name.lower())
 
     def register(self, cloud_cls: 'Cloud') -> None:
