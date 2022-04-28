@@ -5,8 +5,10 @@ import pickle
 import sqlite3
 import time
 import threading
+import typing
 from typing import Any, Dict, List, Optional, Union
-
+if typing.TYPE_CHECKING:
+    from sky.backends import backend as backend_lib
 
 _BENCHMARK_DB_PATH = os.path.expanduser('~/.sky/benchmark.db')
 os.makedirs(pathlib.Path(_BENCHMARK_DB_PATH).parents[0], exist_ok=True)
@@ -22,7 +24,6 @@ class _BenchmarkSQLiteConn(threading.local):
 
     def _create_tables(self) -> None:
         # Table for Benchmark
-        # self.cursor.execute('DROP TABLE IF EXISTS benchmark') # DELETEME
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS benchmark (
             name TEXT PRIMARY KEY,
@@ -31,7 +32,6 @@ class _BenchmarkSQLiteConn(threading.local):
             logger TEXT,
             status TEXT)""")
         # Table for Benchmark Results
-        # self.cursor.execute('DROP TABLE IF EXISTS benchmark_results') # DELETEME
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS benchmark_results (
             cluster TEXT PRIMARY KEY,
@@ -71,7 +71,7 @@ def add_benchmark(benchmark_name: str, task_name: str, logger_name: str) -> None
 
 
 def add_benchmark_result(benchmark_name: str,
-                         cluster_handle: 'backends.Backend.ResourceHandle') -> None:
+                         cluster_handle: 'backend_lib.Backend.ResourceHandle') -> None:
     name = cluster_handle.cluster_name
     num_nodes = cluster_handle.launched_nodes
     resources = pickle.dumps(cluster_handle.launched_resources)
