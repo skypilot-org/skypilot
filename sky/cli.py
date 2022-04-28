@@ -1017,20 +1017,26 @@ def _download_and_update_benchmark_logs(benchmark: str, logger_name: str, cluste
 
 @benchmark.command('show', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
+@click.option('--force-download',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Force downloading benchmark logs in the running clusters.')
 @click.option('--all',
               '-a',
               default=False,
               is_flag=True,
               required=False,
               help='Show all information in full.')
-def benchmark_show(benchmark: str, all: bool) -> None:  # pylint: disable=redefined-builtin
+# pylint: disable=redefined-builtin
+def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
     """Show a benchmark report."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
 
     logger_name = record['logger']
-    if record['status'] == benchmark_state.BenchmarkStatus.RUNNING:
+    if record['status'] == benchmark_state.BenchmarkStatus.RUNNING or force_download:
         clusters = global_user_state.get_clusters_from_benchmark(benchmark)
         running = [
             cluster['name'] for cluster in clusters
