@@ -6,8 +6,13 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+import filelock
 
 import sky
+from sky.backends.backend_utils import SKY_REMOTE_PATH
+
+WHEEL_DIR = pathlib.Path(os.path.expanduser(SKY_REMOTE_PATH))
+SKY_PACKAGE_PATH = pathlib.Path(sky.__file__).parent.parent / 'sky'
 
 
 def cleanup_wheels_dir(wheel_dir: pathlib.Path,
@@ -25,39 +30,38 @@ def cleanup_wheels_dir(wheel_dir: pathlib.Path,
                 f.unlink()
 
 
-def build_sky_wheel() -> pathlib.Path:
-    """Build a wheel for Sky at a newly made temporary path.
-
-    This works correctly only when sky is installed with development/editable
-    mode.
-
-    Caller is responsible for removing the wheel.
-    """
-    # TODO(suquark): Cache built wheels to prevent rebuilding.
-    # This may not be necessary because it's fast to build the wheel.
-    # check if sky is installed under development mode.
+def _get_sky_package_path() -> pathlib.Path:
     package_root = pathlib.Path(sky.__file__).parent.parent
-    # Use a newly made, unique temporary dir because there may be many
-    # concurrent 'sky launch' happening.
-    tempdir = tempfile.mkdtemp()
-    wheel_dir = pathlib.Path(tempdir)
+    return package_root / 'sky'
+
+
+def _get_latest_built_wheel() -> pathlib.Path:
+    try:
+        latest_wheel = max(WHEEL_DIR.glob('sky-*.whl'), key=os.path.getctime)
+    except ValueError:
+        raise FileNotFoundError('Could not find built Sky wheels.') from None
+    return latest_wheel
+
+
+def _build_sky_wheel() -> pathlib.Path:
+    """Build a wheel for Sky."""
+    sky_package_path = _get_sky_package_path()
     # prepare files
-    (wheel_dir / 'sky').symlink_to(package_root / 'sky',
-                                   target_is_directory=True)
-    setup_files_dir = package_root / 'sky' / 'setup_files'
+    (WHEEL_DIR / 'sky').symlink_to(sky_package_path, target_is_directory=True)
+    setup_files_dir = sky_package_path / 'setup_files'
     for f in setup_files_dir.iterdir():
         if f.is_file():
-            shutil.copy(str(f), str(wheel_dir))
+            shutil.copy(str(f), str(WHEEL_DIR))
 
     # It is important to normalize the path, otherwise 'pip wheel' would
     # treat the directory as a file and generate an empty wheel.
-    norm_path = str(wheel_dir) + os.sep
+    norm_path = str(WHEEL_DIR) + os.sep
     try:
         # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
         # of the output.
         subprocess.run([
             'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
-            str(wheel_dir)
+            str(WHEEL_DIR)
         ],
                        stdout=subprocess.DEVNULL,
                        stderr=subprocess.PIPE,
@@ -65,12 +69,32 @@ def build_sky_wheel() -> pathlib.Path:
     except subprocess.CalledProcessError as e:
         raise RuntimeError('Fail to build pip wheel for Sky. '
                            f'Error message: {e.stderr.decode()}') from e
-    try:
-        latest_wheel = max(wheel_dir.glob('sky-*.whl'), key=os.path.getctime)
-    except ValueError:
-        raise FileNotFoundError('Could not find built Sky wheels.') from None
-    cleanup_wheels_dir(wheel_dir, latest_wheel)
-    return wheel_dir.absolute()
+
+    latest_wheel = _get_latest_built_wheel()
+    cleanup_wheels_dir(WHEEL_DIR, latest_wheel)
+    return WHEEL_DIR.absolute()
+
+
+def build_sky_wheel() -> pathlib.Path:
+    """Build a wheel for Sky, or reuse a cached wheel.
+
+    Caller is responsible for removing the wheel.
+    """
+    with filelock.FileLock(WHEEL_DIR.parent / '.wheels_lock'):
+        last_modification_time = max(
+            os.path.getmtime(root) for root, _, _ in os.walk(SKY_PACKAGE_PATH))
+        last_wheel_modification_time = max(
+            os.path.getmtime(root) for root, _, _ in os.walk(WHEEL_DIR))
+        # only build wheels if the wheel is outdated
+        if last_wheel_modification_time < last_modification_time:
+            _build_sky_wheel()
+
+        # Use a newly made, unique temporary dir because there may be many
+        # concurrent 'sky launch' happening.
+        temp_wheel_dir = pathlib.Path(tempfile.mkdtemp())
+        shutil.copy(_get_latest_built_wheel(), temp_wheel_dir)
+
+    return temp_wheel_dir.absolute()
 
 
 if __name__ == '__main__':
