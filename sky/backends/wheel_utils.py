@@ -86,7 +86,7 @@ def build_sky_wheel() -> pathlib.Path:
     # This lock prevents that the wheel is updated while being copied.
     # Although the current caller already uses a lock, we still lock it here
     # to guarantee inherent consistency.
-    with filelock.FileLock(WHEEL_DIR.parent / '.wheels_lock'):
+    with filelock.FileLock(WHEEL_DIR.parent / '.wheels_lock'):  # pylint: disable=E0110
         # This implements a classic "compare, update and clone" consistency
         # protocol. "compare, update and clone" has to be atomic to avoid
         # race conditions.
@@ -108,4 +108,14 @@ def build_sky_wheel() -> pathlib.Path:
 
 
 if __name__ == '__main__':
+    shutil.rmtree(WHEEL_DIR, ignore_errors=True)
+    import time
+    start = time.time()
     build_sky_wheel()
+    duration = time.time() - start
+
+    start = time.time()
+    build_sky_wheel()
+    duration_cached = time.time() - start
+
+    print(duration, duration_cached, duration / duration_cached)
