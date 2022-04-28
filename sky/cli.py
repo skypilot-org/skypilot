@@ -1336,6 +1336,8 @@ def _terminate_or_stop_clusters(
                     name, f'{teardown_verb} it')
             except ValueError as e:
                 if not purge:
+                    # TODO(zhwu): Check all the managed spot jobs to be terminal
+                    # before allowing the user to delete the cluster.
                     click.echo(str(e))
                     continue
             handle = global_user_state.get_handle_from_cluster_name(name)

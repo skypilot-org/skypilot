@@ -8,7 +8,7 @@ from sky import sky_logging
 from sky.backends import backend_utils
 
 if typing.TYPE_CHECKING:
-    from sky.backends import Backend
+    from sky import backends
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -20,7 +20,7 @@ SPOT_DEFAULT_STRATEGY = None
 class StrategyExecutor:
     """Handle each launching, recovery and termination of the spot clusters."""
 
-    def __init__(self, cluster_name: str, backend: 'Backend',
+    def __init__(self, cluster_name: str, backend: 'backends.Backend',
                  task: 'task_lib.Task') -> None:
         self.dag = sky.Dag()
         self.dag.add(task)
@@ -36,7 +36,7 @@ class StrategyExecutor:
             SPOT_DEFAULT_STRATEGY = name
 
     @classmethod
-    def make(cls, cluster_name: str, backend: 'Backend',
+    def make(cls, cluster_name: str, backend: 'backends.Backend',
              task: 'task_lib.Task') -> 'StrategyExecutor':
         """Create a strategy from a task."""
         resources = task.resources
