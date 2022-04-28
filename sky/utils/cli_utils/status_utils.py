@@ -44,7 +44,8 @@ def show_status_table(show_all: bool, refresh: bool):
         StatusColumn('COMMAND',
                      _get_command,
                      trunc_length=35 if not show_all else 0),
-        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False)
+        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False),
+        StatusColumn('BENCHMARK', _get_benchmark, show_by_default=False),
     ]
 
     columns = []
@@ -114,6 +115,13 @@ def _get_price(cluster_status):
                    handle.launched_nodes)
     price_str = f'$ {hourly_cost:.3f}'
     return price_str
+
+
+def _get_benchmark(cluster_status):
+    benchmark_str = '-'
+    if cluster_status['benchmark'] is not None:
+        benchmark_str = str(cluster_status['benchmark'])
+    return benchmark_str
 
 
 def _is_pending_autostop(cluster_status):
