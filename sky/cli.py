@@ -1048,7 +1048,8 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
     columns = [
         'NAME',
         'RESOURCES',
-        'RUNTIME (min)',
+        'INIT_TIME (min)',
+        'RUN_TIME (min)',
         '#ITERS',
         'SEC/ITER',
         '$/ITER',
@@ -1066,14 +1067,23 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
         num_nodes = result['num_nodes']
         resources = result['resources']
         start_ts = result['start_ts']
+        first_ts = result['first_ts']
         last_ts = result['last_ts']
         iters = result['iters']
 
-        if last_ts is not None and start_ts is not None:
-            run_time = last_ts - start_ts
-            sec_per_iter = run_time / iters
+        if start_ts is not None and first_ts is not None:
+            init_time = first_ts - start_ts
+        else:
+            init_time = 0
+
+        if last_ts is not None and first_ts is not None:
+            run_time = last_ts - first_ts
         else:
             run_time = 0
+
+        if run_time > 0 and iters is not None:
+            sec_per_iter = run_time / (iters - 1)
+        else:
             sec_per_iter = 0
 
         row = [
@@ -1081,7 +1091,9 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
             result['cluster'],
             # RESOURCES
             f'{num_nodes}x {resources}',
-            # RUNTIME (min)
+            # INIT_TIME (min)
+            f'{init_time / 60:.2f}',
+            # RUN_TIME (min)
             f'{run_time / 60:.2f}',
             # ITERS
             iters,
@@ -1091,7 +1103,6 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
             f'{num_nodes * resources.get_cost(sec_per_iter):.6f}',
         ]
         if all:
-            first_ts = result['first_ts']
             if first_ts is None:
                 first_ts = '-'
             else:
