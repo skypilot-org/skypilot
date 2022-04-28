@@ -1174,10 +1174,24 @@ def benchmark_down(
     _terminate_or_stop_benchmark(benchmark, except_clusters, terminate=True, yes=yes)
 
 
+# TODO: add all
 @benchmark.command('delete', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
-def benchmark_delete(benchmark: str) -> None:
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def benchmark_delete(benchmark: str, yes: bool) -> None:
     """Delete a benchmark from the history."""
+    if not yes:
+        click.confirm(
+            f'Deleting benchmark: {benchmark}. Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
+
     clusters = global_user_state.get_clusters_from_benchmark(benchmark)
     for cluster in clusters:
         global_user_state.set_cluster_benchmark_name(cluster['name'], None)
