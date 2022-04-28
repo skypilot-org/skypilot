@@ -133,6 +133,10 @@ class Resources:
         return self._use_spot
 
     @property
+    def use_spot_specified(self) -> bool:
+        return self._use_spot_specified
+
+    @property
     def spot_recovery(self) -> Optional[str]:
         return self._spot_recovery
 

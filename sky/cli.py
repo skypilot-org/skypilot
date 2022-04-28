@@ -1985,11 +1985,17 @@ def spot_launch(
     assert len(task.resources) == 1
     old_resources = list(task.resources)[0]
     new_resources = old_resources.copy(**override_params)
+
+    change_default_value = dict()
+    if not new_resources.use_spot_specified:
+        logger.info('use_spot not specified, set to True.')
+        change_default_value['use_spot'] = True
     if new_resources.spot_recovery is None:
         logger.info('No spot recovery strategy specified. Defaulting to '
                     f'{spot_lib.SPOT_DEFAULT_STRATEGY}.')
-        new_resources = new_resources.copy(
-            spot_recovery=spot_lib.SPOT_DEFAULT_STRATEGY)
+        change_default_value['spot_recovery'] = spot_lib.SPOT_DEFAULT_STRATEGY
+
+    new_resources = new_resources.copy(**change_default_value)
     task.set_resources({new_resources})
 
     if task.run is None:
