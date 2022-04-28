@@ -103,11 +103,11 @@ def _get_cloud(cloud: Optional[str],
     """Check if cloud is registered and return cloud object."""
 
     if cluster_name in _list_local_clusters():
-        if cloud in ['aws', 'gcp', 'azure']:
+        if cloud is None:
+            cloud = 'local'
+        if cloud != 'local':
             raise click.UsageError(f'Local Cluster {cluster_name} is '
                                    f'not part of Cloud {cloud}.')
-        elif cloud is None:
-            cloud = 'local'
     elif cluster_name is None and cloud.lower == 'local':
         raise click.UsageError('Cloud is local. Must specify a cluster name.')
 
@@ -115,7 +115,7 @@ def _get_cloud(cloud: Optional[str],
     if (cloud is None and cluster_name is not None) or \
         (cloud is not None and cloud_obj is None):
         if cloud.lower() == 'local':
-            local_cloud = clouds.get_local_cloud(cluster_name)
+            local_cloud = clouds.Local.get_local_cluster(cluster_name)
             if local_cloud:
                 return local_cloud
             raise click.UsageError(
@@ -643,6 +643,7 @@ def launch(
         is_yaml = False
         yaml_config = None
 
+    # TODO: Move validation logic elsewhere
     yaml_cloud = None
     if yaml_config:
         if yaml_config.get('resources'):
@@ -650,10 +651,10 @@ def launch(
                 yaml_cloud = yaml_config['resources']['cloud']
 
     if cluster in _list_local_clusters():
-        public_clouds = ['aws', 'gcp', 'azure']
-        if yaml_cloud in public_clouds or cloud in public_clouds:
+        if (yaml_cloud is not None and yaml_cloud != 'local') or \
+            (cloud is not None and cloud != 'local'):
             raise ValueError(f'Detected Local cluster {cluster}. Must specify '
-                             'cloud: local.')
+                             '`cloud: local` or no cloud.')
         else:
             cloud = 'local'
 

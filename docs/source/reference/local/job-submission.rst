@@ -16,7 +16,7 @@ To list all registered local clusters, run:
 
 .. code-block:: console
 
-  $ sky local status my-local-cluster
+  $ sky local status
 
 This may show multiple local clusters, if you have created several:
 
@@ -63,7 +63,7 @@ Copy the following YAML into a ``local_example.yaml`` file:
 
   # Invoked under the workdir (i.e., can use its files).
   run: |
-    echo "Hello, Sky on Prem!"
+    echo "Hello, Sky On-Prem!"
     conda env list
 
 This defines a task to be run on the Local cloud. The task takes up 1 V100 GPU.

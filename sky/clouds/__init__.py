@@ -6,7 +6,7 @@ from sky.clouds.cloud import Zone
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
 from sky.clouds.gcp import GCP
-from sky.clouds.local import Local, get_local_cloud
+from sky.clouds.local import Local
 
 __all__ = [
     'AWS',
@@ -17,5 +17,4 @@ __all__ = [
     'Region',
     'Zone',
     'CLOUD_REGISTRY',
-    'get_local_cloud',
 ]

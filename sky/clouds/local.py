@@ -21,14 +21,6 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-def get_local_cloud(cloud: str):
-    if not os.path.exists(os.path.expanduser(f'~/.sky/local/{cloud}.yml')):
-        return None
-    local_cloud_type = clouds.Local()
-    local_cloud_type.set_cloud_name(cloud)
-    return local_cloud_type
-
-
 class Local(clouds.Cloud):
     """Local/On-premise."""
 
@@ -37,10 +29,10 @@ class Local(clouds.Cloud):
     _regions: List[clouds.Region] = [LOCAL_REGION]
 
     def __init__(self):
-        self.cloud_name = Local._REPR
+        self.local_cluster_name = Local._REPR
 
-    def set_cloud_name(self, cloud: str):
-        self.cloud_name = cloud
+    def set_local_cluster_name(self, cluster: str):
+        self.local_cluster_name = cluster
 
     @classmethod
     def regions(cls):
@@ -72,7 +64,7 @@ class Local(clouds.Cloud):
         return 0.0
 
     def __repr__(self):
-        return self.cloud_name
+        return self.local_cluster_name
 
     def is_same_cloud(self, other: clouds.Cloud):
         return isinstance(other, Local)
@@ -108,9 +100,18 @@ class Local(clouds.Cloud):
     def region_exists(self, region: str) -> bool:
         return True
 
+    @staticmethod
+    def get_local_cluster(cluster: str):
+        if not os.path.exists(
+                os.path.expanduser(f'~/.sky/local/{cluster}.yml')):
+            return None
+        local_cloud_type = clouds.Local()
+        local_cloud_type.set_local_cluster_name(cluster)
+        return local_cloud_type
+
     def get_local_ips(self):
-        cloud = self.cloud_name
-        local_cluster_path = os.path.expanduser(f'~/.sky/local/{cloud}.yml')
+        cluster = self.local_cluster_name
+        local_cluster_path = os.path.expanduser(f'~/.sky/local/{cluster}.yml')
         with open(local_cluster_path, 'r') as f:
             config = yaml.safe_load(f)
         ips = config['cluster']['ips']

@@ -6,7 +6,7 @@ Setting up Local Cluster
 Installing Sky Dependences
 -------------------
 
-Sky on Prem requires :code:`python3` and :code:`ray==1.10.0` to be setup on all local nodes and globally available to all users.
+Sky On-Prem requires :code:`python3` and :code:`ray==1.10.0` to be setup on all local nodes and globally available to all users.
 
 To install Ray for all users, run the following command on all local nodes:
 
