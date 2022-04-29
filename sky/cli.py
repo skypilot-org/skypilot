@@ -2066,7 +2066,14 @@ def _is_spot_controller_up(
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)
-def spot_status():
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+# pylint: disable=redefined-builtin
+def spot_status(all: bool):
     """Show statuses of managed spot jobs."""
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     # TODO(zhwu): Enable status check when spot controller is in INIT state and
@@ -2089,7 +2096,7 @@ def spot_status():
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     codegen = spot_lib.SpotCodeGen()
-    code = codegen.show_jobs()
+    code = codegen.show_jobs(show_all=all)
     returncode, job_table_str, stderr = backend.run_on_head(
         handle, code, require_outputs=True, stream_logs=False)
     backend_utils.handle_returncode(returncode, code,
