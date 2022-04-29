@@ -1333,9 +1333,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'{colorama.Fore.CYAN}Connecting to existing local cluster: '
                 f'"{cluster_name}" [Local Cluster: {cloud}, '
                 f'Username: {ssh_user}].{colorama.Style.RESET_ALL}\n'
-                'Tip: to reuse an existing cluster, '
-                'specify --cluster (-c). '
-                'Run `sky local status` to see existing local clusters.')
+                'Run `sky status` to see existing local clusters.')
         else:
             logger.info(
                 f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '

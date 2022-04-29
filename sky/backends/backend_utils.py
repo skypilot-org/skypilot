@@ -5,6 +5,7 @@ import datetime
 import enum
 import http.client as httplib
 import getpass
+import json
 from multiprocessing import pool
 import os
 import pathlib
@@ -660,8 +661,8 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
             raise ValueError(f'Ray not installed on {ip}')
 
 
-def get_local_custom_resources(ips: List[str],
-                               auth_config: Dict[str, str]) -> Dict[str, int]:
+def get_local_custom_resources(
+        ips: List[str], auth_config: Dict[str, str]) -> List[Dict[str, int]]:
     """Gets the custom accelerators for the local cluster.
     Assumes that the cluster is homogeneous (all nodes are
     the same).
@@ -672,7 +673,7 @@ def get_local_custom_resources(ips: List[str],
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
     remote_resource_path = '~/.sky/resource_group.py'
-    node_custom_resources = {}
+    custom_resources = []
 
     def rsync_no_handle(ip, source, target):
         rsync_command = [
@@ -725,34 +726,32 @@ def get_local_custom_resources(ips: List[str],
         print(accelerators_dict)
         """)
 
-    ip = ips[0]
-    with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-        fp.write(code)
-        fp.flush()
-        rsync_no_handle(ip, fp.name, remote_resource_path)
+    for ip in ips:
+        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+            fp.write(code)
+            fp.flush()
+            rsync_no_handle(ip, fp.name, remote_resource_path)
 
-    rc, output, _ = run_command_on_ip_via_ssh(ip,
-                                              f'python3 {remote_resource_path}',
-                                              ssh_user=ssh_user,
-                                              ssh_private_key=ssh_key,
-                                              stream_logs=False,
-                                              require_outputs=True)
+        rc, output, _ = run_command_on_ip_via_ssh(
+            ip,
+            f'python3 {remote_resource_path}',
+            ssh_user=ssh_user,
+            ssh_private_key=ssh_key,
+            stream_logs=False,
+            require_outputs=True)
 
-    if rc:
-        raise ValueError('Failed to execute resource group detector. '
-                         'Check if Python3 is installed correctly.')
+        if rc:
+            raise ValueError('Failed to execute resource group detector. '
+                             'Check if Python3 is installed correctly.')
 
-    # Convert output into a custom resources dict
-    ip_resources = ast.literal_eval(output)
-    for acc, num_acc in ip_resources.items():
-        if acc not in node_custom_resources:
-            node_custom_resources[acc] = 0
-        node_custom_resources[acc] += num_acc
-    return node_custom_resources
+        # Convert output into a custom resources dict
+        ip_resources = ast.literal_eval(output)
+        custom_resources.append(ip_resources)
+    return custom_resources
 
 
 def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
-                         custom_resources: Dict[str, int] = None):
+                         custom_resources: List[Dict[str, int]] = None):
 
     local_cluster_config = yaml_config['cluster']
     if local_cluster_config['name'] in ['aws', 'gcp', 'azure']:
@@ -771,9 +770,10 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     display.start()
 
     head_ip = ip_list[0]
+    head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
     head_cmd = ('ray stop; ray start --head --port=6379 '
                 '--object-manager-port=8076 --dashboard-port 8265 '
-                f'--resources={custom_resources!r}')
+                f'--resources={head_resources!r}')
     rc, _, _ = run_command_on_ip_via_ssh(head_ip,
                                          head_cmd,
                                          ssh_user=ssh_user,
@@ -791,9 +791,11 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
             f'[bold cyan]Workers {idx}/{total_workers} Ready')
         display.start()
 
+        worker_resources = json.dumps(custom_resources[idx + 1],
+                                      separators=(',', ':'))
         worker_cmd = (f'ray stop; ray start --address={head_ip}:6379 '
                       '--object-manager-port=8076 '
-                      f'--resources={custom_resources!r}')
+                      f'--resources={worker_resources!r}')
         rc, _, _ = run_command_on_ip_via_ssh(ip,
                                              worker_cmd,
                                              ssh_user=ssh_user,

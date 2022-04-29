@@ -29,7 +29,6 @@ each other.
 """
 import functools
 import getpass
-import json
 import os
 import shlex
 import sys
@@ -912,7 +911,7 @@ def exec(
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
     status_utils.show_status_table(all, refresh)
-    backend_utils.run('sky local status')
+    local_status()
 
 
 @cli.command()
@@ -1430,9 +1429,10 @@ def _terminate_or_stop_clusters(
     local_clusters = _list_local_clusters()
     if len(names) > 0:
         names = _get_glob_clusters(names)
-        names = [c for c in names if _error_if_local_cluster(c, \
-            local_clusters, f'Local Cluster {c} does not support '
-            '`sky stop/down`.')]
+        if not terminate:
+            names = [c for c in names if _error_if_local_cluster(c, \
+                local_clusters, f'Local Cluster {c} does not support '
+                '`sky stop`.')]
         for name in names:
             try:
                 backend_utils.disallow_sky_reserved_cluster_name(
@@ -2041,7 +2041,6 @@ def local_launch(entrypoint: str):
                 nl=False)
     custom_resources = backend_utils.get_local_custom_resources(
         ips, auth_config)
-    custom_resources = json.dumps(custom_resources, separators=(',', ':'))
     steps += 1
 
     # Launching Ray Autoscaler service
@@ -2058,7 +2057,6 @@ def local_launch(entrypoint: str):
     click.secho(f'Saved in {censored_yaml_path} \n', fg='yellow', nl=False)
 
 
-@local.command('status', cls=_DocumentedCodeCommand)
 def local_status():
     """List all local clusters and users.
     """
@@ -2083,8 +2081,7 @@ def local_status():
         if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
             if (handle.launched_nodes is not None and
                     handle.launched_resources is not None):
-                resources_str = (f'{handle.launched_nodes}x '
-                                 f'{resources.local_node_resources}')
+                resources_str = (f'{resources.local_node_resources}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
         cluster_name = str(resources.cloud)
@@ -2124,6 +2121,7 @@ def local_status():
         click.echo('No existing clusters.')
 
 
+@cli.group(cls=_NaturalOrderGroup)
 def spot():
     """Managed spot instances related commands."""
     pass

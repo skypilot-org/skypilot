@@ -197,7 +197,7 @@ class Task:
             workdir=config.pop('workdir', None),
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
-            auth_config=config.get('auth'),
+            auth_config=config.pop('auth', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -253,6 +253,7 @@ class Task:
             if acc.startswith('tpu-') and task.num_nodes > 1:
                 raise ValueError('Multi-node TPU cluster not supported. '
                                  f'Got num_nodes={task.num_nodes}')
+
         if len(config) > 0:
             raise ValueError(f'Unknown fields in in YAML: {config}')
         task.set_resources({resources})
