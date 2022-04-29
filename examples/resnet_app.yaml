@@ -1,5 +1,4 @@
 name: resnet-app
-workdir: ~/Downloads/tpu
 
 resources:
   cloud: aws
@@ -20,6 +19,10 @@ outputs: {
 # }
 
 setup: |
+  git clone https://github.com/concretevitamin/tpu || true
+  cd tpu
+  git checkout 9459fee
+
   . $(conda info --base)/etc/profile.d/conda.sh
   pip install --upgrade pip
 
@@ -37,6 +40,7 @@ setup: |
   fi
 
 run: |
+  cd tpu
   . $(conda info --base)/etc/profile.d/conda.sh
   conda activate resnet
 
