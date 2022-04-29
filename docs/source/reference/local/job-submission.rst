@@ -16,17 +16,17 @@ To list all registered local clusters, run:
 
 .. code-block:: console
 
-  $ sky local status
+  $ sky status
 
 This may show multiple local clusters, if you have created several:
 
 .. code-block::
 
   Listing all local clusters:
-  NAME              CLUSTER_USER  CLUSTER_RESOURCES  COMMAND                                                  
-  my-local-cluster  my_user       2x {'V100': 4}     sky launch -c my-local-cluster ..
-  ml-research       daniel        3x {'K80': 8}      sky exec ml-research ..
-  test              -             -                  -
+  NAME              CLUSTER_USER  CLUSTER_RESOURCES              COMMAND                                                  
+  my-local-cluster  my_user       [{'V100': 4}, {'V100': 4}]     sky launch -c my-local-cluster ..
+  ml-research       daniel        [{'K80': 8}]                   sky exec ml-research ..
+  test              -             -                              -
 
 Local clusters that have ben ran with ``sky launch`` have all table columns populated.
 
