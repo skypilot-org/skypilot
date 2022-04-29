@@ -44,7 +44,7 @@ YAPF_FLAGS=(
 )
 
 YAPF_EXCLUDES=(
-    # '--exclude' 'python/build/*'
+    '--exclude' 'sky/skylet/providers'
 )
 
 # Format specified files
