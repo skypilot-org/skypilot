@@ -2112,14 +2112,20 @@ def spot_status(all: bool):
               type=str,
               help='Managed sopt job name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
+@click.option('--all',
+              '-a',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Cancel all managed spot jobs.')
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(zhwu): Add --all option.
-def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
+# pylint: disable=redefined-builtin
+def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     """Cancel managed spot jobs.
 
     You can provide either a job name or a list of job ids to be cancelled.
@@ -2137,15 +2143,20 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
 
     """
 
-    if not _is_spot_controller_up(
-            'All managed spot jobs should have finished.'):
+    handle = _is_spot_controller_up(
+        'All managed spot jobs should have finished.')
+    if handle is None:
         return
 
     job_id_str = ','.join(map(str, job_ids))
-    if job_ids and name is not None:
+    if sum(len(job_ids) > 0, name is not None, all) != 1:
+        argument_str = f'--job-ids {", ".join(map(str, job_ids))}' if len(
+            job_ids) > 0 else ''
+        argument_str += f' --name {name}' if name is not None else ''
+        argument_str += ' --all' if all else ''
         raise click.UsageError(
-            'Can only specify one of JOB_IDS or --name.'
-            f' Both are specified: JOB_IDS {job_id_str}; --name {name!r}.')
+            'Can only specify one of JOB_IDS or --name or --all. '
+            f'Cmd provided {argument_str!r}.')
 
     if not yes:
         job_identity_str = f'with IDs {job_id_str}' if job_ids else repr(name)
@@ -2160,7 +2171,9 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     codegen = spot_lib.SpotCodeGen()
-    if job_ids:
+    if all:
+        code = codegen.cancel_jobs_by_id(None)
+    elif job_ids:
         code = codegen.cancel_jobs_by_id(job_ids)
     else:
         code = codegen.cancel_job_by_name(name)
