@@ -79,7 +79,9 @@ def readable_time_duration(start: Optional[int],
         If absolute is specified, returns the accurate time duration,
           e.g. "1h 2m 23s"
     """
-    if start is None:
+    # start < 0 means that the starting time is not specified yet.
+    # It is only used in spot_utils.show_jobs() for job duration calculation.
+    if start is None or start < 0:
         return '-'
     if end is not None:
         end = pendulum.from_timestamp(end)
