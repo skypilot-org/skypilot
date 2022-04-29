@@ -10,6 +10,7 @@ from typing import List, Tuple
 import colorama
 import filelock
 
+from sky import global_user_state
 from sky.skylet.utils import log_utils
 from sky.spot import spot_state
 
@@ -27,6 +28,11 @@ class UserSignal(enum.Enum):
 
 
 # ======== user functions ========
+
+
+def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
+    """Generate spot cluster name."""
+    return f'{task_name}-{job_id}'
 
 
 def cancel_jobs_by_id(job_ids: List[int]) -> str:
@@ -67,14 +73,17 @@ def cancel_job_by_name(job_name: str) -> str:
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
 
 
-def show_jobs() -> str:
+def show_jobs(show_all: bool) -> str:
     """Show all spot jobs."""
     jobs = spot_state.get_spot_jobs()
 
-    job_table = log_utils.create_table([
+    columns = [
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'STARTED',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
-    ])
+    ]
+    if show_all:
+        columns += ['CLUSTER', 'REGION']
+    job_table = log_utils.create_table(columns)
     for job in jobs:
         job_duration = log_utils.readable_time_duration(
             job['last_recovered_at'] - job['job_duration'],
@@ -86,7 +95,7 @@ def show_jobs() -> str:
                                                             job['job_duration'],
                                                             absolute=True)
 
-        job_table.add_row([
+        values = [
             job['job_id'],
             job['job_name'],
             job['resources'],
@@ -101,7 +110,20 @@ def show_jobs() -> str:
             job_duration,
             job['recovery_count'],
             job['status'].value,
-        ])
+        ]
+        if show_all:
+            cluster_name = generate_spot_cluster_name(job['job_name'],
+                                                      job['job_id'])
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            if handle is None:
+                values.extend(['-', '-'])
+            else:
+                values.extend([
+                    f'{handle.launched_nodes}x {handle.launched_resources}',
+                    handle.launched_resources.region
+                ])
+        job_table.add_row(values)
     return str(job_table)
 
 
@@ -117,9 +139,9 @@ class SpotCodeGen:
     def __init__(self):
         self._code = []
 
-    def show_jobs(self) -> str:
+    def show_jobs(self, show_all: bool) -> str:
         self._code += [
-            'job_table = spot_utils.show_jobs()',
+            f'job_table = spot_utils.show_jobs({show_all})',
             'print(job_table)',
         ]
         return self._build()
