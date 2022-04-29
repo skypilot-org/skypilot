@@ -5,10 +5,19 @@ from sky.backends import backend_utils
 from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
+from sky import spot
 
 logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
+
+
+def _get_cloud(cloud: str) -> clouds.Cloud:
+    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
+    if (cloud is not None and cloud_obj is None):
+        # Overwritten later
+        return clouds.Local()
+    return clouds.CLOUD_REGISTRY.get(cloud)
 
 
 class Resources:
@@ -36,8 +45,11 @@ class Resources:
         # TODO:
         sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
-    # Increment this if any fields changed. For backward compatibility.
-    _VERSION = 2
+    # If any fields changed:
+    # 1. Increment the version. For backward compatibility.
+    # 2. Change the __setstate__ method to handle the new fields.
+    # 3. Modify the to_config method to handle the new fields.
+    _VERSION = 3
 
     def __init__(
         self,
@@ -46,6 +58,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
+        spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
     ):
@@ -69,6 +82,9 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
+        self._spot_recovery = None
+        if spot_recovery is not None:
+            self._spot_recovery = spot_recovery.upper()
 
         if disk_size is not None:
             if disk_size < 50:
@@ -85,6 +101,7 @@ class Resources:
 
         self._try_validate_instance_type()
         self._try_validate_accelerators()
+        self._try_validate_spot()
 
     def __repr__(self) -> str:
         if isinstance(self.cloud, clouds.Local):
@@ -135,6 +152,14 @@ class Resources:
     @property
     def use_spot(self) -> bool:
         return self._use_spot
+
+    @property
+    def use_spot_specified(self) -> bool:
+        return self._use_spot_specified
+
+    @property
+    def spot_recovery(self) -> Optional[str]:
+        return self._spot_recovery
 
     @property
     def disk_size(self) -> int:
@@ -211,8 +236,7 @@ class Resources:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
                     cloud_str = f'for any cloud among {enabled_clouds}'
-                raise ValueError(f'Invalid region {region!r} '
-                                 f'{cloud_str}.')
+                raise ValueError(f'Invalid region {region!r} ' f'{cloud_str}.')
             if len(valid_clouds) > 1:
                 raise ValueError(
                     f'Ambiguous region {region!r} '
@@ -280,6 +304,17 @@ class Resources:
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
+
+    def _try_validate_spot(self) -> None:
+        if self._spot_recovery is None:
+            return
+        if not self._use_spot:
+            raise ValueError(
+                'Cannot specify spot_recovery without use_spot set to True.')
+        if self._spot_recovery not in spot.SPOT_STRATEGIES:
+            raise ValueError(f'Spot recovery strategy {self._spot_recovery} '
+                             'is not supported. The strategy should be among '
+                             f'{list(spot.SPOT_STRATEGIES.keys())}')
 
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
@@ -424,6 +459,7 @@ class Resources:
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', self.use_spot),
+            spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
         )
@@ -432,6 +468,53 @@ class Resources:
             return resources
         assert len(override) == 0
         return resources
+
+    @classmethod
+    def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
+        if config is None:
+            return Resources()
+        resources_fields = dict()
+        if config.get('cloud') is not None:
+            resources_fields['cloud'] = _get_cloud(config.pop('cloud'))
+        if config.get('instance_type') is not None:
+            resources_fields['instance_type'] = config.pop('instance_type')
+        if config.get('accelerators') is not None:
+            resources_fields['accelerators'] = config.pop('accelerators')
+        if config.get('accelerator_args') is not None:
+            resources_fields['accelerator_args'] = dict(
+                config.pop('accelerator_args'))
+        if config.get('use_spot') is not None:
+            resources_fields['use_spot'] = config.pop('use_spot')
+        if config.get('spot_recovery') is not None:
+            resources_fields['spot_recovery'] = config.pop('spot_recovery')
+        if config.get('disk_size') is not None:
+            resources_fields['disk_size'] = int(config.pop('disk_size'))
+        if config.get('region') is not None:
+            resources_fields['region'] = config.pop('region')
+
+        if len(config) > 0:
+            raise ValueError(f'Unknown fields in resources config: {config}')
+        return Resources(**resources_fields)
+
+    def to_yaml_config(self) -> Dict[str, Union[str, int]]:
+        """Returns a yaml-style dict of config for this resource bundle."""
+        config = {}
+
+        def add_if_not_none(key, value):
+            if value is not None and value != 'None':
+                config[key] = value
+
+        add_if_not_none('cloud', str(self.cloud))
+        add_if_not_none('instance_type', self.instance_type)
+        add_if_not_none('accelerators', self.accelerators)
+        add_if_not_none('accelerator_args', self.accelerator_args)
+
+        if self._use_spot_specified:
+            add_if_not_none('use_spot', self.use_spot)
+        config['spot_recovery'] = self.spot_recovery
+        config['disk_size'] = self.disk_size
+        add_if_not_none('region', self.region)
+        return config
 
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
@@ -442,6 +525,8 @@ class Resources:
         version = state.pop('_version', None)
         # Handle old version(s) here.
         if version is None:
+            version = -1
+        if version < 0:
             cloud = state.pop('cloud')
             state['_cloud'] = cloud
 
@@ -457,7 +542,9 @@ class Resources:
             disk_size = state.pop('disk_size')
             state['_disk_size'] = disk_size
 
+        if version < 2:
             self._region = None
-        elif version < 2:
-            self._region = None
+
+        if version < 3:
+            self._spot_recovery = None
         self.__dict__.update(state)

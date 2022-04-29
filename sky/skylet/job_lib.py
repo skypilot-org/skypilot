@@ -116,11 +116,21 @@ def set_status(job_id: int, status: JobStatus) -> None:
     _CONN.commit()
 
 
-def get_status(job_id: int) -> JobStatus:
+def get_status(job_id: int) -> Optional[JobStatus]:
     rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (status,) in rows:
-        assert status is not None
+        if status is None:
+            return None
+        return JobStatus[status]
+
+
+def get_latest_job_status() -> Optional[JobStatus]:
+    rows = _CURSOR.execute(
+        'SELECT status FROM jobs ORDER BY job_id DESC LIMIT 1')
+    for (status,) in rows:
+        if status is None:
+            return None
         return JobStatus[status]
 
 
@@ -461,11 +471,15 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_job_status(cls, job_id: str) -> str:
+    def get_job_status(cls, job_id: Optional[str] = None) -> str:
         # Prints "Job <id> <status>" for UX; caller should parse the last token.
-        code = [
-            f'job_status = job_lib.get_status({job_id})',
-            f'print("Job", {job_id}, job_status.value, flush=True)',
+        if job_id is None:
+            code = ['job_status = job_lib.get_latest_job_status()']
+        else:
+            code = [f'job_status = job_lib.get_status({job_id})']
+        code += [
+            'status_str = None if job_status is None else job_status.value',
+            f'print("Job", {job_id}, status_str, flush=True)',
         ]
         return cls._build(code)
 

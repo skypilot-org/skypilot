@@ -168,6 +168,10 @@ class Azure(clouds.Cloud):
         }
 
     def get_feasible_launchable_resources(self, resources):
+        if resources.use_spot:
+            # TODO(zhwu): our azure subscription offer ID does not support spot.
+            # Need to support it.
+            return ([], [])
         fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources

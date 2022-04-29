@@ -106,7 +106,7 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
 def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     copy_dag = copy.deepcopy(dag)
 
-    _, optimizer_plan = sky.Optimizer._optimize_objective(dag, minimize_cost)
+    optimizer_plan = sky.Optimizer._optimize_objective(dag, minimize_cost)
     if minimize_cost:
         objective = sky.Optimizer._compute_total_cost(dag.get_graph(),
                                                       dag.tasks, optimizer_plan)
@@ -127,7 +127,7 @@ def test_optimizer(monkeypatch):
     monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
 
     dag = generate_random_dag(num_tasks=5, seed=0)
-    dag = sky.Optimizer._add_dummy_source_sink_nodes(dag)
+    sky.Optimizer._add_dummy_source_sink_nodes(dag)
 
     compare_optimization_results(dag, minimize_cost=True)
     compare_optimization_results(dag, minimize_cost=False)
