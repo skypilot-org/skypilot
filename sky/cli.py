@@ -2076,8 +2076,6 @@ def _is_spot_controller_up(
 def spot_status(all: bool):
     """Show statuses of managed spot jobs."""
     click.secho('Fetching managed spot job statuses...', fg='yellow')
-    # TODO(zhwu): Enable status check when spot controller is in INIT state and
-    # actually UP.
     cache = spot_lib.load_job_table_cache()
     job_table_str = 'No cached job status table found.'
     if cache is not None:
