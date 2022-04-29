@@ -38,7 +38,7 @@ def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
 def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
     """Cancel jobs by id. If job_ids is None, cancel all jobs."""
     if job_ids is None:
-        job_ids = spot_state.get_nonterminal_job_ids()
+        job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
     if len(job_ids) == 0:
         return 'No job to cancel.'
     for job_id in job_ids:
