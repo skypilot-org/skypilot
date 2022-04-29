@@ -101,7 +101,7 @@ def _truncate_long_string(s: str, max_length: int = 35) -> str:
 
 
 def _get_cloud(cloud: Optional[str],
-               cluster_name: Optional[str]) -> Optional[clouds.Cloud]:
+               cluster_name: Optional[str] = None) -> Optional[clouds.Cloud]:
     """Check if cloud is registered and return cloud object."""
 
     if cluster_name in _list_local_clusters():

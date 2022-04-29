@@ -236,7 +236,8 @@ class Resources:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
                     cloud_str = f'for any cloud among {enabled_clouds}'
-                raise ValueError(f'Invalid region {region!r} ' f'{cloud_str}.')
+                raise ValueError(f'Invalid region {region!r} '
+                                 f'{cloud_str}.')
             if len(valid_clouds) > 1:
                 raise ValueError(
                     f'Ambiguous region {region!r} '

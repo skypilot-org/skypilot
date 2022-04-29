@@ -570,7 +570,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     credential_file_mounts, credential_excludes = credentials
 
     ip_list = to_provision.ips
-    yaml_path = _fill_template(
+    yaml_path = fill_template(
         cluster_config_template,
         dict(
             resources_vars,
