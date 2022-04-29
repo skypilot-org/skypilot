@@ -19,8 +19,6 @@ if [ $OSTYPE == 'darwin'* ]; then
     sleep 5
     kill -9 ${proc_pid}
 else
-    # Uses pgid instead of sid, since sid can be changed by other processes.
-    pgid=`ps -o pgid= -p ${proc_pid}`
     # Recursively gracefully kill (SIGTERM) all child processes of proc_pid.
     # We should not run this command if pgid is empty, i.e. the process is already dead.
     [[ -z "${pgid}" ]] || (pstree -p ${proc_pid} | grep -o '([0-9]\+)' | grep -o '[0-9]\+' | sudo xargs kill -15)
