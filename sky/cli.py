@@ -2047,24 +2047,21 @@ def spot_launch(
 
 def _is_spot_controller_up(
     stopped_message: str,
-    message_before_hint: Optional[str] = None
-) -> Optional[backends.Backend.ResourceHandle]:
+) -> Tuple[Optional[global_user_state.ClusterStatus],
+           Optional[backends.Backend.ResourceHandle]]:
     controller_status, handle = backend_utils.refresh_cluster_status_handle(
         spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
     if controller_status is None:
         click.echo('No managed spot job has been run.')
-        return None
-    if controller_status != global_user_state.ClusterStatus.UP:
+    elif controller_status != global_user_state.ClusterStatus.UP:
         msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
-        if message_before_hint is not None:
-            msg += f'\n{message_before_hint}'
         if controller_status == global_user_state.ClusterStatus.STOPPED:
             msg += f'\n{stopped_message}'
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
         click.echo(msg)
-        return None
+        handle = None
     return controller_status, handle
 
 
@@ -2087,23 +2084,25 @@ def spot_status(all: bool, refresh: bool):
     """Show statuses of managed spot jobs."""
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     cache = spot_lib.load_job_table_cache()
-    job_table_str = 'No cached job status table found.'
-    if cache is not None:
-        readable_time = log_utils.readable_time_duration(cache[0])
-        job_table_str = (
-            f'\nCached job status table [last updated: {readable_time}]:\n'
-            f'{cache[1]}\n')
-    controller_status, handle = _is_spot_controller_up(
-        'To view the latest job table, please start the controller first with: '
-        f'sky start {spot_lib.SPOT_CONTROLLER_NAME}',
-        message_before_hint=job_table_str)
+    stop_msg = ''
+    if not refresh:
+        stop_msg = 'To view the latest job table: sky spot status --refresh'
+    controller_status, handle = _is_spot_controller_up(stop_msg)
+
     if refresh and controller_status == global_user_state.ClusterStatus.STOPPED:
-        click.secho('Spot controller is autostopped, restarting...',
-                    fg='yellow')
+        click.secho('Restarting controller for latest status...', fg='yellow')
         handle = _start_cluster(spot_lib.SPOT_CONTROLLER_NAME,
                                 idle_minutes_to_autostop=spot_lib.
                                 SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+
     if handle is None:
+        job_table_str = 'No cached job status table found.'
+        if cache is not None:
+            readable_time = log_utils.readable_time_duration(cache[0])
+            job_table_str = (
+                f'\nCached job status table [last updated: {readable_time}]:\n'
+                f'{cache[1]}\n')
+        click.echo(job_table_str)
         return
 
     backend = backend_utils.get_backend_from_handle(handle)
