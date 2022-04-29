@@ -6,12 +6,14 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+
 import filelock
 
 import sky
-from sky.backends.backend_utils import SKY_REMOTE_PATH
+from sky.backends import backend_utils
 
-WHEEL_DIR = pathlib.Path(os.path.expanduser(SKY_REMOTE_PATH))
+# Local wheel path is same as the remote path.
+WHEEL_DIR = pathlib.Path(os.path.expanduser(backend_utils.SKY_REMOTE_PATH))
 SKY_PACKAGE_PATH = pathlib.Path(sky.__file__).parent.parent / 'sky'
 
 
@@ -73,6 +75,9 @@ def build_sky_wheel() -> pathlib.Path:
     """Build a wheel for Sky, or reuse a cached wheel.
 
     Caller is responsible for removing the wheel.
+
+    Returns:
+        A newly made temporary path.
     """
 
     def _get_latest_modification_time(path: pathlib.Path) -> float:
@@ -105,17 +110,3 @@ def build_sky_wheel() -> pathlib.Path:
         shutil.copy(_get_latest_built_wheel(), temp_wheel_dir)
 
     return temp_wheel_dir.absolute()
-
-
-if __name__ == '__main__':
-    shutil.rmtree(WHEEL_DIR, ignore_errors=True)
-    import time
-    start = time.time()
-    build_sky_wheel()
-    duration = time.time() - start
-
-    start = time.time()
-    build_sky_wheel()
-    duration_cached = time.time() - start
-
-    print(duration, duration_cached, duration / duration_cached)
