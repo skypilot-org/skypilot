@@ -24,12 +24,12 @@ setup: |
   # pip list | grep azure-cli 2>&1 > /dev/null || \
   #  pip3 install "$(echo {{sky_remote_path}}/*.whl)[azure]" 2>&1 > /dev/null 
 
-  test -f ~/google-cloud-sdk/bin/gcloud || \
+  gcloud --version || \
   (wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && \
     tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && \
     mv google-cloud-sdk ~/ && \
-    ~/google-cloud-sdk/install.sh -q)
-  source ~/google-cloud-sdk/path.bash.inc
+    ~/google-cloud-sdk/install.sh -q && \
+    echo 'source ~/google-cloud-sdk/path.bash.inc' >> ~/.bashrc)
 
 run: |
   python -u -m sky.spot.controller \
