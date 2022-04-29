@@ -386,19 +386,17 @@ def test_cancel_pytorch():
 def test_managed_spot():
     """Test the spot yaml."""
     name = _get_cluster_name() + f'-{int(time.time())}'
-    test = Test(
-        'managed_spot',
-        [
-            f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
-            f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
-            'sleep 5',
-            f'sky spot status | grep {name}-1 | grep STARTING',
-            f'sky spot status | grep {name}-2 | grep STARTING',
-            f'sky spot cancel -y -n {name}-1',
-            'sleep 200',
-            f'sky spot status | grep {name}-1 | grep CANCELLED',
-            f'sky spot status | grep {name}-2 | grep "RUNNING\|SUCCEEDED"',
-        ])
+    test = Test('managed_spot', [
+        f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
+        f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
+        'sleep 5',
+        f'sky spot status | grep {name}-1 | grep STARTING',
+        f'sky spot status | grep {name}-2 | grep STARTING',
+        f'sky spot cancel -y -n {name}-1',
+        'sleep 200',
+        f'sky spot status | grep {name}-1 | grep CANCELLED',
+        f'sky spot status | grep {name}-2 | grep "RUNNING\|SUCCEEDED"',
+    ])
     run_one_test(test)
 
 
