@@ -29,6 +29,7 @@ each other.
 """
 import functools
 import getpass
+from operator import is_
 import os
 import shlex
 import sys
@@ -1123,6 +1124,20 @@ def autostop(
                                 idle_minutes_to_autostop=idle_minutes)
 
 
+def _start_cluster(cluster_name: str):
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    with sky.Dag():
+        dummy_task = sky.Task().set_resources(handle.launched_resources)
+        dummy_task.num_nodes = handle.launched_nodes
+    handle = backend.provision(dummy_task,
+                    to_provision=handle.launched_resources,
+                    dryrun=False,
+                    stream_logs=True,
+                    cluster_name=cluster_name)
+    return handle
+
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clusters', nargs=-1, required=True)
 @click.option('--yes',
@@ -1164,8 +1179,7 @@ def start(clusters: Tuple[str], yes: bool):
         clusters = _get_glob_clusters(clusters)
 
         for name in clusters:
-            (cluster_status,
-             handle) = backend_utils.refresh_cluster_status_handle(name)
+            cluster_status, _ = backend_utils.refresh_cluster_status_handle(name)
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
@@ -1205,10 +1219,7 @@ def start(clusters: Tuple[str], yes: bool):
             assert cluster_status in (
                 global_user_state.ClusterStatus.INIT,
                 global_user_state.ClusterStatus.STOPPED), cluster_status
-            to_start.append({
-                'name': name,
-                'handle': handle,
-            })
+            to_start.append(name)
     if not to_start:
         return
     # FIXME: Assumes a specific backend.
@@ -1216,7 +1227,7 @@ def start(clusters: Tuple[str], yes: bool):
 
     if not yes:
         cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'
-        cluster_list = ', '.join([r['name'] for r in to_start])
+        cluster_list = ', '.join(to_start)
         click.confirm(
             f'Restarting {len(to_start)} {cluster_str}: '
             f'{cluster_list}. Proceed?',
@@ -1224,17 +1235,8 @@ def start(clusters: Tuple[str], yes: bool):
             abort=True,
             show_default=True)
 
-    for record in to_start:
-        name = record['name']
-        handle = record['handle']
-        with sky.Dag():
-            dummy_task = sky.Task().set_resources(handle.launched_resources)
-            dummy_task.num_nodes = handle.launched_nodes
-        backend.provision(dummy_task,
-                          to_provision=handle.launched_resources,
-                          dryrun=False,
-                          stream_logs=True,
-                          cluster_name=name)
+    for name in to_start:
+        _start_cluster(name)
         click.secho(f'Cluster {name} started.', fg='green')
 
 
@@ -2072,8 +2074,14 @@ def _is_spot_controller_up(
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.option('--refresh',
+            '-r',
+            default=False,
+            is_flag=True,
+            required=False,
+            help='Refresh the status of the cluster (restart the spot controller if it is stopped).')
 # pylint: disable=redefined-builtin
-def spot_status(all: bool):
+def spot_status(all: bool, refresh: bool):
     """Show statuses of managed spot jobs."""
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     cache = spot_lib.load_job_table_cache()
@@ -2087,8 +2095,11 @@ def spot_status(all: bool):
         'To view the latest job table, please start the controller first with: '
         f'sky start {spot_lib.SPOT_CONTROLLER_NAME}',
         message_before_hint=job_table_str)
+    if refresh:
+        handle = _start_cluster(spot_lib.SPOT_CONTROLLER_NAME)
     if handle is None:
         return
+
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
