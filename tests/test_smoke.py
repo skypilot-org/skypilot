@@ -1,5 +1,6 @@
 import getpass
 import inspect
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -10,7 +11,9 @@ import uuid
 import colorama
 import pytest
 
+import sky
 from sky import global_user_state
+from sky import resources
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 
@@ -235,6 +238,7 @@ def test_tpu():
         'tpu_app',
         [
             f'sky launch -y -c {name} examples/tpu_app.yaml',
+            f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -321,12 +325,12 @@ def test_autostop():
         'autostop',
         [
             f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
-            f'sky autostop {name} -i 0',
-            f'sky status --refresh | grep {name} | grep -q "0 min"',  # Ensure the cluster is STOPPED.
-            'sleep 120',
-            f'sky status --refresh | grep {name} | grep -q STOPPED',  # Ensure the cluster is STOPPED.
+            f'sky autostop {name} -i 1',
+            f'sky status | grep {name} | grep "1 min"',  # Ensure autostop is set.
+            'sleep 180',
+            f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
             f'sky start -y {name}',
-            f'sky status | grep {name} | grep -q UP',  # Ensure the cluster is UP.
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
@@ -346,11 +350,11 @@ def test_cancel():
             # Wait the GPU process to start.
             'sleep 60',
             f'sky exec {name} "nvidia-smi | grep python"',
-            f'sky logs {name} 2 --status',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel {name} 1',
-            'sleep 5',
+            'sleep 60',
             f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
-            f'sky logs {name} 3 --status',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -361,20 +365,38 @@ def test_cancel():
 def test_cancel_pytorch():
     name = _get_cluster_name()
     test = Test(
-        'cancel',
+        'cancel-pytorch',
         [
             f'sky launch -c {name} examples/resnet_distributed_torch.yaml -y -d',
             # Wait the GPU process to start.
             'sleep 60',
             f'sky exec {name} "nvidia-smi | grep python"',
-            f'sky logs {name} 2 --status',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel {name} 1',
-            'sleep 5',
+            'sleep 60',
             f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
-            f'sky logs {name} 3 --status',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
+    run_one_test(test)
+
+
+# ---------- Testing managed spot ----------
+def test_managed_spot():
+    """Test the spot yaml."""
+    name = _get_cluster_name() + f'-{int(time.time())}'
+    test = Test('managed_spot', [
+        f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
+        f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
+        'sleep 5',
+        f'sky spot status | grep {name}-1 | grep STARTING',
+        f'sky spot status | grep {name}-2 | grep STARTING',
+        f'sky spot cancel -y -n {name}-1',
+        'sleep 200',
+        f'sky spot status | grep {name}-1 | grep CANCELLED',
+        f'sky spot status | grep {name}-2 | grep "RUNNING\|SUCCEEDED"',
+    ])
     run_one_test(test)
 
 
@@ -398,6 +420,7 @@ def test_azure_start_stop_two_nodes():
     run_one_test(test)
 
 
+# ---------- Testing Storage ----------
 class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
 
@@ -491,3 +514,51 @@ class TestStorageWithCredentials:
         # It should not exist because the bucket was created externally.
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
+
+
+# ---------- Testing YAML Specs ----------
+# Our sky storage requires credentials to check the bucket existance when
+# loading a task from the yaml file, so we cannot make it a unit test.
+class TestYamlSpecs:
+    _TEST_YAML_PATHS = [
+        'examples/minimal.yaml', 'examples/managed_spot.yaml',
+        'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
+        'examples/multi_hostname.yaml', 'examples/storage_demo.yaml'
+    ]
+
+    def _is_dict_subset(self, d1, d2):
+        """Check if d1 is the subset of d2."""
+        for k, v in d1.items():
+            if k not in d2:
+                if isinstance(v, list) or isinstance(v, dict):
+                    assert len(v) == 0, (k, v)
+                else:
+                    assert False, (k, v)
+            elif isinstance(v, dict):
+                assert isinstance(d2[k], dict), (k, v, d2)
+                self._is_dict_subset(v, d2[k])
+            elif isinstance(v, str):
+                assert v.lower() == d2[k].lower(), (k, v, d2[k])
+            else:
+                assert v == d2[k], (k, v, d2[k])
+
+    def _check_equivalent(self, yaml_path):
+        """Check if the yaml is equivalent after load and dump again."""
+        origin_task_config = backend_utils.read_yaml(yaml_path)
+
+        task = sky.Task.from_yaml(yaml_path)
+        new_task_config = task.to_yaml_config()
+        # d1 <= d2
+        self._is_dict_subset(origin_task_config, new_task_config)
+
+    def test_load_dump_yaml_config_equivalent(self):
+        """Test if the yaml config is equivalent after load and dump again."""
+        pathlib.Path('~/datasets').expanduser().mkdir(exist_ok=True)
+        pathlib.Path('~/tmpfile').expanduser().touch()
+        pathlib.Path('~/.ssh').expanduser().mkdir(exist_ok=True)
+        pathlib.Path('~/.ssh/id_rsa.pub').expanduser().touch()
+        pathlib.Path('~/tmp-workdir').expanduser().mkdir(exist_ok=True)
+        pathlib.Path('~/Downloads/tpu').expanduser().mkdir(parents=True,
+                                                           exist_ok=True)
+        for yaml_path in self._TEST_YAML_PATHS:
+            self._check_equivalent(yaml_path)

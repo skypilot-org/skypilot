@@ -89,3 +89,8 @@ class FetchIPError(Exception):
     def __init__(self, reason: Reason) -> None:
         super().__init__()
         self.reason = reason
+
+
+class NetworkError(Exception):
+    """Raised when network fails."""
+    pass
