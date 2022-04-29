@@ -532,7 +532,7 @@ def cli():
               required=False,
               help=('OS disk size in GBs.'))
 @click.option(
-    '--autostop-idle-minutes',
+    '--idle-minutes-to-autostop',
     '-i',
     default=None,
     type=int,
@@ -561,7 +561,7 @@ def launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     disk_size: Optional[int],
-    autostop_idle_minutes: Optional[int],
+    idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
@@ -661,7 +661,7 @@ def launch(
                cluster_name=cluster,
                detach_run=detach_run,
                backend=backend,
-               autostop_idle_minutes=autostop_idle_minutes)
+               idle_minutes_to_autostop=idle_minutes_to_autostop)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1122,7 +1122,8 @@ def autostop(
                                 idle_minutes_to_autostop=idle_minutes)
 
 
-def _start_cluster(cluster_name: str):
+def _start_cluster(cluster_name: str,
+                   idle_minutes_to_autostop: Optional[int] = None):
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -1134,6 +1135,8 @@ def _start_cluster(cluster_name: str):
                                dryrun=False,
                                stream_logs=True,
                                cluster_name=cluster_name)
+    if idle_minutes_to_autostop is not None:
+        backend.set_autostop(handle, idle_minutes_to_autostop)
     return handle
 
 
@@ -2037,8 +2040,8 @@ def spot_launch(
                    cluster_name=controller_name,
                    detach_run=detach_run,
                    backend=backend,
-                   autostop_idle_minutes=spot_lib.
-                   SPOT_CONTROLLER_AUTOSTOP_IDLE_MINUTES,
+                   idle_minutes_to_autostop=spot_lib.
+                   SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                    is_spot_controller_task=True)
 
 
@@ -2062,7 +2065,7 @@ def _is_spot_controller_up(
             msg += '\nPlease wait for the controller to be ready.'
         click.echo(msg)
         return None
-    return handle
+    return controller_status, handle
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)
@@ -2090,12 +2093,15 @@ def spot_status(all: bool, refresh: bool):
         job_table_str = (
             f'\nCached job status table [last updated: {readable_time}]:\n'
             f'{cache[1]}\n')
-    handle = _is_spot_controller_up(
+    controller_status, handle = _is_spot_controller_up(
         'To view the latest job table, please start the controller first with: '
         f'sky start {spot_lib.SPOT_CONTROLLER_NAME}',
         message_before_hint=job_table_str)
-    if refresh:
-        handle = _start_cluster(spot_lib.SPOT_CONTROLLER_NAME)
+    if refresh and controller_status == global_user_state.ClusterStatus.STOPPED:
+        click.secho('Spot controller is autostopped, restarting...', fg='yellow')
+        handle = _start_cluster(spot_lib.SPOT_CONTROLLER_NAME,
+                                idle_minutes_to_autostop=spot_lib.
+                                SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
     if handle is None:
         return
 
@@ -2188,9 +2194,9 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
         code = codegen.cancel_job_by_name(name)
     # The stderr is redirected to stdout
     returncode, stdout, _ = backend.run_on_head(handle,
-                                                     code,
-                                                     require_outputs=True,
-                                                     stream_logs=False)
+                                                code,
+                                                require_outputs=True,
+                                                stream_logs=False)
     backend_utils.handle_returncode(returncode, code,
                                     'Failed to cancel managed spot job', stdout)
 

@@ -8,7 +8,7 @@ from sky.spot.spot_utils import SpotCodeGen
 from sky.spot.spot_utils import dump_job_table_cache
 from sky.spot.spot_utils import load_job_table_cache
 
-SPOT_CONTROLLER_AUTOSTOP_IDLE_MINUTES = 60
+SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 60
 SPOT_CONTROLLER_NAME = 'sky-spot-controller'
 
 SPOT_CONTROLLER_TEMPLATE = 'spot-controller.yaml.j2'
