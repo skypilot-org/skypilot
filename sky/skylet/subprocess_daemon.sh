@@ -23,8 +23,8 @@ else
     pgid=`ps -o pgid= -p ${proc_pid}`
     # Recursively gracefully kill (SIGTERM) all child processes of proc_pid.
     # We should not run this command if pgid is empty, i.e. the process is already dead.
-    [[ -z "${pgid}" ]] || (ps --forest -o pid -g $pgid | tail -n +2 | xargs kill -15)
+    [[ -z "${pgid}" ]] || (pstree -p ${proc_pid} | grep -o '([0-9]\+)' | grep -o '[0-9]\+' | sudo xargs kill -15)
     # Wait 30s for the processes to exit gracefully.
     sleep 30
-    [[ -z "${pgid}" ]] || (ps --forest -o pid -g $pgid | tail -n +2 | xargs kill -9)
+    [[ -z "${pgid}" ]] || (pstree -p ${proc_pid} | grep -o '([0-9]\+)' | grep -o '[0-9]\+' | sudo xargs kill -9)
 fi
