@@ -2098,7 +2098,8 @@ def spot_status(all: bool, refresh: bool):
         f'sky start {spot_lib.SPOT_CONTROLLER_NAME}',
         message_before_hint=job_table_str)
     if refresh and controller_status == global_user_state.ClusterStatus.STOPPED:
-        click.secho('Spot controller is autostopped, restarting...', fg='yellow')
+        click.secho('Spot controller is autostopped, restarting...',
+                    fg='yellow')
         handle = _start_cluster(spot_lib.SPOT_CONTROLLER_NAME,
                                 idle_minutes_to_autostop=spot_lib.
                                 SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
@@ -2158,7 +2159,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     """
 
-    handle = _is_spot_controller_up(
+    _, handle = _is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None:
         return
