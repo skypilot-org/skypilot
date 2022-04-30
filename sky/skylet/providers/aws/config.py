@@ -627,18 +627,8 @@ def _get_or_create_vpc_security_groups(conf, node_types):
         for node_type in node_types
     }
 
-    # Temporary measure, as deleting per-cluster SGs is too slow.
-    # See https://github.com/sky-proj/sky/pull/742.
-    # Generate the name of the security group we're looking for...
-    # (username, mac addr last 4 chars): for uniquefying users on shared-account
-    # cloud providers.
-    _user_and_mac = f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}'
-    expected_sg_name = (
-        conf["provider"]
-        .get("security_group", {})
-        .get("GroupName", SECURITY_GROUP_TEMPLATE.format(_user_and_mac))
-    )
-
+    # config file must include security group name
+    expected_sg_name = conf["provider"]["security_group"]["GroupName"]
     # Figure out which security groups with this name exist for each VPC...
     vpc_to_existing_sg = {
         sg.vpc_id: sg
