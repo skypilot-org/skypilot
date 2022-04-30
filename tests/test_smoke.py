@@ -183,7 +183,7 @@ def test_job_queue():
     run_one_test(test)
 
 
-def test_multi_node_job_queue():
+def test_n_node_job_queue():
     name = _get_cluster_name()
     test = Test(
         'job_queue_multinode',
