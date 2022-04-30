@@ -1,6 +1,13 @@
+"""Sky subprocess daemon.
+
+Wait for parent_pid to exit, then SIGTERM (or SIGKILL if needed) the child
+processes of proc_pid.
+"""
+
 import psutil
 import argparse
 import time
+import sys
 
 if __name__ == '__main__':
 
@@ -14,7 +21,8 @@ if __name__ == '__main__':
 
     parent_process.wait()
 
-    if not process.is_running(): exit()
+    if not process.is_running():
+        sys.exit()
     children = process.children(recursive=True)
     children.append(process)
     for pid in children:
@@ -22,7 +30,7 @@ if __name__ == '__main__':
             pid.terminate()
         except psutil.NoSuchProcess:
             pass
-        
+
     # Wait 30s for the processes to exit gracefully.
     time.sleep(30)
 
