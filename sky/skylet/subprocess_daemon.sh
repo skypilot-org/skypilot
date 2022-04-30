@@ -5,7 +5,7 @@ parent_pid=$1
 proc_pid=$2
 remote=${3:-0}
 
-while kill -s 0 ${parent_pid}; do sleep 1; done
+while ps -p ${parent_pid} > /dev/null; do sleep 1; done
 
 if [ ${remote} -eq 0 ]; then
     # This is to avoid the PIPE outputing to the console after being killed in next line.
@@ -20,9 +20,13 @@ if [ $OSTYPE == 'darwin'* ]; then
     kill -9 ${proc_pid}
 else
     # Recursively gracefully kill (SIGTERM) all child processes of proc_pid.
-    # We should not run this command if pgid is empty, i.e. the process is already dead.
-    [[ -z "${pgid}" ]] || (pstree -p ${proc_pid} | grep -o '([0-9]\+)' | grep -o '[0-9]\+' | sudo xargs kill -15)
+    # We should not run this command if the process is already dead.
+    if ps -p ${proc_pid} > /dev/null ; then
+        pstree -p ${proc_pid} | grep -o '([0-9]\+)' | grep -o '[0-9]\+' | sudo xargs kill -15
+    fi
     # Wait 30s for the processes to exit gracefully.
     sleep 30
-    [[ -z "${pgid}" ]] || (pstree -p ${proc_pid} | grep -o '([0-9]\+)' | grep -o '[0-9]\+' | sudo xargs kill -9)
+    if ps -p ${proc_pid} > /dev/null ; then
+        pstree -p ${proc_pid} | grep -o '([0-9]\+)' | grep -o '[0-9]\+' | sudo xargs kill -9
+    fi
 fi
