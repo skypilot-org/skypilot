@@ -545,7 +545,7 @@ class TestYamlSpecs:
     _TEST_YAML_PATHS = [
         'examples/minimal.yaml', 'examples/managed_spot.yaml',
         'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
-        'examples/multi_hostname.yaml', 'examples/storage_demo.yaml'
+        'examples/multi_hostname.yaml'
     ]
 
     def _is_dict_subset(self, d1, d2):
