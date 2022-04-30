@@ -569,6 +569,14 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'zones': ','.join(zones),
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
+                # Temporary measure, as deleting per-cluster SGs is too slow.
+                # See https://github.com/sky-proj/sky/pull/742.
+                # Generate the name of the security group we're looking for...
+                # (username, mac addr last 4 chars): for uniquefying users on
+                # shared-account cloud providers.
+                'security_group':
+                    f'sky-security-group-'
+                    f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region}',
