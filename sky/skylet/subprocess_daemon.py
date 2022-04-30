@@ -34,6 +34,7 @@ if __name__ == '__main__':
     # Wait 30s for the processes to exit gracefully.
     time.sleep(30)
 
+    # SIGKILL if they're still running.
     for pid in children:
         try:
             pid.kill()
