@@ -13,7 +13,6 @@ import pytest
 
 import sky
 from sky import global_user_state
-from sky import resources
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 
@@ -385,7 +384,7 @@ def test_cancel_pytorch():
 # ---------- Testing managed spot ----------
 def test_managed_spot():
     """Test the spot yaml."""
-    name = _get_cluster_name() + f'-{int(time.time())}'
+    name = _get_cluster_name()
     test = Test(
         'managed-spot',
         [
@@ -407,7 +406,7 @@ def test_managed_spot():
 # ---------- Testing managed spot ----------
 def test_managed_gcp_spot():
     """Test managed spot on GCP."""
-    name = _get_cluster_name() + f'-{int(time.time())}'
+    name = _get_cluster_name()
     test = Test(
         'managed-spot-gcp',
         [
