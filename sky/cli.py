@@ -477,6 +477,24 @@ def _check_yaml(entrypoint: str) -> bool:
     return is_yaml
 
 
+def _start_cluster(cluster_name: str,
+                   idle_minutes_to_autostop: Optional[int] = None):
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    with sky.Dag():
+        dummy_task = sky.Task().set_resources(handle.launched_resources)
+        dummy_task.num_nodes = handle.launched_nodes
+    handle = backend.provision(dummy_task,
+                               to_provision=handle.launched_resources,
+                               dryrun=False,
+                               stream_logs=True,
+                               cluster_name=cluster_name)
+    if idle_minutes_to_autostop is not None:
+        backend.set_autostop(handle, idle_minutes_to_autostop)
+    return handle
+
+
 class _NaturalOrderGroup(click.Group):
     """Lists commands in the order they are defined in this script.
 
@@ -1120,24 +1138,6 @@ def autostop(
                                 terminate=False,
                                 no_confirm=True,
                                 idle_minutes_to_autostop=idle_minutes)
-
-
-def _start_cluster(cluster_name: str,
-                   idle_minutes_to_autostop: Optional[int] = None):
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-    with sky.Dag():
-        dummy_task = sky.Task().set_resources(handle.launched_resources)
-        dummy_task.num_nodes = handle.launched_nodes
-    handle = backend.provision(dummy_task,
-                               to_provision=handle.launched_resources,
-                               dryrun=False,
-                               stream_logs=True,
-                               cluster_name=cluster_name)
-    if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop)
-    return handle
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2078,7 +2078,8 @@ def _is_spot_controller_up(
     default=False,
     is_flag=True,
     required=False,
-    help='Restart the spot controller if stopped for the latest status.')
+    help='Query the latest statuses, restarting the spot controller if stopped.'
+)
 # pylint: disable=redefined-builtin
 def spot_status(all: bool, refresh: bool):
     """Show statuses of managed spot jobs."""
@@ -2165,13 +2166,12 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
-        argument_str = f'--job-ids {", ".join(map(str, job_ids))}' if len(
-            job_ids) > 0 else ''
+        argument_str = f'--job-ids {job_id_str}' if len(job_ids) > 0 else ''
         argument_str += f' --name {name}' if name is not None else ''
         argument_str += ' --all' if all else ''
         raise click.UsageError(
             'Can only specify one of JOB_IDS or --name or --all. '
-            f'Cmd provided {argument_str!r}.')
+            f'Provided {argument_str!r}.')
 
     if not yes:
         job_identity_str = f'with IDs {job_id_str}' if job_ids else repr(name)
