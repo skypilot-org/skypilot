@@ -14,6 +14,7 @@ provider:
   # teardown(terminate=True) will override this.
   cache_stopped_nodes: True
   security_group:
+    # AWS config file must include security group name
     GroupName: {{security_group}}
 
 auth:
