@@ -45,6 +45,7 @@ install_requires = [
     # polling strategies`
     'grpcio<=1.43.0',
     'pulp',
+    'psutil',
 ]
 
 extras_require = {
