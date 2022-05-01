@@ -5,7 +5,7 @@ import json
 import pathlib
 import shlex
 import time
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import colorama
 import filelock
@@ -35,8 +35,13 @@ def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
     return f'{task_name}-{job_id}'
 
 
-def cancel_jobs_by_id(job_ids: List[int]) -> str:
-    """Cancel jobs by id."""
+def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
+    """Cancel jobs by id.
+
+    If job_ids is None, cancel all jobs.
+    """
+    if job_ids is None:
+        job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
     if len(job_ids) == 0:
         return 'No job to cancel.'
     for job_id in job_ids:
@@ -146,7 +151,7 @@ class SpotCodeGen:
         ]
         return self._build()
 
-    def cancel_jobs_by_id(self, job_ids: List[int]) -> str:
+    def cancel_jobs_by_id(self, job_ids: Optional[List[int]]) -> str:
         self._code += [
             f'result = spot_utils.cancel_jobs_by_id({job_ids})',
             'print(result, end="", flush=True)',

@@ -1253,7 +1253,7 @@ class CloudVmRayBackend(backends.Backend):
                   to_provision: Optional['resources_lib.Resources'],
                   dryrun: bool,
                   stream_logs: bool,
-                  cluster_name: Optional[str] = None):
+                  cluster_name: Optional[str] = None) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # Try to launch the exiting cluster first
         if cluster_name is None:
