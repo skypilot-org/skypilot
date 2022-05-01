@@ -50,7 +50,6 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
-from sky.backends import cloud_vm_ray_backend
 from sky.clouds import service_catalog
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
@@ -478,6 +477,24 @@ def _check_yaml(entrypoint: str) -> bool:
     return is_yaml
 
 
+def _start_cluster(cluster_name: str,
+                   idle_minutes_to_autostop: Optional[int] = None):
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    with sky.Dag():
+        dummy_task = sky.Task().set_resources(handle.launched_resources)
+        dummy_task.num_nodes = handle.launched_nodes
+    handle = backend.provision(dummy_task,
+                               to_provision=handle.launched_resources,
+                               dryrun=False,
+                               stream_logs=True,
+                               cluster_name=cluster_name)
+    if idle_minutes_to_autostop is not None:
+        backend.set_autostop(handle, idle_minutes_to_autostop)
+    return handle
+
+
 class _NaturalOrderGroup(click.Group):
     """Lists commands in the order they are defined in this script.
 
@@ -533,7 +550,7 @@ def cli():
               required=False,
               help=('OS disk size in GBs.'))
 @click.option(
-    '--autostop-idle-minutes',
+    '--idle-minutes-to-autostop',
     '-i',
     default=None,
     type=int,
@@ -562,7 +579,7 @@ def launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     disk_size: Optional[int],
-    autostop_idle_minutes: Optional[int],
+    idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
@@ -662,7 +679,7 @@ def launch(
                cluster_name=cluster,
                detach_run=detach_run,
                backend=backend,
-               autostop_idle_minutes=autostop_idle_minutes)
+               idle_minutes_to_autostop=idle_minutes_to_autostop)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1164,8 +1181,8 @@ def start(clusters: Tuple[str], yes: bool):
         clusters = _get_glob_clusters(clusters)
 
         for name in clusters:
-            (cluster_status,
-             handle) = backend_utils.refresh_cluster_status_handle(name)
+            cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+                name)
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
@@ -1205,18 +1222,13 @@ def start(clusters: Tuple[str], yes: bool):
             assert cluster_status in (
                 global_user_state.ClusterStatus.INIT,
                 global_user_state.ClusterStatus.STOPPED), cluster_status
-            to_start.append({
-                'name': name,
-                'handle': handle,
-            })
+            to_start.append(name)
     if not to_start:
         return
-    # FIXME: Assumes a specific backend.
-    backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
     if not yes:
         cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'
-        cluster_list = ', '.join([r['name'] for r in to_start])
+        cluster_list = ', '.join(to_start)
         click.confirm(
             f'Restarting {len(to_start)} {cluster_str}: '
             f'{cluster_list}. Proceed?',
@@ -1224,17 +1236,8 @@ def start(clusters: Tuple[str], yes: bool):
             abort=True,
             show_default=True)
 
-    for record in to_start:
-        name = record['name']
-        handle = record['handle']
-        with sky.Dag():
-            dummy_task = sky.Task().set_resources(handle.launched_resources)
-            dummy_task.num_nodes = handle.launched_nodes
-        backend.provision(dummy_task,
-                          to_provision=handle.launched_resources,
-                          dryrun=False,
-                          stream_logs=True,
-                          cluster_name=name)
+    for name in to_start:
+        _start_cluster(name)
         click.secho(f'Cluster {name} started.', fg='green')
 
 
@@ -2037,32 +2040,29 @@ def spot_launch(
                    cluster_name=controller_name,
                    detach_run=detach_run,
                    backend=backend,
-                   autostop_idle_minutes=spot_lib.
-                   SPOT_CONTROLLER_AUTOSTOP_IDLE_MINUTES,
+                   idle_minutes_to_autostop=spot_lib.
+                   SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                    is_spot_controller_task=True)
 
 
 def _is_spot_controller_up(
     stopped_message: str,
-    message_before_hint: Optional[str] = None
-) -> Optional[backends.Backend.ResourceHandle]:
+) -> Tuple[Optional[global_user_state.ClusterStatus],
+           Optional[backends.Backend.ResourceHandle]]:
     controller_status, handle = backend_utils.refresh_cluster_status_handle(
         spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
     if controller_status is None:
         click.echo('No managed spot job has been run.')
-        return None
-    if controller_status != global_user_state.ClusterStatus.UP:
+    elif controller_status != global_user_state.ClusterStatus.UP:
         msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
-        if message_before_hint is not None:
-            msg += f'\n{message_before_hint}'
         if controller_status == global_user_state.ClusterStatus.STOPPED:
             msg += f'\n{stopped_message}'
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
         click.echo(msg)
-        return None
-    return handle
+        handle = None
+    return controller_status, handle
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)
@@ -2072,22 +2072,38 @@ def _is_spot_controller_up(
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest statuses, restarting the spot controller if stopped.'
+)
 # pylint: disable=redefined-builtin
-def spot_status(all: bool):
+def spot_status(all: bool, refresh: bool):
     """Show statuses of managed spot jobs."""
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     cache = spot_lib.load_job_table_cache()
-    job_table_str = 'No cached job status table found.'
-    if cache is not None:
-        readable_time = log_utils.readable_time_duration(cache[0])
-        job_table_str = (
-            f'\nCached job status table [last updated: {readable_time}]:\n'
-            f'{cache[1]}\n')
-    handle = _is_spot_controller_up(
-        'To view the latest job table, please start the controller first with: '
-        f'sky start {spot_lib.SPOT_CONTROLLER_NAME}',
-        message_before_hint=job_table_str)
+    stop_msg = ''
+    if not refresh:
+        stop_msg = 'To view the latest job table: sky spot status --refresh'
+    controller_status, handle = _is_spot_controller_up(stop_msg)
+
+    if refresh and controller_status == global_user_state.ClusterStatus.STOPPED:
+        click.secho('Restarting controller for latest status...', fg='yellow')
+        handle = _start_cluster(spot_lib.SPOT_CONTROLLER_NAME,
+                                idle_minutes_to_autostop=spot_lib.
+                                SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+
     if handle is None:
+        job_table_str = 'No cached job status table found.'
+        if cache is not None:
+            readable_time = log_utils.readable_time_duration(cache[0])
+            job_table_str = (
+                f'\nCached job status table [last updated: {readable_time}]:\n'
+                f'{cache[1]}\n')
+        click.echo(job_table_str)
         return
 
     backend = backend_utils.get_backend_from_handle(handle)
@@ -2112,14 +2128,20 @@ def spot_status(all: bool):
               type=str,
               help='Managed sopt job name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
+@click.option('--all',
+              '-a',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Cancel all managed spot jobs.')
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(zhwu): Add --all option.
-def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
+# pylint: disable=redefined-builtin
+def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     """Cancel managed spot jobs.
 
     You can provide either a job name or a list of job ids to be cancelled.
@@ -2137,15 +2159,19 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
 
     """
 
-    if not _is_spot_controller_up(
-            'All managed spot jobs should have finished.'):
+    _, handle = _is_spot_controller_up(
+        'All managed spot jobs should have finished.')
+    if handle is None:
         return
 
     job_id_str = ','.join(map(str, job_ids))
-    if job_ids and name is not None:
+    if sum([len(job_ids) > 0, name is not None, all]) != 1:
+        argument_str = f'--job-ids {job_id_str}' if len(job_ids) > 0 else ''
+        argument_str += f' --name {name}' if name is not None else ''
+        argument_str += ' --all' if all else ''
         raise click.UsageError(
-            'Can only specify one of JOB_IDS or --name.'
-            f' Both are specified: JOB_IDS {job_id_str}; --name {name!r}.')
+            'Can only specify one of JOB_IDS or --name or --all. '
+            f'Provided {argument_str!r}.')
 
     if not yes:
         job_identity_str = f'with IDs {job_id_str}' if job_ids else repr(name)
@@ -2160,16 +2186,19 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], yes: bool):
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     codegen = spot_lib.SpotCodeGen()
-    if job_ids:
+    if all:
+        code = codegen.cancel_jobs_by_id(None)
+    elif job_ids:
         code = codegen.cancel_jobs_by_id(job_ids)
     else:
         code = codegen.cancel_job_by_name(name)
-    returncode, stdout, stderr = backend.run_on_head(handle,
-                                                     code,
-                                                     require_outputs=True,
-                                                     stream_logs=False)
+    # The stderr is redirected to stdout
+    returncode, stdout, _ = backend.run_on_head(handle,
+                                                code,
+                                                require_outputs=True,
+                                                stream_logs=False)
     backend_utils.handle_returncode(returncode, code,
-                                    'Failed to cancel managed spot job', stderr)
+                                    'Failed to cancel managed spot job', stdout)
 
     click.echo(stdout)
     if 'Multiple jobs found with name' in stdout:

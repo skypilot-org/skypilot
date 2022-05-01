@@ -167,15 +167,19 @@ def set_cancelled(job_id: int):
 # ======== utility functions ========
 
 
-def get_nonterminal_job_ids_by_name(name: str) -> List[int]:
+def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
+    """Get non-terminal job ids by name."""
+    name_filter = 'job_name=(?)' if name is not None else ''
+    field_values = [status.value for status in SpotStatus.terminal_status()]
+    if name is not None:
+        field_values.append(name)
 
     rows = _CURSOR.execute(
         f"""\
         SELECT job_id FROM spot
-        WHERE job_name=(?) AND
-        status NOT IN
-        ({", ".join(["?"] * len(SpotStatus.terminal_status()))})""",
-        (name, *[status.value for status in SpotStatus.terminal_status()]))
+        WHERE status NOT IN
+        ({", ".join(["?"] * len(SpotStatus.terminal_status()))})
+        {name_filter}""", field_values)
     job_ids = [row[0] for row in rows if row[0] is not None]
     return job_ids
 
