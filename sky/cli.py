@@ -1335,7 +1335,7 @@ def _terminate_or_stop_clusters(
             name for name in names
             if name in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
-        reserved_clusters_str = ', '.join(reserved_clusters)
+        reserved_clusters_str = ', '.join(map(repr, reserved_clusters))
         names = [
             name for name in _get_glob_clusters(names)
             if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
@@ -1353,7 +1353,7 @@ def _terminate_or_stop_clusters(
                         'reserved clusters.')
                 raise click.UsageError(msg)
             if len(names) != 0:
-                names_str = ', '.join(names)
+                names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
                     f'{operation} sky reserved clusters {reserved_clusters_str}'
                     f' with multiple other clusters {names_str} is not '
