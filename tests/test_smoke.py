@@ -565,7 +565,7 @@ class TestYamlSpecs:
                 if k == 'accelerators':
                     resources = sky.Resources()
                     resources._set_accelerators(v, None)
-                    assert resources.accelerators == d2[k], (k, v, d2)                    
+                    assert resources.accelerators == d2[k], (k, v, d2)
                 else:
                     assert v.lower() == d2[k].lower(), (k, v, d2[k])
             else:
