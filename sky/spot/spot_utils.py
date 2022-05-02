@@ -11,8 +11,12 @@ import colorama
 import filelock
 
 from sky import global_user_state
+from sky import sky_logging
+from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.spot import spot_state
+
+logger = sky_logging.init_logger(__name__)
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 JOB_STATUS_CHECK_GAP_SECONDS = 60
@@ -44,7 +48,28 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
     if len(job_ids) == 0:
         return 'No job to cancel.'
+    job_id_str = ', '.join(map(str, job_ids))
+    logger.info(f'Cancelling jobs {job_id_str}.')
     for job_id in job_ids:
+        # Check the status of the managed spot job status. If it is in
+        # terminal state, we can safely skip it.
+        job_status = spot_state.get_status(job_id)
+        if job_status.is_terminal():
+            logger.info(f'Job {job_id} is already in terminal state. Skip.')
+            continue
+
+        # Check the status of the controller. If it is not running, it must be
+        # exited abnormally, and we should set the job status to FAILED.
+        # TODO(zhwu): instead of having the liveness check here, we may need
+        # to make it as a event in skylet.
+        controller_status = job_lib.get_status(job_id)
+        if controller_status.is_terminal():
+            logger.error(f'Controller for job {job_id} have exited abnormally. '
+                         'Set the job status to FAILED.')
+            spot_state.set_failed(job_id)
+            continue
+
+        # Send the signal to the spot job controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
