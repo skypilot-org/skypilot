@@ -70,6 +70,12 @@ WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
 _TEST_IP = '1.1.1.1'
 
+# GCP has a 63 char limit; however, Ray autoscaler adds many
+# characters. Through testing, 37 chars is the maximum length for the Sky
+# cluster name on GCP.  Ref:
+# https://cloud.google.com/compute/docs/naming-resources#resource-name-format
+_MAX_CLUSTER_NAME_LEN = 37
+
 
 def fill_template(template_name: str,
                   variables: Dict,
@@ -1308,6 +1314,10 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
     if re.fullmatch(valid_regex, cluster_name) is None:
         raise ValueError(f'Cluster name "{cluster_name}" is invalid; '
                          f'ensure it is fully matched by regex: {valid_regex}')
+    if len(cluster_name) > _MAX_CLUSTER_NAME_LEN:
+        raise ValueError(
+            f'Cluster name {cluster_name!r} has {len(cluster_name)}'
+            f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
 
 
 def disallow_sky_reserved_cluster_name(cluster_name: Optional[str],
