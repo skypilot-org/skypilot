@@ -606,17 +606,17 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
-        name = config.get('name')
-        source = config.get('source')
-        store = config.get('store')
-        mode_str = config.get('mode')
+        name = config.pop('name', None)
+        source = config.pop('source', None)
+        store = config.pop('store', None)
+        mode_str = config.pop('mode', None)
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
             mode = StorageMode(mode_str.upper())
         else:
-            mode = None
-        persistent = True if config.get(
-            'persistent') is None else config['persistent']
+            # Make sure this keeps the same as the default mode in __init__
+            mode = StorageMode.MOUNT
+        persistent = config.pop('persistent', True)
         # Validation of the config object happens on instantiation.
         storage_obj = cls(name=name,
                           source=source,
@@ -624,6 +624,9 @@ class Storage(object):
                           mode=mode)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
+        if config:
+            raise exceptions.StorageSpecError(
+                f'Invalid storage spec: {config.keys()}')
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:
