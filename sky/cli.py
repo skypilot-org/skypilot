@@ -1344,10 +1344,14 @@ def _terminate_or_stop_clusters(
         # normal clusters and purge is True.
         if len(reserved_clusters) > 0:
             if not purge:
-                raise click.UsageError(
+                msg = (
                     f'{operation} sky reserved clusters {reserved_clusters_str}'
-                    ' is not supported.\n'
-                    'Please use --purge to force deletion (not normal).')
+                    ' is not supported.\n')
+                if terminate:
+                    msg += (
+                        'Please specify --purge to force termination of the '
+                        'reserved clusters.')
+                raise click.UsageError(msg)
             if len(names) != 0:
                 names_str = ', '.join(names)
                 raise click.UsageError(
