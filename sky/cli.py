@@ -1323,28 +1323,36 @@ def _terminate_or_stop_clusters(
             f'sky {command} requires either a cluster name (see `sky status`) '
             'or --all.')
 
-    teardown_verb = 'Terminating' if terminate else 'Stopping'
+    operation = 'Terminating' if terminate else 'Stopping'
+    if idle_minutes_to_autostop is not None:
+        verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
+        operation = f'{verb} auto-stop on'
     to_down = []
     if len(names) > 0:
         names = _get_glob_clusters(names)
+        for name in names:
+            try:
+                backend_utils.disallow_sky_reserved_cluster_name(
+                    name, f'{operation} it')
+            except ValueError as e:
+                if not purge:
+                    # TODO(zhwu): Check all the managed spot jobs to be terminal
+                    # before allowing the user to delete the cluster.
+                    click.echo(str(e))
+                    continue
+            handle = global_user_state.get_handle_from_cluster_name(name)
+            to_down.append({'name': name, 'handle': handle})
     if apply_to_all:
         all_clusters = global_user_state.get_clusters()
         if len(names) > 0:
             print(f'Both --all and cluster(s) specified for sky {command}. '
                   'Letting --all take effect.')
-        names = [record['name'] for record in all_clusters]
-    for name in names:
-        try:
-            backend_utils.disallow_sky_reserved_cluster_name(
-                name, f'{teardown_verb} it')
-        except ValueError as e:
-            if not purge:
-                # TODO(zhwu): Check all the managed spot jobs to be terminal
-                # before allowing the user to delete the cluster.
-                click.echo(str(e))
-                continue
-        handle = global_user_state.get_handle_from_cluster_name(name)
-        to_down.append({'name': name, 'handle': handle})
+        names = [
+            record['name']
+            for record in all_clusters
+            if record['name'] != spot_lib.SPOT_CONTROLLER_NAME
+        ]
+
     if not to_down and not names:
         print('Cluster(s) not found (see `sky status`).')
         return
@@ -1353,16 +1361,12 @@ def _terminate_or_stop_clusters(
         cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
         cluster_list = ', '.join([r['name'] for r in to_down])
         click.confirm(
-            f'{teardown_verb} {len(to_down)} {cluster_str}: '
+            f'{operation} {len(to_down)} {cluster_str}: '
             f'{cluster_list}. Proceed?',
             default=True,
             abort=True,
             show_default=True)
 
-    operation = 'Terminating' if terminate else 'Stopping'
-    if idle_minutes_to_autostop is not None:
-        verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-        operation = f'{verb} auto-stop on'
     plural = 's' if len(to_down) > 1 else ''
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
