@@ -542,6 +542,9 @@ class TestStorageWithCredentials:
 # Our sky storage requires credentials to check the bucket existance when
 # loading a task from the yaml file, so we cannot make it a unit test.
 class TestYamlSpecs:
+    # TODO(zhwu): Add test for `to_yaml_config` for the Storage object.
+    #  We should not use `examples/storage_demo.yaml` here, since it requires
+    #  users to ensure bucket names to not exist and/or be unique.
     _TEST_YAML_PATHS = [
         'examples/minimal.yaml', 'examples/managed_spot.yaml',
         'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
