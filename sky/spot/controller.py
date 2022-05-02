@@ -107,7 +107,7 @@ class SpotController:
         try:
             self._run()
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.error(f'Unexpected error occured: Exception {type(e)}({e})')
+            logger.error(f'Unexpected error occured: {type(e).__name__}: {e}')
         finally:
             self._strategy_executor.terminate_cluster()
             job_status = spot_state.get_status(self._job_id)
