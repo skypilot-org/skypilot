@@ -590,8 +590,7 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
-    backend_utils.disallow_sky_reserved_cluster_name(cluster,
-                                                     'Launching task on it')
+    backend_utils.is_reserved_cluster_name(cluster, 'Launching task on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
@@ -762,8 +761,7 @@ def exec(
         sky exec mycluster python train_cpu.py
         sky exec mycluster --gpus=V100:1 python train_gpu.py
     """
-    backend_utils.disallow_sky_reserved_cluster_name(cluster,
-                                                     'Executing task on it')
+    backend_utils.is_reserved_cluster_name(cluster, 'Executing task on it')
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
@@ -1314,7 +1312,11 @@ def _terminate_or_stop_clusters(
         no_confirm: bool,
         purge: bool = False,
         idle_minutes_to_autostop: Optional[int] = None) -> None:
-    """Terminates or (auto-)stops a cluster (or all clusters)."""
+    """Terminates or (auto-)stops a cluster (or all clusters).
+
+    The reserved clusters can only be terminated/stopped, when the cluster name
+    is explicitly (not glob and the only one) specified and purge is True.
+    """
     assert idle_minutes_to_autostop is None or (not terminate and no_confirm), (
         idle_minutes_to_autostop, terminate, no_confirm)
     command = 'down' if terminate else 'stop'
@@ -1327,31 +1329,52 @@ def _terminate_or_stop_clusters(
     if idle_minutes_to_autostop is not None:
         verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
         operation = f'{verb} auto-stop on'
-    to_down = []
+
     if len(names) > 0:
-        names = _get_glob_clusters(names)
-        for name in names:
-            try:
-                backend_utils.disallow_sky_reserved_cluster_name(
-                    name, f'{operation} it')
-            except ValueError as e:
-                if not purge:
-                    # TODO(zhwu): Check all the managed spot jobs to be terminal
-                    # before allowing the user to delete the cluster.
-                    click.echo(str(e))
-                    continue
-            handle = global_user_state.get_handle_from_cluster_name(name)
-            to_down.append({'name': name, 'handle': handle})
+        reserved_clusters = [
+            name for name in names
+            if name in backend_utils.SKY_RESERVED_CLUSTER_NAMES
+        ]
+        reserved_clusters_str = ', '.join(reserved_clusters)
+        names = [
+            name for name in _get_glob_clusters(names)
+            if name not in reserved_clusters
+        ]
+        # Make sure the reserved clusters are explicitly specified without other
+        # normal clusters and purge is True.
+        if len(reserved_clusters) > 0:
+            if not purge:
+                raise click.UsageError(
+                    f'{operation} sky reserved clusters {reserved_clusters_str}'
+                    ' is not supported.\n'
+                    'Please use --purge to force deletion (not normal).')
+            if len(names) != 0:
+                names_str = ', '.join(names)
+                raise click.UsageError(
+                    f'{operation} sky reserved clusters {reserved_clusters_str}'
+                    f' with multiple other clusters {names_str} is not '
+                    'supported.\n'
+                    f'Please omit the reserved clusters {reserved_clusters}.')
+        names += reserved_clusters
+
     if apply_to_all:
         all_clusters = global_user_state.get_clusters()
         if len(names) > 0:
             print(f'Both --all and cluster(s) specified for sky {command}. '
                   'Letting --all take effect.')
+        # We should not remove reserved clusters when --all is specified.
+        # Otherwise, it would be very easy to accidentally delete a reserved
+        # cluster.
         names = [
             record['name']
             for record in all_clusters
-            if record['name'] != spot_lib.SPOT_CONTROLLER_NAME
+            if record['name'] not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
+
+    to_down = []
+    for name in names:
+        handle = global_user_state.get_handle_from_cluster_name(name)
+        to_down.append({'name': name, 'handle': handle})
 
     if not to_down and not names:
         print('Cluster(s) not found (see `sky status`).')

@@ -200,8 +200,7 @@ def launch(dag: sky.Dag,
            idle_minutes_to_autostop: Optional[int] = None,
            is_spot_controller_task: bool = False) -> None:
     if not is_spot_controller_task:
-        backend_utils.disallow_sky_reserved_cluster_name(
-            cluster_name, 'sky.launch')
+        backend_utils.is_reserved_cluster_name(cluster_name, 'sky.launch')
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,
@@ -225,7 +224,7 @@ def exec(  # pylint: disable=redefined-builtin
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
 ) -> None:
-    backend_utils.disallow_sky_reserved_cluster_name(cluster_name, 'sky.exec')
+    backend_utils.is_reserved_cluster_name(cluster_name, 'sky.exec')
 
     status, handle = backend_utils.refresh_cluster_status_handle(cluster_name)
     if handle is None:
