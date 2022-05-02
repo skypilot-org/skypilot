@@ -1327,24 +1327,24 @@ def _terminate_or_stop_clusters(
     to_down = []
     if len(names) > 0:
         names = _get_glob_clusters(names)
-        for name in names:
-            try:
-                backend_utils.disallow_sky_reserved_cluster_name(
-                    name, f'{teardown_verb} it')
-            except ValueError as e:
-                if not purge:
-                    # TODO(zhwu): Check all the managed spot jobs to be terminal
-                    # before allowing the user to delete the cluster.
-                    click.echo(str(e))
-                    continue
-            handle = global_user_state.get_handle_from_cluster_name(name)
-            to_down.append({'name': name, 'handle': handle})
     if apply_to_all:
-        to_down = global_user_state.get_clusters()
+        all_clusters = global_user_state.get_clusters()
         if len(names) > 0:
             print(f'Both --all and cluster(s) specified for sky {command}. '
                   'Letting --all take effect.')
-            names = []
+        names = [record['name'] for record in all_clusters]
+    for name in names:
+        try:
+            backend_utils.disallow_sky_reserved_cluster_name(
+                name, f'{teardown_verb} it')
+        except ValueError as e:
+            if not purge:
+                # TODO(zhwu): Check all the managed spot jobs to be terminal
+                # before allowing the user to delete the cluster.
+                click.echo(str(e))
+                continue
+        handle = global_user_state.get_handle_from_cluster_name(name)
+        to_down.append({'name': name, 'handle': handle})
     if not to_down and not names:
         print('Cluster(s) not found (see `sky status`).')
         return

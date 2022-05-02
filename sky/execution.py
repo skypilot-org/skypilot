@@ -14,6 +14,7 @@ Current task launcher:
 """
 import enum
 import sys
+import time
 import traceback
 from typing import Any, List, Optional
 
@@ -179,6 +180,9 @@ def _execute(dag: sky.Dag,
         if not status_printed:
             # Needed because this finally doesn't always get executed on errors.
             if is_spot_controller_task:
+                # For spot controller task, it requires a while to have the
+                # managed spot status shown in the status table.
+                time.sleep(0.5)
                 backends.backend_utils.run('sky spot status')
             else:
                 backends.backend_utils.run('sky status')
