@@ -2175,6 +2175,8 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     if not yes:
         job_identity_str = f'with IDs {job_id_str}' if job_ids else repr(name)
+        if all:
+            job_identity_str = 'all managed spot jobs'
         click.confirm(
             f'Cancelling managed spot job {job_identity_str}. Proceed?',
             default=True,
