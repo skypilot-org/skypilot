@@ -1338,7 +1338,7 @@ def _terminate_or_stop_clusters(
         reserved_clusters_str = ', '.join(reserved_clusters)
         names = [
             name for name in _get_glob_clusters(names)
-            if name not in reserved_clusters
+            if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters and purge is True.
