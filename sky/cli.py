@@ -1004,6 +1004,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             'is not up...skipped.',
             fg='yellow')
         return
+    backend_utils.is_reserved_cluster_name(cluster, 'Cancelling jobs')
 
     if all:
         click.secho(f'Cancelling all jobs on cluster {cluster}...', fg='yellow')
