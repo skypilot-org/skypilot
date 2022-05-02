@@ -12,9 +12,6 @@ import logging
 import boto3
 import botocore
 
-import getpass
-import uuid
-
 from ray.autoscaler._private.util import check_legacy_fields
 from ray.autoscaler.tags import NODE_TYPE_LEGACY_HEAD, NODE_TYPE_LEGACY_WORKER
 from ray.autoscaler._private.providers import _PROVIDER_PRETTY_NAMES
@@ -34,7 +31,7 @@ logger = logging.getLogger(__name__)
 RAY = "ray-autoscaler"
 DEFAULT_RAY_INSTANCE_PROFILE = RAY + "-v1"
 DEFAULT_RAY_IAM_ROLE = RAY + "-v1"
-SECURITY_GROUP_TEMPLATE = "sky-{}"
+SECURITY_GROUP_TEMPLATE = RAY + "-{}"
 
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V30.0"
 
@@ -627,16 +624,11 @@ def _get_or_create_vpc_security_groups(conf, node_types):
         for node_type in node_types
     }
 
-    # Temporary measure, as deleting per-cluster SGs is too slow.
-    # See https://github.com/sky-proj/sky/pull/742.
     # Generate the name of the security group we're looking for...
-    # (username, mac addr last 4 chars): for uniquefying users on shared-account
-    # cloud providers.
-    _user_and_mac = f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}'
     expected_sg_name = (
         conf["provider"]
         .get("security_group", {})
-        .get("GroupName", SECURITY_GROUP_TEMPLATE.format(_user_and_mac))
+        .get("GroupName", SECURITY_GROUP_TEMPLATE.format(conf["cluster_name"]))
     )
 
     # Figure out which security groups with this name exist for each VPC...

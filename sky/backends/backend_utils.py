@@ -70,6 +70,12 @@ WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
 _TEST_IP = '1.1.1.1'
 
+# GCP has a 63 char limit; however, Ray autoscaler adds many
+# characters. Through testing, 37 chars is the maximum length for the Sky
+# cluster name on GCP.  Ref:
+# https://cloud.google.com/compute/docs/naming-resources#resource-name-format
+_MAX_CLUSTER_NAME_LEN = 37
+
 
 def fill_template(template_name: str,
                   variables: Dict,
@@ -569,6 +575,14 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'zones': ','.join(zones),
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
+                # Temporary measure, as deleting per-cluster SGs is too slow.
+                # See https://github.com/sky-proj/sky/pull/742.
+                # Generate the name of the security group we're looking for...
+                # (username, mac addr last 4 chars): for uniquefying users on
+                # shared-account cloud providers.
+                'security_group':
+                    f'sky-security-group-'
+                    f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region}',
@@ -1300,6 +1314,10 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
     if re.fullmatch(valid_regex, cluster_name) is None:
         raise ValueError(f'Cluster name "{cluster_name}" is invalid; '
                          f'ensure it is fully matched by regex: {valid_regex}')
+    if len(cluster_name) > _MAX_CLUSTER_NAME_LEN:
+        raise ValueError(
+            f'Cluster name {cluster_name!r} has {len(cluster_name)}'
+            f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
 
 
 def disallow_sky_reserved_cluster_name(cluster_name: Optional[str],
