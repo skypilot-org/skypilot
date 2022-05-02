@@ -562,7 +562,12 @@ class TestYamlSpecs:
                 assert isinstance(d2[k], dict), (k, v, d2)
                 self._is_dict_subset(v, d2[k])
             elif isinstance(v, str):
-                assert v.lower() == d2[k].lower(), (k, v, d2[k])
+                if k == 'accelerators':
+                    resources = sky.Resources()
+                    resources._set_accelerators(v, None)
+                    assert resources.accelerators == d2[k], (k, v, d2)
+                else:
+                    assert v.lower() == d2[k].lower(), (k, v, d2[k])
             else:
                 assert v == d2[k], (k, v, d2[k])
 
