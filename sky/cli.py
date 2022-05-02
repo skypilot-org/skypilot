@@ -1314,7 +1314,7 @@ def _terminate_or_stop_clusters(
         idle_minutes_to_autostop: Optional[int] = None) -> None:
     """Terminates or (auto-)stops a cluster (or all clusters).
 
-    The reserved clusters can only be terminated/stopped, when the cluster name
+    The reserved clusters can only be terminated, when the cluster name
     is explicitly (not glob and the only one) specified and purge is True.
     """
     assert idle_minutes_to_autostop is None or (not terminate and no_confirm), (
@@ -1346,10 +1346,10 @@ def _terminate_or_stop_clusters(
             if not purge:
                 msg = (
                     f'{operation} sky reserved clusters {reserved_clusters_str}'
-                    ' is not supported.\n')
+                    ' is not supported.')
                 if terminate:
                     msg += (
-                        'Please specify --purge to force termination of the '
+                        '\nPlease specify --purge to force termination of the '
                         'reserved clusters.')
                 raise click.UsageError(msg)
             if len(names) != 0:
