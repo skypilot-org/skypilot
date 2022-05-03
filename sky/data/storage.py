@@ -614,7 +614,8 @@ class Storage(object):
             # Make mode case insensitive, if specified
             mode = StorageMode(mode_str.upper())
         else:
-            mode = None
+            # Make sure this keeps the same as the default mode in __init__
+            mode = StorageMode.MOUNT
         persistent = True if config.get(
             'persistent') is None else config['persistent']
         # Validation of the config object happens on instantiation.
