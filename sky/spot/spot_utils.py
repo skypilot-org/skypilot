@@ -51,6 +51,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         return 'No job to cancel.'
     job_id_str = ', '.join(map(str, job_ids))
     logger.info(f'Cancelling jobs {job_id_str}.')
+    cancelled_job_ids = []
     for job_id in job_ids:
         # Check the status of the managed spot job status. If it is in
         # terminal state, we can safely skip it.
@@ -92,10 +93,14 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
             with signal_file.open('w') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
+        cancelled_job_ids.append(job_id)
 
-    identity_str = f'job ID {job_ids[0]} is'
-    if len(job_ids) > 1:
-        identity_str = f'job IDs {job_ids} are'
+    if len(cancelled_job_ids) == 0:
+        return 'No job to cancel.'
+    identity_str = f'job ID {cancelled_job_ids[0]} is'
+    if len(cancelled_job_ids) > 1:
+        cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
+        identity_str = f'job IDs {cancelled_job_ids_str} are'
 
     return (f'Jobs with {identity_str} scheduled to be cancelled within '
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
