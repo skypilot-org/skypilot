@@ -1154,12 +1154,13 @@ def get_head_ip(
 
 
 def check_network_connection():
-    conn = httplib.HTTPSConnection(_TEST_IP, timeout=1)
+    # A timeout of 1s seems to infrequently encounter 'socket.timeout'.
+    conn = httplib.HTTPSConnection(_TEST_IP, timeout=3)
     try:
         conn.request('HEAD', '/')
     except OSError as e:
         raise exceptions.NetworkError(
-            'Could not refresh the cluster. Network is down.') from e
+            'Could not refresh the cluster. Network seems down.') from e
 
 
 def _ping_cluster_and_set_status(
