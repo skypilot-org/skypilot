@@ -2,9 +2,14 @@
 Setting up Local Cluster
 ======================
 
+Prerequisites
+-------------
+To ensure sky nodes can communicate with each other, please ensure the following ports are open and accessible on each node:
+..
+   TODO(michaelzhiluo): Check and add ports here. https://docs.ray.io/en/latest/ray-core/configure.html#ports-configurations might help.
 
-Installing Sky Dependences
--------------------
+Installing Sky Dependencies
+---------------------------
 
 Sky On-Prem requires :code:`python3` and :code:`ray==1.10.0` to be setup on all local nodes and globally available to all users.
 
