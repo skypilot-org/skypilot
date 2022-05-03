@@ -2050,7 +2050,9 @@ def spot_launch(
             'Local file mounts are not allowed for managed spot jobs, '
             f'but following are found: {copy_mounts_str}')
 
-    # Copy the local source to the bucket.
+    # Copy the local source to the bucket. The task will not be executed locally,
+    # so we need to copy the files to the bucket manually here before sending to
+    # the remote spot controller.
     task.add_storage_mounts()
 
     # Replace the source field that is local path in all storage_mounts with
@@ -2058,8 +2060,9 @@ def spot_launch(
     for storage_obj in task.storage_mounts.values():
         if (storage_obj.source is not None and
                 not data_utils.is_cloud_store_url(storage_obj.source)):
-            # TODO(zhwu): set storage.store to None, when we support source=None
-            # for COPY mode.
+            # Need to replace the local path with bucket URI, and remove the
+            # name field, so that the sky storage mount can work on the spot
+            # controller.
             store_types = list(storage_obj.stores.keys())
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
@@ -2093,8 +2096,6 @@ def spot_launch(
             f'Launching managed spot job {name} from spot controller...',
             fg='yellow')
         backend = backends.CloudVmRayBackend()
-        # TODO(zhwu): Remove the hint messages after launch finished as it is
-        # not related.
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,
