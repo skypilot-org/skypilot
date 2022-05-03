@@ -986,6 +986,8 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             'sky cancel requires either a job id '
             f'(see `sky queue {cluster} -s`) or the --all flag.')
 
+    backend_utils.is_reserved_cluster_name(cluster, 'Cancelling jobs')
+
     # Check the status of the cluster.
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster)
@@ -1004,7 +1006,6 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             'is not up...skipped.',
             fg='yellow')
         return
-    backend_utils.is_reserved_cluster_name(cluster, 'Cancelling jobs')
 
     if all:
         click.secho(f'Cancelling all jobs on cluster {cluster}...', fg='yellow')
@@ -1093,11 +1094,18 @@ def stop(
               is_flag=True,
               required=False,
               help='Cancel the auto-stopping.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
 def autostop(
-        clusters: Tuple[str],
-        all: Optional[bool],  # pylint: disable=redefined-builtin
-        idle_minutes: Optional[int],
-        cancel: bool,  # pylint: disable=redefined-outer-name
+    clusters: Tuple[str],
+    all: Optional[bool],  # pylint: disable=redefined-builtin
+    idle_minutes: Optional[int],
+    cancel: bool,  # pylint: disable=redefined-outer-name
+    yes: bool,
 ):
     """Schedule or cancel auto-stopping for cluster(s).
 
@@ -1135,7 +1143,7 @@ def autostop(
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=False,
-                                no_confirm=True,
+                                no_confirm=yes,
                                 idle_minutes_to_autostop=idle_minutes)
 
 
@@ -1318,8 +1326,8 @@ def _terminate_or_stop_clusters(
     The reserved clusters can only be terminated, when the cluster name
     is explicitly (not glob and the only one) specified and purge is True.
     """
-    assert idle_minutes_to_autostop is None or (not terminate and no_confirm), (
-        idle_minutes_to_autostop, terminate, no_confirm)
+    assert idle_minutes_to_autostop is None or not terminate, (
+        idle_minutes_to_autostop, terminate)
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
         raise click.UsageError(
@@ -1376,32 +1384,32 @@ def _terminate_or_stop_clusters(
             if record['name'] not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
 
-    to_down = []
+    clusters = []
     for name in names:
         handle = global_user_state.get_handle_from_cluster_name(name)
-        to_down.append({'name': name, 'handle': handle})
+        clusters.append({'name': name, 'handle': handle})
 
-    if not to_down and not names:
+    if not clusters and not names:
         print('Cluster(s) not found (see `sky status`).')
         return
 
-    if not no_confirm and len(to_down) > 0:
-        cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
-        cluster_list = ', '.join([r['name'] for r in to_down])
+    if not no_confirm and len(clusters) > 0:
+        cluster_str = 'clusters' if len(clusters) > 1 else 'cluster'
+        cluster_list = ', '.join([r['name'] for r in clusters])
         click.confirm(
-            f'{operation} {len(to_down)} {cluster_str}: '
+            f'{operation} {len(clusters)} {cluster_str}: '
             f'{cluster_list}. Proceed?',
             default=True,
             abort=True,
             show_default=True)
 
-    plural = 's' if len(to_down) > 1 else ''
+    plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
     task = progress.add_task(
-        f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
-        total=len(to_down))
+        f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
+        total=len(clusters))
 
     def _terminate_or_stop(record):
         name = record['name']
@@ -1473,7 +1481,7 @@ def _terminate_or_stop_clusters(
         progress.start()
 
     with progress:
-        backend_utils.run_in_parallel(_terminate_or_stop, to_down)
+        backend_utils.run_in_parallel(_terminate_or_stop, clusters)
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
         progress.refresh()
