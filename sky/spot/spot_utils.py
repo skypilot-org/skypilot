@@ -74,8 +74,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
             cluster_name = generate_spot_cluster_name(task_name, job_id)
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
-            backend = backend_utils.get_backend_from_handle(handle)
             if handle is not None:
+                backend = backend_utils.get_backend_from_handle(handle)
                 backend.teardown(handle, terminate=True)
 
             # Set the job status to FAILED.

@@ -11,8 +11,6 @@ from sky import cli
 from sky import global_user_state
 from sky import spot
 
-import traceback
-
 
 def test_spot_nonexist_strategy():
     """Test the nonexist recovery strategy."""
@@ -99,8 +97,10 @@ class TestReservedClustersOperations:
 
         result = cli_runner.invoke(cli.down, ['sky-spot-controller'])
         assert result.exit_code == click.UsageError.exit_code
-        assert 'is not supported' in result.output
-        assert 'Terminating' in result.output
+        assert (
+            'Terminating sky reserved clusters \'sky-spot-controller\' is '
+            'not supported'
+            in result.output)
 
         result = cli_runner.invoke(cli.down, ['sky-spot-con*'])
         assert not result.exception
@@ -118,18 +118,15 @@ class TestReservedClustersOperations:
         assert isinstance(result.exception, SystemExit)
         assert 'Aborted' in result.output
 
-        result = cli_runner.invoke(cli.down, ['sky-spot-controller'])
-        assert result.exit_code == click.UsageError.exit_code
-        assert 'is not supported' in result.output
-        assert 'Terminating' in result.output
-
     @pytest.mark.timeout(60)
     def test_stop_spot_controller(self, _mock_cluster_state):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.stop, ['sky-spot-controller'])
         assert result.exit_code == click.UsageError.exit_code
-        assert 'is not supported' in result.output
-        assert 'Stopping' in result.output
+        assert (
+            'Stopping sky reserved clusters \'sky-spot-controller\' is '
+            'not supported'
+            in result.output)
 
         result = cli_runner.invoke(cli.stop, ['sky-spot-con*'])
         assert not result.exception
@@ -144,8 +141,10 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.autostop, ['sky-spot-controller'])
         assert result.exit_code == click.UsageError.exit_code
-        assert 'is not supported' in result.output
-        assert 'auto-stop' in result.output
+        assert (
+            'Scheduling auto-stop on sky reserved clusters '
+            '\'sky-spot-controller\' is not supported'
+            in result.output)
 
         result = cli_runner.invoke(cli.autostop, ['sky-spot-con*'])
         assert not result.exception
@@ -159,5 +158,4 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, ['sky-spot-controller', '-a'])
         assert isinstance(result.exception, ValueError)
-        assert 'is not allowed' in str(result.exception)
-        assert 'Cancelling' in str(result.exception)
+        assert 'Cancelling jobs is not allowed' in str(result.exception)

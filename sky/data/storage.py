@@ -278,7 +278,7 @@ class Storage(object):
                  source: Optional[Path] = None,
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
-                 mode: Optional[StorageMode] = StorageMode.MOUNT,
+                 mode: StorageMode = StorageMode.MOUNT,
                  sync_on_reconstruction: Optional[bool] = True):
         """Initializes a Storage object.
 
