@@ -642,23 +642,31 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
 
+    def _run_command_and_handle_ssh_failure(ip: str,
+                                            command: str,
+                                            failure_message: str):
+        rc = run_command_on_ip_via_ssh(ip,
+                                       command,
+                                       ssh_user=ssh_user,
+                                       ssh_private_key=ssh_key,
+                                       stream_logs=False)
+        if rc == 255:
+            # SSH failed
+            raise ValueError(f'SSH with user {ssh_user} and key {ssh_key} '
+                             f'to {ip} failed. Check your credentials and try '
+                             f'again.')
+        elif rc:
+            raise ValueError(failure_message.format(ip=ip))
+
     for ip in ips:
         # All nodes must have Ray and Python3
-        rc = run_command_on_ip_via_ssh(ip,
-                                       'python3 --version',
-                                       ssh_user=ssh_user,
-                                       ssh_private_key=ssh_key,
-                                       stream_logs=False)
-        if rc:
-            raise ValueError(f'Python3 not installed on {ip}')
+        _run_command_and_handle_ssh_failure(ip,
+                                            'python3 --version',
+                                            'Python3 is not installed on {ip}')
 
-        rc = run_command_on_ip_via_ssh(ip,
-                                       'ray --version',
-                                       ssh_user=ssh_user,
-                                       ssh_private_key=ssh_key,
-                                       stream_logs=False)
-        if rc:
-            raise ValueError(f'Ray not installed on {ip}')
+        _run_command_and_handle_ssh_failure(ip,
+                                            'ray --version',
+                                            'Ray is not installed on {ip}')
 
 
 def get_local_custom_resources(
