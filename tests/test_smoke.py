@@ -461,7 +461,7 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_bucket_name(self):
         # Creates a temporary bucket name
-        yield f'sky-test-{int(time.time())}'
+        yield f'sky-test-{time.time_ns()}'
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_mount):
