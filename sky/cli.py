@@ -2037,6 +2037,8 @@ def spot_launch(
     if name is not None:
         task.name = name
 
+    # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
+    # following validations.
     # Check the file mounts in the task.
     # Disallow all local file mounts (copy mounts).
     if task.workdir is not None:
