@@ -429,19 +429,18 @@ def test_managed_spot_storage():
         'examples/managed_spot_with_storage.yaml').read_text()
     yaml_str = yaml_str.replace('sky-workdir-zhwu',
                                 f'sky-test-{int(time.time())}')
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
-                                     delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(yaml_str)
         file_path = f.name
-    test = Test(
-        'managed-spot-storage',
-        [
-            f'sky spot launch -n {name} {file_path} -y',
-            f'sky spot status | grep {name} | grep SUCCEEDED',
-        ],
-        f'sky spot cancel -y -n {name}',
-    )
-    run_one_test(test)
+        test = Test(
+            'managed-spot-storage',
+            [
+                f'sky spot launch -n {name} {file_path} -y',
+                f'sky spot status | grep {name} | grep SUCCEEDED',
+            ],
+            f'sky spot cancel -y -n {name}',
+        )
+        run_one_test(test)
 
 
 @pytest.mark.slow
