@@ -2050,7 +2050,7 @@ def spot_launch(
             'Local file mounts are not allowed for managed spot jobs, '
             f'but following are found: {copy_mounts_str}')
 
-    # Copy the local source to the bucket. The task will not be executed locally,
+    # Copy the local source to a bucket. The task will not be executed locally,
     # so we need to copy the files to the bucket manually here before sending to
     # the remote spot controller.
     task.add_storage_mounts()
