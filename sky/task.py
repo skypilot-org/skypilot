@@ -282,6 +282,8 @@ class Task:
                 resources['use_spot'] = resources['use_spot']
             if resources.get('region') is not None:
                 resources['region'] = resources.pop('region')
+            if resources.get('options') is not None:
+                resources.pop('options')
             # FIXME: We should explicitly declare all the parameters
             # that are sliding through the **resources
             resources = sky.Resources(**resources)

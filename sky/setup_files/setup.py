@@ -45,6 +45,9 @@ install_requires = [
     # polling strategies`
     'grpcio<=1.43.0',
     'pulp',
+    # FIXME
+    'tensorboard',
+    'wandb',
 ]
 
 extras_require = {

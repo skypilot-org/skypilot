@@ -58,15 +58,21 @@ class BenchmarkStatus(enum.Enum):
     FINISHED = 'FINISHED'
 
 
-
-def add_benchmark(benchmark_name: str, task_name: str, logger_name: str) -> None:
+def add_benchmark(benchmark_name: str, task_name: Union[None, str], logger_name: str) -> None:
     """Add a new benchmark."""
     launched_at = int(time.time())
-    _BENCHMARK_DB.cursor.execute(
-        'INSERT INTO benchmark'
-        '(name, task, launched_at, logger, status) '
-        'VALUES (?, ?, ?, ?, ?)',
-        (benchmark_name, task_name, launched_at, logger_name, BenchmarkStatus.RUNNING.value))
+    if task_name is None:
+        _BENCHMARK_DB.cursor.execute(
+            'INSERT INTO benchmark'
+            '(name, task, launched_at, logger, status) '
+            'VALUES (?, NULL, ?, ?, ?)',
+            (benchmark_name, launched_at, logger_name, BenchmarkStatus.RUNNING.value))
+    else:
+        _BENCHMARK_DB.cursor.execute(
+            'INSERT INTO benchmark'
+            '(name, task, launched_at, logger, status) '
+            'VALUES (?, ?, ?, ?, ?)',
+            (benchmark_name, task_name, launched_at, logger_name, BenchmarkStatus.RUNNING.value))
     _BENCHMARK_DB.conn.commit()
 
 

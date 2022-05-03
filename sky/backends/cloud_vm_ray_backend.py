@@ -34,7 +34,7 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
-from sky.skylet import autostop_lib
+from sky.skylet import autostop_lib, benchmark_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
@@ -1400,6 +1400,15 @@ class CloudVmRayBackend(backends.Backend):
                                             stderr=stderr)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop)
+
+    def benchmark_summary(self, handle: ResourceHandle, log_dir: str, output_path: str, logger_name: str) -> str:
+        code = benchmark_lib.BenchmarkCodeGen.generate_summary(log_dir, output_path, logger_name)
+        returncode, _, stderr = self.run_on_head(handle,
+                                                      code,
+                                                      require_outputs=True)
+        backend_utils.handle_returncode(returncode, code,
+                                        'Failed to generate a benchmark summary',
+                                        stderr=stderr)
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
