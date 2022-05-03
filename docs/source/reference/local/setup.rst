@@ -5,6 +5,7 @@ Setting up Local Cluster
 Prerequisites
 -------------
 To ensure sky nodes can communicate with each other, please ensure the following ports are open and accessible on each node:
+
 ..
    TODO(michaelzhiluo): Check and add ports here. https://docs.ray.io/en/latest/ray-core/configure.html#ports-configurations might help.
 
