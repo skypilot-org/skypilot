@@ -590,8 +590,8 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
-    backend_utils.disallow_sky_reserved_cluster_name(cluster,
-                                                     'Launching task on it')
+    backend_utils.check_cluster_name_not_reserved(
+        cluster, operation_str='Launching task on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
@@ -762,8 +762,8 @@ def exec(
         sky exec mycluster python train_cpu.py
         sky exec mycluster --gpus=V100:1 python train_gpu.py
     """
-    backend_utils.disallow_sky_reserved_cluster_name(cluster,
-                                                     'Executing task on it')
+    backend_utils.check_cluster_name_not_reserved(
+        cluster, operation_str='Executing task on it')
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
@@ -988,6 +988,9 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             'sky cancel requires either a job id '
             f'(see `sky queue {cluster} -s`) or the --all flag.')
 
+    backend_utils.check_cluster_name_not_reserved(
+        cluster, operation_str='Cancelling jobs')
+
     # Check the status of the cluster.
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster)
@@ -1094,11 +1097,18 @@ def stop(
               is_flag=True,
               required=False,
               help='Cancel the auto-stopping.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
 def autostop(
-        clusters: Tuple[str],
-        all: Optional[bool],  # pylint: disable=redefined-builtin
-        idle_minutes: Optional[int],
-        cancel: bool,  # pylint: disable=redefined-outer-name
+    clusters: Tuple[str],
+    all: Optional[bool],  # pylint: disable=redefined-builtin
+    idle_minutes: Optional[int],
+    cancel: bool,  # pylint: disable=redefined-outer-name
+    yes: bool,
 ):
     """Schedule or cancel auto-stopping for cluster(s).
 
@@ -1136,7 +1146,7 @@ def autostop(
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=False,
-                                no_confirm=True,
+                                no_confirm=yes,
                                 idle_minutes_to_autostop=idle_minutes)
 
 
@@ -1314,62 +1324,96 @@ def _terminate_or_stop_clusters(
         no_confirm: bool,
         purge: bool = False,
         idle_minutes_to_autostop: Optional[int] = None) -> None:
-    """Terminates or (auto-)stops a cluster (or all clusters)."""
-    assert idle_minutes_to_autostop is None or (not terminate and no_confirm), (
-        idle_minutes_to_autostop, terminate, no_confirm)
+    """Terminates or (auto-)stops a cluster (or all clusters).
+
+    Reserved clusters (spot controller) can only be terminated if the cluster
+    name is explicitly and uniquely specified (not via glob) and purge is set
+    to True.
+    """
+    assert idle_minutes_to_autostop is None or not terminate, (
+        idle_minutes_to_autostop, terminate)
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
         raise click.UsageError(
             f'sky {command} requires either a cluster name (see `sky status`) '
             'or --all.')
 
-    teardown_verb = 'Terminating' if terminate else 'Stopping'
-    to_down = []
+    operation = 'Terminating' if terminate else 'Stopping'
+    if idle_minutes_to_autostop is not None:
+        verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
+        operation = f'{verb} auto-stop on'
+
     if len(names) > 0:
-        names = _get_glob_clusters(names)
-        for name in names:
-            try:
-                backend_utils.disallow_sky_reserved_cluster_name(
-                    name, f'{teardown_verb} it')
-            except ValueError as e:
-                if not purge:
-                    # TODO(zhwu): Check all the managed spot jobs to be terminal
-                    # before allowing the user to delete the cluster.
-                    click.echo(str(e))
-                    continue
-            handle = global_user_state.get_handle_from_cluster_name(name)
-            to_down.append({'name': name, 'handle': handle})
+        reserved_clusters = [
+            name for name in names
+            if name in backend_utils.SKY_RESERVED_CLUSTER_NAMES
+        ]
+        reserved_clusters_str = ', '.join(map(repr, reserved_clusters))
+        names = [
+            name for name in _get_glob_clusters(names)
+            if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
+        ]
+        # Make sure the reserved clusters are explicitly specified without other
+        # normal clusters and purge is True.
+        if len(reserved_clusters) > 0:
+            if not purge:
+                msg = (
+                    f'{operation} sky reserved clusters {reserved_clusters_str}'
+                    ' is not supported.')
+                if terminate:
+                    msg += (
+                        '\nPlease specify --purge to force termination of the '
+                        'reserved clusters.')
+                raise click.UsageError(msg)
+            if len(names) != 0:
+                names_str = ', '.join(map(repr, names))
+                raise click.UsageError(
+                    f'{operation} sky reserved clusters {reserved_clusters_str}'
+                    f' with multiple other clusters {names_str} is not '
+                    'supported.\n'
+                    f'Please omit the reserved clusters {reserved_clusters}.')
+        names += reserved_clusters
+
     if apply_to_all:
-        to_down = global_user_state.get_clusters()
+        all_clusters = global_user_state.get_clusters()
         if len(names) > 0:
             print(f'Both --all and cluster(s) specified for sky {command}. '
                   'Letting --all take effect.')
-            names = []
-    if not to_down and not names:
+        # We should not remove reserved clusters when --all is specified.
+        # Otherwise, it would be very easy to accidentally delete a reserved
+        # cluster.
+        names = [
+            record['name']
+            for record in all_clusters
+            if record['name'] not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
+        ]
+
+    clusters = []
+    for name in names:
+        handle = global_user_state.get_handle_from_cluster_name(name)
+        clusters.append({'name': name, 'handle': handle})
+
+    if not clusters and not names:
         print('Cluster(s) not found (see `sky status`).')
         return
 
-    if not no_confirm and len(to_down) > 0:
-        cluster_str = 'clusters' if len(to_down) > 1 else 'cluster'
-        cluster_list = ', '.join([r['name'] for r in to_down])
+    if not no_confirm and len(clusters) > 0:
+        cluster_str = 'clusters' if len(clusters) > 1 else 'cluster'
+        cluster_list = ', '.join([r['name'] for r in clusters])
         click.confirm(
-            f'{teardown_verb} {len(to_down)} {cluster_str}: '
+            f'{operation} {len(clusters)} {cluster_str}: '
             f'{cluster_list}. Proceed?',
             default=True,
             abort=True,
             show_default=True)
 
-    operation = 'Terminating' if terminate else 'Stopping'
-    if idle_minutes_to_autostop is not None:
-        verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-        operation = f'{verb} auto-stop on'
-    plural = 's' if len(to_down) > 1 else ''
+    plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
     task = progress.add_task(
-        f'[bold cyan]{operation} {len(to_down)} cluster{plural}[/]',
-        total=len(to_down))
+        f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
+        total=len(clusters))
 
     def _terminate_or_stop(record):
         name = record['name']
@@ -1441,7 +1485,7 @@ def _terminate_or_stop_clusters(
         progress.start()
 
     with progress:
-        backend_utils.run_in_parallel(_terminate_or_stop, to_down)
+        backend_utils.run_in_parallel(_terminate_or_stop, clusters)
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
         progress.refresh()
@@ -2175,14 +2219,14 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     if not yes:
         job_identity_str = f'with IDs {job_id_str}' if job_ids else repr(name)
+        if all:
+            job_identity_str = 'all managed spot jobs'
         click.confirm(
             f'Cancelling managed spot job {job_identity_str}. Proceed?',
             default=True,
             abort=True,
             show_default=True)
 
-    handle = global_user_state.get_handle_from_cluster_name(
-        spot_lib.SPOT_CONTROLLER_NAME)
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     codegen = spot_lib.SpotCodeGen()

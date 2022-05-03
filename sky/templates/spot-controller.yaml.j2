@@ -29,7 +29,7 @@ setup: |
     tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && \
     mv google-cloud-sdk ~/ && \
     ~/google-cloud-sdk/install.sh -q && \
-    echo 'source ~/google-cloud-sdk/path.bash.inc' >> ~/.bashrc)
+    echo 'source ~/google-cloud-sdk/path.bash.inc' >> ~/.bashrc) 2>&1 > /dev/null
 
 run: |
   python -u -m sky.spot.controller \
