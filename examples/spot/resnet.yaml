@@ -10,8 +10,8 @@ name: resnet
 resources:
     accelerators: V100:4
     cloud: aws
-    # use_spot: true
-    # spot_recovery: FAILOVER
+    use_spot: true
+    spot_recovery: FAILOVER
 
 num_nodes: 1
 
