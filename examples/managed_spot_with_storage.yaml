@@ -1,0 +1,22 @@
+name: minimal
+
+resources:
+  cloud: aws
+  use_spot: true
+  spot_recovery: failover
+
+file_mounts:
+  ~/sky_workdir:
+    name: sky-workdir-zhwu
+    source: .
+    mode: COPY
+  /imagenet:
+    name: imagenet-bucket
+  /imagenet-image:
+    source: s3://sky-imagenet-data
+
+run: |
+  set -ex
+  ls ~/sky_workdir/sky
+  ls -l /imagenet | wc -l
+  ls -l /imagenet-image/datasets
