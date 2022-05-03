@@ -13,6 +13,7 @@ from sky import spot
 
 import traceback
 
+
 def test_spot_nonexist_strategy():
     """Test the nonexist recovery strategy."""
     task_yaml = textwrap.dedent("""\
@@ -28,6 +29,7 @@ def test_spot_nonexist_strategy():
                 match='is not supported. The strategy should be among'):
             sky.Task.from_yaml(f.name)
 
+
 class TestReservedClustersOperations:
     """Test operations on reserved clusters."""
 
@@ -35,8 +37,9 @@ class TestReservedClustersOperations:
     def _mock_db_conn(self, monkeypatch, tmp_path):
         tmp_path.mkdir(parents=True, exist_ok=True)
         db_path = tmp_path / 'state_testing.db'
-        monkeypatch.setattr(global_user_state, '_DB', global_user_state._SQLiteConn(str(db_path)))
-    
+        monkeypatch.setattr(global_user_state, '_DB',
+                            global_user_state._SQLiteConn(str(db_path)))
+
     @pytest.fixture
     def _mock_cluster_state(self, _mock_db_conn):
         assert 'state.db' not in global_user_state._DB.db_path
@@ -45,34 +48,50 @@ class TestReservedClustersOperations:
             cluster_yaml='/tmp/cluster1.yaml',
             head_ip='1.1.1.1',
             launched_nodes=2,
-            launched_resources=sky.Resources(sky.AWS(), instance_type='p3.2xlarge', region='us-east-1'),
+            launched_resources=sky.Resources(sky.AWS(),
+                                             instance_type='p3.2xlarge',
+                                             region='us-east-1'),
         )
-        global_user_state.add_or_update_cluster('test-cluster1', handle, ready=True)
+        global_user_state.add_or_update_cluster('test-cluster1',
+                                                handle,
+                                                ready=True)
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name='test-cluster2',
             cluster_yaml='/tmp/cluster2.yaml',
             head_ip='1.1.1.2',
             launched_nodes=1,
-            launched_resources=sky.Resources(sky.GCP(), instance_type='n1-highmem-8', accelerators={'A100': 4}, region='us-west1'),
+            launched_resources=sky.Resources(sky.GCP(),
+                                             instance_type='n1-highmem-8',
+                                             accelerators={'A100': 4},
+                                             region='us-west1'),
         )
-        global_user_state.add_or_update_cluster('test-cluster2', handle, ready=True)
+        global_user_state.add_or_update_cluster('test-cluster2',
+                                                handle,
+                                                ready=True)
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name='test-cluster3',
             cluster_yaml='/tmp/cluster3.yaml',
             head_ip='1.1.1.3',
             launched_nodes=4,
-            launched_resources=sky.Resources(sky.Azure(), instance_type='Standard_D4s_v3', region='eastus'),
+            launched_resources=sky.Resources(sky.Azure(),
+                                             instance_type='Standard_D4s_v3',
+                                             region='eastus'),
         )
-        global_user_state.add_or_update_cluster('test-cluster3', handle, ready=False)
+        global_user_state.add_or_update_cluster('test-cluster3',
+                                                handle,
+                                                ready=False)
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name=spot.SPOT_CONTROLLER_NAME,
             cluster_yaml='/tmp/spot_controller.yaml',
             head_ip='1.1.1.4',
             launched_nodes=1,
-            launched_resources=sky.Resources(sky.AWS(), instance_type='m4.2xlarge', region='us-west-1'),
+            launched_resources=sky.Resources(sky.AWS(),
+                                             instance_type='m4.2xlarge',
+                                             region='us-west-1'),
         )
-        global_user_state.add_or_update_cluster(spot.SPOT_CONTROLLER_NAME, handle, ready=True)
-
+        global_user_state.add_or_update_cluster(spot.SPOT_CONTROLLER_NAME,
+                                                handle,
+                                                ready=True)
 
     @pytest.mark.timeout(60)
     def test_down_spot_controller(self, _mock_cluster_state):
@@ -103,7 +122,6 @@ class TestReservedClustersOperations:
         assert result.exit_code == click.UsageError.exit_code
         assert 'is not supported' in result.output
         assert 'Terminating' in result.output
-
 
     @pytest.mark.timeout(60)
     def test_stop_spot_controller(self, _mock_cluster_state):
