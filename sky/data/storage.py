@@ -636,7 +636,12 @@ class Storage(object):
             if value is not None:
                 config[key] = value
 
-        add_if_not_none('name', self.name)
+        name = self.name
+        if self.source is not None and data_utils.is_cloud_store_url(
+                self.source):
+            # Remove name if source is a cloud store URL
+            name = None
+        add_if_not_none('name', name)
         add_if_not_none('source', self.source)
 
         stores = None

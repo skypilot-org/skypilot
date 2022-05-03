@@ -51,6 +51,8 @@ from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
+from sky.data import data_utils
+from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.utils.cli_utils import status_utils
@@ -1878,6 +1880,29 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
             'storage delete\'.')
 
 
+# Managed Spot CLIs
+
+
+def _is_spot_controller_up(
+    stopped_message: str,
+) -> Tuple[Optional[global_user_state.ClusterStatus],
+           Optional[backends.Backend.ResourceHandle]]:
+    controller_status, handle = backend_utils.refresh_cluster_status_handle(
+        spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
+    if controller_status is None:
+        click.echo('No managed spot job has been run.')
+    elif controller_status != global_user_state.ClusterStatus.UP:
+        msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
+               f'is {controller_status.value}.')
+        if controller_status == global_user_state.ClusterStatus.STOPPED:
+            msg += f'\n{stopped_message}'
+        if controller_status == global_user_state.ClusterStatus.INIT:
+            msg += '\nPlease wait for the controller to be ready.'
+        click.echo(msg)
+        handle = None
+    return controller_status, handle
+
+
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
     """Managed spot instances related commands."""
@@ -2012,6 +2037,39 @@ def spot_launch(
     if name is not None:
         task.name = name
 
+    # Check the file mounts in the task.
+    # Disallow all local file mounts (copy mounts).
+    if task.workdir is not None:
+        raise click.UsageError('Workdir is not allowed for managed spot jobs.')
+    copy_mounts = task.get_local_to_remote_file_mounts()
+    copy_mounts_str = '\n\t'.join(': '.join(m) for m in copy_mounts)
+    if copy_mounts:
+        raise click.UsageError(
+            'Local file mounts are not allowed for managed spot jobs, '
+            f'but following are found: {copy_mounts_str}')
+
+    # Copy the local source to the bucket.
+    task.add_storage_mounts()
+
+    # Replace the source field that is local path in all storage_mounts with bucket
+    # URI and remove the name field.
+    for storage_obj in task.storage_mounts.values():
+        if (storage_obj.source is not None and
+                not data_utils.is_cloud_store_url(storage_obj.source)):
+            # TODO(zhwu): set storage.store to None, when we support source=None
+            # for COPY mode.
+            store_types = list(storage_obj.stores.keys())
+            assert len(store_types) == 1, (
+                'We only support one store type for now.', storage_obj.stores)
+            store_type = store_types[0]
+            if store_type == StoreType.S3:
+                storage_obj.source = f's3://{storage_obj.name}'
+            elif store_type == StoreType.GCS:
+                storage_obj.source = f'gs://{storage_obj.name}'
+            else:
+                raise ValueError(f'Unsupported store type: {store_type}')
+            storage_obj.name = None
+
     with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
@@ -2030,7 +2088,7 @@ def spot_launch(
             task = sky.Task.from_yaml(yaml_path)
             assert len(task.resources) == 1
         click.secho(
-            f'Launching managed spot task {name} from spot controller...',
+            f'Launching managed spot job {name} from spot controller...',
             fg='yellow')
         backend = backends.CloudVmRayBackend()
         # TODO(zhwu): Remove the hint messages after launch finished as it is
@@ -2043,26 +2101,6 @@ def spot_launch(
                    idle_minutes_to_autostop=spot_lib.
                    SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                    is_spot_controller_task=True)
-
-
-def _is_spot_controller_up(
-    stopped_message: str,
-) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
-    controller_status, handle = backend_utils.refresh_cluster_status_handle(
-        spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
-    if controller_status is None:
-        click.echo('No managed spot job has been run.')
-    elif controller_status != global_user_state.ClusterStatus.UP:
-        msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
-               f'is {controller_status.value}.')
-        if controller_status == global_user_state.ClusterStatus.STOPPED:
-            msg += f'\n{stopped_message}'
-        if controller_status == global_user_state.ClusterStatus.INIT:
-            msg += '\nPlease wait for the controller to be ready.'
-        click.echo(msg)
-        handle = None
-    return controller_status, handle
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)
