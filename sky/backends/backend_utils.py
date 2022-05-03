@@ -1322,8 +1322,9 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
             f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
 
 
-def check_cluster_name_not_reserved(cluster_name: Optional[str],
-                                    operation_str: Optional[str]):
+def check_cluster_name_not_reserved(
+        cluster_name: Optional[str],
+        operation_str: Optional[str] = None) -> None:
     """Errors out if cluster name is reserved by sky.
 
     If the cluster name is reserved, return the error message. Otherwise,
@@ -1334,7 +1335,7 @@ def check_cluster_name_not_reserved(cluster_name: Optional[str],
         usage = 'spot controller'
     msg = (f'Cluster {cluster_name!r} is reserved for {usage}.')
     if operation_str is not None:
-           msg += (f'{colorama.Fore.RED}{operation_str} is not allowed.'
-           f'{colorama.Style.RESET_ALL}')
+        msg += (f'{colorama.Fore.RED}{operation_str} is not allowed.'
+                f'{colorama.Style.RESET_ALL}')
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         raise ValueError(msg)

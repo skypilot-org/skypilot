@@ -72,7 +72,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
 
             # Tear down the abnormal spot cluster to avoid resource leakage.
             cluster_name = generate_spot_cluster_name(task_name, job_id)
-            handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
             backend = backend_utils.get_backend_from_handle(handle)
             if handle is not None:
                 backend.teardown(handle, terminate=True)
