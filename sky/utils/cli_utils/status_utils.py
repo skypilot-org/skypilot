@@ -56,7 +56,7 @@ def show_status_table(show_all: bool, refresh: bool):
     pending_autostop = 0
     for record in cluster_records:
         try:
-            backend_utils.is_reserved_cluster_name(record['name'], '')
+            backend_utils.check_cluster_name_not_reserved(record['name'])
         except ValueError:
             # Skip the reserved cluster names in the status table.
             if not show_all:

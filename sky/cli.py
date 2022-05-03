@@ -590,7 +590,8 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
-    backend_utils.is_reserved_cluster_name(cluster, 'Launching task on it')
+    backend_utils.check_cluster_name_not_reserved(
+        cluster, operation_str='Launching task on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
@@ -761,7 +762,8 @@ def exec(
         sky exec mycluster python train_cpu.py
         sky exec mycluster --gpus=V100:1 python train_gpu.py
     """
-    backend_utils.is_reserved_cluster_name(cluster, 'Executing task on it')
+    backend_utils.check_cluster_name_not_reserved(
+        cluster, operation_str='Executing task on it')
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
@@ -986,7 +988,8 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             'sky cancel requires either a job id '
             f'(see `sky queue {cluster} -s`) or the --all flag.')
 
-    backend_utils.is_reserved_cluster_name(cluster, 'Cancelling jobs')
+    backend_utils.check_cluster_name_not_reserved(
+        cluster, operation_str='Cancelling jobs')
 
     # Check the status of the cluster.
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
@@ -1323,8 +1326,9 @@ def _terminate_or_stop_clusters(
         idle_minutes_to_autostop: Optional[int] = None) -> None:
     """Terminates or (auto-)stops a cluster (or all clusters).
 
-    The reserved clusters can only be terminated, when the cluster name
-    is explicitly (not glob and the only one) specified and purge is True.
+    Reserved clusters (spot controller) can only be terminated if the cluster
+    name is explicitly and uniquely specified (not via glob) and purge is set
+    to True.
     """
     assert idle_minutes_to_autostop is None or not terminate, (
         idle_minutes_to_autostop, terminate)

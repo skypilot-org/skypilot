@@ -12,6 +12,7 @@ import filelock
 
 from sky import global_user_state
 from sky import sky_logging
+from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.spot import spot_state
@@ -55,7 +56,8 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         # terminal state, we can safely skip it.
         job_status = spot_state.get_status(job_id)
         if job_status.is_terminal():
-            logger.info(f'Job {job_id} is already in terminal state. Skip.')
+            logger.info(f'Job {job_id} is already in terminal state '
+                        f'{job_status.value}. Skipped.')
             continue
 
         # Check the status of the controller. If it is not running, it must be
@@ -66,6 +68,16 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         if controller_status.is_terminal():
             logger.error(f'Controller for job {job_id} have exited abnormally. '
                          'Set the job status to FAILED.')
+            task_name = spot_state.get_task_name_by_job_id(job_id)
+
+            # Tear down the abnormal spot cluster to avoid resource leakage.
+            cluster_name = generate_spot_cluster_name(task_name, job_id)
+            handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+            backend = backend_utils.get_backend_from_handle(handle)
+            if handle is not None:
+                backend.teardown(handle, terminate=True)
+
+            # Set the job status to FAILED.
             spot_state.set_failed(job_id)
             continue
 

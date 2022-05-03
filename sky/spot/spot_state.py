@@ -204,3 +204,10 @@ def get_spot_jobs() -> List[Dict[str, Any]]:
         job_dict['status'] = SpotStatus(job_dict['status'])
         jobs.append(job_dict)
     return jobs
+
+def get_task_name_by_job_id(job_id: int) -> str:
+    """Get the task name of a job."""
+    task_name = _CURSOR.execute(
+        """\
+        SELECT job_name FROM spot WHERE job_id=(?)""", (job_id,)).fetchone()
+    return task_name[0]
