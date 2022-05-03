@@ -278,7 +278,7 @@ class Storage(object):
                  source: Optional[Path] = None,
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
-                 mode: Optional[StorageMode] = StorageMode.MOUNT,
+                 mode: StorageMode = StorageMode.MOUNT,
                  sync_on_reconstruction: Optional[bool] = True):
         """Initializes a Storage object.
 
@@ -321,6 +321,7 @@ class Storage(object):
         self.source = source
         self.persistent = persistent
         self.mode = mode
+        assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
 
         # Validate and correct inputs if necessary
@@ -614,7 +615,8 @@ class Storage(object):
             # Make mode case insensitive, if specified
             mode = StorageMode(mode_str.upper())
         else:
-            mode = None
+            # Make sure this keeps the same as the default mode in __init__
+            mode = StorageMode.MOUNT
         persistent = True if config.get(
             'persistent') is None else config['persistent']
         # Validation of the config object happens on instantiation.

@@ -23,7 +23,7 @@ jobs:
           - tests/test_pycryptodome_version.py
           - tests/test_storage.py
           - tests/test_wheels.py
-          - tests/test_yaml_specs.py
+          - tests/test_spot.py
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository

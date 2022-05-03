@@ -76,6 +76,8 @@ _TEST_IP = '1.1.1.1'
 # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
 _MAX_CLUSTER_NAME_LEN = 37
 
+SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
+
 
 def fill_template(template_name: str,
                   variables: Dict,
@@ -1348,10 +1350,20 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
             f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
 
 
-def disallow_sky_reserved_cluster_name(cluster_name: Optional[str],
-                                       operation_str: str):
+def check_cluster_name_not_reserved(
+        cluster_name: Optional[str],
+        operation_str: Optional[str] = None) -> None:
+    """Errors out if cluster name is reserved by sky.
+
+    If the cluster name is reserved, return the error message. Otherwise,
+    return None.
+    """
+    usage = 'internal use'
     if cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
-        raise ValueError(
-            f'Cluster {cluster_name!r} is reserved for the spot controller.\n'
-            f'{colorama.Fore.RED}{operation_str} is not allowed.'
-            f'{colorama.Style.RESET_ALL}')
+        usage = 'spot controller'
+    msg = (f'Cluster {cluster_name!r} is reserved for {usage}.')
+    if operation_str is not None:
+        msg += (f'{colorama.Fore.RED}{operation_str} is not allowed.'
+                f'{colorama.Style.RESET_ALL}')
+    if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
+        raise ValueError(msg)
