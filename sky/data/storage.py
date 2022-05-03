@@ -321,6 +321,7 @@ class Storage(object):
         self.source = source
         self.persistent = persistent
         self.mode = mode
+        assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
 
         # Validate and correct inputs if necessary
