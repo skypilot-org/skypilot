@@ -169,7 +169,7 @@ def set_cancelled(job_id: int):
 
 def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get non-terminal job ids by name."""
-    name_filter = 'job_name=(?)' if name is not None else ''
+    name_filter = 'AND job_name=(?)' if name is not None else ''
     field_values = [status.value for status in SpotStatus.terminal_status()]
     if name is not None:
         field_values.append(name)

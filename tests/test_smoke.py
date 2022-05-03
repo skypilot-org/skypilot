@@ -425,9 +425,12 @@ def test_managed_gcp_spot():
 def test_managed_spot_storage():
     """Test storage with managed spot"""
     name = _get_cluster_name()
-    yaml_str = pathlib.Path('examples/managed_spot_with_storage.yaml').read_text()
-    yaml_str = yaml_str.replace('sky-workdir-zhwu', f'sky-test-{int(time.time())}')
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w', delete=False) as f:
+    yaml_str = pathlib.Path(
+        'examples/managed_spot_with_storage.yaml').read_text()
+    yaml_str = yaml_str.replace('sky-workdir-zhwu',
+                                f'sky-test-{int(time.time())}')
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
         f.write(yaml_str)
         file_path = f.name
     test = Test(
