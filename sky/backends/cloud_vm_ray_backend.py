@@ -2156,7 +2156,6 @@ class CloudVmRayBackend(backends.Backend):
                 query_cmd = (
                     f'aws ec2 describe-instances --region {region} --filters '
                     f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
-                    'Name=instance-state-name,Values=stopping,stopped '
                     f'--query Reservations[].Instances[].InstanceId '
                     '--output text')
                 terminate_cmd = (

@@ -235,8 +235,8 @@ class SSHConfigHelper(object):
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
-        sky_autogen_comment = '# Added by sky (use `sky stop/down ' + \
-                            f'{cluster_name}` to remove)'
+        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
+                               f'{cluster_name}` to remove)')
         overwrite = False
         overwrite_begin_idx = None
         ip = ips[0]
@@ -411,8 +411,12 @@ class SSHConfigHelper(object):
                 f.write('\n')
 
     @classmethod
-    def remove_cluster(cls, cluster_name: str, ip: str, auth_config: Dict[str,
-                                                                          str]):
+    def remove_cluster(
+        cls,
+        cluster_name: str,
+        ip: str,
+        auth_config: Dict[str, str],
+    ):
         """Remove authentication information for cluster from local SSH config.
 
         If no existing host matching the provided specification is found, then
@@ -434,8 +438,8 @@ class SSHConfigHelper(object):
         # Scan the config for the cluster name.
         for i, line in enumerate(config):
             next_line = config[i + 1] if i + 1 < len(config) else ''
-            if line.strip() == f'HostName {ip}' and next_line.strip(
-            ) == f'User {username}':
+            if (line.strip() == f'HostName {ip}' and
+                    next_line.strip() == f'User {username}'):
                 start_line_idx = i - 1
                 break
 
@@ -1152,15 +1156,26 @@ def get_head_ip(
 
 
 def check_network_connection():
-    conn = httplib.HTTPSConnection(_TEST_IP, timeout=1)
+    # A timeout of 1s seems to infrequently encounter 'socket.timeout'.
+    conn = httplib.HTTPSConnection(_TEST_IP, timeout=3)
     try:
         conn.request('HEAD', '/')
     except OSError as e:
         raise exceptions.NetworkError(
-            'Could not refresh the cluster. Network is down.') from e
+            'Could not refresh the cluster. Network seems down.') from e
 
 
-def _ping_cluster_and_set_status(record: Dict[str, Any]) -> Dict[str, Any]:
+def _ping_cluster_and_set_status(
+        record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Pings a cluster and potentially sets it to stopped.
+
+    Setting it to STOPPED means (1) setting the clusters table, (2) removing it
+    from the SSH config.
+
+    Returns:
+      If the cluster yaml is found to be concurrently removed, returns None.
+      Otherwise returns the input record with status potentially updated.
+    """
     handle = record['handle']
     cluster_name = handle.cluster_name
 
@@ -1186,8 +1201,18 @@ def _ping_cluster_and_set_status(record: Dict[str, Any]) -> Dict[str, Any]:
     # 1. Autostop case: the whole cluster will be properly stopped soon.
     # 2. Managed spot case: We will soon relaunch the cluster by the strategy
     #    on the same region or terminate the cluster.
+    try:
+        config = read_yaml(handle.cluster_yaml)
+    except FileNotFoundError:
+        # This happens e.g., during smoke tests. A test calls `sky status
+        # --refresh`, processes another cluster (running this current func),
+        # while a concurrent test has torn down itself.
+        #
+        # We know we can't ping the IP and the cluster yaml has been
+        # removed. With high likelihood the cluster has been removed.
+        return None
+    auth_config = config['auth']
     global_user_state.remove_cluster(cluster_name, terminate=False)
-    auth_config = read_yaml(handle.cluster_yaml)['auth']
     SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
     return global_user_state.get_cluster_from_name(cluster_name)
 
@@ -1207,6 +1232,8 @@ def refresh_cluster_status_handle(
             # Refresh the status only when force_refresh is True or the cluster
             # has autostopped turned on.
             record = _ping_cluster_and_set_status(record)
+            if record is None:
+                return None, None
     return record['status'], handle
 
 
@@ -1218,7 +1245,8 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
     for record in rich_progress.track(records,
                                       description='Refreshing cluster status'):
         record = _ping_cluster_and_set_status(record)
-        updated_records.append(record)
+        if record is not None:
+            updated_records.append(record)
     return updated_records
 
 
