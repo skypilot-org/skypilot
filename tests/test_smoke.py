@@ -541,10 +541,13 @@ class TestStorageWithCredentials:
 # Our sky storage requires credentials to check the bucket existance when
 # loading a task from the yaml file, so we cannot make it a unit test.
 class TestYamlSpecs:
+    # TODO(zhwu): Add test for `to_yaml_config` for the Storage object.
+    #  We should not use `examples/storage_demo.yaml` here, since it requires
+    #  users to ensure bucket names to not exist and/or be unique.
     _TEST_YAML_PATHS = [
         'examples/minimal.yaml', 'examples/managed_spot.yaml',
         'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
-        'examples/multi_hostname.yaml', 'examples/storage_demo.yaml'
+        'examples/multi_hostname.yaml'
     ]
 
     def _is_dict_subset(self, d1, d2):
@@ -559,7 +562,12 @@ class TestYamlSpecs:
                 assert isinstance(d2[k], dict), (k, v, d2)
                 self._is_dict_subset(v, d2[k])
             elif isinstance(v, str):
-                assert v.lower() == d2[k].lower(), (k, v, d2[k])
+                if k == 'accelerators':
+                    resources = sky.Resources()
+                    resources._set_accelerators(v, None)
+                    assert resources.accelerators == d2[k], (k, v, d2)
+                else:
+                    assert v.lower() == d2[k].lower(), (k, v, d2[k])
             else:
                 assert v == d2[k], (k, v, d2[k])
 
