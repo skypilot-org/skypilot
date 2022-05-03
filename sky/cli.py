@@ -1991,10 +1991,10 @@ def spot_launch(
 
     change_default_value = dict()
     if not new_resources.use_spot_specified:
-        logger.info('use_spot not specified, set to True.')
+        logger.info('Field use_spot not specified; defaulting to True.')
         change_default_value['use_spot'] = True
     if new_resources.spot_recovery is None:
-        logger.info('No spot recovery strategy specified. Defaulting to '
+        logger.info('No spot recovery strategy specified; defaulting to '
                     f'{spot_lib.SPOT_DEFAULT_STRATEGY}.')
         change_default_value['spot_recovery'] = spot_lib.SPOT_DEFAULT_STRATEGY
 
