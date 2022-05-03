@@ -2051,8 +2051,8 @@ def spot_launch(
     # Copy the local source to the bucket.
     task.add_storage_mounts()
 
-    # Replace the source field that is local path in all storage_mounts with bucket
-    # URI and remove the name field.
+    # Replace the source field that is local path in all storage_mounts with
+    # bucket URI and remove the name field.
     for storage_obj in task.storage_mounts.values():
         if (storage_obj.source is not None and
                 not data_utils.is_cloud_store_url(storage_obj.source)):
