@@ -1231,9 +1231,7 @@ def refresh_cluster_status_handle(
             # has autostopped turned on.
             record = _ping_cluster_and_set_status(record)
             if record is None:
-                raise RuntimeError(
-                    f'Cluster {cluster_name!r} seems concurrently removed: '
-                    f'cluster yaml {record["handle"].cluster_yaml} not found.')
+                return None, None
     return record['status'], handle
 
 
