@@ -461,7 +461,10 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_bucket_name(self):
         # Creates a temporary bucket name
-        yield f'sky-test-{time.time_ns()}'
+        # time.time() returns varying precision on different systems, so we
+        # replace the decimal point and use whatever precision we can get.
+        timestamp = str(time.time()).replace('.', '')
+        yield f'sky-test-{timestamp}'
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_mount):
