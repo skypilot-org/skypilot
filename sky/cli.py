@@ -2227,8 +2227,6 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
             abort=True,
             show_default=True)
 
-    handle = global_user_state.get_handle_from_cluster_name(
-        spot_lib.SPOT_CONTROLLER_NAME)
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     codegen = spot_lib.SpotCodeGen()
