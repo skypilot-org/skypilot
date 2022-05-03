@@ -414,6 +414,8 @@ def test_gcp_spot():
         [
             f'sky spot launch -n {name} --cloud gcp "sleep 3600" -y -d',
             'sleep 5',
+            # Captures & prints the table for easier debugging. Two echo's to
+            # separate the table from the grep output.
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep STARTING',
             'sleep 200',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep RUNNING',
