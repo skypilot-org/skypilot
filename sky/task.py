@@ -65,6 +65,7 @@ class Task:
         *,
         setup: Optional[str] = None,
         run: Optional[CommandOrCommandGen] = None,
+        envs: Optional[Dict[str, str]] = None,
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
         # Advanced:
@@ -89,6 +90,8 @@ class Task:
             some nodes, in which case no commands are run on them).  Commands
             will be run under 'workdir'. Note the command generator should be
             self-contained.
+          envs: A dictionary of environment variables to set before running the
+            setup and run command.
           workdir: The local working directory.  This directory and its files
             will be synced to a location on the remote VM(s), and 'setup' and
             'run' commands will be run under that location (thus, they can rely
@@ -106,6 +109,7 @@ class Task:
         self.storage_mounts = {}
         self.storage_plans = {}
         self.setup = setup
+        self.envs = envs
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04')

@@ -34,7 +34,7 @@ import shlex
 import sys
 import tempfile
 import typing
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
@@ -247,6 +247,12 @@ _TASK_OPTIONS = [
         default=None,
         help=('Whether to request spot instances. If specified, override the '
               '"resources.use_spot".')),
+    click.option(
+        '--env',
+        required=False,
+        type=lambda x: x.split('='),
+        multiple=True,
+    )
 ]
 
 
@@ -578,6 +584,7 @@ def launch(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    env: List[Dict[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
@@ -662,6 +669,7 @@ def launch(
             task.num_nodes = num_nodes
         if name is not None:
             task.name = name
+        task.envs = dict(env)
 
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
@@ -704,6 +712,7 @@ def exec(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    env: List[Dict[str, str]],
 ):
     """Execute a task or a command on a cluster (skip setup).
 
@@ -816,6 +825,7 @@ def exec(
             task.num_nodes = num_nodes
         if name is not None:
             task.name = name
+        task.envs = dict(env)
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
@@ -1953,6 +1963,7 @@ def spot():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+# TODO(zhwu): Add --env option as sky launch --env option.
 def spot_launch(
     entrypoint: str,
     name: Optional[str],
