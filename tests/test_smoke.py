@@ -426,7 +426,7 @@ def test_gcp_spot():
 
 
 # ---------- Testing storage for managed spot ----------
-def test_managed_spot_storage():
+def test_spot_storage():
     """Test storage with managed spot"""
     name = _get_cluster_name()
     yaml_str = pathlib.Path(
