@@ -125,9 +125,11 @@ def get_status(job_id: int) -> Optional[JobStatus]:
 
 
 def get_latest_job_id() -> Optional[int]:
-    rows = _CURSOR.execute('SELECT job_id FROM jobs ORDER BY job_id DESC LIMIT 1')
+    rows = _CURSOR.execute(
+        'SELECT job_id FROM jobs ORDER BY job_id DESC LIMIT 1')
     for (job_id,) in rows:
         return job_id
+
 
 def set_job_started(job_id: int) -> None:
     _CURSOR.execute(
@@ -442,8 +444,8 @@ class JobLibCodeGen:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
-            f'log_dir = job_lib.log_dir(job_id)',
-            f'log_lib.tail_logs(job_id, log_dir)',
+            'log_dir = job_lib.log_dir(job_id)',
+            'log_lib.tail_logs(job_id, log_dir)',
         ]
         return cls._build(code)
 
@@ -453,9 +455,9 @@ class JobLibCodeGen:
         code = [
             f'job_id = {job_id} if job_id is not None '
             'else job_lib.get_latest_job_id()',
-            f'job_status = job_lib.get_status(job_id)',
+            'job_status = job_lib.get_status(job_id)',
             'status_str = None if job_status is None else job_status.value',
-            f'print("Job", {job_id}, status_str, flush=True)',
+            'print("Job", job_id, status_str, flush=True)',
         ]
         return cls._build(code)
 
@@ -472,7 +474,7 @@ class JobLibCodeGen:
         code = [
             f'job_id = {job_id!r} if {job_id!r} is not None '
             'else job_lib.get_latest_job_id()',
-            f'log_dirs = job_lib.log_dirs_with_globbing(str(job_id))',
+            'log_dirs = job_lib.log_dirs_with_globbing(str(job_id))',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)

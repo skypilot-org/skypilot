@@ -925,7 +925,7 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
 @click.argument('job_id', required=False, type=str)
 def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
     """Tail the log of a job.
-    
+
     If job_id is not provided, tail the logs of the last job on the cluster.
     """
     cluster_name = cluster
@@ -2254,26 +2254,32 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     if 'Multiple jobs found with name' in stdout:
         click.echo('Please specify the job ID instead of the job name.')
 
+
 @spot.command('logs', cls=_DocumentedCodeCommand)
-@click.option('--name', '-n', required=False, type=str, help='Managed sopt job name.')
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help='Managed sopt job name.')
 @click.argument('job_id', required=False, type=int)
 @click.option(
     '--sync-down',
     '-s',
     is_flag=True,
     default=False,
-    help='Sync down the archive logs of the job (This will download all the logs '
-    'from every recovery).')
+    help='Sync down the archive logs of the job (This will download all the '
+    'logs from every recovery).')
 def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
     """Show spot controller logs.
-    
-    If --sync-down is specified, the all the logs from every recovery will be downloaded
-     from the controller.
+
+    If --sync-down is specified, the all the logs from every recovery will be
+     downloaded from the controller.
     Otherwise, the realtime logs from the job will be streamed.
     """
     # TODO(zhwu): Automatically restart the spot controller
     _, handle = _is_spot_controller_up(
-        'Please restart the spot controller with sky start sky-spot-controller.')
+        'Please restart the spot controller with sky start sky-spot-controller.'
+    )
     if handle is None:
         return
 
@@ -2289,9 +2295,12 @@ def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
             code = codegen.stream_logs_by_name(name)
         else:
             code = codegen.stream_logs_by_id(job_id)
-        returncode, stdout, _ = backend.run_on_head(
-            handle, code, require_outputs=True, stream_logs=True)
-        backend_utils.handle_returncode(returncode, code, 'Failed to fetch logs', stdout)
+        returncode, stdout, _ = backend.run_on_head(handle,
+                                                    code,
+                                                    require_outputs=True,
+                                                    stream_logs=True)
+        backend_utils.handle_returncode(returncode, code,
+                                        'Failed to fetch logs', stdout)
 
         if 'is already in terminal' in stdout:
             click.echo('Please use --sync-down to download the archived logs.')
@@ -2299,6 +2308,7 @@ def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
         # Sync down the archived logs
         # TODO(wei-lin): Please fill in the implementation.
         raise NotImplementedError('Sync down is not implemented yet.')
+
 
 def main():
     return cli()

@@ -1782,7 +1782,8 @@ class CloudVmRayBackend(backends.Backend):
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
-    def sync_down_logs(self, handle: ResourceHandle, job_ids: Optional[str]) -> None:
+    def sync_down_logs(self, handle: ResourceHandle,
+                       job_ids: Optional[str]) -> None:
         code = job_lib.JobLibCodeGen.get_log_path_with_globbing(job_ids)
         returncode, log_dirs, stderr = self.run_on_head(handle,
                                                         code,
@@ -1918,7 +1919,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{colorama.Fore.YELLOW}Start streaming logs...'
                     f'{colorama.Style.RESET_ALL}')
         if job_id is None:
-            logger.info(f'Job ID not provided. Streaming the latest logs...')
+            logger.info('Job ID not provided. Streaming the latest logs...')
 
         # With interactive mode, the ctrl-c will send directly to the running
         # program on the remote instance, and the ssh will be disconnected by

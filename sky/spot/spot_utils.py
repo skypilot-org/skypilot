@@ -120,11 +120,13 @@ def cancel_job_by_name(job_name: str) -> str:
     return (f'Job {job_name!r} is scheduled to be cancelled within '
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
 
+
 def stream_logs_by_id(job_id: int) -> str:
     """Stream logs by job id."""
     job_status = spot_state.get_status(job_id)
     if job_status.is_terminal():
-        return (f'Job {job_id} is already in terminal state {job_status.value}.')
+        return (
+            f'Job {job_id} is already in terminal state {job_status.value}.')
     task_name = spot_state.get_task_name_by_job_id(job_id)
     cluster_name = generate_spot_cluster_name(task_name, job_id)
     # TODO(zhwu): handle task status here.
@@ -146,6 +148,7 @@ def stream_logs_by_name(job_name: str) -> str:
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
     stream_logs_by_id(job_ids[0])
     return ''
+
 
 def show_jobs(show_all: bool) -> str:
     """Show all spot jobs."""
@@ -233,7 +236,7 @@ class SpotCodeGen:
             'print(msg, end="", flush=True)',
         ]
         return self._build()
-    
+
     def stream_logs_by_name(self, job_name: str) -> str:
         self._code += [
             f'msg = spot_utils.stream_logs_by_name({job_name!r})',
