@@ -120,6 +120,32 @@ def cancel_job_by_name(job_name: str) -> str:
     return (f'Job {job_name!r} is scheduled to be cancelled within '
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
 
+def stream_logs_by_id(job_id: int) -> str:
+    """Stream logs by job id."""
+    job_status = spot_state.get_status(job_id)
+    if job_status.is_terminal():
+        return (f'Job {job_id} is already in terminal state {job_status.value}.')
+    task_name = spot_state.get_task_name_by_job_id(job_id)
+    cluster_name = generate_spot_cluster_name(task_name, job_id)
+    # TODO(zhwu): handle cluster status here.
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    backend = backend_utils.get_backend_from_handle(handle)
+    backend.tail_logs(handle, None)
+    return ''
+
+
+def stream_logs_by_name(job_name: str) -> str:
+    """Stream logs by name."""
+    job_ids = spot_state.get_nonterminal_job_ids_by_name(job_name)
+    if len(job_ids) == 0:
+        return (f'{colorama.Fore.RED}No job found with name {job_name!r}.'
+                f'{colorama.Style.RESET_ALL}')
+    if len(job_ids) > 1:
+        return (f'{colorama.Fore.RED}Multiple running jobs found '
+                f'with name {job_name!r}.\n'
+                f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
+    stream_logs_by_id(job_ids[0])
+    return ''
 
 def show_jobs(show_all: bool) -> str:
     """Show all spot jobs."""
@@ -196,15 +222,29 @@ class SpotCodeGen:
 
     def cancel_jobs_by_id(self, job_ids: Optional[List[int]]) -> str:
         self._code += [
-            f'result = spot_utils.cancel_jobs_by_id({job_ids})',
-            'print(result, end="", flush=True)',
+            f'msg = spot_utils.cancel_jobs_by_id({job_ids})',
+            'print(msg, end="", flush=True)',
         ]
         return self._build()
 
     def cancel_job_by_name(self, job_name: str) -> str:
         self._code += [
-            f'result = spot_utils.cancel_job_by_name({job_name!r})',
-            'print(result, end="", flush=True)',
+            f'msg = spot_utils.cancel_job_by_name({job_name!r})',
+            'print(msg, end="", flush=True)',
+        ]
+        return self._build()
+    
+    def stream_logs_by_name(self, job_name: str) -> str:
+        self._code += [
+            f'msg = spot_utils.stream_logs_by_name({job_name!r})',
+            'print(msg, end="", flush=True)',
+        ]
+        return self._build()
+
+    def stream_logs_by_id(self, job_id: int) -> str:
+        self._code += [
+            f'msg = spot_utils.stream_logs_by_id({job_id})',
+            'print(msg, end="", flush=True)',
         ]
         return self._build()
 
