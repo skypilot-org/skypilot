@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+from http.server import executable
 import colorama
 import datetime
 import enum
@@ -967,13 +968,15 @@ def run_command_on_ip_via_ssh(
             command += [f'| tee {log_path}']
         else:
             command += [f'> {log_path}']
+        command += ['; exit ${PIPESTATUS[0]}']
 
     return log_lib.run_with_log(' '.join(command),
                                 log_path,
                                 stream_logs,
                                 process_stream=process_stream,
                                 require_outputs=require_outputs,
-                                shell=True)
+                                shell=True,
+                                executable='/bin/bash')
 
 
 def handle_returncode(returncode: int,

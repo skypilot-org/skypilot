@@ -147,6 +147,7 @@ def stream_logs_by_id(job_id: int) -> str:
             time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
             continue
         returncode = backend.tail_logs(handle, None)
+        logger.debug(f'The return code is {returncode}.')
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_state.get_status(job_id).value}).')
     return ''
