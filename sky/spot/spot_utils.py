@@ -12,6 +12,7 @@ import filelock
 
 from sky import global_user_state
 from sky import sky_logging
+from sky import backends
 from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
@@ -24,11 +25,13 @@ JOB_STATUS_CHECK_GAP_SECONDS = 60
 
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
+_LOG_STREAM_CHECK_GAP_SECONDS = 60
+
 
 class UserSignal(enum.Enum):
     """The signal to be sent to the user."""
     CANCEL = 'CANCEL'
-    # TODO(zhwu): We can have more communication signals here if needed
+    # NOTE: We can have more communication signals here if needed
     # in the future.
 
 
@@ -129,10 +132,18 @@ def stream_logs_by_id(job_id: int) -> str:
             f'Job {job_id} is already in terminal state {job_status.value}.')
     task_name = spot_state.get_task_name_by_job_id(job_id)
     cluster_name = generate_spot_cluster_name(task_name, job_id)
-    # TODO(zhwu): handle task status here.
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    backend = backend_utils.get_backend_from_handle(handle)
-    backend.tail_logs(handle, None)
+    backend = backends.CloudVmRayBackend()
+    while spot_state.get_status(job_id).is_terminal() is False:
+        cluster_status, handle = backend_utils.refresh_cluster_status_handle(
+            cluster_name, force_refresh=True)
+        if cluster_status != global_user_state.ClusterStatus.UP:
+            logger.info(f'The log is not ready yet, as the spot job is '
+                        f'{spot_state.get_status(job_id).value}. '
+                        f'Wait for {_LOG_STREAM_CHECK_GAP_SECONDS} seconds.')
+            logger.debug(f'The cluster {cluster_name} is {cluster_status}.')
+            time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
+            continue
+        backend.tail_logs(handle, None)
     return ''
 
 
