@@ -144,6 +144,8 @@ def stream_logs_by_id(job_id: int) -> str:
             time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
             continue
         backend.tail_logs(handle, None)
+    logger.info(f'Logs finished for job {job_id} '
+                f'(status: {spot_state.get_status(job_id).value}).')
     return ''
 
 
@@ -222,7 +224,10 @@ class SpotCodeGen:
 
       >> codegen = SpotCodegen().show_jobs(...)
     """
-    _PREFIX = ['from sky.spot import spot_utils']
+    _PREFIX = [
+        'from sky.spot import spot_utils',
+        'from sky.spot import spot_state',
+    ]
 
     def __init__(self):
         self._code = []
@@ -255,9 +260,11 @@ class SpotCodeGen:
         ]
         return self._build()
 
-    def stream_logs_by_id(self, job_id: int) -> str:
+    def stream_logs_by_id(self, job_id: Optional[int]) -> str:
         self._code += [
-            f'msg = spot_utils.stream_logs_by_id({job_id})',
+            f'job_id = {job_id} if {job_id} is not None '
+            'else spot_state.get_latest_job_id()',
+            'msg = spot_utils.stream_logs_by_id(job_id)',
             'print(msg, end="", flush=True)',
         ]
         return self._build()

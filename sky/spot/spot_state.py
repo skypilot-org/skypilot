@@ -212,3 +212,11 @@ def get_task_name_by_job_id(job_id: int) -> str:
         """\
         SELECT job_name FROM spot WHERE job_id=(?)""", (job_id,)).fetchone()
     return task_name[0]
+
+
+def get_latest_job_id() -> Optional[int]:
+    """Get the latest job id."""
+    rows = _CURSOR.execute("""\
+        SELECT job_id FROM spot ORDER BY submitted_at DESC LIMIT 1""")
+    for (job_id,) in rows:
+        return job_id
