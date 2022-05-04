@@ -56,6 +56,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
                                            delete=False)
     test.echo(f'Test started. Log: less {log_file.name}')
     for command in test.commands:
+        log_file.write(f'+ {command}\n')
+        log_file.flush()
         proc = subprocess.Popen(
             command,
             stdout=log_file,
@@ -77,7 +79,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     fore = colorama.Fore
     outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
                if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-    reason = f'\nReason: {command!r}' if proc.returncode else ''
+    reason = f'\nReason: {command}' if proc.returncode else ''
     test.echo(f'{outcome}.'
               f'{reason}'
               f'\nLog: less {log_file.name}\n')
@@ -324,7 +326,7 @@ def test_autostop():
         'autostop',
         [
             f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
-            f'sky autostop {name} -i 1',
+            f'sky autostop -y {name} -i 1',
             f'sky status | grep {name} | grep "1 min"',  # Ensure autostop is set.
             'sleep 180',
             f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
@@ -382,7 +384,7 @@ def test_cancel_pytorch():
 
 
 # ---------- Testing managed spot ----------
-def test_managed_spot():
+def test_spot():
     """Test the spot yaml."""
     name = _get_cluster_name()
     test = Test(
@@ -391,12 +393,12 @@ def test_managed_spot():
             f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
             f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
             'sleep 5',
-            f'sky spot status | grep {name}-1 | grep STARTING',
-            f'sky spot status | grep {name}-2 | grep STARTING',
+            f'sky spot status | grep {name}-1 | head -n1 | grep STARTING',
+            f'sky spot status | grep {name}-2 | head -n1 | grep STARTING',
             f'sky spot cancel -y -n {name}-1',
             'sleep 200',
-            f'sky spot status | grep {name}-1 | grep CANCELLED',
-            f'sky spot status | grep {name}-2 | grep "RUNNING\|SUCCEEDED"',
+            f'sky spot status | grep {name}-1 | head -n1 | grep CANCELLED',
+            f'sky spot status | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
     )
@@ -404,7 +406,7 @@ def test_managed_spot():
 
 
 # ---------- Testing managed spot ----------
-def test_managed_gcp_spot():
+def test_gcp_spot():
     """Test managed spot on GCP."""
     name = _get_cluster_name()
     test = Test(
@@ -412,9 +414,11 @@ def test_managed_gcp_spot():
         [
             f'sky spot launch -n {name} --cloud gcp "sleep 3600" -y -d',
             'sleep 5',
-            f'sky spot status | grep {name} | grep STARTING',
+            # Captures & prints the table for easier debugging. Two echo's to
+            # separate the table from the grep output.
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep STARTING',
             'sleep 200',
-            f'sky spot status | grep {name} | grep "RUNNING"',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep RUNNING',
         ],
         f'sky spot cancel -y -n {name}',
     )
@@ -479,7 +483,10 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_bucket_name(self):
         # Creates a temporary bucket name
-        yield f'sky-test-{int(time.time())}'
+        # time.time() returns varying precision on different systems, so we
+        # replace the decimal point and use whatever precision we can get.
+        timestamp = str(time.time()).replace('.', '')
+        yield f'sky-test-{timestamp}'
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_mount):
@@ -584,7 +591,12 @@ class TestYamlSpecs:
                 assert isinstance(d2[k], dict), (k, v, d2)
                 self._is_dict_subset(v, d2[k])
             elif isinstance(v, str):
-                assert v.lower() == d2[k].lower(), (k, v, d2[k])
+                if k == 'accelerators':
+                    resources = sky.Resources()
+                    resources._set_accelerators(v, None)
+                    assert resources.accelerators == d2[k], (k, v, d2)
+                else:
+                    assert v.lower() == d2[k].lower(), (k, v, d2[k])
             else:
                 assert v == d2[k], (k, v, d2[k])
 

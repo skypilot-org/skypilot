@@ -173,12 +173,12 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     field_values = [status.value for status in SpotStatus.terminal_status()]
     if name is not None:
         field_values.append(name)
-
+    statuses = ', '.join(['?'] * len(SpotStatus.terminal_status()))
     rows = _CURSOR.execute(
         f"""\
         SELECT job_id FROM spot
         WHERE status NOT IN
-        ({", ".join(["?"] * len(SpotStatus.terminal_status()))})
+        ({statuses})
         {name_filter}""", field_values)
     job_ids = [row[0] for row in rows if row[0] is not None]
     return job_ids
@@ -204,3 +204,11 @@ def get_spot_jobs() -> List[Dict[str, Any]]:
         job_dict['status'] = SpotStatus(job_dict['status'])
         jobs.append(job_dict)
     return jobs
+
+
+def get_task_name_by_job_id(job_id: int) -> str:
+    """Get the task name of a job."""
+    task_name = _CURSOR.execute(
+        """\
+        SELECT job_name FROM spot WHERE job_id=(?)""", (job_id,)).fetchone()
+    return task_name[0]
