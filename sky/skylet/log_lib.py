@@ -14,9 +14,10 @@ from typing import Iterator, List, Optional, Tuple, Union
 
 import colorama
 
+from sky import exceptions
+from sky import sky_logging
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
-from sky import sky_logging
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 _SKY_LOG_WAITING_GAP_SECONDS = 1
@@ -321,7 +322,7 @@ def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
                         start_streaming_at='SKY INFO: Reserving task slots on'):
                     print(line, end='', flush=True)
         except KeyboardInterrupt:
-            return
+            sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
     else:
         try:
             with open(log_path, 'r') as f:

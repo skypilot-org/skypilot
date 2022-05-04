@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple
 import colorama
 import filelock
 
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import backends
@@ -133,17 +134,19 @@ def stream_logs_by_id(job_id: int) -> str:
     task_name = spot_state.get_task_name_by_job_id(job_id)
     cluster_name = generate_spot_cluster_name(task_name, job_id)
     backend = backends.CloudVmRayBackend()
-    while spot_state.get_status(job_id).is_terminal() is False:
+    returncode = 0
+    while (spot_state.get_status(job_id).is_terminal() is False and
+           returncode != exceptions.KEYBOARD_INTERRUPT_CODE):
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
             cluster_name, force_refresh=True)
         if cluster_status != global_user_state.ClusterStatus.UP:
             logger.info(f'The log is not ready yet, as the spot job is '
                         f'{spot_state.get_status(job_id).value}. '
-                        f'Wait for {_LOG_STREAM_CHECK_GAP_SECONDS} seconds.')
+                        f'Waiting for {_LOG_STREAM_CHECK_GAP_SECONDS} seconds.')
             logger.debug(f'The cluster {cluster_name} is {cluster_status}.')
             time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
             continue
-        backend.tail_logs(handle, None)
+        returncode = backend.tail_logs(handle, None)
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_state.get_status(job_id).value}).')
     return ''

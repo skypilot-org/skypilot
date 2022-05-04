@@ -28,6 +28,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import optimizer
+from sky import spot as spot_lib
 from sky import task as task_lib
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -1897,9 +1898,12 @@ class CloudVmRayBackend(backends.Backend):
 
         try:
             if not detach_run:
-                # Sky logs. Not using subprocess.run since it will make the
-                # ssh keep connected after ctrl-c.
-                self.tail_logs(handle, job_id)
+                if handle.cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
+                    self.tail_spot_logs(handle, job_id)
+                else:
+                    # Sky logs. Not using subprocess.run since it will make the
+                    # ssh keep connected after ctrl-c.
+                    self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
             logger.info(f'{fore.CYAN}Job ID: '
@@ -1924,7 +1928,7 @@ class CloudVmRayBackend(backends.Backend):
         # With interactive mode, the ctrl-c will send directly to the running
         # program on the remote instance, and the ssh will be disconnected by
         # sshd, so no error code will appear.
-        self.run_on_head(
+        returncode = self.run_on_head(
             handle,
             code,
             stream_logs=True,
@@ -1933,12 +1937,31 @@ class CloudVmRayBackend(backends.Backend):
             # there may be 5 minutes delay in logging.
             ssh_mode=backend_utils.SshMode.INTERACTIVE)
 
-        # Due to the interactive mode of ssh, we cannot distinguish the ctrl-c
-        # from other success case (e.g. the job is finished) from the returncode
-        # or catch by KeyboardInterrupt exception.
-        # TODO(zhwu): only show this line when ctrl-c is sent.
-        logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                       f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+        if returncode == exceptions.KEYBOARD_INTERRUPT_CODE:
+            # Due to the interactive mode of ssh, we cannot distinguish the
+            # ctrl-c from other success case (e.g. the job is finished) from the
+            # returncode or catch by KeyboardInterrupt exception.
+            # TODO(zhwu): only show this line when ctrl-c is sent.
+            logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                           f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+        return returncode
+
+    def tail_spot_logs(self,
+                       handle: ResourceHandle,
+                       job_id: Optional[int] = None,
+                       job_name: Optional[str] = None) -> None:
+        # if job_name is not None, job_id should be None
+        assert job_name is None or job_id is None, (job_name, job_id)
+        if job_name is not None:
+            code = spot_lib.SpotCodeGen().stream_logs_by_name(job_name)
+        else:
+            code = spot_lib.SpotCodeGen().stream_logs_by_id(job_id)
+
+        return self.run_on_head(handle,
+                                code,
+                                stream_logs=True,
+                                process_stream=False,
+                                ssh_mode=backend_utils.SshMode.INTERACTIVE)
 
     def _add_job(self, handle: ResourceHandle, job_name: str,
                  resources_str: str) -> int:

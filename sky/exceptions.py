@@ -1,6 +1,9 @@
 """Exceptions."""
 import enum
 
+# Randomly picked exception codes for Sky.
+KEYBOARD_INTERRUPT_CODE = 65
+
 
 class ResourcesUnavailableError(Exception):
     """Raised when resources are unavailable."""

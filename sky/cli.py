@@ -923,6 +923,7 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
           'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
 @click.argument('cluster', required=True, type=str)
 @click.argument('job_id', required=False, type=str)
+# TODO(zhwu): support logs by job name
 def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
     """Tail the log of a job.
 
@@ -2290,20 +2291,7 @@ def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
 
     if not sync_down:
         # Stream the realtime logs
-        codegen = spot_lib.SpotCodeGen()
-        if name is not None:
-            code = codegen.stream_logs_by_name(name)
-        else:
-            code = codegen.stream_logs_by_id(job_id)
-        returncode, stdout, _ = backend.run_on_head(handle,
-                                                    code,
-                                                    require_outputs=True,
-                                                    stream_logs=True)
-        backend_utils.handle_returncode(returncode, code,
-                                        'Failed to fetch logs', stdout)
-
-        if 'is already in terminal' in stdout:
-            click.echo('Please use --sync-down to download the archived logs.')
+        backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
     else:
         # Sync down the archived logs
         # TODO(wei-lin): Please fill in the implementation.
