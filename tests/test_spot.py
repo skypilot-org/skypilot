@@ -54,19 +54,6 @@ class TestReservedClustersOperations:
                                                 handle,
                                                 ready=True)
         handle = backends.CloudVmRayBackend.ResourceHandle(
-            cluster_name='test-cluster2',
-            cluster_yaml='/tmp/cluster2.yaml',
-            head_ip='1.1.1.2',
-            launched_nodes=1,
-            launched_resources=sky.Resources(sky.GCP(),
-                                             instance_type='n1-highmem-8',
-                                             accelerators={'A100': 4},
-                                             region='us-west1'),
-        )
-        global_user_state.add_or_update_cluster('test-cluster2',
-                                                handle,
-                                                ready=True)
-        handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name='test-cluster3',
             cluster_yaml='/tmp/cluster3.yaml',
             head_ip='1.1.1.3',
