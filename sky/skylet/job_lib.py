@@ -453,7 +453,7 @@ class JobLibCodeGen:
     def get_job_status(cls, job_id: Optional[int] = None) -> str:
         # Prints "Job <id> <status>" for UX; caller should parse the last token.
         code = [
-            f'job_id = {job_id} if job_id is not None '
+            f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
             'job_status = job_lib.get_status(job_id)',
             'status_str = None if job_status is None else job_status.value',
