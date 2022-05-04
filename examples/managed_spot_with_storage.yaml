@@ -1,5 +1,3 @@
-name: minimal
-
 resources:
   cloud: aws
   use_spot: true
@@ -9,6 +7,7 @@ file_mounts:
   ~/sky_workdir:
     name: sky-workdir-zhwu
     source: .
+    persistent: false
     mode: COPY
   /imagenet:
     name: imagenet-bucket
