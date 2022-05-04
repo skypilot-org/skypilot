@@ -170,6 +170,9 @@ def _execute(dag: sky.Dag,
         traceback.print_exc()
         print()
         if is_spot_controller_task:
+            # For spot controller task, it requires a while to have the
+            # managed spot status shown in the status table.
+            time.sleep(0.5)
             backends.backend_utils.run('sky spot status')
         else:
             backends.backend_utils.run('sky status')
