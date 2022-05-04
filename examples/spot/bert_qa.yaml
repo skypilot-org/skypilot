@@ -10,7 +10,7 @@ num_nodes: 1
 
 file_mounts:
     /checkpoint:
-        name: checkpoint-bucket-bert
+        name: # Fill in your bucket name
         mode: MOUNT
 
 setup: |

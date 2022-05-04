@@ -10,12 +10,12 @@ num_nodes: 1
 
 file_mounts:
     /checkpoint:
-        name: checkpoint-bucket-lit
+        name: # Fill in your bucket name
         mode: MOUNT
 
     ~/lit:
         name: sky-lit-code
-        #source: /home/eecs/weichiang/repos/sky/examples/spot/lightning_cifar10
+        # source: /home/eecs/weichiang/repos/sky/examples/spot/lightning_cifar10
         store: s3
         persistent: True
         mode: MOUNT
