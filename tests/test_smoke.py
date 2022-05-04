@@ -435,6 +435,7 @@ def test_spot_storage():
                                 f'sky-test-{int(time.time())}')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(yaml_str)
+        f.flush()
         file_path = f.name
         test = Test(
             'managed-spot-storage',
