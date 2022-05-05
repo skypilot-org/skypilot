@@ -2112,7 +2112,7 @@ def spot_launch(
     if name is not None:
         task.name = name
     if env is not None:
-        task.env = dict(env)
+        task.envs = dict(env)
 
     # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
     # following validations.

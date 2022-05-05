@@ -449,6 +449,38 @@ def test_spot_storage():
         run_one_test(test)
 
 
+# ---------- Testing env ----------
+def test_inline_env():
+    """Test env"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-inline-env',
+        [
+            f'sky launch -c {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing env for spot ----------
+def test_inline_spot_env():
+    """Test env"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-inline-spot-env',
+        [
+            f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
+            f'sky spot status | grep {name} | grep SUCCEEDED',
+        ],
+        f'sky spot cancel -y -n {name}',
+    )
+    run_one_test(test)
+
+
 @pytest.mark.slow
 def test_azure_start_stop_two_nodes():
     name = _get_cluster_name()
