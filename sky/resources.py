@@ -453,13 +453,14 @@ class Resources:
 
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
+        use_spot = self.use_spot if self._use_spot_specified else None
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
             accelerators=override.pop('accelerators', self.accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
-            use_spot=override.pop('use_spot', self.use_spot),
+            use_spot=override.pop('use_spot', use_spot),
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),

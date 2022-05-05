@@ -5,13 +5,19 @@ import json
 import pathlib
 import shlex
 import time
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import colorama
 import filelock
 
+from sky import global_user_state
+from sky import sky_logging
+from sky.backends import backend_utils
+from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.spot import spot_state
+
+logger = sky_logging.init_logger(__name__)
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 JOB_STATUS_CHECK_GAP_SECONDS = 60
@@ -29,11 +35,55 @@ class UserSignal(enum.Enum):
 # ======== user functions ========
 
 
-def cancel_jobs_by_id(job_ids: List[int]) -> str:
-    """Cancel jobs by id."""
+def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
+    """Generate spot cluster name."""
+    return f'{task_name}-{job_id}'
+
+
+def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
+    """Cancel jobs by id.
+
+    If job_ids is None, cancel all jobs.
+    """
+    if job_ids is None:
+        job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
     if len(job_ids) == 0:
         return 'No job to cancel.'
+    job_id_str = ', '.join(map(str, job_ids))
+    logger.info(f'Cancelling jobs {job_id_str}.')
+    cancelled_job_ids = []
     for job_id in job_ids:
+        # Check the status of the managed spot job status. If it is in
+        # terminal state, we can safely skip it.
+        job_status = spot_state.get_status(job_id)
+        if job_status.is_terminal():
+            logger.info(f'Job {job_id} is already in terminal state '
+                        f'{job_status.value}. Skipped.')
+            continue
+
+        # Check the status of the controller. If it is not running, it must be
+        # exited abnormally, and we should set the job status to FAILED.
+        # TODO(zhwu): instead of having the liveness check here, we may need
+        # to make it as a event in skylet.
+        controller_status = job_lib.get_status(job_id)
+        if controller_status.is_terminal():
+            logger.error(f'Controller for job {job_id} have exited abnormally. '
+                         'Set the job status to FAILED.')
+            task_name = spot_state.get_task_name_by_job_id(job_id)
+
+            # Tear down the abnormal spot cluster to avoid resource leakage.
+            cluster_name = generate_spot_cluster_name(task_name, job_id)
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            if handle is not None:
+                backend = backend_utils.get_backend_from_handle(handle)
+                backend.teardown(handle, terminate=True)
+
+            # Set the job status to FAILED.
+            spot_state.set_failed(job_id)
+            continue
+
+        # Send the signal to the spot job controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
@@ -43,12 +93,16 @@ def cancel_jobs_by_id(job_ids: List[int]) -> str:
             with signal_file.open('w') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
+        cancelled_job_ids.append(job_id)
 
-    identity_str = f'job ID {job_ids[0]} is'
-    if len(job_ids) > 1:
-        identity_str = f'job IDs {job_ids} are'
+    if len(cancelled_job_ids) == 0:
+        return 'No job to cancel.'
+    identity_str = f'Job with ID {cancelled_job_ids[0]} is'
+    if len(cancelled_job_ids) > 1:
+        cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
+        identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
-    return (f'Jobs with {identity_str} scheduled to be cancelled within '
+    return (f'{identity_str} scheduled to be cancelled within '
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
 
 
@@ -56,8 +110,7 @@ def cancel_job_by_name(job_name: str) -> str:
     """Cancel a job by name."""
     job_ids = spot_state.get_nonterminal_job_ids_by_name(job_name)
     if len(job_ids) == 0:
-        return (f'{colorama.Fore.RED}No job found with name {job_name!r}.'
-                f'{colorama.Style.RESET_ALL}')
+        return f'No running job found with name {job_name!r}.'
     if len(job_ids) > 1:
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
@@ -67,14 +120,17 @@ def cancel_job_by_name(job_name: str) -> str:
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
 
 
-def show_jobs() -> str:
+def show_jobs(show_all: bool) -> str:
     """Show all spot jobs."""
     jobs = spot_state.get_spot_jobs()
 
-    job_table = log_utils.create_table([
+    columns = [
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'STARTED',
         'JOB DURATION', '#RECOVERIES', 'STATUS'
-    ])
+    ]
+    if show_all:
+        columns += ['CLUSTER', 'REGION']
+    job_table = log_utils.create_table(columns)
     for job in jobs:
         job_duration = log_utils.readable_time_duration(
             job['last_recovered_at'] - job['job_duration'],
@@ -86,7 +142,7 @@ def show_jobs() -> str:
                                                             job['job_duration'],
                                                             absolute=True)
 
-        job_table.add_row([
+        values = [
             job['job_id'],
             job['job_name'],
             job['resources'],
@@ -101,7 +157,20 @@ def show_jobs() -> str:
             job_duration,
             job['recovery_count'],
             job['status'].value,
-        ])
+        ]
+        if show_all:
+            cluster_name = generate_spot_cluster_name(job['job_name'],
+                                                      job['job_id'])
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            if handle is None:
+                values.extend(['-', '-'])
+            else:
+                values.extend([
+                    f'{handle.launched_nodes}x {handle.launched_resources}',
+                    handle.launched_resources.region
+                ])
+        job_table.add_row(values)
     return str(job_table)
 
 
@@ -117,14 +186,14 @@ class SpotCodeGen:
     def __init__(self):
         self._code = []
 
-    def show_jobs(self) -> str:
+    def show_jobs(self, show_all: bool) -> str:
         self._code += [
-            'job_table = spot_utils.show_jobs()',
+            f'job_table = spot_utils.show_jobs({show_all})',
             'print(job_table)',
         ]
         return self._build()
 
-    def cancel_jobs_by_id(self, job_ids: List[int]) -> str:
+    def cancel_jobs_by_id(self, job_ids: Optional[List[int]]) -> str:
         self._code += [
             f'result = spot_utils.cancel_jobs_by_id({job_ids})',
             'print(result, end="", flush=True)',

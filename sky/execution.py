@@ -14,6 +14,7 @@ Current task launcher:
 """
 import enum
 import sys
+import time
 import traceback
 from typing import Any, List, Optional
 
@@ -52,7 +53,7 @@ def _execute(dag: sky.Dag,
              stages: Optional[List[Stage]] = None,
              cluster_name: Optional[str] = None,
              detach_run: bool = False,
-             autostop_idle_minutes: Optional[int] = None,
+             idle_minutes_to_autostop: Optional[int] = None,
              is_spot_controller_task: bool = False) -> None:
     """Runs a DAG.
 
@@ -96,9 +97,8 @@ def _execute(dag: sky.Dag,
         cluster_exists = existing_handle is not None
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
-    if not isinstance(
-            backend,
-            backends.CloudVmRayBackend) and autostop_idle_minutes is not None:
+    if not isinstance(backend, backends.CloudVmRayBackend
+                     ) and idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
         raise ValueError(
             f'Backend {backend.NAME} does not support autostop, please try '
@@ -149,8 +149,8 @@ def _execute(dag: sky.Dag,
             backend.setup(handle, task)
 
         if stages is None or Stage.PRE_EXEC in stages:
-            if autostop_idle_minutes is not None:
-                backend.set_autostop(handle, autostop_idle_minutes)
+            if idle_minutes_to_autostop is not None:
+                backend.set_autostop(handle, idle_minutes_to_autostop)
 
         if stages is None or Stage.EXEC in stages:
             try:
@@ -180,6 +180,9 @@ def _execute(dag: sky.Dag,
         if not status_printed:
             # Needed because this finally doesn't always get executed on errors.
             if is_spot_controller_task:
+                # For spot controller task, it requires a while to have the
+                # managed spot status shown in the status table.
+                time.sleep(0.5)
                 backends.backend_utils.run('sky spot status')
             else:
                 backends.backend_utils.run('sky status')
@@ -194,11 +197,11 @@ def launch(dag: sky.Dag,
            optimize_target: OptimizeTarget = OptimizeTarget.COST,
            cluster_name: Optional[str] = None,
            detach_run: bool = False,
-           autostop_idle_minutes: Optional[int] = None,
+           idle_minutes_to_autostop: Optional[int] = None,
            is_spot_controller_task: bool = False) -> None:
     if not is_spot_controller_task:
-        backend_utils.disallow_sky_reserved_cluster_name(
-            cluster_name, 'sky.launch')
+        backend_utils.check_cluster_name_not_reserved(
+            cluster_name, operation_str='sky.launch')
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,
@@ -208,7 +211,7 @@ def launch(dag: sky.Dag,
              optimize_target=optimize_target,
              cluster_name=cluster_name,
              detach_run=detach_run,
-             autostop_idle_minutes=autostop_idle_minutes,
+             idle_minutes_to_autostop=idle_minutes_to_autostop,
              is_spot_controller_task=is_spot_controller_task)
 
 
@@ -222,7 +225,8 @@ def exec(  # pylint: disable=redefined-builtin
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
 ) -> None:
-    backend_utils.disallow_sky_reserved_cluster_name(cluster_name, 'sky.exec')
+    backend_utils.check_cluster_name_not_reserved(cluster_name,
+                                                  operation_str='sky.exec')
 
     status, handle = backend_utils.refresh_cluster_status_handle(cluster_name)
     if handle is None:

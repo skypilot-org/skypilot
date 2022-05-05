@@ -278,7 +278,7 @@ class Storage(object):
                  source: Optional[Path] = None,
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
-                 mode: Optional[StorageMode] = StorageMode.MOUNT,
+                 mode: StorageMode = StorageMode.MOUNT,
                  sync_on_reconstruction: Optional[bool] = True):
         """Initializes a Storage object.
 
@@ -321,6 +321,7 @@ class Storage(object):
         self.source = source
         self.persistent = persistent
         self.mode = mode
+        assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
 
         # Validate and correct inputs if necessary
@@ -606,17 +607,17 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
-        name = config.get('name')
-        source = config.get('source')
-        store = config.get('store')
-        mode_str = config.get('mode')
+        name = config.pop('name', None)
+        source = config.pop('source', None)
+        store = config.pop('store', None)
+        mode_str = config.pop('mode', None)
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
             mode = StorageMode(mode_str.upper())
         else:
-            mode = None
-        persistent = True if config.get(
-            'persistent') is None else config['persistent']
+            # Make sure this keeps the same as the default mode in __init__
+            mode = StorageMode.MOUNT
+        persistent = config.pop('persistent', True)
         # Validation of the config object happens on instantiation.
         storage_obj = cls(name=name,
                           source=source,
@@ -624,6 +625,9 @@ class Storage(object):
                           mode=mode)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
+        if config:
+            raise exceptions.StorageSpecError(
+                f'Invalid storage spec. Unknown fields: {config.keys()}')
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:
@@ -633,7 +637,12 @@ class Storage(object):
             if value is not None:
                 config[key] = value
 
-        add_if_not_none('name', self.name)
+        name = self.name
+        if self.source is not None and data_utils.is_cloud_store_url(
+                self.source):
+            # Remove name if source is a cloud store URL
+            name = None
+        add_if_not_none('name', name)
         add_if_not_none('source', self.source)
 
         stores = None
@@ -802,7 +811,7 @@ class S3Store(AbstractStore):
                     return bucket, True
             else:
                 ex = exceptions.StorageBucketGetError(
-                    'Failed to connect to an existing bucket. \n'
+                    f'Failed to connect to an existing bucket {self.name!r}.\n'
                     'Check if the 1) the bucket name is taken and/or '
                     '2) the bucket permissions are not setup correctly. '
                     f'Consider using `aws s3 ls {self.name}` to debug.')
