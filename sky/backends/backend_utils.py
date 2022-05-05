@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-from http.server import executable
 import colorama
 import datetime
 import enum
