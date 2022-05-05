@@ -1938,10 +1938,6 @@ class CloudVmRayBackend(backends.Backend):
             ssh_mode=backend_utils.SshMode.INTERACTIVE)
 
         if returncode == exceptions.KEYBOARD_INTERRUPT_CODE:
-            # Due to the interactive mode of ssh, we cannot distinguish the
-            # ctrl-c from other success case (e.g. the job is finished) from the
-            # returncode or catch by KeyboardInterrupt exception.
-            # TODO(zhwu): only show this line when ctrl-c is sent.
             logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                            f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
         return returncode

@@ -969,7 +969,7 @@ def run_command_on_ip_via_ssh(
         else:
             command += [f'> {log_path}']
         # This is required to make sure the executor of the command can get the
-        # correct returncode, since linux pipe is used. It also requires the 
+        # correct returncode, since linux pipe is used. It also requires the
         # executor to be '/bin/bash' instead of the default '/bin/sh'.
         command += ['; exit ${PIPESTATUS[0]}']
         executable = '/bin/bash'
