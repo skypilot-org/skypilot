@@ -162,7 +162,7 @@ def stream_logs_by_id(job_id: int) -> str:
             cluster_name, force_refresh=True)
         if cluster_status != global_user_state.ClusterStatus.UP:
             logger.info(
-                f'The log is not ready yet, as the spot job is '
+                f'The log is not ready yet, as the spot job may be still '
                 # Should not use spot_state.get_status(job_id) here, as
                 # the job status can be delayed.
                 f'{spot_state.SpotStatus.RECOVERING.value}. '
