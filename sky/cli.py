@@ -191,11 +191,13 @@ def _interactive_node_cli_command(cli_func):
 
     return decorator
 
+
 def _parse_env_var(env_var: str) -> Tuple[str, str]:
     """Parse env vars into a (KEY, VAL) pair."""
     if '=' not in env_var:
         return (env_var, os.environ.get(env_var, ''))
     return env_var.split('=', 1)
+
 
 _TASK_OPTIONS = [
     click.option('--name',
@@ -258,14 +260,14 @@ _TASK_OPTIONS = [
         type=_parse_env_var,
         multiple=True,
         help=('Environment variable to set on the remote node. '
-                '--env can be specified multiple times. '
-                'Example:\n'
-                '  1. --env MY_ENV=1: set the $MY_ENV on the cluster to be 1.\n'
-                '  2. --env MY_ENV2=$HOME: set the $MY_ENV2 on the cluster to '
-                'be the same value of $HOME in the local environment where the '
-                'sky command is run.\n'
-                '  3. --env MY_ENV3: set the $MY_ENV3 on the cluster to be the '
-                'same value of $MY_ENV3 in the local environment.'),
+              '--env can be specified multiple times. '
+              'Example:\n'
+              '  1. --env MY_ENV=1: set the $MY_ENV on the cluster to be 1.\n'
+              '  2. --env MY_ENV2=$HOME: set the $MY_ENV2 on the cluster to '
+              'be the same value of $HOME in the local environment where the '
+              'sky command is run.\n'
+              '  3. --env MY_ENV3: set the $MY_ENV3 on the cluster to be the '
+              'same value of $MY_ENV3 in the local environment.'),
     )
 ]
 
@@ -787,7 +789,7 @@ def exec(
 
     .. code-block:: bash
         # Pass environment variables to the task
-        sky exec mycluster --env WANDB_API_KEY=$WANDB_API_KEY python train_gpu.py
+        sky exec mycluster --env WANDB_API_KEY python train_gpu.py
     """
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Executing task on it')
