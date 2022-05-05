@@ -1921,7 +1921,7 @@ class CloudVmRayBackend(backends.Backend):
     def tail_logs(self,
                   handle: ResourceHandle,
                   job_id: Optional[int],
-                  job_id_in_message: Optional[int] = None) -> int:
+                  job_id_in_message: Optional[str] = None) -> int:
         code = job_lib.JobLibCodeGen.tail_logs(
             job_id, job_id_in_message=job_id_in_message)
         if job_id is None:

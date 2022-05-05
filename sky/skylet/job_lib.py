@@ -12,8 +12,11 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
+from sky import sky_logging
 from sky.skylet.utils import db_utils
 from sky.skylet.utils import log_utils
+
+logger = sky_logging.init_logger(__name__)
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 
@@ -283,6 +286,7 @@ def update_status(submitted_gap_sec: int = 0) -> None:
         # because it could be pending for resources instead. The
         # RUNNING status will be set by our generated ray program.
         if status != JobStatus.RUNNING:
+            logger.info(f'Update job {job["job_id"]} status to {status}')
             set_status(job['job_id'], status)
 
 
@@ -442,12 +446,12 @@ class JobLibCodeGen:
 
     @classmethod
     def tail_logs(cls, job_id: Optional[int],
-                  job_id_in_message: Optional[int]) -> str:
+                  job_id_in_message: Optional[str]) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
             'log_dir = job_lib.log_dir(job_id)',
-            f'log_lib.tail_logs(job_id, log_dir, {job_id_in_message})',
+            f'log_lib.tail_logs(job_id, log_dir, {job_id_in_message!r})',
         ]
         return cls._build(code)
 

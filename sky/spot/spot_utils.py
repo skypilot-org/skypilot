@@ -28,8 +28,7 @@ _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
 _LOG_STREAM_CHECK_GAP_SECONDS = 60
 
-_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 1
-_LOG_STREAM_CHECK_CONTROLLER_TIMEOUT = 30
+_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 
 class UserSignal(enum.Enum):
@@ -131,15 +130,10 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_logs_by_id(job_id: int) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
-    cnt = 0
     while (controller_status != job_lib.JobStatus.RUNNING and
            (controller_status is None or not controller_status.is_terminal())):
-        cnt += 1
-        if cnt >= _LOG_STREAM_CHECK_CONTROLLER_TIMEOUT:
-            return (f'{colorama.Fore.RED}Failed to find controller for job '
-                    f'{job_id} within timeout. Please check: sky spot status'
-                    f'{colorama.Style.RESET_ALL}')
-        logger.info('Waiting for the spot controller process to be running.')
+        status_str = controller_status.value if controller_status is not None else 'None'
+        logger.info(f'Waiting for the spot controller process to be RUNNING (status: {status_str}).')
         time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
         controller_status = job_lib.get_status(job_id)
 
@@ -164,9 +158,12 @@ def stream_logs_by_id(job_id: int) -> str:
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
             cluster_name, force_refresh=True)
         if cluster_status != global_user_state.ClusterStatus.UP:
-            logger.info(f'The log is not ready yet, as the spot job is '
-                        f'{spot_state.get_status(job_id).value}. '
-                        f'Waiting for {_LOG_STREAM_CHECK_GAP_SECONDS} seconds.')
+            logger.info(
+                f'The log is not ready yet, as the spot job is '
+                # Should not use spot_state.get_status(job_id) here, as
+                # the job status can be delayed.
+                f'{spot_state.SpotStatus.RECOVERING.value}. '
+                f'Waiting for {_LOG_STREAM_CHECK_GAP_SECONDS} seconds.')
             logger.debug(f'The cluster {cluster_name} is {cluster_status}.')
             time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
             continue

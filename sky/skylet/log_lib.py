@@ -236,7 +236,7 @@ def run_bash_command_with_log(bash_command: str,
 
 def _follow_job_logs(file,
                      job_id: int,
-                     job_id_in_message: bool = False,
+                     job_id_in_message: str,
                      start_streaming_at: str = '') -> Iterator[str]:
     """Yield each line from a file as they are written.
 
@@ -272,7 +272,7 @@ def _follow_job_logs(file,
                     time.sleep(1 + _SKY_LOG_TAILING_GAP_SECONDS)
                     wait_last_logs = False
                     continue
-                print(f'SKY INFO: Job {job_id_in_message} finished '
+                print(f'SKY INFO: {job_id_in_message} finished '
                       f'(status: {status.value}).')
                 return
 
@@ -345,6 +345,7 @@ def tail_logs(job_id: int,
             for line in _follow_job_logs(
                     log_file,
                     job_id=job_id,
+                    job_id_in_message=job_id_in_message,
                     start_streaming_at='SKY INFO: Reserving task slots on'):
                 print(line, end='', flush=True)
     else:
