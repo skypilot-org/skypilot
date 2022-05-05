@@ -193,13 +193,13 @@ class Task:
         if config is None:
             config = {}
 
-        # TODO: perform more checks on yaml and raise meaningful errors.
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
             workdir=config.pop('workdir', None),
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
+            envs=config.pop('envs', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -286,6 +286,7 @@ class Task:
         add_if_not_none('setup', self.setup)
         add_if_not_none('workdir', self.workdir)
         add_if_not_none('run', self.run)
+        add_if_not_none('envs', self.envs)
 
         add_if_not_none('file_mounts', dict())
 
