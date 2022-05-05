@@ -11,8 +11,13 @@ import colorama
 import filelock
 
 from sky import global_user_state
+from sky import sky_logging
+from sky.backends import backend_utils
+from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.spot import spot_state
+
+logger = sky_logging.init_logger(__name__)
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 JOB_STATUS_CHECK_GAP_SECONDS = 60
@@ -44,7 +49,41 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
     if len(job_ids) == 0:
         return 'No job to cancel.'
+    job_id_str = ', '.join(map(str, job_ids))
+    logger.info(f'Cancelling jobs {job_id_str}.')
+    cancelled_job_ids = []
     for job_id in job_ids:
+        # Check the status of the managed spot job status. If it is in
+        # terminal state, we can safely skip it.
+        job_status = spot_state.get_status(job_id)
+        if job_status.is_terminal():
+            logger.info(f'Job {job_id} is already in terminal state '
+                        f'{job_status.value}. Skipped.')
+            continue
+
+        # Check the status of the controller. If it is not running, it must be
+        # exited abnormally, and we should set the job status to FAILED.
+        # TODO(zhwu): instead of having the liveness check here, we may need
+        # to make it as a event in skylet.
+        controller_status = job_lib.get_status(job_id)
+        if controller_status.is_terminal():
+            logger.error(f'Controller for job {job_id} have exited abnormally. '
+                         'Set the job status to FAILED.')
+            task_name = spot_state.get_task_name_by_job_id(job_id)
+
+            # Tear down the abnormal spot cluster to avoid resource leakage.
+            cluster_name = generate_spot_cluster_name(task_name, job_id)
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            if handle is not None:
+                backend = backend_utils.get_backend_from_handle(handle)
+                backend.teardown(handle, terminate=True)
+
+            # Set the job status to FAILED.
+            spot_state.set_failed(job_id)
+            continue
+
+        # Send the signal to the spot job controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
@@ -54,10 +93,14 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
             with signal_file.open('w') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
+        cancelled_job_ids.append(job_id)
 
-    identity_str = f'Job with ID {job_ids[0]} is'
-    if len(job_ids) > 1:
-        identity_str = f'Jobs with IDs {job_ids} are'
+    if len(cancelled_job_ids) == 0:
+        return 'No job to cancel.'
+    identity_str = f'Job with ID {cancelled_job_ids[0]} is'
+    if len(cancelled_job_ids) > 1:
+        cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
+        identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
     return (f'{identity_str} scheduled to be cancelled within '
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
@@ -67,8 +110,7 @@ def cancel_job_by_name(job_name: str) -> str:
     """Cancel a job by name."""
     job_ids = spot_state.get_nonterminal_job_ids_by_name(job_name)
     if len(job_ids) == 0:
-        return (f'{colorama.Fore.RED}No job found with name {job_name!r}.'
-                f'{colorama.Style.RESET_ALL}')
+        return f'No running job found with name {job_name!r}.'
     if len(job_ids) > 1:
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'

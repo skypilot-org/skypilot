@@ -251,7 +251,7 @@ class Task:
                 raise ValueError('Multi-node TPU cluster not supported. '
                                  f'Got num_nodes={task.num_nodes}')
         if len(config) > 0:
-            raise ValueError(f'Unknown fields in in YAML: {config}')
+            raise ValueError(f'Unknown fields in in YAML: {config.keys()}')
         task.set_resources({resources})
         return task
 
