@@ -55,11 +55,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
 
-    identity_str = f'job ID {job_ids[0]} is'
+    identity_str = f'Job with ID {job_ids[0]} is'
     if len(job_ids) > 1:
-        identity_str = f'job IDs {job_ids} are'
+        identity_str = f'Jobs with IDs {job_ids} are'
 
-    return (f'Jobs with {identity_str} scheduled to be cancelled within '
+    return (f'{identity_str} scheduled to be cancelled within '
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
 
 
