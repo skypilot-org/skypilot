@@ -278,7 +278,7 @@ class Storage(object):
                  source: Optional[Path] = None,
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
-                 mode: Optional[StorageMode] = StorageMode.MOUNT,
+                 mode: StorageMode = StorageMode.MOUNT,
                  sync_on_reconstruction: Optional[bool] = True):
         """Initializes a Storage object.
 
@@ -321,6 +321,7 @@ class Storage(object):
         self.source = source
         self.persistent = persistent
         self.mode = mode
+        assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
 
         # Validate and correct inputs if necessary
@@ -442,16 +443,14 @@ class Storage(object):
                 #  and now the user wants to mount it in COPY mode? We should
                 #  perhaps check for existence in global_user_state here.
                 raise exceptions.StorageSourceError(
-                    'Storage\'s \'source\' must be specified when using COPY '
-                    'mode.')
+                    'Storage source must be specified when using COPY mode.')
             else:
                 # If source is not specified in mount mode, the intent is to
                 # create a bucket and use it as scratch disk. Name must be
                 # specified to create bucket.
                 if not self.name:
                     raise exceptions.StorageSpecError(
-                        'Storage\'s \'source\' or \'name\' must be specified '
-                        'when \'name\' is not set.')
+                        'Storage source or storage name must be specified.')
                 else:
                     # Create bucket and mount
                     return
@@ -462,8 +461,8 @@ class Storage(object):
             if not self.name:
                 if is_local_source:
                     raise exceptions.StorageNameError(
-                        'Storage\'s \'name\' must be specified if the source '
-                        'is local.')
+                        'Storage name must be specified if the source is local.'
+                    )
                 else:
                     # Set name to source bucket name and continue
                     self.name = urllib.parse.urlsplit(source).netloc
@@ -476,8 +475,8 @@ class Storage(object):
                     # Both name and source should not be specified if the source
                     # is a URI. Name will be inferred from the URI.
                     raise exceptions.StorageSpecError(
-                        'Storage\'s \'name\' should not be specified if the '
-                        'source is a remote URI.')
+                        'Storage name should not be specified if the source is '
+                        'a remote URI.')
         raise exceptions.StorageSpecError(
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
@@ -608,17 +607,17 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
-        name = config.get('name')
-        source = config.get('source')
-        store = config.get('store')
-        mode_str = config.get('mode')
+        name = config.pop('name', None)
+        source = config.pop('source', None)
+        store = config.pop('store', None)
+        mode_str = config.pop('mode', None)
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
             mode = StorageMode(mode_str.upper())
         else:
-            mode = None
-        persistent = True if config.get(
-            'persistent') is None else config['persistent']
+            # Make sure this keeps the same as the default mode in __init__
+            mode = StorageMode.MOUNT
+        persistent = config.pop('persistent', True)
         # Validation of the config object happens on instantiation.
         storage_obj = cls(name=name,
                           source=source,
@@ -626,6 +625,9 @@ class Storage(object):
                           mode=mode)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
+        if config:
+            raise exceptions.StorageSpecError(
+                f'Invalid storage spec. Unknown fields: {config.keys()}')
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:
@@ -635,7 +637,12 @@ class Storage(object):
             if value is not None:
                 config[key] = value
 
-        add_if_not_none('name', self.name)
+        name = self.name
+        if self.source is not None and data_utils.is_cloud_store_url(
+                self.source):
+            # Remove name if source is a cloud store URL
+            name = None
+        add_if_not_none('name', name)
         add_if_not_none('source', self.source)
 
         stores = None
