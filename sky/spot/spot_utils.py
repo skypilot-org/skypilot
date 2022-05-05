@@ -131,8 +131,12 @@ def stream_logs_by_id(job_id: int) -> str:
     controller_status = job_lib.get_status(job_id)
     while (controller_status != job_lib.JobStatus.RUNNING and
            (controller_status is None or not controller_status.is_terminal())):
-        status_str = controller_status.value if controller_status is not None else 'None'
-        logger.info(f'Waiting for the spot controller process to be RUNNING (status: {status_str}).')
+        status_str = 'None'
+        if controller_status is not None:
+            status_str = controller_status.value
+        logger.info(
+            'Waiting for the spot controller process to be RUNNING (status: '
+            f'{status_str}).')
         time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
         controller_status = job_lib.get_status(job_id)
 

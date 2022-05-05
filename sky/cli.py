@@ -2217,7 +2217,7 @@ def spot_status(all: bool, refresh: bool):
               '-n',
               required=False,
               type=str,
-              help='Managed sopt job name to cancel.')
+              help='Managed spot job name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
 @click.option('--all',
               '-a',
@@ -2301,7 +2301,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
               '-n',
               required=False,
               type=str,
-              help='Managed sopt job name.')
+              help='Managed spot job name.')
 @click.argument('job_id', required=False, type=int)
 @click.option(
     '--sync-down',
