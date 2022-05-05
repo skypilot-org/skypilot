@@ -1918,8 +1918,12 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
-    def tail_logs(self, handle: ResourceHandle, job_id: Optional[int]) -> int:
-        code = job_lib.JobLibCodeGen.tail_logs(job_id)
+    def tail_logs(self,
+                  handle: ResourceHandle,
+                  job_id: Optional[int],
+                  job_id_in_message: Optional[int] = None) -> int:
+        code = job_lib.JobLibCodeGen.tail_logs(
+            job_id, job_id_in_message=job_id_in_message)
         if job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
@@ -1945,9 +1949,9 @@ class CloudVmRayBackend(backends.Backend):
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         if job_name is not None:
-            code = spot_lib.SpotCodeGen().stream_logs_by_name(job_name)
+            code = spot_lib.SpotCodeGen.stream_logs_by_name(job_name)
         else:
-            code = spot_lib.SpotCodeGen().stream_logs_by_id(job_id)
+            code = spot_lib.SpotCodeGen.stream_logs_by_id(job_id)
 
         return self.run_on_head(handle,
                                 code,

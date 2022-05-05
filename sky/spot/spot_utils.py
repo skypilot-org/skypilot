@@ -28,6 +28,9 @@ _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
 _LOG_STREAM_CHECK_GAP_SECONDS = 60
 
+_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 1
+_LOG_STREAM_CHECK_CONTROLLER_TIMEOUT = 30
+
 
 class UserSignal(enum.Enum):
     """The signal to be sent to the user."""
@@ -128,10 +131,16 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_logs_by_id(job_id: int) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
+    cnt = 0
     while (controller_status != job_lib.JobStatus.RUNNING and
-           not controller_status.is_terminal()):
+           (controller_status is None or not controller_status.is_terminal())):
+        cnt += 1
+        if cnt >= _LOG_STREAM_CHECK_CONTROLLER_TIMEOUT:
+            return (f'{colorama.Fore.RED}Failed to find controller for job '
+                    f'{job_id} within timeout. Please check: sky spot status'
+                    f'{colorama.Style.RESET_ALL}')
         logger.info('Waiting for the spot controller process to be running.')
-        time.sleep(1)
+        time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
         controller_status = job_lib.get_status(job_id)
 
     job_status = spot_state.get_status(job_id)
@@ -161,7 +170,9 @@ def stream_logs_by_id(job_id: int) -> str:
             logger.debug(f'The cluster {cluster_name} is {cluster_status}.')
             time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
             continue
-        returncode = backend.tail_logs(handle, job_id=None)
+        returncode = backend.tail_logs(handle,
+                                       job_id=None,
+                                       job_id_in_message=f'spot job {job_id}')
         logger.debug(f'The return code is {returncode}.')
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_state.get_status(job_id).value}).')
@@ -241,55 +252,58 @@ class SpotCodeGen:
 
     Usage:
 
-      >> codegen = SpotCodegen().show_jobs(...)
+      >> codegen = SpotCodegen.show_jobs(...)
     """
     _PREFIX = [
         'from sky.spot import spot_state',
         'from sky.spot import spot_utils',
     ]
 
-    def __init__(self):
-        self._code = []
-
-    def show_jobs(self, show_all: bool) -> str:
-        self._code += [
+    @classmethod
+    def show_jobs(cls, show_all: bool) -> str:
+        code = [
             f'job_table = spot_utils.show_jobs({show_all})',
             'print(job_table)',
         ]
-        return self._build()
+        return cls._build(code)
 
-    def cancel_jobs_by_id(self, job_ids: Optional[List[int]]) -> str:
-        self._code += [
+    @classmethod
+    def cancel_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
+        code = [
             f'msg = spot_utils.cancel_jobs_by_id({job_ids})',
             'print(msg, end="", flush=True)',
         ]
-        return self._build()
+        return cls._build(code)
 
-    def cancel_job_by_name(self, job_name: str) -> str:
-        self._code += [
+    @classmethod
+    def cancel_job_by_name(cls, job_name: str) -> str:
+        code = [
             f'msg = spot_utils.cancel_job_by_name({job_name!r})',
             'print(msg, end="", flush=True)',
         ]
-        return self._build()
+        return cls._build(code)
 
-    def stream_logs_by_name(self, job_name: str) -> str:
-        self._code += [
+    @classmethod
+    def stream_logs_by_name(cls, job_name: str) -> str:
+        code = [
             f'msg = spot_utils.stream_logs_by_name({job_name!r})',
             'print(msg, flush=True)',
         ]
-        return self._build()
+        return cls._build(code)
 
-    def stream_logs_by_id(self, job_id: Optional[int]) -> str:
-        self._code += [
+    @classmethod
+    def stream_logs_by_id(cls, job_id: Optional[int]) -> str:
+        code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else spot_state.get_latest_job_id()',
             'msg = spot_utils.stream_logs_by_id(job_id)',
             'print(msg, flush=True)',
         ]
-        return self._build()
+        return cls._build(code)
 
-    def _build(self):
-        code = self._PREFIX + self._code
+    @classmethod
+    def _build(cls, code: List[str] = None) -> str:
+        code = cls._PREFIX + code
         code = '; '.join(code)
         return f'python3 -u -c {shlex.quote(code)}'
 

@@ -236,6 +236,7 @@ def run_bash_command_with_log(bash_command: str,
 
 def _follow_job_logs(file,
                      job_id: int,
+                     job_id_in_message: bool = False,
                      start_streaming_at: str = '') -> Iterator[str]:
     """Yield each line from a file as they are written.
 
@@ -271,9 +272,8 @@ def _follow_job_logs(file,
                     time.sleep(1 + _SKY_LOG_TAILING_GAP_SECONDS)
                     wait_last_logs = False
                     continue
-                print(
-                    f'SKY INFO: Job {job_id} finished (status: {status.value}).'
-                )
+                print(f'SKY INFO: Job {job_id_in_message} finished '
+                      f'(status: {status.value}).')
                 return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
@@ -294,11 +294,19 @@ def stop_handler(signum, frame):
     sys.exit(exceptions.SIGTSTP_CODE)
 
 
-def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
-    logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for job {job_id}.'
-                f'{colorama.Style.RESET_ALL}')
+def tail_logs(job_id: int,
+              log_dir: Optional[str],
+              job_id_in_message: Optional[str] = None) -> None:
+    if job_id_in_message is None:
+        job_id_in_message = f'job {job_id}'
+    logger.debug(
+        f'Tailing logs for job, real job_id {job_id}, job_id in message '
+        f'{job_id_in_message}.')
+    logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for '
+                f'{job_id_in_message}.{colorama.Style.RESET_ALL}')
     if log_dir is None:
-        print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
+        print(f'Job {job_id_in_message} not found (see `sky queue`).',
+              file=sys.stderr)
         return
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
@@ -317,9 +325,9 @@ def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
             break
         if retry_cnt >= _SKY_LOG_WAITING_MAX_RETRY:
             print(
-                f'{colorama.Fore.RED}SKY ERROR: Logs for job {job_id} (status: '
-                f'{status.value}) does not exist after retry {retry_cnt} times.'
-                f'{colorama.Style.RESET_ALL}')
+                f'{colorama.Fore.RED}SKY ERROR: Logs for job '
+                f'{job_id_in_message} (status: {status.value}) does not exist '
+                f'after retry {retry_cnt} times.{colorama.Style.RESET_ALL}')
             return
         print(f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')

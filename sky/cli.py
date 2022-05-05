@@ -2160,8 +2160,7 @@ def spot_status(all: bool, refresh: bool):
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    codegen = spot_lib.SpotCodeGen()
-    code = codegen.show_jobs(show_all=all)
+    code = spot_lib.SpotCodeGen.show_jobs(show_all=all)
     returncode, job_table_str, stderr = backend.run_on_head(
         handle, code, require_outputs=True, stream_logs=False)
     backend_utils.handle_returncode(returncode, code,
@@ -2236,7 +2235,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
-    codegen = spot_lib.SpotCodeGen()
+    codegen = spot_lib.SpotCodeGen
     if all:
         code = codegen.cancel_jobs_by_id(None)
     elif job_ids:

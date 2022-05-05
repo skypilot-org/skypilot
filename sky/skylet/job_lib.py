@@ -441,12 +441,13 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def tail_logs(cls, job_id: Optional[int]) -> str:
+    def tail_logs(cls, job_id: Optional[int],
+                  job_id_in_message: Optional[int]) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
             'log_dir = job_lib.log_dir(job_id)',
-            'log_lib.tail_logs(job_id, log_dir)',
+            f'log_lib.tail_logs(job_id, log_dir, {job_id_in_message})',
         ]
         return cls._build(code)
 
