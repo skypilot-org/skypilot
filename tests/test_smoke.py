@@ -241,6 +241,7 @@ def test_tpu():
             f'sky launch -y -c {name} examples/tpu_app.yaml',
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky launch -y -c {name} examples/tpu_app.yaml | grep "TPU .* already exists"',  # Ensure sky launch won't create another TPU.
         ],
         f'sky down -y {name}',
     )
@@ -423,6 +424,29 @@ def test_gcp_spot():
         f'sky spot cancel -y -n {name}',
     )
     run_one_test(test)
+
+
+# ---------- Testing storage for managed spot ----------
+def test_spot_storage():
+    """Test storage with managed spot"""
+    name = _get_cluster_name()
+    yaml_str = pathlib.Path(
+        'examples/managed_spot_with_storage.yaml').read_text()
+    yaml_str = yaml_str.replace('sky-workdir-zhwu',
+                                f'sky-test-{int(time.time())}')
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_str)
+        f.flush()
+        file_path = f.name
+        test = Test(
+            'managed-spot-storage',
+            [
+                f'sky spot launch -n {name} {file_path} -y',
+                f'sky spot status | grep {name} | grep SUCCEEDED',
+            ],
+            f'sky spot cancel -y -n {name}',
+        )
+        run_one_test(test)
 
 
 @pytest.mark.slow

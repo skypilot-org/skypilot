@@ -4,7 +4,7 @@ name: tpu_app
 workdir: ./examples/tpu_app_code
 
 resources:
-  accelerators: tpu-v3-8
+  accelerators: tpu-v2-8
   accelerator_args:
     tf_version: 2.5.0
 

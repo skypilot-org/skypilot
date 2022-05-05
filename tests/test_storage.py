@@ -1,7 +1,6 @@
-import subprocess
+import time
 
 import pytest
-import time
 
 from sky import exceptions
 from sky.data import storage as storage_lib
@@ -18,7 +17,7 @@ class TestStorageSpecLocalSource:
 
     def test_source_trailing_slashes(self):
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='test', source=f'/bin/')
+            storage_lib.Storage(name='test', source='/bin/')
         assert 'Storage source paths cannot end with a slash' in str(e)
 
 
