@@ -29,9 +29,19 @@ class JobStatus(enum.Enum):
     FAILED = 'FAILED'
     CANCELLED = 'CANCELLED'
 
+    @property
+    def _order_list(self):
+        return [
+            self.INIT, self.PENDING, self.RUNNING, self.SUCCEEDED, self.FAILED,
+            self.CANCELLED
+        ]
+
     def is_terminal(self):
         return self in (JobStatus.SUCCEEDED, JobStatus.FAILED,
                         JobStatus.CANCELLED)
+
+    def __lt__(self, other):
+        return self._order_list.index(self) < self._order_list.index(other)
 
 
 _RAY_TO_JOB_STATUS_MAP = {
@@ -238,16 +248,21 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
     for job_id, res in zip(job_ids, results):
         # Replace the color codes in the output
         res = ANSI_ESCAPE.sub('', res.strip().rstrip('.'))
+        original_status = get_status(job_id)
         if res == 'not found':
             # The job may be stale, when the instance is restarted (the ray
             # redis is volatile). We need to reset the status of the task to
             # FAILED if its original status is RUNNING or PENDING.
-            status = get_status(job_id)
-            if status in [JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING]:
+            if original_status in [
+                    JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING
+            ]:
                 status = JobStatus.FAILED
         else:
             ray_status = res.rpartition(' ')[-1]
             status = _RAY_TO_JOB_STATUS_MAP[ray_status]
+            # To avoid race condition, where the original status has already
+            # been set to later state by the job. We skip the update.
+            status = max(status, original_status)
         job_status_list.append(status)
     return job_status_list
 
