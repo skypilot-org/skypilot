@@ -2088,8 +2088,8 @@ def spot_launch(
     if task.workdir is not None:
         raise click.UsageError('Workdir is not allowed for managed spot jobs.')
     copy_mounts = task.get_local_to_remote_file_mounts()
-    copy_mounts_str = '\n\t'.join(': '.join(m) for m in copy_mounts)
     if copy_mounts:
+        copy_mounts_str = '\n\t'.join(': '.join(m) for m in copy_mounts)
         raise click.UsageError(
             'Local file mounts are not allowed for managed spot jobs, '
             f'but following are found: {copy_mounts_str}')
