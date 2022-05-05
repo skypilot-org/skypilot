@@ -165,6 +165,7 @@ def stream_logs_by_id(job_id: int) -> str:
                 f'The log is not ready yet, as the spot job may be still '
                 # Should not use spot_state.get_status(job_id) here, as
                 # the job status can be delayed.
+                f'{spot_state.SpotStatus.STARTING.value}/'
                 f'{spot_state.SpotStatus.RECOVERING.value}. '
                 f'Waiting for {_LOG_STREAM_CHECK_GAP_SECONDS} seconds.')
             logger.debug(f'The cluster {cluster_name} is {cluster_status}.')
