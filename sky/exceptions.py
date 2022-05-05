@@ -1,7 +1,7 @@
 """Exceptions."""
 import enum
 
-# Return code for keyboard interruption
+# Return code for keyboard interruption and SIGTSTP
 KEYBOARD_INTERRUPT_CODE = 130
 SIGTSTP_CODE = 146
 

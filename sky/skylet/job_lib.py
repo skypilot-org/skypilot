@@ -32,19 +32,12 @@ class JobStatus(enum.Enum):
     FAILED = 'FAILED'
     CANCELLED = 'CANCELLED'
 
-    @property
-    def _order_list(self):
-        return [
-            self.INIT, self.PENDING, self.RUNNING, self.SUCCEEDED, self.FAILED,
-            self.CANCELLED
-        ]
-
     def is_terminal(self):
         return self in (JobStatus.SUCCEEDED, JobStatus.FAILED,
                         JobStatus.CANCELLED)
 
     def __lt__(self, other):
-        return self._order_list.index(self) < self._order_list.index(other)
+        return list(JobStatus).index(self) < list(JobStatus).index(other)
 
 
 _RAY_TO_JOB_STATUS_MAP = {
@@ -301,7 +294,7 @@ def update_status(submitted_gap_sec: int = 0) -> None:
         # because it could be pending for resources instead. The
         # RUNNING status will be set by our generated ray program.
         if status != JobStatus.RUNNING:
-            logger.info(f'Update job {job["job_id"]} status to {status}')
+            logger.info(f'Updating job {job["job_id"]} status to {status}')
             set_status(job['job_id'], status)
 
 
@@ -461,12 +454,12 @@ class JobLibCodeGen:
 
     @classmethod
     def tail_logs(cls, job_id: Optional[int],
-                  job_id_in_message: Optional[str]) -> str:
+                  spot_job_id: Optional[int]) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
             'log_dir = job_lib.log_dir(job_id)',
-            f'log_lib.tail_logs(job_id, log_dir, {job_id_in_message!r})',
+            f'log_lib.tail_logs(job_id, log_dir, {spot_job_id!r})',
         ]
         return cls._build(code)
 

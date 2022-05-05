@@ -1921,9 +1921,9 @@ class CloudVmRayBackend(backends.Backend):
     def tail_logs(self,
                   handle: ResourceHandle,
                   job_id: Optional[int],
-                  job_id_in_message: Optional[str] = None) -> int:
-        code = job_lib.JobLibCodeGen.tail_logs(
-            job_id, job_id_in_message=job_id_in_message)
+                  spot_job_id: Optional[int] = None) -> int:
+        code = job_lib.JobLibCodeGen.tail_logs(job_id,
+                                               spot_job_id=spot_job_id)
         if job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')

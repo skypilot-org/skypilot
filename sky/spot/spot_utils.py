@@ -172,7 +172,7 @@ def stream_logs_by_id(job_id: int) -> str:
             continue
         returncode = backend.tail_logs(handle,
                                        job_id=None,
-                                       job_id_in_message=f'spot job {job_id}')
+                                       spot_job_id=job_id)
         logger.debug(f'The return code is {returncode}.')
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_state.get_status(job_id).value}).')
