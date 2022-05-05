@@ -325,9 +325,10 @@ def tail_logs(job_id: int,
         if os.path.exists(log_path):
             break
         if retry_cnt >= _SKY_LOG_WAITING_MAX_RETRY:
-            print(f'{colorama.Fore.RED}SKY ERROR: Logs '
-                  f'{job_str} (status: {status.value}) does not exist '
-                  f'after retrying {retry_cnt} times.{colorama.Style.RESET_ALL}')
+            print(
+                f'{colorama.Fore.RED}SKY ERROR: Logs '
+                f'{job_str} (status: {status.value}) does not exist '
+                f'after retrying {retry_cnt} times.{colorama.Style.RESET_ALL}')
             return
         print(f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')

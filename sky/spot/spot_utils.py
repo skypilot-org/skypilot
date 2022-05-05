@@ -170,9 +170,7 @@ def stream_logs_by_id(job_id: int) -> str:
             logger.debug(f'The cluster {cluster_name} is {cluster_status}.')
             time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
             continue
-        returncode = backend.tail_logs(handle,
-                                       job_id=None,
-                                       spot_job_id=job_id)
+        returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
         logger.debug(f'The return code is {returncode}.')
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_state.get_status(job_id).value}).')
