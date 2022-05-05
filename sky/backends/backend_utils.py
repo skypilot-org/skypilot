@@ -634,7 +634,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if resources_vars.get('tpu_type') is not None:
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
-            tpu_name = generate_tpu_name(cluster_name)
+            tpu_name = cluster_name
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
         scripts = tuple(
@@ -1316,10 +1316,6 @@ def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
-
-
-def generate_tpu_name(cluster_name):
-    return f'{cluster_name}-sky-{uuid.uuid4().hex[:4]}'
 
 
 def get_node_ips(
