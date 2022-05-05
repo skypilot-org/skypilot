@@ -2319,7 +2319,7 @@ def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
     """
     # TODO(zhwu): Automatically restart the spot controller
     _, handle = _is_spot_controller_up(
-        'Please restart the spot controller with sky start sky-spot-controller.'
+        'Please restart the spot controller with `sky start sky-spot-controller`.'
     )
     if handle is None:
         return
