@@ -721,7 +721,7 @@ class RetryingVmProvisioner(object):
                     f'  TPU {tpu_name} creation failed due to quota '
                     'exhaustion. Please visit '
                     'https://console.cloud.google.com/iam-admin/quotas '
-                    'for more  information.')
+                    'for more information.')
                 raise exceptions.ResourcesUnavailableError()
 
             if 'PERMISSION_DENIED' in stderr:
@@ -784,16 +784,6 @@ class RetryingVmProvisioner(object):
                 dryrun=dryrun)
             if dryrun:
                 return
-            tpu_name = config_dict.get('tpu_name')
-            if tpu_name is not None:
-                logger.info(
-                    f'{colorama.Style.BRIGHT}Provisioning TPU on '
-                    f'{to_provision.cloud} '
-                    f'{region.name}{colorama.Style.RESET_ALL} ({zone_str})')
-
-                success = self._try_provision_tpu(to_provision, config_dict)
-                if not success:
-                    continue
             cluster_config_file = config_dict['ray']
 
             # Record early, so if anything goes wrong, 'sky status' will show
@@ -812,6 +802,18 @@ class RetryingVmProvisioner(object):
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
+
+            tpu_name = config_dict.get('tpu_name')
+            if tpu_name is not None:
+                logger.info(
+                    f'{colorama.Style.BRIGHT}Provisioning TPU on '
+                    f'{to_provision.cloud} '
+                    f'{region.name}{colorama.Style.RESET_ALL} ({zone_str})')
+
+                success = self._try_provision_tpu(to_provision, config_dict)
+                if not success:
+                    continue
+
             logging_info = {
                 'cluster_name': cluster_name,
                 'region_name': region.name,
@@ -1805,11 +1807,8 @@ class CloudVmRayBackend(backends.Backend):
 
         style = colorama.Style
         fore = colorama.Fore
-        logger.info(f'{fore.CYAN}Logs Directories: {style.RESET_ALL}')
         for job_id, log_dir in zip(job_ids, local_log_dirs):
-            logger.info(f'{fore.CYAN}'
-                        f'{style.BRIGHT}Job ID: {style.NORMAL}{job_id}'
-                        f' {style.BRIGHT}Path: {style.NORMAL}{log_dir}'
+            logger.info(f'{fore.CYAN}Job {job_id} logs: {log_dir}'
                         f'{style.RESET_ALL}')
 
         ips = backend_utils.get_node_ips(handle.cluster_yaml,
@@ -1840,7 +1839,7 @@ class CloudVmRayBackend(backends.Backend):
                                   f), contextlib.redirect_stderr(f):
                         rsync_down(ip, local_log_dir, remote_log_dir)
                     logger.info(
-                        f'{fore.CYAN}Job {job_id} logs: Downloaded from '
+                        f'{fore.CYAN}Job {job_id} logs: downloaded from '
                         f'node-{i} ({ip}){style.RESET_ALL}')
                 except click.exceptions.ClickException as e:
                     # Raised by rsync_down. Remote log dir may not exist, since
@@ -2210,6 +2209,7 @@ class CloudVmRayBackend(backends.Backend):
                         stream_logs=False,
                         require_outputs=True)
 
+            tpu_rc = 0
             if handle.tpu_delete_script is not None:
                 with backend_utils.safe_console_status(
                         '[bold cyan]Terminating TPU...'):
@@ -2224,9 +2224,8 @@ class CloudVmRayBackend(backends.Backend):
                                  f'{tpu_stdout}\n'
                                  f'**** STDERR ****\n'
                                  f'{tpu_stderr}{colorama.Style.RESET_ALL}')
-                    return False
 
-        if returncode != 0:
+        if returncode != 0 or tpu_rc != 0:
             if purge:
                 logger.warning(
                     f'{colorama.Fore.YELLOW}'

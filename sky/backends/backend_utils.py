@@ -76,6 +76,8 @@ _TEST_IP = '1.1.1.1'
 # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
 _MAX_CLUSTER_NAME_LEN = 37
 
+SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
+
 
 def fill_template(template_name: str,
                   variables: Dict,
@@ -609,7 +611,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if resources_vars.get('tpu_type') is not None:
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
-            tpu_name = generate_tpu_name(cluster_name)
+            tpu_name = cluster_name
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
         scripts = tuple(
@@ -1078,10 +1080,6 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def generate_tpu_name(cluster_name):
-    return f'{cluster_name}-sky-{uuid.uuid4().hex[:4]}'
-
-
 def get_node_ips(
         cluster_yaml: str,
         expected_num_nodes: int,
@@ -1348,10 +1346,20 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
             f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
 
 
-def disallow_sky_reserved_cluster_name(cluster_name: Optional[str],
-                                       operation_str: str):
+def check_cluster_name_not_reserved(
+        cluster_name: Optional[str],
+        operation_str: Optional[str] = None) -> None:
+    """Errors out if cluster name is reserved by sky.
+
+    If the cluster name is reserved, return the error message. Otherwise,
+    return None.
+    """
+    usage = 'internal use'
     if cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
-        raise ValueError(
-            f'Cluster {cluster_name!r} is reserved for the spot controller.\n'
-            f'{colorama.Fore.RED}{operation_str} is not allowed.'
-            f'{colorama.Style.RESET_ALL}')
+        usage = 'spot controller'
+    msg = (f'Cluster {cluster_name!r} is reserved for {usage}.')
+    if operation_str is not None:
+        msg += (f'{colorama.Fore.RED}{operation_str} is not allowed.'
+                f'{colorama.Style.RESET_ALL}')
+    if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
+        raise ValueError(msg)
