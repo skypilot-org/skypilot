@@ -128,11 +128,12 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
         try:
-            self.backend.cancel_jobs(handle, None)
+            self.backend.cancel_jobs(handle, jobs=None)
         except SystemExit:
             # Ignore the failure as the cluster can be totally stopped, and the
             # job canceling can get connection error.
-            pass
+            logger.info('Ignoring the job cancellation failure; the spot '
+                        'cluster is likely completely stopped. Recovering.')
 
         is_launched = self.launch(raise_on_failure=False)
         if is_launched:

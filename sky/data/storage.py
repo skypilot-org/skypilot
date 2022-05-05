@@ -442,14 +442,16 @@ class Storage(object):
                 #  and now the user wants to mount it in COPY mode? We should
                 #  perhaps check for existence in global_user_state here.
                 raise exceptions.StorageSourceError(
-                    'Storage source must be specified when using COPY mode.')
+                    'Storage\'s \'source\' must be specified when using COPY '
+                    'mode.')
             else:
                 # If source is not specified in mount mode, the intent is to
                 # create a bucket and use it as scratch disk. Name must be
                 # specified to create bucket.
                 if not self.name:
                     raise exceptions.StorageSpecError(
-                        'Storage source or storage name must be specified.')
+                        'Storage\'s \'source\' or \'name\' must be specified '
+                        'when \'name\' is not set.')
                 else:
                     # Create bucket and mount
                     return
@@ -460,8 +462,8 @@ class Storage(object):
             if not self.name:
                 if is_local_source:
                     raise exceptions.StorageNameError(
-                        'Storage name must be specified if the source is local.'
-                    )
+                        'Storage\'s \'name\' must be specified if the source '
+                        'is local.')
                 else:
                     # Set name to source bucket name and continue
                     self.name = urllib.parse.urlsplit(source).netloc
@@ -474,8 +476,8 @@ class Storage(object):
                     # Both name and source should not be specified if the source
                     # is a URI. Name will be inferred from the URI.
                     raise exceptions.StorageSpecError(
-                        'Storage name should not be specified if the source is '
-                        'a remote URI.')
+                        'Storage\'s \'name\' should not be specified if the '
+                        'source is a remote URI.')
         raise exceptions.StorageSpecError(
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
@@ -802,7 +804,7 @@ class S3Store(AbstractStore):
                     return bucket, True
             else:
                 ex = exceptions.StorageBucketGetError(
-                    'Failed to connect to an existing bucket. \n'
+                    f'Failed to connect to an existing bucket {self.name!r}.\n'
                     'Check if the 1) the bucket name is taken and/or '
                     '2) the bucket permissions are not setup correctly. '
                     f'Consider using `aws s3 ls {self.name}` to debug.')
