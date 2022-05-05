@@ -10,13 +10,14 @@ num_nodes: 1
 
 file_mounts:
     /checkpoint:
-        name: # NOTE: Fill in your bucket name
+        name: # NOTE: Fill in your bucket name for checkpoint
         mode: MOUNT
 
     ~/lit:
-        name: # NOTE: Fill in your bucket name
-        source: ./examples/spot/lightning_cifar10  # Assumes PWD is the Sky repo root.
-        mode: MOUNT
+        name: # NOTE: Fill in your bucket name for codes
+        source: ./examples/spot/lightning_cifar10
+        persistent: false
+        mode: COPY
 
 setup: |
     set -e  # Fail if any command failed.
