@@ -959,7 +959,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
     if job_id is not None and not job_id.isdigit():
         click.secho(
             'Only single job ID supported for streaming or status check, '
-            'consider using --sync_down',
+            'consider using --sync_down to download logs for multiple jobs.',
             fg='yellow')
         return
     job_id = int(job_id) if job_id is not None else job_id
@@ -2284,7 +2284,6 @@ def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
     if handle is None:
         return
 
-    # TODO(zhwu): show logs of the latest job
     if name is not None and job_id is not None:
         click.UsageError('Cannot specify both --name and --job-id.')
     backend = backend_utils.get_backend_from_handle(handle)

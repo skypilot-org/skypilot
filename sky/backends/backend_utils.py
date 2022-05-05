@@ -957,6 +957,9 @@ def run_command_on_ip_via_ssh(
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
             '| stdbuf -o0 tail -n +5',
+            # This is required to make sure the executor of the command can get the
+            # correct returncode, since linux pipe is used.
+            '; exit ${PIPESTATUS[0]}'
         ]
 
     command = ' '.join(command)
@@ -965,13 +968,14 @@ def run_command_on_ip_via_ssh(
     executable = None
     if not process_stream:
         if stream_logs:
-            command += [f'| tee {log_path}']
+            command += [
+                f'| tee {log_path}',
+                # This also requires the executor to be '/bin/bash' instead
+                # of the default '/bin/sh'.
+                '; exit ${PIPESTATUS[0]}'
+            ]
         else:
             command += [f'> {log_path}']
-        # This is required to make sure the executor of the command can get the
-        # correct returncode, since linux pipe is used. It also requires the
-        # executor to be '/bin/bash' instead of the default '/bin/sh'.
-        command += ['; exit ${PIPESTATUS[0]}']
         executable = '/bin/bash'
 
     return log_lib.run_with_log(' '.join(command),

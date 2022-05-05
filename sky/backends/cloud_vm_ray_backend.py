@@ -1918,12 +1918,11 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
-    def tail_logs(self, handle: ResourceHandle, job_id: Optional[int]) -> None:
+    def tail_logs(self, handle: ResourceHandle, job_id: Optional[int]) -> int:
         code = job_lib.JobLibCodeGen.tail_logs(job_id)
-        logger.info(f'{colorama.Fore.YELLOW}Start streaming logs...'
-                    f'{colorama.Style.RESET_ALL}')
         if job_id is None:
-            logger.info('Job ID not provided. Streaming the latest logs...')
+            logger.info(
+                'Job ID not provided. Streaming the logs of the latest job.')
 
         # With interactive mode, the ctrl-c will send directly to the running
         # program on the remote instance, and the ssh will be disconnected by
@@ -1937,9 +1936,6 @@ class CloudVmRayBackend(backends.Backend):
             # there may be 5 minutes delay in logging.
             ssh_mode=backend_utils.SshMode.INTERACTIVE)
 
-        if returncode == exceptions.KEYBOARD_INTERRUPT_CODE:
-            logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                           f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
         return returncode
 
     def tail_spot_logs(self,

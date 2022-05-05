@@ -10,10 +10,10 @@ from typing import List, Optional, Tuple
 import colorama
 import filelock
 
+from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import backends
 from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
@@ -128,12 +128,11 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_logs_by_id(job_id: int) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
-    while controller_status != job_lib.JobStatus.RUNNING:
-        logger.info('Wating for the spot controller process to be running.')
+    while (controller_status != job_lib.JobStatus.RUNNING and
+           not controller_status.is_terminal()):
+        logger.info('Waiting for the spot controller process to be running.')
         time.sleep(1)
         controller_status = job_lib.get_status(job_id)
-        if controller_status.is_terminal():
-            break
 
     job_status = spot_state.get_status(job_id)
     while job_status is None:
@@ -143,13 +142,16 @@ def stream_logs_by_id(job_id: int) -> str:
 
     if job_status.is_terminal():
         return (
-            f'Job {job_id} is already in terminal state {job_status.value}.')
+            f'Job {job_id} is already in terminal state {job_status.value}. '
+            'Logs will be not shown.')
     task_name = spot_state.get_task_name_by_job_id(job_id)
     cluster_name = generate_spot_cluster_name(task_name, job_id)
     backend = backends.CloudVmRayBackend()
     returncode = 0
     while (spot_state.get_status(job_id).is_terminal() is False and
-           returncode != exceptions.KEYBOARD_INTERRUPT_CODE):
+           returncode not in [
+               exceptions.KEYBOARD_INTERRUPT_CODE, exceptions.SIGTSTP_CODE
+           ]):
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
             cluster_name, force_refresh=True)
         if cluster_status != global_user_state.ClusterStatus.UP:
@@ -159,7 +161,7 @@ def stream_logs_by_id(job_id: int) -> str:
             logger.debug(f'The cluster {cluster_name} is {cluster_status}.')
             time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
             continue
-        returncode = backend.tail_logs(handle, None)
+        returncode = backend.tail_logs(handle, job_id=None)
         logger.debug(f'The return code is {returncode}.')
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_state.get_status(job_id).value}).')
@@ -242,8 +244,8 @@ class SpotCodeGen:
       >> codegen = SpotCodegen().show_jobs(...)
     """
     _PREFIX = [
-        'from sky.spot import spot_utils',
         'from sky.spot import spot_state',
+        'from sky.spot import spot_utils',
     ]
 
     def __init__(self):
@@ -273,7 +275,7 @@ class SpotCodeGen:
     def stream_logs_by_name(self, job_name: str) -> str:
         self._code += [
             f'msg = spot_utils.stream_logs_by_name({job_name!r})',
-            'print(msg, end="", flush=True)',
+            'print(msg, flush=True)',
         ]
         return self._build()
 
@@ -282,7 +284,7 @@ class SpotCodeGen:
             f'job_id = {job_id} if {job_id} is not None '
             'else spot_state.get_latest_job_id()',
             'msg = spot_utils.stream_logs_by_id(job_id)',
-            'print(msg, end="", flush=True)',
+            'print(msg, flush=True)',
         ]
         return self._build()
 

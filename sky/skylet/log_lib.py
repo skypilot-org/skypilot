@@ -5,6 +5,7 @@ This is a remote utility module that provides logging functionality.
 import io
 import os
 import selectors
+import signal
 import subprocess
 import sys
 import time
@@ -279,7 +280,23 @@ def _follow_job_logs(file,
             status = job_lib.get_status(job_id)
 
 
+def interrupt_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+
+
+def stop_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
+    sys.exit(exceptions.SIGTSTP_CODE)
+
+
 def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
+    logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for job {job_id}.'
+                f'{colorama.Style.RESET_ALL}')
     if log_dir is None:
         print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
         return
@@ -310,19 +327,18 @@ def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
         status = job_lib.query_job_status([job_id])[0]
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
-        try:
-            # Not using `ray job logs` because it will put progress bar in
-            # multiple lines.
-            with open(log_path, 'r', newline='') as log_file:
-                # Using `_follow` instead of `tail -f` to streaming the whole
-                # log and creating a new process for tail.
-                for line in _follow_job_logs(
-                        log_file,
-                        job_id=job_id,
-                        start_streaming_at='SKY INFO: Reserving task slots on'):
-                    print(line, end='', flush=True)
-        except KeyboardInterrupt:
-            sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+        signal.signal(signal.SIGINT, interrupt_handler)
+        signal.signal(signal.SIGTSTP, stop_handler)
+        # Not using `ray job logs` because it will put progress bar in
+        # multiple lines.
+        with open(log_path, 'r', newline='') as log_file:
+            # Using `_follow` instead of `tail -f` to streaming the whole
+            # log and creating a new process for tail.
+            for line in _follow_job_logs(
+                    log_file,
+                    job_id=job_id,
+                    start_streaming_at='SKY INFO: Reserving task slots on'):
+                print(line, end='', flush=True)
     else:
         try:
             with open(log_path, 'r') as f:
