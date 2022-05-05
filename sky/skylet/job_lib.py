@@ -248,9 +248,8 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
             # The job may be stale, when the instance is restarted (the ray
             # redis is volatile). We need to reset the status of the task to
             # FAILED if its original status is RUNNING or PENDING.
-            if original_status in [
-                    JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING
-            ]:
+            status = original_status
+            if not original_status.is_terminal():
                 status = JobStatus.FAILED
         else:
             ray_status = res.rpartition(' ')[-1]
