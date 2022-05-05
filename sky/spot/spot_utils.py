@@ -127,7 +127,20 @@ def cancel_job_by_name(job_name: str) -> str:
 
 def stream_logs_by_id(job_id: int) -> str:
     """Stream logs by job id."""
+    controller_status = job_lib.get_status(job_id)
+    while controller_status != job_lib.JobStatus.RUNNING:
+        logger.info('Wating for the spot controller process to be running.')
+        time.sleep(1)
+        controller_status = job_lib.get_status(job_id)
+        if controller_status.is_terminal():
+            break
+
     job_status = spot_state.get_status(job_id)
+    while job_status is None:
+        logger.info('Waiting for the spot job to be started.')
+        time.sleep(1)
+        job_status = spot_state.get_status(job_id)
+
     if job_status.is_terminal():
         return (
             f'Job {job_id} is already in terminal state {job_status.value}.')

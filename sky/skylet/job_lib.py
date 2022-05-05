@@ -35,6 +35,7 @@ class JobStatus(enum.Enum):
 
 
 _RAY_TO_JOB_STATUS_MAP = {
+    'PENDING': JobStatus.PENDING,
     'RUNNING': JobStatus.RUNNING,
     'succeeded': JobStatus.SUCCEEDED,
     'failed': JobStatus.FAILED,
