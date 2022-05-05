@@ -962,12 +962,17 @@ def run_command_on_ip_via_ssh(
     command = ' '.join(command)
     command = base_ssh_command + [shlex.quote(command)]
 
+    executable = None
     if not process_stream:
         if stream_logs:
             command += [f'| tee {log_path}']
         else:
             command += [f'> {log_path}']
+        # This is required to make sure the executor of the command can get the
+        # correct returncode, since linux pipe is used. It also requires the 
+        # executor to be '/bin/bash' instead of the default '/bin/sh'.
         command += ['; exit ${PIPESTATUS[0]}']
+        executable = '/bin/bash'
 
     return log_lib.run_with_log(' '.join(command),
                                 log_path,
@@ -975,7 +980,7 @@ def run_command_on_ip_via_ssh(
                                 process_stream=process_stream,
                                 require_outputs=require_outputs,
                                 shell=True,
-                                executable='/bin/bash')
+                                executable=executable)
 
 
 def handle_returncode(returncode: int,
