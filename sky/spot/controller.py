@@ -116,6 +116,9 @@ class SpotController:
             if not job_status.is_terminal():
                 spot_state.set_failed(self._job_id)
 
+            # Clean up Storages with persistent=False.
+            self.backend.teardown_ephemeral_storage(self._task)
+
     def _job_status_check(self) -> Optional['job_lib.JobStatus']:
         """Check the status of the job running on the spot cluster.
 
