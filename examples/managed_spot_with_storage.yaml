@@ -1,3 +1,11 @@
+# A managed spot example with storages.
+#
+# Runs a task that has sky storage configured.
+#
+# Usage:
+#   sky spot launch -c spot-storage examples/managed_spot_with_storage.yaml
+#   sky down spot-storage
+
 resources:
   cloud: aws
   use_spot: true
@@ -5,12 +13,13 @@ resources:
 
 file_mounts:
   ~/sky_workdir:
+    # Change this to the your own globally unique bucket name.
     name: sky-workdir-zhwu
     source: .
     persistent: false
     mode: COPY
   /imagenet:
-    name: imagenet-bucket
+    source: s3://imagenet-bucket
   /imagenet-image:
     source: s3://sky-imagenet-data
 

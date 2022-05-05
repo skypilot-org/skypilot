@@ -627,7 +627,7 @@ class Storage(object):
             storage_obj.add_store(StoreType(store.upper()))
         if config:
             raise exceptions.StorageSpecError(
-                f'Invalid storage spec: {config.keys()}')
+                f'Invalid storage spec. Unknown fields: {config.keys()}')
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:
