@@ -10,20 +10,19 @@ num_nodes: 1
 
 file_mounts:
     /checkpoint:
-        name: # Fill in your bucket name
+        name: # NOTE: Fill in your bucket name
         mode: MOUNT
 
     ~/lit:
-        name: sky-lit-code
-        # source: /home/eecs/weichiang/repos/sky/examples/spot/lightning_cifar10
-        store: s3
-        persistent: True
+        name: # NOTE: Fill in your bucket name
+        source: ./examples/spot/lightning_cifar10  # Assumes PWD is the Sky repo root.
         mode: MOUNT
 
 setup: |
-    # Fill in your wandb key
-    echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
+    set -e  # Fail if any command failed.
 
+    # Fill in your wandb key: copy from https://wandb.ai/authorize
+    echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
     cd ~/lit
     pip3 install --upgrade pip
     pip3 install -r requirements.txt

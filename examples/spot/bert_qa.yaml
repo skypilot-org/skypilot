@@ -10,11 +10,11 @@ num_nodes: 1
 
 file_mounts:
     /checkpoint:
-        name: # Fill in your bucket name
+        name: # NOTE: Fill in your bucket name
         mode: MOUNT
 
 setup: |
-    # Fill in your wandb key
+    # Fill in your wandb key: copy from https://wandb.ai/authorize
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
     git clone https://github.com/huggingface/transformers.git
