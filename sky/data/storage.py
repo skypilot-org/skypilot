@@ -811,7 +811,7 @@ class S3Store(AbstractStore):
                     return bucket, True
             else:
                 ex = exceptions.StorageBucketGetError(
-                    'Failed to connect to an existing bucket. \n'
+                    f'Failed to connect to an existing bucket {self.name!r}.\n'
                     'Check if the 1) the bucket name is taken and/or '
                     '2) the bucket permissions are not setup correctly. '
                     f'Consider using `aws s3 ls {self.name}` to debug.')

@@ -1805,11 +1805,8 @@ class CloudVmRayBackend(backends.Backend):
 
         style = colorama.Style
         fore = colorama.Fore
-        logger.info(f'{fore.CYAN}Logs Directories: {style.RESET_ALL}')
         for job_id, log_dir in zip(job_ids, local_log_dirs):
-            logger.info(f'{fore.CYAN}'
-                        f'{style.BRIGHT}Job ID: {style.NORMAL}{job_id}'
-                        f' {style.BRIGHT}Path: {style.NORMAL}{log_dir}'
+            logger.info(f'{fore.CYAN}Job {job_id} logs: {log_dir}'
                         f'{style.RESET_ALL}')
 
         ips = backend_utils.get_node_ips(handle.cluster_yaml,
@@ -1840,7 +1837,7 @@ class CloudVmRayBackend(backends.Backend):
                                   f), contextlib.redirect_stderr(f):
                         rsync_down(ip, local_log_dir, remote_log_dir)
                     logger.info(
-                        f'{fore.CYAN}Job {job_id} logs: Downloaded from '
+                        f'{fore.CYAN}Job {job_id} logs: downloaded from '
                         f'node-{i} ({ip}){style.RESET_ALL}')
                 except click.exceptions.ClickException as e:
                     # Raised by rsync_down. Remote log dir may not exist, since
