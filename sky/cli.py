@@ -191,6 +191,11 @@ def _interactive_node_cli_command(cli_func):
 
     return decorator
 
+def _parse_env_var(env_var: str) -> Tuple[str, str]:
+    """Parse env vars into a (KEY, VAL) pair."""
+    if '=' not in env_var:
+        return (env_var, os.environ.get(env_var, ''))
+    return env_var.split('=', 1)
 
 _TASK_OPTIONS = [
     click.option('--name',
@@ -250,8 +255,17 @@ _TASK_OPTIONS = [
     click.option(
         '--env',
         required=False,
-        type=lambda x: x.split('='),
+        type=_parse_env_var,
         multiple=True,
+        help=('Environment variable to set on the remote node. '
+                '--env can be specified multiple times. '
+                'Example:\n'
+                '  1. --env MY_ENV=1: set the $MY_ENV on the cluster to be 1.\n'
+                '  2. --env MY_ENV2=$HOME: set the $MY_ENV2 on the cluster to '
+                'be the same value of $HOME in the local environment where the '
+                'sky command is run.\n'
+                '  3. --env MY_ENV3: set the $MY_ENV3 on the cluster to be the '
+                'same value of $MY_ENV3 in the local environment.'),
     )
 ]
 
@@ -770,6 +784,10 @@ def exec(
         # Pass in commands for execution
         sky exec mycluster python train_cpu.py
         sky exec mycluster --gpus=V100:1 python train_gpu.py
+
+    .. code-block:: bash
+        # Pass environment variables to the task
+        sky exec mycluster --env WANDB_API_KEY=$WANDB_API_KEY python train_gpu.py
     """
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Executing task on it')
@@ -1963,7 +1981,6 @@ def spot():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(zhwu): Add --env option as sky launch --env option.
 def spot_launch(
     entrypoint: str,
     name: Optional[str],
@@ -1974,6 +1991,7 @@ def spot_launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     spot_recovery: Optional[str],
+    env: List[Dict[str, str]],
     disk_size: Optional[int],
     detach_run: bool,
     yes: bool,
@@ -2066,6 +2084,9 @@ def spot_launch(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
+
+    if env is not None:
+        task.env = dict(env)
 
     with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
                                      mode='w') as f:
