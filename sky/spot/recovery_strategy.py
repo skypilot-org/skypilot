@@ -81,7 +81,7 @@ class StrategyExecutor:
             if cluster_status == global_user_state.ClusterStatus.UP:
                 return True
             # TODO(zhwu): maybe exponential backoff is better?
-            if retry_cnt > max_retry:
+            if retry_cnt >= max_retry:
                 if raise_on_failure:
                     raise RuntimeError(
                         f'Failed to launch the spot cluster after {max_retry} '
@@ -112,7 +112,7 @@ class StrategyExecutor:
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
     """Failover strategy: wait in same region and failover after timout."""
 
-    _MAX_RETRY_CNT = 3
+    _MAX_RETRY_CNT = 240  # Retry for 4 hours.
     _RETRY_GAP_SECONDS = 60
 
     def recover(self):
