@@ -676,6 +676,12 @@ def launch(
         if yaml_cloud == 'local':
             cloud = 'local'
 
+    # Disallow command entrypoints for local clusters
+    if not is_yaml and cloud == 'local':
+        raise click.UsageError('Local clusters cannot run commands directly '
+                               'from cli. Please specify a YAML file with auth '
+                               'credentials set.')
+
     if not yes:
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
         # it exists but is STOPPED.
