@@ -88,7 +88,7 @@ initialization_commands: []
 setup_commands:
   # This AMI's system Python is version 2+.
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
-  - (which pip3 > /dev/null 2>&1 || (sudo apt-get update && sudo apt install -y python3-pip)) && pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
+  - (which pip3 > /dev/null 2>&1 || (sudo apt-get update && sudo apt install -y python3-pip)) && (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
     sudo systemctl stop unattended-upgrades;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
     sudo pkill -9 apt-get;
