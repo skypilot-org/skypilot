@@ -199,7 +199,8 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
     if '=' not in env_var:
         value = os.environ.get(env_var)
         if value is None:
-            raise click.UsageError(f'{env_var} is not set in local environment.')
+            raise click.UsageError(
+                f'{env_var} is not set in local environment.')
         return (env_var, value)
     return tuple(env_var.split('=', 1))
 
