@@ -34,7 +34,7 @@ import shlex
 import sys
 import tempfile
 import typing
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
@@ -244,6 +244,17 @@ def _interactive_node_cli_command(cli_func):
     return decorator
 
 
+def _parse_env_var(env_var: str) -> Tuple[str, str]:
+    """Parse env vars into a (KEY, VAL) pair."""
+    if '=' not in env_var:
+        value = os.environ.get(env_var)
+        if value is None:
+            raise click.UsageError(
+                f'{env_var} is not set in local environment.')
+        return (env_var, value)
+    return tuple(env_var.split('=', 1))
+
+
 _TASK_OPTIONS = [
     click.option('--name',
                  '-n',
@@ -299,6 +310,27 @@ _TASK_OPTIONS = [
         default=None,
         help=('Whether to request spot instances. If specified, override the '
               '"resources.use_spot".')),
+    click.option(
+        '--env',
+        required=False,
+        type=_parse_env_var,
+        multiple=True,
+        help="""
+        Environment variable to set on the remote node. 
+        It can be specified multiple times.
+
+        Example:
+        
+        \b
+        1. --env MY_ENV=1: set the $MY_ENV on the cluster to be 1.
+
+        2. --env MY_ENV2=$HOME: set the $MY_ENV2 on the cluster to
+        be the same value of $HOME in the local environment where the
+        sky command is run.
+
+        3. --env MY_ENV3: set the $MY_ENV3 on the cluster to be the 
+        same value of $MY_ENV3 in the local environment.""",
+    )
 ]
 
 
@@ -643,6 +675,7 @@ def launch(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    env: List[Dict[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
@@ -757,6 +790,7 @@ def launch(
             task.num_nodes = num_nodes
         if name is not None:
             task.name = name
+        task.envs = env
 
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
@@ -799,6 +833,7 @@ def exec(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    env: List[Dict[str, str]],
 ):
     """Execute a task or a command on a cluster (skip setup).
 
@@ -856,6 +891,10 @@ def exec(
         # Pass in commands for execution
         sky exec mycluster python train_cpu.py
         sky exec mycluster --gpus=V100:1 python train_gpu.py
+
+    .. code-block:: bash
+        # Pass environment variables to the task
+        sky exec mycluster --env WANDB_API_KEY python train_gpu.py
     """
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Executing task on it')
@@ -915,6 +954,7 @@ def exec(
             task.num_nodes = num_nodes
         if name is not None:
             task.name = name
+        task.envs = env
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
@@ -2239,6 +2279,7 @@ def spot_launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     spot_recovery: Optional[str],
+    env: List[Dict[str, str]],
     disk_size: Optional[int],
     detach_run: bool,
     yes: bool,
@@ -2331,6 +2372,7 @@ def spot_launch(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
+    task.envs = env
 
     # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
     # following validations.

@@ -3,7 +3,7 @@ import inspect
 import os
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 import sky
@@ -20,6 +20,7 @@ CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
+_VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
                      ' uppercase letters, digits, underscores, periods,'
                      ' and dashes. Must start and end with alphanumeric'
@@ -56,6 +57,11 @@ def _is_valid_name(name: str) -> bool:
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
 
 
+def _is_valid_env_var(name: str) -> bool:
+    """Checks if the task environment variable name is valid."""
+    return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
+
+
 class Task:
     """Task: a coarse-grained stage in an application."""
 
@@ -65,6 +71,7 @@ class Task:
         *,
         setup: Optional[str] = None,
         run: Optional[CommandOrCommandGen] = None,
+        envs: Optional[Dict[str, str]] = None,
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
         # Advanced:
@@ -90,6 +97,8 @@ class Task:
             some nodes, in which case no commands are run on them).  Commands
             will be run under 'workdir'. Note the command generator should be
             self-contained.
+          envs: A dictionary of environment variables to set before running the
+            setup and run command.
           workdir: The local working directory.  This directory and its files
             will be synced to a location on the remote VM(s), and 'setup' and
             'run' commands will be run under that location (thus, they can rely
@@ -107,6 +116,7 @@ class Task:
         self.storage_mounts = {}
         self.storage_plans = {}
         self.setup = setup
+        self._envs = envs
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04')
@@ -190,7 +200,6 @@ class Task:
         if config is None:
             config = {}
 
-        # TODO: perform more checks on yaml and raise meaningful errors.
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -198,6 +207,7 @@ class Task:
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
             auth_config=config.pop('auth', None),
+            envs=config.pop('envs', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -286,6 +296,7 @@ class Task:
         add_if_not_none('setup', self.setup)
         add_if_not_none('workdir', self.workdir)
         add_if_not_none('run', self.run)
+        add_if_not_none('envs', self.envs)
 
         add_if_not_none('file_mounts', dict())
 
@@ -302,6 +313,31 @@ class Task:
     @property
     def num_nodes(self) -> int:
         return self._num_nodes
+
+    @property
+    def envs(self) -> Dict[str, str]:
+        return self._envs
+
+    @envs.setter
+    def envs(self, envs: Union[None, Tuple[Tuple[str, str]], Dict[str, str]]):
+        if envs is None:
+            self._envs = None
+            return
+        if isinstance(envs, (list, tuple)):
+            keys = set(env[0] for env in envs)
+            if len(keys) != len(envs):
+                raise ValueError('Duplicate env keys provided.')
+            envs = dict(envs)
+        if isinstance(envs, dict):
+            for key in envs:
+                if not isinstance(key, str):
+                    raise ValueError('Env keys must be strings.')
+                if not _is_valid_env_var(key):
+                    raise ValueError(f'Invalid env key: {key}')
+        else:
+            raise ValueError(
+                f'envs must be List[Tuple[str, str]] or Dict[str, str] {envs}')
+        self._envs = envs
 
     @property
     def need_spot_recovery(self) -> bool:

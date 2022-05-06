@@ -222,7 +222,7 @@ class RayCodeGen:
                       file=sys.stderr,
                       flush=True)
                 job_lib.set_job_started({self.job_id!r})
-                export_sky_env_vars = ''
+                sky_env_vars_dict = dict()
                 """)
         ]
 
@@ -240,7 +240,7 @@ class RayCodeGen:
                 ])
                 print('SKY INFO: Reserved IPs:', ip_list)
                 ip_list_str = '\\n'.join(ip_list)
-                export_sky_env_vars = 'export SKY_NODE_IPS="' + ip_list_str + '"\\n'
+                sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
                 """),
         ]
 
@@ -268,6 +268,7 @@ class RayCodeGen:
         task_name: Optional[str],
         ray_resources_dict: Optional[Dict[str, float]],
         log_path: str,
+        env_vars: Dict[str, str] = None,
         gang_scheduling_id: int = 0,
     ) -> None:
         """Generates code for a ray remote task that runs a bash command."""
@@ -303,7 +304,11 @@ class RayCodeGen:
             resources_key = list(ray_resources_dict.keys())[0]
             if 'tpu' in resources_key.lower():
                 num_gpus_str = ''
-
+        sky_env_vars_dict_str = ''
+        if env_vars is not None:
+            sky_env_vars_dict_str = '\n'.join(
+                f'sky_env_vars_dict[{k!r}] = {v!r}'
+                for k, v in env_vars.items())
         resources_str = ', placement_group=pg'
         resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
         logger.debug('Added Task with options: '
@@ -317,16 +322,16 @@ class RayCodeGen:
         log_path = os.path.expanduser({log_path!r})
 
         if script is not None:
-            node_export_sky_env_vars = (export_sky_env_vars +
-                                        'export SKY_NODE_RANK={gang_scheduling_id}\\n'
-                                        'export SKY_JOB_ID={self.job_id}\\n')
+            sky_env_vars_dict['SKY_NODE_RANK'] = {gang_scheduling_id!r}
+            sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
+            {sky_env_vars_dict_str}
             futures.append(run_bash_command_with_log \\
                     .options({name_str}{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(
                         script,
                         log_path,
                         getpass.getuser(),
-                        export_sky_env_vars=node_export_sky_env_vars,
+                        env_vars=sky_env_vars_dict,
                         stream_logs=True,
                         with_ray=True,
                     ))""")
@@ -1834,7 +1839,8 @@ class CloudVmRayBackend(backends.Backend):
         if task.setup is None:
             return
 
-        setup_script = log_lib.make_task_bash_script(task.setup)
+        setup_script = log_lib.make_task_bash_script(task.setup,
+                                                     env_vars=task.envs)
         with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
             f.write(setup_script)
             f.flush()
@@ -2190,6 +2196,7 @@ class CloudVmRayBackend(backends.Backend):
         command_for_node = task.run if isinstance(task.run, str) else None
         codegen.add_ray_task(
             bash_script=command_for_node,
+            env_vars=task.envs,
             task_name=task.name,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
             log_path=log_path)
@@ -2233,6 +2240,7 @@ class CloudVmRayBackend(backends.Backend):
 
             codegen.add_ray_task(
                 bash_script=command_for_node,
+                env_vars=task.envs,
                 task_name=name,
                 ray_resources_dict=accelerator_dict,
                 log_path=log_path,
