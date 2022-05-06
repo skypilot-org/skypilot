@@ -114,13 +114,6 @@ def main():
                    resume=True,
                    dir=argv.wandb_dir)
 
-    # Create directories outside the PyTorch program
-    # Do not create directory here because it is not multiprocess safe
-    '''
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
-    '''
-
     model_filepath = os.path.join(model_dir, model_filename)
 
     # We need to use seeds to make sure that the models initialized in different processes are the same
@@ -128,7 +121,6 @@ def main():
 
     # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
     torch.distributed.init_process_group(backend="nccl")
-    # torch.distributed.init_process_group(backend="gloo")
 
     # Encapsulate the model on the GPU assigned to the current process
     model = torchvision.models.resnet18(pretrained=False)
