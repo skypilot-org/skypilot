@@ -29,13 +29,6 @@ class JobStatus(enum.Enum):
     FAILED = 'FAILED'
     CANCELLED = 'CANCELLED'
 
-    @property
-    def _order_list(self):
-        return [
-            self.INIT, self.PENDING, self.RUNNING, self.SUCCEEDED, self.FAILED,
-            self.CANCELLED
-        ]
-
     def is_terminal(self):
         return self in (JobStatus.SUCCEEDED, JobStatus.FAILED,
                         JobStatus.CANCELLED)
