@@ -261,15 +261,21 @@ _TASK_OPTIONS = [
         required=False,
         type=_parse_env_var,
         multiple=True,
-        help=('Environment variable to set on the remote node. '
-              '--env can be specified multiple times. '
-              'Example:\n'
-              '  1. --env MY_ENV=1: set the $MY_ENV on the cluster to be 1.\n'
-              '  2. --env MY_ENV2=$HOME: set the $MY_ENV2 on the cluster to '
-              'be the same value of $HOME in the local environment where the '
-              'sky command is run.\n'
-              '  3. --env MY_ENV3: set the $MY_ENV3 on the cluster to be the '
-              'same value of $MY_ENV3 in the local environment.'),
+        help="""
+        Environment variable to set on the remote node. 
+        It can be specified multiple times.
+
+        Example:
+        
+        \b
+        1. --env MY_ENV=1: set the $MY_ENV on the cluster to be 1.
+
+        2. --env MY_ENV2=$HOME: set the $MY_ENV2 on the cluster to
+        be the same value of $HOME in the local environment where the
+        sky command is run.
+
+        3. --env MY_ENV3: set the $MY_ENV3 on the cluster to be the 
+        same value of $MY_ENV3 in the local environment.""",
     )
 ]
 
