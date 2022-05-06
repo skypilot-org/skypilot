@@ -149,12 +149,12 @@ def stream_logs_by_id(job_id: int) -> str:
     if job_status.is_terminal():
         return (
             f'Job {job_id} is already in terminal state {job_status.value}. '
-            'Logs will be not shown.')
+            'Logs will not be shown.')
     task_name = spot_state.get_task_name_by_job_id(job_id)
     cluster_name = generate_spot_cluster_name(task_name, job_id)
     backend = backends.CloudVmRayBackend()
     returncode = 0
-    while (spot_state.get_status(job_id).is_terminal() is False and
+    while (not spot_state.get_status(job_id).is_terminal() and
            returncode not in [
                exceptions.KEYBOARD_INTERRUPT_CODE, exceptions.SIGTSTP_CODE
            ]):
@@ -169,9 +169,12 @@ def stream_logs_by_id(job_id: int) -> str:
                 f'{spot_state.SpotStatus.RECOVERING.value}. '
                 f'Waiting for {_LOG_STREAM_CHECK_GAP_SECONDS} seconds.')
             logger.debug(f'The cluster {cluster_name} is {cluster_status}.')
+            # Wait for a while until the spot job status is updated, so that
+            # we do not print the same log multiple times.
             time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
             continue
         returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
+        time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
         logger.debug(f'The return code is {returncode}.')
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_state.get_status(job_id).value}).')
