@@ -10,7 +10,7 @@ import sys
 import time
 import textwrap
 import tempfile
-from typing import Iterator, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
@@ -189,7 +189,8 @@ def run_with_log(
         return proc.returncode
 
 
-def make_task_bash_script(codegen: str) -> str:
+def make_task_bash_script(codegen: str,
+                          env_vars: Optional[Dict[str, str]] = None) -> str:
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
@@ -201,6 +202,11 @@ def make_task_bash_script(codegen: str) -> str:
             . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
             set +a
             cd {SKY_REMOTE_WORKDIR}"""),
+    ]
+    if env_vars is not None:
+        for k, v in env_vars.items():
+            script.append(f'export {k}={v!r}')
+    script += [
         codegen,
         '',  # New line at EOF.
     ]
@@ -210,12 +216,14 @@ def make_task_bash_script(codegen: str) -> str:
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              export_sky_env_vars: Optional[str] = None,
+                              env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-        if export_sky_env_vars is not None:
-            bash_command = export_sky_env_vars + '\n' + bash_command
+        if env_vars is not None:
+            export_env_vars = '\n'.join(
+                [f'export {k}="{v}"' for k, v in env_vars.items()])
+            bash_command = export_env_vars + '\n' + bash_command
         bash_command = make_task_bash_script(bash_command)
         fp.write(bash_command)
         fp.flush()
