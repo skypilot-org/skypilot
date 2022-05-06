@@ -17,16 +17,21 @@ num_nodes: 2
 
 file_mounts:
     /checkpoint:
-        name: # NOTE: Fill in your bucket name
+        name: # NOTE: Fill in your bucket name for checkpoints
         mode: MOUNT
+
+    ~/resnet_ddp:
+        name: # NOTE: Fill in your bucket name for codes
+        source: ./examples/spot/resnet_ddp
+        persistent: false
+        mode: COPY
 
 setup: |
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
-    git clone https://github.com/infwinston/pytorch-distributed-resnet.git
     pip3 install --upgrade pip
-    cd pytorch-distributed-resnet && pip3 install -r requirements.txt
+    cd ~/resnet_ddp && pip3 install -r requirements.txt
     mkdir -p data  && mkdir -p saved_models && cd data && \
     wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
     tar -xvzf cifar-10-python.tar.gz
@@ -35,8 +40,7 @@ setup: |
     mkdir -p /checkpoint/wandb
 
 run: |
-    cd pytorch-distributed-resnet
-    git pull
+    cd ~/resnet_ddp
 
     # modify your run id for each different run!
     run_id="resnet-run-1"
