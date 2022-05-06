@@ -273,7 +273,6 @@ def _follow_job_logs(file,
                     continue
                 print(f'SKY INFO: Job finished '
                       f'(status: {status.value}).')
-                return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
             status = job_lib.get_status(job_id)
@@ -300,13 +299,12 @@ def tail_logs(job_id: int,
     job_str = f'job {job_id}'
     if spot_job_id is not None:
         job_str = f'spot job {spot_job_id}'
-    logger.debug(
-        f'Tailing logs for job, real job_id {job_id}, job_id in message '
-        f'{spot_job_id}.')
+    logger.debug(f'Tailing logs for job, real job_id {job_id}, spot_job_id '
+                 f'{spot_job_id}.')
     logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for {job_str}.'
                 f'{colorama.Style.RESET_ALL}')
     if log_dir is None:
-        print(f'Job {spot_job_id} not found (see `sky queue`).',
+        print(f'{job_str.capitalize()} not found (see `sky queue`).',
               file=sys.stderr)
         return
     log_path = os.path.join(log_dir, 'run.log')
@@ -326,7 +324,7 @@ def tail_logs(job_id: int,
             break
         if retry_cnt >= _SKY_LOG_WAITING_MAX_RETRY:
             print(
-                f'{colorama.Fore.RED}SKY ERROR: Logs '
+                f'{colorama.Fore.RED}SKY ERROR: Logs for '
                 f'{job_str} (status: {status.value}) does not exist '
                 f'after retrying {retry_cnt} times.{colorama.Style.RESET_ALL}')
             return

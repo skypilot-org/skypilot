@@ -160,7 +160,8 @@ def stream_logs_by_id(job_id: int) -> str:
            ]):
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
             cluster_name, force_refresh=True)
-        if cluster_status != global_user_state.ClusterStatus.UP:
+        underlying_job_status = backend.get_job_status(handle)
+        if underlying_job_status is None:
             logger.info(
                 f'The log is not ready yet, as the spot job may be still '
                 # Should not use spot_state.get_status(job_id) here, as
@@ -169,13 +170,16 @@ def stream_logs_by_id(job_id: int) -> str:
                 f'{spot_state.SpotStatus.RECOVERING.value}. '
                 f'Waiting for {_LOG_STREAM_CHECK_GAP_SECONDS} seconds.')
             logger.debug(f'The cluster {cluster_name} is {cluster_status}.')
-            # Wait for a while until the spot job status is updated, so that
-            # we do not print the same log multiple times.
+            logger.debug(
+                f'The underlying job status is {underlying_job_status}.')
             time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
             continue
+
         returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
-        time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
         logger.debug(f'The return code is {returncode}.')
+        # Wait for a while until the spot job status is updated, so that
+        # we do not print the same log multiple times.
+        time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_state.get_status(job_id).value}).')
     return ''
