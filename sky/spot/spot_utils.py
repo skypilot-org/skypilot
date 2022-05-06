@@ -151,12 +151,8 @@ def stream_logs_by_id(job_id: int) -> str:
     task_name = spot_state.get_task_name_by_job_id(job_id)
     cluster_name = generate_spot_cluster_name(task_name, job_id)
     backend = backends.CloudVmRayBackend()
-    returncode = 0
-    while (not spot_state.get_status(job_id).is_terminal() and
-           returncode not in [
-               exceptions.KEYBOARD_INTERRUPT_CODE, exceptions.SIGTSTP_CODE
-           ]):
-        spot_status = spot_state.get_status(job_id)
+    spot_status = spot_state.get_status(job_id)
+    while not spot_status.is_terminal():
         if spot_status != spot_state.SpotStatus.RUNNING:
             logger.info(f'The log is not ready yet, as the spot job is in '
                         f'{spot_status.value}. '
@@ -165,13 +161,16 @@ def stream_logs_by_id(job_id: int) -> str:
             continue
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
-        if returncode == 0:
-            # If the job succeeded, we can safely break the loop.
+        if returncode in [
+                0, exceptions.KEYBOARD_INTERRUPT_CODE, exceptions.SIGTSTP_CODE
+        ]:
+            # If the job succeeded/ctrl-c/ctrl-z, we can safely break the loop.
             break
         logger.debug(f'The return code is {returncode}.')
         # Wait for a while until the spot job status is updated, so that
         # we do not print the same log multiple times.
         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+        spot_status = spot_state.get_status(job_id)
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_state.get_status(job_id).value}).')
     return ''
