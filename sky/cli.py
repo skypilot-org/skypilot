@@ -197,7 +197,10 @@ def _interactive_node_cli_command(cli_func):
 def _parse_env_var(env_var: str) -> Tuple[str, str]:
     """Parse env vars into a (KEY, VAL) pair."""
     if '=' not in env_var:
-        return (env_var, os.environ.get(env_var, ''))
+        value = os.environ.get(env_var)
+        if value is None:
+            raise click.UsageError(f'{env_var} is not set in local environment.')
+        return (env_var, value)
     return tuple(env_var.split('=', 1))
 
 
