@@ -154,7 +154,7 @@ def stream_logs_by_id(job_id: int) -> str:
     spot_status = spot_state.get_status(job_id)
     while not spot_status.is_terminal():
         if spot_status != spot_state.SpotStatus.RUNNING:
-            logger.info(f'The log is not ready yet, as the spot job is in '
+            logger.info(f'The log is not ready yet, as the spot job is '
                         f'{spot_status.value}. '
                         f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
