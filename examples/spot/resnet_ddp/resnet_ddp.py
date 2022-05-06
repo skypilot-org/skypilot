@@ -12,8 +12,8 @@ import os
 import random
 import numpy as np
 
-
 import wandb
+
 
 def set_random_seeds(random_seed=0):
 
@@ -59,8 +59,7 @@ def main():
         "--local_rank",
         type=int,
         help=
-        "Local rank. Necessary for using the torch.distributed.launch utility."
-    )
+        "Local rank. Necessary for using the torch.distributed.launch utility.")
     parser.add_argument("--num_epochs",
                         type=int,
                         help="Number of training epochs.",
@@ -99,8 +98,6 @@ def main():
 
     argv = parser.parse_args()
 
-
-
     local_rank = argv.local_rank
     num_epochs = argv.num_epochs
     batch_size = argv.batch_size
@@ -112,7 +109,10 @@ def main():
 
     if local_rank == 0:
         wandb.login()
-        wandb.init(project="resnet_ddp", id=argv.run_id, resume=True, dir=argv.wandb_dir)
+        wandb.init(project="resnet_ddp",
+                   id=argv.run_id,
+                   resume=True,
+                   dir=argv.wandb_dir)
 
     # Create directories outside the PyTorch program
     # Do not create directory here because it is not multiprocess safe
@@ -137,7 +137,6 @@ def main():
     model = model.to(device)
     ddp_model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[local_rank], output_device=local_rank)
-
 
     # Prepare dataset and dataloader
     transform = transforms.Compose([
@@ -194,7 +193,7 @@ def main():
         # Save and evaluate model routinely
         if epoch % 10 == 0:
             print("Local Rank: {}, Epoch: {}, Training ...".format(
-            local_rank, epoch))
+                local_rank, epoch))
             if local_rank == 0:
                 accuracy = evaluate(model=ddp_model,
                                     device=device,
