@@ -3,7 +3,7 @@ import inspect
 import os
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 import sky
@@ -20,6 +20,7 @@ CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
+_VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
                      ' uppercase letters, digits, underscores, periods,'
                      ' and dashes. Must start and end with alphanumeric'
@@ -54,6 +55,11 @@ def _is_valid_name(name: str) -> bool:
     if name is None:
         return True
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
+
+
+def _is_valid_env_var(name: str) -> bool:
+    """Checks if the task environment variable name is valid."""
+    return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
 
 
 class Task:
@@ -109,7 +115,7 @@ class Task:
         self.storage_mounts = {}
         self.storage_plans = {}
         self.setup = setup
-        self.envs = envs
+        self._envs = envs
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04')
@@ -303,6 +309,31 @@ class Task:
     @property
     def num_nodes(self) -> int:
         return self._num_nodes
+
+    @property
+    def envs(self) -> Dict[str, str]:
+        return self._envs
+
+    @envs.setter
+    def envs(self, envs: Union[None, Tuple[Tuple[str, str]], Dict[str, str]]):
+        if envs is None:
+            self._envs = None
+            return
+        if isinstance(envs, (list, tuple)):
+            keys = set(env[0] for env in envs)
+            if len(keys) != len(envs):
+                raise ValueError('Duplicate env keys provided.')
+            envs = dict(envs)
+        if isinstance(envs, dict):
+            for key in envs:
+                if not isinstance(key, str):
+                    raise ValueError('Env keys must be strings.')
+                if not _is_valid_env_var(key):
+                    raise ValueError(f'Invalid env key: {key}')
+        else:
+            raise ValueError(
+                f'envs must be List[Tuple[str, str]] or Dict[str, str] {envs}')
+        self._envs = envs
 
     @property
     def need_spot_recovery(self) -> bool:

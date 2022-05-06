@@ -198,7 +198,7 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
     """Parse env vars into a (KEY, VAL) pair."""
     if '=' not in env_var:
         return (env_var, os.environ.get(env_var, ''))
-    return env_var.split('=', 1)
+    return tuple(env_var.split('=', 1))
 
 
 _TASK_OPTIONS = [
@@ -687,7 +687,7 @@ def launch(
             task.num_nodes = num_nodes
         if name is not None:
             task.name = name
-        task.envs = dict(env)
+        task.envs = env
 
     if cluster is not None:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
@@ -847,7 +847,7 @@ def exec(
             task.num_nodes = num_nodes
         if name is not None:
             task.name = name
-        task.envs = dict(env)
+        task.envs = env
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
@@ -2111,8 +2111,7 @@ def spot_launch(
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
-    if env is not None:
-        task.envs = dict(env)
+    task.envs = env
 
     # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
     # following validations.
