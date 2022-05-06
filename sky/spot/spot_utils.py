@@ -26,8 +26,6 @@ JOB_STATUS_CHECK_GAP_SECONDS = 60
 
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
-_LOG_STREAM_CHECK_GAP_SECONDS = 60
-
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 
@@ -158,28 +156,22 @@ def stream_logs_by_id(job_id: int) -> str:
            returncode not in [
                exceptions.KEYBOARD_INTERRUPT_CODE, exceptions.SIGTSTP_CODE
            ]):
-        cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-            cluster_name, force_refresh=True)
-        underlying_job_status = backend.get_job_status(handle)
-        if underlying_job_status is None:
-            logger.info(
-                f'The log is not ready yet, as the spot job may be still '
-                # Should not use spot_state.get_status(job_id) here, as
-                # the job status can be delayed.
-                f'{spot_state.SpotStatus.STARTING.value}/'
-                f'{spot_state.SpotStatus.RECOVERING.value}. '
-                f'Waiting for {_LOG_STREAM_CHECK_GAP_SECONDS} seconds.')
-            logger.debug(f'The cluster {cluster_name} is {cluster_status}.')
-            logger.debug(
-                f'The underlying job status is {underlying_job_status}.')
-            time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
+        spot_status = spot_state.get_status(job_id)
+        if spot_status != spot_state.SpotStatus.RUNNING:
+            logger.info(f'The log is not ready yet, as the spot job is in '
+                        f'{spot_status.value}.'
+                        f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
             continue
-
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
+        if returncode == 0:
+            # If the job succeeded, we can safely break the loop.
+            break
         logger.debug(f'The return code is {returncode}.')
         # Wait for a while until the spot job status is updated, so that
         # we do not print the same log multiple times.
-        time.sleep(_LOG_STREAM_CHECK_GAP_SECONDS)
+        time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_state.get_status(job_id).value}).')
     return ''
