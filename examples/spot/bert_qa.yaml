@@ -36,6 +36,6 @@ run: |
     --num_train_epochs 50 \
     --max_seq_length 384 \
     --doc_stride 128 \
-    --output_dir /checkpoint/bert_qa/
-    --report_to wandb
+    --output_dir /checkpoint/bert_qa/ \
+    --report_to wandb \
     --save_total_limit 10
