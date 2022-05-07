@@ -2139,6 +2139,7 @@ class CloudVmRayBackend(backends.Backend):
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
             handle.cluster_name)
         cluster_name = handle.cluster_name
+        tpu_rc = 0
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -2217,7 +2218,6 @@ class CloudVmRayBackend(backends.Backend):
                         stream_logs=False,
                         require_outputs=True)
 
-            tpu_rc = 0
             if handle.tpu_delete_script is not None:
                 with backend_utils.safe_console_status(
                         '[bold cyan]Terminating TPU...'):
