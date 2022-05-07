@@ -25,3 +25,5 @@ def test_build_wheels():
         # set file date to 1970-01-01 00:00 UTC
         os.utime(root, (0, 0))
     assert wheel_utils.build_sky_wheel().exists()
+
+    shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
