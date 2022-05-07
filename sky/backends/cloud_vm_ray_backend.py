@@ -301,13 +301,15 @@ class RayCodeGen:
             resources_key = list(ray_resources_dict.keys())[0]
             if 'tpu' in resources_key.lower():
                 num_gpus_str = ''
+        resources_str += ', placement_group=pg'
+        resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
+
         sky_env_vars_dict_str = ''
         if env_vars is not None:
             sky_env_vars_dict_str = '\n'.join(
                 f'sky_env_vars_dict[{k!r}] = {v!r}'
                 for k, v in env_vars.items())
-        resources_str = ', placement_group=pg'
-        resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
+
         logger.debug('Added Task with options: '
                      f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
         self._code += [
