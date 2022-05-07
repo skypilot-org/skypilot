@@ -158,6 +158,7 @@ def stream_logs_by_id(job_id: int) -> str:
                         f'{spot_status.value}. '
                         f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+            spot_status = spot_state.get_status(job_id)
             continue
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
