@@ -271,8 +271,8 @@ def _follow_job_logs(file,
                     time.sleep(1 + _SKY_LOG_TAILING_GAP_SECONDS)
                     wait_last_logs = False
                     continue
-                print(f'SKY INFO: Job finished '
-                      f'(status: {status.value}).')
+                print(f'SKY INFO: Job finished (status: {status.value}).')
+                return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
             status = job_lib.get_status(job_id)
