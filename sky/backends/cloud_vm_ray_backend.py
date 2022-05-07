@@ -301,13 +301,15 @@ class RayCodeGen:
             resources_key = list(ray_resources_dict.keys())[0]
             if 'tpu' in resources_key.lower():
                 num_gpus_str = ''
+        resources_str += ', placement_group=pg'
+        resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
+
         sky_env_vars_dict_str = ''
         if env_vars is not None:
             sky_env_vars_dict_str = '\n'.join(
                 f'sky_env_vars_dict[{k!r}] = {v!r}'
                 for k, v in env_vars.items())
-        resources_str = ', placement_group=pg'
-        resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
+
         logger.debug('Added Task with options: '
                      f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
         self._code += [
@@ -2139,6 +2141,7 @@ class CloudVmRayBackend(backends.Backend):
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
             handle.cluster_name)
         cluster_name = handle.cluster_name
+        tpu_rc = 0
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -2217,7 +2220,6 @@ class CloudVmRayBackend(backends.Backend):
                         stream_logs=False,
                         require_outputs=True)
 
-            tpu_rc = 0
             if handle.tpu_delete_script is not None:
                 with backend_utils.safe_console_status(
                         '[bold cyan]Terminating TPU...'):
