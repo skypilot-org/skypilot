@@ -964,9 +964,13 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
     help=('If specified, do not show logs but exit with a status code for the '
           'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
 @click.argument('cluster', required=True, type=str)
-@click.argument('job_id', required=True, type=str)
-def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
-    """Tail the log of a job."""
+@click.argument('job_id', required=False, type=str)
+# TODO(zhwu): support logs by job name
+def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
+    """Tail the log of a job.
+
+    If job_id is not provided, tail the logs of the last job on the cluster.
+    """
     cluster_name = cluster
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
@@ -992,7 +996,16 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
     if sync_down:
         click.secho('Syncing down logs to local...', fg='yellow')
         backend.sync_down_logs(handle, job_id)
-    elif status:
+        return
+
+    if job_id is not None and not job_id.isdigit():
+        click.secho(
+            'Only single job ID supported for streaming or status check, '
+            'consider using --sync_down to download logs for multiple jobs.',
+            fg='yellow')
+        return
+    job_id = int(job_id) if job_id is not None else job_id
+    if status:
         # FIXME(zongheng,zhwu): non-existent job ids throw:
         # TypeError: expected str, bytes or os.PathLike object, not tuple
         job_status = backend.get_job_status(handle, job_id)
@@ -1005,13 +1018,7 @@ def logs(cluster: str, job_id: str, sync_down: bool, status: bool):  # pylint: d
                 fg='red')
             sys.exit(1)
     else:
-        if not job_id.isdigit():
-            click.secho(
-                'Only single job ID supported for streaming, '
-                'consider using --sync_down',
-                fg='yellow')
-            return
-        backend.tail_logs(handle, int(job_id))
+        backend.tail_logs(handle, job_id)
 
 
 @cli.command()
@@ -2236,8 +2243,7 @@ def spot_status(all: bool, refresh: bool):
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    codegen = spot_lib.SpotCodeGen()
-    code = codegen.show_jobs(show_all=all)
+    code = spot_lib.SpotCodeGen.show_jobs(show_all=all)
     returncode, job_table_str, stderr = backend.run_on_head(
         handle, code, require_outputs=True, stream_logs=False)
     backend_utils.handle_returncode(returncode, code,
@@ -2253,7 +2259,7 @@ def spot_status(all: bool, refresh: bool):
               '-n',
               required=False,
               type=str,
-              help='Managed sopt job name to cancel.')
+              help='Managed spot job name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
 @click.option('--all',
               '-a',
@@ -2312,7 +2318,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
-    codegen = spot_lib.SpotCodeGen()
+    codegen = spot_lib.SpotCodeGen
     if all:
         code = codegen.cancel_jobs_by_id(None)
     elif job_ids:
@@ -2330,6 +2336,47 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     click.echo(stdout)
     if 'Multiple jobs found with name' in stdout:
         click.echo('Please specify the job ID instead of the job name.')
+
+
+@spot.command('logs', cls=_DocumentedCodeCommand)
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help='Managed spot job name.')
+@click.argument('job_id', required=False, type=int)
+@click.option(
+    '--sync-down',
+    '-s',
+    is_flag=True,
+    default=False,
+    help='Sync down the archive logs of the job (This will download all the '
+    'logs from every recovery).')
+def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
+    """Show spot controller logs.
+
+    If --sync-down is specified, the all the logs from every recovery will be
+     downloaded from the controller.
+    Otherwise, the realtime logs from the job will be streamed.
+    """
+    # TODO(zhwu): Automatically restart the spot controller
+    _, handle = _is_spot_controller_up(
+        'Please restart the spot controller with '
+        '`sky start sky-spot-controller`.')
+    if handle is None:
+        return
+
+    if name is not None and job_id is not None:
+        click.UsageError('Cannot specify both --name and --job-id.')
+    backend = backend_utils.get_backend_from_handle(handle)
+
+    if not sync_down:
+        # Stream the realtime logs
+        backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
+    else:
+        # Sync down the archived logs
+        # TODO(wei-lin): Please fill in the implementation.
+        raise NotImplementedError('Sync down is not implemented yet.')
 
 
 def main():

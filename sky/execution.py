@@ -21,8 +21,9 @@ from typing import Any, List, Optional
 import sky
 from sky import backends
 from sky import global_user_state
-from sky import sky_logging
 from sky import optimizer
+from sky import sky_logging
+from sky import spot
 from sky.backends import backend_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -53,8 +54,7 @@ def _execute(dag: sky.Dag,
              stages: Optional[List[Stage]] = None,
              cluster_name: Optional[str] = None,
              detach_run: bool = False,
-             idle_minutes_to_autostop: Optional[int] = None,
-             is_spot_controller_task: bool = False) -> None:
+             idle_minutes_to_autostop: Optional[int] = None) -> None:
     """Runs a DAG.
 
     If the DAG has not been optimized yet, this will call sky.optimize() for
@@ -169,7 +169,10 @@ def _execute(dag: sky.Dag,
         # Shorter stacktrace than raise e (e.g., no cli stuff).
         traceback.print_exc()
         print()
-        if is_spot_controller_task:
+        if cluster_name == spot.SPOT_CONTROLLER_NAME:
+            # For spot controller task, it requires a while to have the
+            # managed spot status shown in the status table.
+            time.sleep(0.5)
             backends.backend_utils.run('sky spot status')
         else:
             backends.backend_utils.run('sky status')
@@ -179,7 +182,7 @@ def _execute(dag: sky.Dag,
     finally:
         if not status_printed:
             # Needed because this finally doesn't always get executed on errors.
-            if is_spot_controller_task:
+            if cluster_name == spot.SPOT_CONTROLLER_NAME:
                 # For spot controller task, it requires a while to have the
                 # managed spot status shown in the status table.
                 time.sleep(0.5)
@@ -211,8 +214,7 @@ def launch(dag: sky.Dag,
              optimize_target=optimize_target,
              cluster_name=cluster_name,
              detach_run=detach_run,
-             idle_minutes_to_autostop=idle_minutes_to_autostop,
-             is_spot_controller_task=is_spot_controller_task)
+             idle_minutes_to_autostop=idle_minutes_to_autostop)
 
 
 def exec(  # pylint: disable=redefined-builtin
