@@ -43,6 +43,10 @@ def _get_latest_built_wheel() -> pathlib.Path:
 def _build_sky_wheel() -> pathlib.Path:
     """Build a wheel for Sky."""
     # prepare files
+    if (WHEEL_DIR / 'sky').exists():
+        # This may because the last wheel build was interrupted,
+        # so the symlink file doesn't get cleaned.
+        (WHEEL_DIR / 'sky').unlink()
     (WHEEL_DIR / 'sky').symlink_to(SKY_PACKAGE_PATH, target_is_directory=True)
     setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
     for f in setup_files_dir.iterdir():
