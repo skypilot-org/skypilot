@@ -15,7 +15,6 @@ file_mounts:
 
 setup: |
   # Install cli dependencies
-  echo "Preparing controller runtime..."
   (pip list | grep boto3 2>&1 > /dev/null && \
    pip list | grep google-api-python-client 2>&1 > /dev/null) || \
    pip3 install "$(echo {{sky_remote_path}}/*.whl)[aws,gcp]" 2>&1 > /dev/null
@@ -35,5 +34,3 @@ run: |
   python -u -m sky.spot.controller \
     ~/.sky/sky_spot_tasks/{{cluster_name}}.yaml \
     --job-id $SKY_JOB_ID
-
-

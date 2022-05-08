@@ -12,8 +12,11 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
+from sky import sky_logging
 from sky.skylet.utils import db_utils
 from sky.skylet.utils import log_utils
+
+logger = sky_logging.init_logger(__name__)
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 
@@ -38,6 +41,7 @@ class JobStatus(enum.Enum):
 
 
 _RAY_TO_JOB_STATUS_MAP = {
+    'PENDING': JobStatus.PENDING,
     'RUNNING': JobStatus.RUNNING,
     'succeeded': JobStatus.SUCCEEDED,
     'failed': JobStatus.FAILED,
@@ -127,13 +131,11 @@ def get_status(job_id: int) -> Optional[JobStatus]:
         return JobStatus[status]
 
 
-def get_latest_job_status() -> Optional[JobStatus]:
+def get_latest_job_id() -> Optional[int]:
     rows = _CURSOR.execute(
-        'SELECT status FROM jobs ORDER BY job_id DESC LIMIT 1')
-    for (status,) in rows:
-        if status is None:
-            return None
-        return JobStatus[status]
+        'SELECT job_id FROM jobs ORDER BY job_id DESC LIMIT 1')
+    for (job_id,) in rows:
+        return job_id
 
 
 def set_job_started(job_id: int) -> None:
@@ -291,6 +293,7 @@ def update_status(submitted_gap_sec: int = 0) -> None:
         # because it could be pending for resources instead. The
         # RUNNING status will be set by our generated ray program.
         if status != JobStatus.RUNNING:
+            logger.info(f'Updating job {job["job_id"]} status to {status}')
             set_status(job['job_id'], status)
 
 
@@ -449,23 +452,25 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def tail_logs(cls, job_id: int) -> str:
+    def tail_logs(cls, job_id: Optional[int],
+                  spot_job_id: Optional[int]) -> str:
         code = [
-            f'log_dir = job_lib.log_dir({job_id})',
-            f'log_lib.tail_logs({job_id}, log_dir)',
+            f'job_id = {job_id} if {job_id} is not None '
+            'else job_lib.get_latest_job_id()',
+            'log_dir = job_lib.log_dir(job_id)',
+            f'log_lib.tail_logs(job_id, log_dir, {spot_job_id!r})',
         ]
         return cls._build(code)
 
     @classmethod
-    def get_job_status(cls, job_id: Optional[str] = None) -> str:
+    def get_job_status(cls, job_id: Optional[int] = None) -> str:
         # Prints "Job <id> <status>" for UX; caller should parse the last token.
-        if job_id is None:
-            code = ['job_status = job_lib.get_latest_job_status()']
-        else:
-            code = [f'job_status = job_lib.get_status({job_id})']
-        code += [
+        code = [
+            f'job_id = {job_id} if {job_id} is not None '
+            'else job_lib.get_latest_job_id()',
+            'job_status = job_lib.get_status(job_id)',
             'status_str = None if job_status is None else job_status.value',
-            f'print("Job", {job_id}, status_str, flush=True)',
+            'print("Job", job_id, status_str, flush=True)',
         ]
         return cls._build(code)
 
@@ -478,9 +483,11 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_log_path_with_globbing(cls, job_id: str) -> str:
+    def get_log_path_with_globbing(cls, job_id: Optional[str]) -> str:
         code = [
-            f'log_dirs = job_lib.log_dirs_with_globbing({job_id!r})',
+            f'job_id = {job_id!r} if {job_id!r} is not None '
+            'else job_lib.get_latest_job_id()',
+            'log_dirs = job_lib.log_dirs_with_globbing(str(job_id))',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)
