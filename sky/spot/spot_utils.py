@@ -168,8 +168,9 @@ def stream_logs_by_id(job_id: int) -> str:
             # If the job succeeded/ctrl-c/ctrl-z, we can safely break the loop.
             break
         logger.debug(f'The return code is {returncode}.')
-        # Wait for a while until the spot job status is updated, so that
-        # we do not print the same log multiple times.
+        # If the tailing fails, it is likely that the cluster fails, so we wait
+        # a while to make sure the spot state is updated by the controller, and
+        # check the spot status again.
         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
         spot_status = spot_state.get_status(job_id)
     logger.info(f'Logs finished for job {job_id} '
