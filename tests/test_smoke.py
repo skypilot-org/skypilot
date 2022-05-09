@@ -203,14 +203,17 @@ def test_n_node_job_queue():
     run_one_test(test)
 
 
-# ---------- Submitting multiple tasks to the same cluster.. ----------
+# ---------- Submitting multiple tasks to the same cluster. ----------
 def test_multi_echo():
     name = _get_cluster_name()  # Keep consistent with the py script.
     test = Test(
         'multi_echo',
         ['python examples/multi_echo.py'] +
         # Ensure jobs succeeded.
-        [f'sky logs {name} {i + 1} --status' for i in range(16)],
+        [f'sky logs {name} {i + 1} --status' for i in range(32)] +
+        # Ensure monitor/autoscaler didn't crash on the 'assert not
+        # unfulfilled' error.  If process not found, grep->ssh returns 1.
+        [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
         f'sky down -y {name}',
     )
     run_one_test(test)
