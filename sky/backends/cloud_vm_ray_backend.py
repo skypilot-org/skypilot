@@ -937,8 +937,8 @@ class RetryingVmProvisioner(object):
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'),
                 require_outputs=True,
-                # Disable stdin to avoid ray outputs breaking the terminal
-                # with misaligned output when multithreading is used.
+                # Disable stdin to avoid ray outputs mess up the terminal with
+                # misaligned output when multithreading/multiprocessing are used.
                 stdin=subprocess.DEVNULL)
             return returncode, stdout, stderr
 
@@ -1017,8 +1017,8 @@ class RetryingVmProvisioner(object):
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
             stream_logs=False,
-            # Disable stdin to avoid ray outputs breaking the terminal
-            # with misaligned output when multithreading is used.
+            # Disable stdin to avoid ray outputs mess up the terminal with
+            # misaligned output when multithreading/multiprocessing are used.
             stdin=subprocess.DEVNULL)
 
     def provision_with_retries(
@@ -1950,7 +1950,9 @@ class CloudVmRayBackend(backends.Backend):
             process_stream=False,
             # Allocate a pseudo-terminal to disable output buffering. Otherwise,
             # there may be 5 minutes delay in logging.
-            ssh_mode=backend_utils.SshMode.INTERACTIVE)
+            ssh_mode=backend_utils.SshMode.INTERACTIVE,
+            stdin=subprocess.DEVNULL,
+        )
 
         return returncode
 
@@ -2246,8 +2248,9 @@ class CloudVmRayBackend(backends.Backend):
                         log_abs_path,
                         stream_logs=False,
                         require_outputs=True,
-                        # Disable stdin to avoid ray outputs breaking the terminal
-                        # with misaligned output when multithreading is used.
+                        # Disable stdin to avoid ray outputs mess up the
+                        # terminal with misaligned output when multithreading/
+                        # multiprocessing are used.
                         stdin=subprocess.DEVNULL)
 
             if handle.tpu_delete_script is not None:
@@ -2383,6 +2386,7 @@ class CloudVmRayBackend(backends.Backend):
         ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
+        **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
         head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip)
@@ -2403,4 +2407,5 @@ class CloudVmRayBackend(backends.Backend):
             ssh_mode=ssh_mode,
             ssh_control_name=self._ssh_control_name(handle),
             require_outputs=require_outputs,
+            **kwargs,
         )
