@@ -936,7 +936,10 @@ class RetryingVmProvisioner(object):
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'),
-                require_outputs=True)
+                require_outputs=True,
+                # Disable stdin to avoid ray down breaking the terminal
+                # with misaligned output when multithreading is used.
+                stdin=subprocess.DEVNULL)
             return returncode, stdout, stderr
 
         region_name = logging_info['region_name']
@@ -1013,7 +1016,10 @@ class RetryingVmProvisioner(object):
         log_lib.run_with_log(
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
-            stream_logs=False)
+            stream_logs=False,
+            # Disable stdin to avoid ray down breaking the terminal
+            # with misaligned output when multithreading is used.
+            stdin=subprocess.DEVNULL)
 
     def provision_with_retries(
         self,
@@ -2239,7 +2245,10 @@ class CloudVmRayBackend(backends.Backend):
                         ['ray', 'down', '-y', f.name],
                         log_abs_path,
                         stream_logs=False,
-                        require_outputs=True)
+                        require_outputs=True,
+                        # Disable stdin to avoid ray down breaking the terminal
+                        # with misaligned output when multithreading is used.
+                        stdin=subprocess.DEVNULL)
 
             if handle.tpu_delete_script is not None:
                 with backend_utils.safe_console_status(
