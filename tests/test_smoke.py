@@ -208,7 +208,10 @@ def test_multi_echo():
     name = _get_cluster_name()  # Keep consistent with the py script.
     test = Test(
         'multi_echo',
-        ['python examples/multi_echo.py'] +
+        [
+            'python examples/multi_echo.py',
+            'sleep 20',
+        ] +
         # Ensure jobs succeeded.
         [f'sky logs {name} {i + 1} --status' for i in range(32)] +
         # Ensure monitor/autoscaler didn't crash on the 'assert not

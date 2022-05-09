@@ -1,7 +1,6 @@
-# From https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/autoscaler/_private/resource_demand_scheduler.py#L571
+# From https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/autoscaler/_private/resource_demand_scheduler.py
 # Sky patch changes:
 #  - comment out "assert not unfulfilled": this seems a buggy assert
-#    (TODO(zongheng): test multinode)
 
 """Implements multi-node-type autoscaling.
 
