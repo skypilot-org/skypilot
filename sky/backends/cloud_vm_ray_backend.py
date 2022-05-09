@@ -29,6 +29,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import optimizer
+from sky import spot as spot_lib
 from sky import task as task_lib
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -304,13 +305,15 @@ class RayCodeGen:
             resources_key = list(ray_resources_dict.keys())[0]
             if 'tpu' in resources_key.lower():
                 num_gpus_str = ''
+        resources_str += ', placement_group=pg'
+        resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
+
         sky_env_vars_dict_str = ''
         if env_vars is not None:
             sky_env_vars_dict_str = '\n'.join(
                 f'sky_env_vars_dict[{k!r}] = {v!r}'
                 for k, v in env_vars.items())
-        resources_str = ', placement_group=pg'
-        resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
+
         logger.debug('Added Task with options: '
                      f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
         self._code += [
@@ -1922,7 +1925,8 @@ class CloudVmRayBackend(backends.Backend):
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
-    def sync_down_logs(self, handle: ResourceHandle, job_ids: str) -> None:
+    def sync_down_logs(self, handle: ResourceHandle,
+                       job_ids: Optional[str]) -> None:
         code = job_lib.JobLibCodeGen.get_log_path_with_globbing(job_ids)
         returncode, log_dirs, stderr = self.run_on_head(handle,
                                                         code,
@@ -2080,9 +2084,12 @@ class CloudVmRayBackend(backends.Backend):
 
         try:
             if not detach_run:
-                # Sky logs. Not using subprocess.run since it will make the
-                # ssh keep connected after ctrl-c.
-                self.tail_logs(handle, job_id)
+                if handle.cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
+                    self.tail_spot_logs(handle, job_id)
+                else:
+                    # Sky logs. Not using subprocess.run since it will make the
+                    # ssh keep connected after ctrl-c.
+                    self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
             logger.info(f'{fore.CYAN}Job ID: '
@@ -2097,7 +2104,10 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
-    def tail_logs(self, handle: ResourceHandle, job_id: int) -> None:
+    def tail_logs(self,
+                  handle: ResourceHandle,
+                  job_id: Optional[int],
+                  spot_job_id: Optional[int] = None) -> None:
         # Get user name
         cluster_yaml = handle.cluster_yaml
         with open(os.path.expanduser(cluster_yaml), 'r') as f:
@@ -2105,14 +2115,18 @@ class CloudVmRayBackend(backends.Backend):
         # User name is guaranteed to exist (on all jinja files)
         ssh_user = cluster_config['auth']['ssh_user']
 
-        code = job_lib.JobLibCodeGen.tail_logs(handle.cluster_name, ssh_user,
-                                               job_id)
-        logger.info(f'{colorama.Fore.YELLOW}Start streaming logs...'
-                    f'{colorama.Style.RESET_ALL}')
+        code = job_lib.JobLibCodeGen.tail_logs(handle.cluster_name,
+                                               ssh_user,
+                                               job_id,
+                                               spot_job_id=spot_job_id)
+        if job_id is None:
+            logger.info(
+                'Job ID not provided. Streaming the logs of the latest job.')
+
         # With interactive mode, the ctrl-c will send directly to the running
         # program on the remote instance, and the ssh will be disconnected by
         # sshd, so no error code will appear.
-        self.run_on_head(
+        returncode = self.run_on_head(
             handle,
             code,
             stream_logs=True,
@@ -2121,12 +2135,24 @@ class CloudVmRayBackend(backends.Backend):
             # there may be 5 minutes delay in logging.
             ssh_mode=backend_utils.SshMode.INTERACTIVE)
 
-        # Due to the interactive mode of ssh, we cannot distinguish the ctrl-c
-        # from other success case (e.g. the job is finished) from the returncode
-        # or catch by KeyboardInterrupt exception.
-        # TODO(zhwu): only show this line when ctrl-c is sent.
-        logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                       f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+        return returncode
+
+    def tail_spot_logs(self,
+                       handle: ResourceHandle,
+                       job_id: Optional[int] = None,
+                       job_name: Optional[str] = None) -> None:
+        # if job_name is not None, job_id should be None
+        assert job_name is None or job_id is None, (job_name, job_id)
+        if job_name is not None:
+            code = spot_lib.SpotCodeGen.stream_logs_by_name(job_name)
+        else:
+            code = spot_lib.SpotCodeGen.stream_logs_by_id(job_id)
+
+        return self.run_on_head(handle,
+                                code,
+                                stream_logs=True,
+                                process_stream=False,
+                                ssh_mode=backend_utils.SshMode.INTERACTIVE)
 
     def _add_job(self, handle: ResourceHandle, job_name: str,
                  resources_str: str) -> int:
@@ -2325,6 +2351,7 @@ class CloudVmRayBackend(backends.Backend):
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
             handle.cluster_name)
         cluster_name = handle.cluster_name
+        tpu_rc = 0
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -2403,7 +2430,6 @@ class CloudVmRayBackend(backends.Backend):
                         stream_logs=False,
                         require_outputs=True)
 
-            tpu_rc = 0
             if handle.tpu_delete_script is not None:
                 with backend_utils.safe_console_status(
                         '[bold cyan]Terminating TPU...'):

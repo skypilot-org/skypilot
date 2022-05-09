@@ -56,7 +56,7 @@ class JobUpdateEvent(SkyletEvent):
     # to avoid race condition with `ray job` to make sure it job has been
     # correctly updated.
     # TODO(zhwu): This number should be tuned based on heuristics.
-    _SUBMITTED_GAP_SECONDS = 2
+    _SUBMITTED_GAP_SECONDS = 60
 
     def __init__(self):
         super().__init__()
