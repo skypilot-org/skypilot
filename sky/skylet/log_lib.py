@@ -161,6 +161,8 @@ def run_with_log(
             # Suppress output
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            # Disable input
+            stdin=subprocess.DEVNULL,
         )
         stdout = ''
         stderr = ''
