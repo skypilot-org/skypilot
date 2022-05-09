@@ -880,21 +880,21 @@ def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
 
 
 def run_command_on_ip_via_ssh(
-    ip: str,
-    cmd: Union[str, List[str]],
-    *,
-    ssh_user: str,
-    ssh_private_key: str,
-    port_forward: Optional[List[int]] = None,
-    # Advanced options.
-    require_outputs: bool = False,
-    log_path: str = '/dev/null',
-    # If False, do not redirect stdout/stderr to optimize performance.
-    process_stream: bool = True,
-    stream_logs: bool = True,
-    ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
-    ssh_control_name: Optional[str] = None,
-) -> Union[int, Tuple[int, str, str]]:
+        ip: str,
+        cmd: Union[str, List[str]],
+        *,
+        ssh_user: str,
+        ssh_private_key: str,
+        port_forward: Optional[List[int]] = None,
+        # Advanced options.
+        require_outputs: bool = False,
+        log_path: str = '/dev/null',
+        # If False, do not redirect stdout/stderr to optimize performance.
+        process_stream: bool = True,
+        stream_logs: bool = True,
+        ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+        ssh_control_name: Optional[str] = None,
+        **kwargs) -> Union[int, Tuple[int, str, str]]:
     """Uses 'ssh' to run 'cmd' on a node with ip.
 
     Args:
@@ -984,7 +984,8 @@ def run_command_on_ip_via_ssh(
                                 process_stream=process_stream,
                                 require_outputs=require_outputs,
                                 shell=True,
-                                executable=executable)
+                                executable=executable,
+                                **kwargs)
 
 
 def handle_returncode(returncode: int,
