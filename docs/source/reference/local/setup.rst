@@ -12,7 +12,7 @@ To ensure sky nodes can communicate with each other, please ensure the following
 Installing Sky Dependencies
 ---------------------------
 
-Sky On-Prem requires :code:`python3` and :code:`ray==1.10.0` to be setup on all local nodes and globally available to all users.
+Sky On-prem requires :code:`python3` and :code:`ray==1.10.0` to be setup on all local nodes and globally available to all users.
 
 To install Ray for all users, run the following command on all local nodes:
 

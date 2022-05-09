@@ -741,7 +741,10 @@ class DummyCloud(clouds.Cloud):
 
 
 def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
-    return any(cloud.is_same_cloud(c) for c in lst)
+    is_cloud = any(cloud.is_same_cloud(c) for c in lst)
+    if isinstance(cloud, clouds.Local):
+        return True
+    return is_cloud
 
 
 def _filter_out_blocked_launchable_resources(
@@ -774,9 +777,8 @@ def _fill_in_launchable_resources(
     if blocked_launchable_resources is None:
         blocked_launchable_resources = []
     for resources in task.get_resources():
-        if resources.cloud is not None and not isinstance(
-                resources.cloud, clouds.Local) and not _cloud_in_list(
-                    resources.cloud, enabled_clouds):
+        if resources.cloud is not None and not _cloud_in_list(
+                resources.cloud, enabled_clouds):
             if try_fix_with_sky_check:
                 check.check(quiet=True)
                 return _fill_in_launchable_resources(

@@ -1,16 +1,10 @@
 cluster_name: {{cluster_name}}
 
-# The maximum number of workers nodes to launch in addition to the head node.
-max_workers: {{num_nodes - 1}}
-min_workers: {{num_nodes - 1}}
-upscaling_speed: {{num_nodes - 1}}
-idle_timeout_minutes: 60
-
 provider:
   type: local
   head_ip: {{head_ip}}
   worker_ips: [
-    {%- for ip in worker_ips%}
+    {%- for ip in worker_ips %}
       "{{ip}}",
     {%- endfor %}
   ]

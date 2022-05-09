@@ -582,7 +582,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     credentials = sky_check.get_cloud_credential_file_mounts()
     credential_file_mounts, credential_excludes = credentials
 
-    ip_list = to_provision.ips
+    ip_list = to_provision.local_ips
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -723,10 +723,9 @@ def get_local_custom_resources(
                                   log_path='/dev/null',
                                   shell=True)
         handle_returncode(
-            rc, command, 'Failed to rsync files onto local cluster. '
-            'Check if: \n'
-            '\t1) SSH Key is correct and has the right permissions.\n'
-            '\t2) Local cluster node IPs are correct.')
+            rc, command, 'Failed to rsync files to local cluster. \n'
+            'Tip: run this command to test connectivity: '
+            f'ssh -i {ssh_key}  {ssh_user}@{ip}')
 
     code = \
     textwrap.dedent("""\
@@ -1479,8 +1478,12 @@ def refresh_cluster_status_handle(
     return record['status'], handle
 
 
-def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
-    records = global_user_state.get_clusters()
+def get_clusters(refresh: bool,
+                 include_clouds: bool = True,
+                 include_local: bool = False) -> List[Dict[str, Any]]:
+    """Gets launched clusters"""
+    records = global_user_state.get_clusters(include_clouds=include_clouds,
+                                             include_local=include_local)
     if not refresh:
         return records
     updated_records = []
@@ -1490,11 +1493,6 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
         if record is not None:
             updated_records.append(record)
     return updated_records
-
-
-def get_local_clusters() -> List[Dict[str, Any]]:
-    records = global_user_state.get_local_clusters()
-    return records
 
 
 def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:

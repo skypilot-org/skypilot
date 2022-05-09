@@ -1,14 +1,14 @@
 .. _local-overview:
-Sky On-Prem
+Sky On-prem
 ===================================
 
-Sky On-Prem is a lightweight cluster manager and job scheduler for local clusters. Sky On-Prem enables multiple users to utilize Sky's :ref:`job submission <job-queue>` feature to share resources on the same local cluster.
+Sky On-prem is a lightweight cluster manager and job scheduler for local clusters. Sky On-prem enables multiple users to utilize Sky's :ref:`job submission <job-queue>` feature to share resources on the same local cluster.
 
-Sky On-Prem is readily deployable on top of any operating system and requires :code:`python3` to be globally installed on all machines.
+Sky On-prem is readily deployable on top of any operating system and requires :code:`python3` to be globally installed on all machines.
 
 Design
 -------------------
-Central to Sky On-Prem is the Sky cluster manager. The cluster manager consists of the Sky job scheduler, which resides on the head node and schedules jobs to be run on local nodes, and the Sky job daemon, which resides on all local nodes and coordinates job logs and metadata with the head node.
+Central to Sky On-prem is the Sky cluster manager. The cluster manager consists of the Sky job scheduler, which resides on the head node and schedules jobs to be run on local nodes, and the Sky job daemon, which resides on all local nodes and coordinates job logs and metadata with the head node.
 
 Sky has two types of users, the **system administrator**, who has **sudo** access to the machine, and **regular users**, who submit jobs to the local cluster.
 

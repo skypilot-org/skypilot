@@ -1125,7 +1125,7 @@ class RetryingVmProvisioner(object):
         num_nodes = to_provision_config.num_nodes
         resources = to_provision_config.resources
         if isinstance(resources.cloud, clouds.Local):
-            num_nodes = len(resources.ips)
+            num_nodes = len(resources.local_ips)
         cluster_exists = to_provision_config.cluster_exists
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
@@ -1334,12 +1334,12 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name, handle.launched_resources, handle.launched_nodes,
                 True)
         cloud = to_provision.cloud
-        if isinstance(to_provision.cloud, clouds.Local):
+        if isinstance(cloud, clouds.Local):
             ssh_user = task.auth_config['ssh_user']
             logger.info(
                 f'{colorama.Fore.CYAN}Connecting to existing local cluster: '
-                f'"{cluster_name}" [Local Cluster: {cloud}, '
-                f'Username: {ssh_user}].{colorama.Style.RESET_ALL}\n'
+                f'"{cluster_name}" [Username: {ssh_user}].'
+                f'{colorama.Style.RESET_ALL}\n'
                 'Run `sky status` to see existing local clusters.')
         else:
             logger.info(

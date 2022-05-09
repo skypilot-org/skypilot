@@ -245,14 +245,18 @@ def get_cluster_from_name(
         return record
 
 
-def get_clusters(ignore_local=True) -> List[Dict[str, Any]]:
+def get_clusters(include_clouds: bool = True,
+                 include_local: bool = False) -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from clusters')
     records = []
+    public_clouds = [clouds.AWS, clouds.GCP, clouds.Azure]
     for name, launched_at, handle, last_use, status, autostop in rows:
         # TODO: use namedtuple instead of dict
         handle = pickle.loads(handle)
+        if type(handle) in public_clouds and not include_clouds:
+            continue
         if isinstance(handle.launched_resources.cloud,
-                      clouds.Local) and ignore_local:
+                      clouds.Local) and not include_local:
             continue
         record = {
             'name': name,
@@ -263,24 +267,6 @@ def get_clusters(ignore_local=True) -> List[Dict[str, Any]]:
             'autostop': autostop,
         }
         records.append(record)
-    return records
-
-
-def get_local_clusters() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('select * from clusters')
-    records = []
-    for name, launched_at, handle, last_use, status, autostop in rows:
-        handle = pickle.loads(handle)
-        if isinstance(handle.launched_resources.cloud, clouds.Local):
-            record = {
-                'name': name,
-                'launched_at': launched_at,
-                'handle': handle,
-                'last_use': last_use,
-                'status': ClusterStatus[status],
-                'autostop': autostop,
-            }
-            records.append(record)
     return records
 
 

@@ -1,11 +1,4 @@
-# A minimal example.
-#
-# Runs a task that simply lists the default conda environments.
-#
-# Usage:
-#   sky launch -c min minimal.yaml
-#   sky down min
-
+# Launches jupyter notebook
 name: jupyter
 
 resources:

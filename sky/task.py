@@ -107,6 +107,7 @@ class Task:
             treated as 1 node.  If > 1, each node will execute its own
             setup/run command; 'run' can either be a str, meaning all nodes get
             the same command, or a lambda, as documented above.
+          auth_config: Defaults to none.
           docker_image: The base docker image that this Task will be built on.
             In effect when LocalDockerBackend is used.  Defaults to
             'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'.
@@ -399,10 +400,12 @@ class Task:
 
         # Automatically fill out custom resources
         for resource in resources:
-            if isinstance(resource.cloud, clouds.Local) and \
-            not resource.local_node_resources and \
-            str(resource.cloud) != 'Local':
-                resource.set_local_node_resources(self.auth_config)
+            # Checks if the resource is from a local cluster and
+            # if the local cluster resources has not been populated
+            if (isinstance(resource.cloud, clouds.Local) and
+                    not resource.local_resources and
+                    str(resource.cloud) != 'Local'):
+                resource.set_local_resources(self.auth_config)
 
         self.resources = resources
         return self

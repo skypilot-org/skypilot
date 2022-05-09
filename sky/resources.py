@@ -1,11 +1,11 @@
 """Resources: compute requirements of Tasks."""
 from typing import Dict, Optional, Union
 
-from sky.backends import backend_utils
 from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
+from sky.backends import backend_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -14,10 +14,10 @@ _DEFAULT_DISK_SIZE_GB = 256
 
 def _get_cloud(cloud: str) -> clouds.Cloud:
     cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
-    if (cloud is not None and cloud_obj is None):
+    if cloud is not None and cloud_obj is None:
         # Overwritten later
         return clouds.Local()
-    return clouds.CLOUD_REGISTRY.get(cloud)
+    return cloud_obj
 
 
 class Resources:
@@ -66,14 +66,20 @@ class Resources:
         self._cloud = cloud
 
         # Check for Local Config
-        self.ips = None
-        self.local_node_resources = None
-        if (cloud is not None and isinstance(self._cloud, clouds.Local) and
+        self.local_ips = None
+        self.local_resources = None
+        if (self._cloud is not None and
+                isinstance(self._cloud, clouds.Local) and
                 str(self._cloud) != 'Local'):
-            self.ips = cloud.get_local_ips()
-            assert instance_type is None and not use_spot and self.ips, (
-                'Resources are passed incorrectly '
-                'to Local/On-Prem.')
+            self.local_ips = self._cloud.get_local_ips()
+            if instance_type is not None:
+                raise ValueError('Local/On-prem mode does not support instance '
+                                 f'type {instance_type}')
+            if use_spot:
+                raise ValueError('Local/On-prem mode does not support spot '
+                                 'instances.')
+            if not self.local_ips:
+                raise ValueError('Local/On-prem mode needs IPs specified.')
 
         self._region: Optional[str] = None
         self._set_region(region)
@@ -329,11 +335,11 @@ class Resources:
                 self.accelerators)
         return hourly_cost * hours
 
-    def set_local_node_resources(self, auth_config):
+    def set_local_resources(self, auth_config):
         assert isinstance(self.cloud, clouds.Local), 'Must be local cloud.'
         custom_resources = backend_utils.get_local_custom_resources(
-            self.ips, auth_config)
-        self.local_node_resources = custom_resources
+            self.local_ips, auth_config)
+        self.local_resources = custom_resources
 
     def is_same_resources(self, other: 'Resources') -> bool:
         """Returns whether two resources are the same.
@@ -466,7 +472,7 @@ class Resources:
             region=override.pop('region', self.region),
         )
         if isinstance(self.cloud, clouds.Local):
-            resources.local_node_resources = self.local_node_resources
+            resources.local_resources = self.local_resources
             return resources
         assert len(override) == 0
         return resources

@@ -1,5 +1,5 @@
 .. _local-job:
-Submitting On-Prem Jobs
+Submitting On-prem Jobs
 ======================
 
 Registering Local Clusters
@@ -63,7 +63,7 @@ Copy the following YAML into a ``local_example.yaml`` file:
 
   # Invoked under the workdir (i.e., can use its files).
   run: |
-    echo "Hello, Sky On-Prem!"
+    echo "Hello, Sky On-prem!"
     conda env list
 
 This defines a task to be run on the Local cloud. The task takes up 1 V100 GPU.

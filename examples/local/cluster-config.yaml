@@ -1,4 +1,4 @@
-# Local/On-Premise Cluster Config.
+# Local/On-premise Cluster Config.
 #
 # Created by the system administrator to launch Ray cluster over on-premise machines.
 # The system administrator must have `sudo` access to the local nodes.

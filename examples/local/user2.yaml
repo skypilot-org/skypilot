@@ -1,4 +1,4 @@
-# Multitenancy Example for Sky On-Prem
+# Multitenancy Example for Sky On-prem
 # 
 # Sky will automatically handle and schedule jobs submitted by different users.
 # Sky On-prem operates under the assumption that an admin with sudo access setups

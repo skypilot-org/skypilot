@@ -320,7 +320,7 @@ _TASK_OPTIONS = [
         It can be specified multiple times.
 
         Example:
-        
+
         \b
         1. --env MY_ENV=1: set the $MY_ENV on the cluster to be 1.
 
@@ -1006,7 +1006,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     if clusters:
         clusters = _get_glob_clusters(clusters)
     else:
-        cluster_infos = global_user_state.get_clusters(ignore_local=False)
+        cluster_infos = global_user_state.get_clusters(include_local=True)
         clusters = [c['name'] for c in cluster_infos]
 
     unsupported_clusters = []
@@ -2112,7 +2112,7 @@ def _is_spot_controller_up(
 
 @cli.group(cls=_NaturalOrderGroup)
 def local():
-    """Local/On-Premise Sky Commands."""
+    """Local/On-premise sky commands."""
     pass
 
 
@@ -2123,8 +2123,10 @@ def local_launch(entrypoint: str):
 
     Performs preflight checks (environment setup, cluster resources)
     and launches Ray to serve sky tasks on the cluster. Finally
-    generates a public distributable YAML that must be used by multiple
-    users sharing the cluster resources.
+    generates a distributable YAML that can be used by multiple
+    users sharing the cluster.
+
+    This command should be run once by the cluster admin, not cluster users.
 
     Example:
 
@@ -2146,7 +2148,7 @@ def local_launch(entrypoint: str):
     local_cluster_name = yaml_config['cluster']['name']
 
     # Check for Ray
-    click.secho(f'[{steps}/4] Checking On-Premise Environment\n',
+    click.secho(f'[{steps}/4] Checking On-premise Environment\n',
                 fg='green',
                 nl=False)
     backend_utils.check_local_installation(ips, auth_config)
@@ -2175,9 +2177,10 @@ def local_launch(entrypoint: str):
 
 
 def local_status():
-    """List all local clusters and users.
-    """
-    clusters_status = backend_utils.get_local_clusters()
+    """List all local clusters."""
+    clusters_status = backend_utils.get_clusters(refresh=False,
+                                                 include_clouds=False,
+                                                 include_local=True)
     columns = [
         'NAME',
         'CLUSTER_USER',
@@ -2198,7 +2201,7 @@ def local_status():
         if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
             if (handle.launched_nodes is not None and
                     handle.launched_resources is not None):
-                resources_str = (f'{resources.local_node_resources}')
+                resources_str = (f'{resources.local_resources}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
         cluster_name = str(resources.cloud)
