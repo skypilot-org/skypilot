@@ -938,7 +938,8 @@ class RetryingVmProvisioner(object):
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'),
                 require_outputs=True,
                 # Disable stdin to avoid ray outputs mess up the terminal with
-                # misaligned output when multithreading/multiprocessing are used.
+                # misaligned output when multithreading/multiprocessing are used
+                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
                 stdin=subprocess.DEVNULL)
             return returncode, stdout, stderr
 
@@ -1019,6 +1020,7 @@ class RetryingVmProvisioner(object):
             stream_logs=False,
             # Disable stdin to avoid ray outputs mess up the terminal with
             # misaligned output when multithreading/multiprocessing are used.
+            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
             stdin=subprocess.DEVNULL)
 
     def provision_with_retries(
@@ -1951,6 +1953,9 @@ class CloudVmRayBackend(backends.Backend):
             # Allocate a pseudo-terminal to disable output buffering. Otherwise,
             # there may be 5 minutes delay in logging.
             ssh_mode=backend_utils.SshMode.INTERACTIVE,
+            # Disable stdin to avoid ray outputs mess up the terminal with
+            # misaligned output when multithreading/multiprocessing are used.
+            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
             stdin=subprocess.DEVNULL,
         )
 
@@ -2251,6 +2256,7 @@ class CloudVmRayBackend(backends.Backend):
                         # Disable stdin to avoid ray outputs mess up the
                         # terminal with misaligned output when multithreading/
                         # multiprocessing are used.
+                        # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
                         stdin=subprocess.DEVNULL)
 
             if handle.tpu_delete_script is not None:
