@@ -937,7 +937,7 @@ class RetryingVmProvisioner(object):
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(os.environ, BOTO_MAX_RETRIES='5'),
                 require_outputs=True,
-                # Disable stdin to avoid ray down breaking the terminal
+                # Disable stdin to avoid ray outputs breaking the terminal
                 # with misaligned output when multithreading is used.
                 stdin=subprocess.DEVNULL)
             return returncode, stdout, stderr
@@ -1017,7 +1017,7 @@ class RetryingVmProvisioner(object):
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
             stream_logs=False,
-            # Disable stdin to avoid ray down breaking the terminal
+            # Disable stdin to avoid ray outputs breaking the terminal
             # with misaligned output when multithreading is used.
             stdin=subprocess.DEVNULL)
 
@@ -2246,7 +2246,7 @@ class CloudVmRayBackend(backends.Backend):
                         log_abs_path,
                         stream_logs=False,
                         require_outputs=True,
-                        # Disable stdin to avoid ray down breaking the terminal
+                        # Disable stdin to avoid ray outputs breaking the terminal
                         # with misaligned output when multithreading is used.
                         stdin=subprocess.DEVNULL)
 
