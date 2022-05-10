@@ -1,8 +1,8 @@
+from multiprocessing import pool
 import getpass
 import uuid
 
 import sky
-from sky.backends import backend_utils
 
 # (username, mac addr last 4 chars): for uniquefying users on shared-account
 # cloud providers.
@@ -27,4 +27,5 @@ def _exec(i):
     sky.exec(dag, cluster_name=cluster, detach_run=True)
 
 
-backend_utils.run_in_parallel(_exec, range(32))
+with pool.ThreadPool() as p:
+    list(p.imap(_exec, range(32)))
