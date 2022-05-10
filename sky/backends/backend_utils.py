@@ -689,8 +689,6 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
 def get_local_custom_resources(
         ips: List[str], auth_config: Dict[str, str]) -> List[Dict[str, int]]:
     """Gets the custom accelerators for the local cluster.
-    Assumes that the cluster is homogeneous (all nodes are
-    the same).
 
     Returns a dictionary mapping accelerators and its count.
     """
@@ -700,7 +698,7 @@ def get_local_custom_resources(
     remote_resource_path = '~/.sky/resource_group.py'
     custom_resources = []
 
-    def rsync_no_handle(ip, source, target):
+    def rsync_no_handle(ip: str, source: str, target: str):
         rsync_command = [
             'rsync',
             '-Pavz',
@@ -723,9 +721,9 @@ def get_local_custom_resources(
                                   log_path='/dev/null',
                                   shell=True)
         handle_returncode(
-            rc, command, 'Failed to rsync files to local cluster. \n'
+            rc, command, 'Failed to rsync files to local cluster. '
             'Tip: run this command to test connectivity: '
-            f'ssh -i {ssh_key}  {ssh_user}@{ip}')
+            f'ssh -i {ssh_key} {ssh_user}@{ip}')
 
     code = \
     textwrap.dedent("""\
@@ -790,14 +788,36 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     ssh_key = auth_config['ssh_private_key']
     assert len(ip_list) >= 1, 'Must specify at least one Local IP'
 
-    display = rich_status.Status('[bold cyan]Launching Ray Cluster on Head')
+    head_ip = ip_list[0]
+    total_workers = len(ip_list[1:])
+    worker_ips = ip_list[1:]
+
+    display = rich_status.Status('[bold cyan]Stopping Ray Cluster')
     display.start()
 
-    head_ip = ip_list[0]
+    run_command_on_ip_via_ssh(head_ip,
+                              'ray stop -f',
+                              ssh_user=ssh_user,
+                              ssh_private_key=ssh_key,
+                              stream_logs=False,
+                              require_outputs=False)
+
+    for idx, ip in enumerate(worker_ips):
+        run_command_on_ip_via_ssh(ip,
+                                  'ray stop -f',
+                                  ssh_user=ssh_user,
+                                  ssh_private_key=ssh_key,
+                                  stream_logs=False,
+                                  require_outputs=False)
+
+    display.stop()
+
     head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
-    head_cmd = ('ray stop; ray start --head --port=6379 '
+    head_cmd = ('ray start --head --port=6379 '
                 '--object-manager-port=8076 --dashboard-port 8265 '
                 f'--resources={head_resources!r}')
+    display = rich_status.Status('[bold cyan]Launching Ray Cluster on Head')
+    display.start()
     rc, _, _ = run_command_on_ip_via_ssh(head_ip,
                                          head_cmd,
                                          ssh_user=ssh_user,
@@ -808,8 +828,6 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     handle_returncode(rc, head_cmd, 'Failed to launch Ray on Head node.')
     display.stop()
 
-    total_workers = len(ip_list[1:])
-    worker_ips = ip_list[1:]
     for idx, ip in enumerate(worker_ips):
         display = rich_status.Status(
             f'[bold cyan]Workers {idx}/{total_workers} Ready')
@@ -817,9 +835,10 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
 
         worker_resources = json.dumps(custom_resources[idx + 1],
                                       separators=(',', ':'))
-        worker_cmd = (f'ray stop; ray start --address={head_ip}:6379 '
+        worker_cmd = (f'ray start --address={head_ip}:6379 '
                       '--object-manager-port=8076 '
                       f'--resources={worker_resources!r}')
+
         rc, _, _ = run_command_on_ip_via_ssh(ip,
                                              worker_cmd,
                                              ssh_user=ssh_user,
@@ -1490,11 +1509,12 @@ def refresh_cluster_status_handle(
 
 
 def get_clusters(refresh: bool,
-                 include_clouds: bool = True,
-                 include_local: bool = False) -> List[Dict[str, Any]]:
+                 include_cloud_clusters: bool = True,
+                 include_local_clusters: bool = False) -> List[Dict[str, Any]]:
     """Gets launched clusters"""
-    records = global_user_state.get_clusters(include_clouds=include_clouds,
-                                             include_local=include_local)
+    records = global_user_state.get_clusters(
+        include_cloud_clusters=include_cloud_clusters,
+        include_local_clusters=include_local_clusters)
     if not refresh:
         return records
     updated_records = []

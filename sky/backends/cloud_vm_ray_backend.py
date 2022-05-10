@@ -959,6 +959,9 @@ class RetryingVmProvisioner(object):
         logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
+        # Edge case: /tmp/ray does not exist, so autoscaler can't create/store
+        # cluster lock and cluster state.
+        os.makedirs('/tmp/ray', exist_ok=True)
         returncode, stdout, stderr = ray_up()
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
@@ -971,7 +974,7 @@ class RetryingVmProvisioner(object):
             worker_ips = config['provider']['worker_ips']
             file_mounts = config['file_mounts']
             setup_cmds = config['setup_commands']
-            rsync_exclude = config['rsync_exclude'][0]
+            rsync_exclude = 'virtenv'
             setup_command = '\n'.join(setup_cmds)
             setup_script = log_lib.make_task_bash_script(setup_command)
             with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:

@@ -245,18 +245,19 @@ def get_cluster_from_name(
         return record
 
 
-def get_clusters(include_clouds: bool = True,
-                 include_local: bool = False) -> List[Dict[str, Any]]:
+def get_clusters(include_cloud_clusters: bool = True,
+                 include_local_clusters: bool = False) -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from clusters')
     records = []
-    public_clouds = [clouds.AWS, clouds.GCP, clouds.Azure]
+
     for name, launched_at, handle, last_use, status, autostop in rows:
         # TODO: use namedtuple instead of dict
         handle = pickle.loads(handle)
-        if type(handle) in public_clouds and not include_clouds:
+        cloud = handle.launched_resources.cloud
+        if clouds.CLOUD_REGISTRY.from_str(
+                repr(cloud)) and not include_cloud_clusters:
             continue
-        if isinstance(handle.launched_resources.cloud,
-                      clouds.Local) and not include_local:
+        if isinstance(cloud, clouds.Local) and not include_local_clusters:
             continue
         record = {
             'name': name,

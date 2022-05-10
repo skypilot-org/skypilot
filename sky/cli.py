@@ -1006,7 +1006,8 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     if clusters:
         clusters = _get_glob_clusters(clusters)
     else:
-        cluster_infos = global_user_state.get_clusters(include_local=True)
+        cluster_infos = global_user_state.get_clusters(
+            include_local_clusters=True)
         clusters = [c['name'] for c in cluster_infos]
 
     unsupported_clusters = []
@@ -2186,8 +2187,8 @@ def local_launch(entrypoint: str):
 def local_status():
     """List all local clusters."""
     clusters_status = backend_utils.get_clusters(refresh=False,
-                                                 include_clouds=False,
-                                                 include_local=True)
+                                                 include_cloud_clusters=False,
+                                                 include_local_clusters=True)
     columns = [
         'NAME',
         'CLUSTER_USER',
@@ -2208,7 +2209,11 @@ def local_status():
         if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
             if (handle.launched_nodes is not None and
                     handle.launched_resources is not None):
-                resources_str = (f'{resources.local_resources}')
+                local_resources = resources.local_resources
+                for idx, resource in enumerate(local_resources):
+                    if not bool(resource):
+                        local_resources[idx] = None
+                resources_str = (f'{local_resources}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
         cluster_name = str(resources.cloud)
