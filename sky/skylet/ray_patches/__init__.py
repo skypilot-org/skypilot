@@ -30,7 +30,7 @@ def _run_patch(original_file, patch_file):
     #  f: no confirmation in the normal case of when patch not applied
     # Adapted from https://unix.stackexchange.com/a/86872/9411
     script = f"""\
-    if ! patch -sRf --dry-run {original_file} {patch_file} 2>/dev/null; then
+    if ! patch -sRf --dry-run {original_file} {patch_file} >/dev/null; then
         patch {original_file} {patch_file}
     else
         echo Patch {patch_file} skipped.
