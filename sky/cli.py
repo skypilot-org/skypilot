@@ -266,11 +266,11 @@ _TASK_OPTIONS = [
         type=_parse_env_var,
         multiple=True,
         help="""
-        Environment variable to set on the remote node. 
+        Environment variable to set on the remote node.
         It can be specified multiple times.
 
         Example:
-        
+
         \b
         1. --env MY_ENV=1: set the $MY_ENV on the cluster to be 1.
 
@@ -278,7 +278,7 @@ _TASK_OPTIONS = [
         be the same value of $HOME in the local environment where the
         sky command is run.
 
-        3. --env MY_ENV3: set the $MY_ENV3 on the cluster to be the 
+        3. --env MY_ENV3: set the $MY_ENV3 on the cluster to be the
         same value of $MY_ENV3 in the local environment.""",
     )
 ]
@@ -921,7 +921,10 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
             unsupported_clusters.append(cluster)
             continue
         if cluster_status != global_user_state.ClusterStatus.UP:
-            print(f'Cluster {cluster} is not up. Skipping.')
+            click.secho(
+                f'Cluster {cluster} is not up (status: {cluster_status.value});'
+                ' skipped.',
+                fg='yellow')
             continue
         _show_job_queue_on_cluster(cluster, handle, backend, code)
     if unsupported_clusters:
@@ -983,9 +986,9 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
                                'LocalDockerBackend.')
     if cluster_status != global_user_state.ClusterStatus.UP:
         click.secho(
-            f'Cluster {cluster_name} (status: {cluster_status}) '
-            'is not up.',
-            fg='red')
+            f'Cluster {cluster_name} is not up '
+            f'(status: {cluster_status.value}).',
+            fg='yellow')
         return
 
     if sync_down and status:
@@ -1028,7 +1031,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
               default=False,
               is_flag=True,
               required=False,
-              help='Cancel all jobs.')
+              help='Cancel all jobs on the specified cluster.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     """Cancel job(s)."""
@@ -1054,8 +1057,8 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             f'is created by {backend.NAME}.')
     if cluster_status != global_user_state.ClusterStatus.UP:
         click.secho(
-            f'Cluster {cluster} (status: {cluster_status}) '
-            'is not up...skipped.',
+            f'Cluster {cluster} is not up (status: {cluster_status.value}); '
+            'skipped.',
             fg='yellow')
         return
 
