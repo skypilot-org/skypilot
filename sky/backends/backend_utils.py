@@ -7,6 +7,7 @@ import getpass
 from multiprocessing import pool
 import os
 import pathlib
+import psutil
 import re
 import shlex
 import subprocess
@@ -1379,3 +1380,30 @@ def check_cluster_name_not_reserved(
                 f'{colorama.Style.RESET_ALL}')
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         raise ValueError(msg)
+
+
+def kill_children_processes():
+    # We need to kill the children, so that the underlying subprocess
+    # will not print the logs to the terminal, after this program
+    # exits.
+    parent_process = psutil.Process()
+    for child in parent_process.children(recursive=True):
+        child.terminate()
+
+
+# Handle ctrl-c
+def interrupt_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+    kill_children_processes()
+    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+
+
+# Handle ctrl-z
+def stop_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
+    kill_children_processes()
+    sys.exit(exceptions.SIGTSTP_CODE)

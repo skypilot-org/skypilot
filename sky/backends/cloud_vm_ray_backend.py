@@ -1932,20 +1932,6 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
-    # Handle ctrl-c
-    def interrupt_handler(self, signum, frame):
-        del signum, frame
-        logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                       f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
-        sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
-
-    # Handle ctrl-z
-    def stop_handler(self, signum, frame):
-        del signum, frame
-        logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                       f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
-        sys.exit(exceptions.SIGTSTP_CODE)
-
     def tail_logs(self,
                   handle: ResourceHandle,
                   job_id: Optional[int],
@@ -1957,18 +1943,15 @@ class CloudVmRayBackend(backends.Backend):
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
-        signal.signal(signal.SIGINT, self.interrupt_handler)
-        signal.signal(signal.SIGTSTP, self.stop_handler)
+        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
         try:
             returncode = self.run_on_head(
                 handle,
                 code,
                 stream_logs=True,
-                # We need process_stream=True, so that the underlying subprocess
-                # will not print the logs to the terminal, after this program
-                # exits.
-                process_stream=True,
+                process_stream=False,
                 # Allocate a pseudo-terminal to disable output buffering.
                 # Otherwise, there may be 5 minutes delay in logging.
                 ssh_mode=backend_utils.SshMode.INTERACTIVE,
@@ -2001,7 +1984,7 @@ class CloudVmRayBackend(backends.Backend):
             handle,
             code,
             stream_logs=True,
-            process_stream=True,
+            process_stream=False,
             ssh_mode=backend_utils.SshMode.INTERACTIVE,
             stdin=subprocess.DEVNULL,
         )
