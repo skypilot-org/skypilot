@@ -4,38 +4,48 @@ All *.patch files in this directory are generated manually by
 
   >> diff original new >original.patch
 
-They should be applied using
+This script applies patches by running the following
 
   >> patch original original.patch
 
-Ray version to check out the original files:
+To get original versions, go to the Ray branch with version:
+
   sky.backends.backend_utils.SKY_REMOTE_RAY_VERSION
 
+Example:
+- https://raw.githubusercontent.com/ray-project/ray/releases/1.10.0/python/ray/worker.py
 """
 import os
-import shutil
 import subprocess
 
 
-def _to_absolute_path(pwd_file):
+def _to_absolute(pwd_file):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), pwd_file)
+
+
+def _run_patch(original_file, patch_file):
+    """Applies a patch if it has not been applied already."""
+    #  s: silent
+    #  R: reverse (to test whether it has been applied)
+    #  f: no confirmation in the normal case of when patch not applied
+    # Adapted from https://unix.stackexchange.com/a/86872/9411
+    script = f"""\
+    if ! patch -sRf --dry-run {original_file} {patch_file} 2>/dev/null; then
+        patch {original_file} {patch_file}
+    else
+        echo Patch {patch_file} skipped.
+    fi
+    """
+    subprocess.run(script, shell=True, check=True)
+
 
 def patch() -> None:
     # Patch the buggy ray files. This should only be called
     # from an isolated python process, because once imported
     # the python module would persist in the memory.
     from ray import worker
-    path = _to_absolute_path('worker.py')
-    shutil.copyfile(path, worker.__file__)
+    _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 
     from ray.autoscaler._private import resource_demand_scheduler
-    subprocess.run([
-        'patch',
-        resource_demand_scheduler.__file__,
-        _to_absolute_path('resource_demand_scheduler.py.patch'),
-    ],
-                   check=True)
-
-    # path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-    #                     'resource_demand_scheduler.py')
-    # shutil.copyfile(path, resource_demand_scheduler.__file__)
+    _run_patch(resource_demand_scheduler.__file__,
+               _to_absolute('resource_demand_scheduler.py.patch'))
