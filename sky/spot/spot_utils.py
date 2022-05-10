@@ -182,8 +182,8 @@ def stream_logs_by_id(job_id: int) -> str:
         spot_status = spot_state.get_status(job_id)
     else:
         # The spot_status is in terminal state.
-    logger.info(f'Logs finished for job {job_id} '
-                f'(status: {spot_state.get_status(job_id).value}).')
+        logger.info(f'Logs finished for job {job_id} '
+                    f'(status: {spot_state.get_status(job_id).value}).')
     return ''
 
 
