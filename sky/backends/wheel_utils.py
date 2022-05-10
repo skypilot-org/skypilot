@@ -1,11 +1,11 @@
 """Utils for building sky pip wheels."""
-from typing import Optional
-
+import hashlib
 import os
 import pathlib
 import shutil
 import subprocess
 import tempfile
+from typing import Optional
 
 import filelock
 
@@ -81,7 +81,8 @@ def build_sky_wheel() -> pathlib.Path:
     Caller is responsible for removing the wheel.
 
     Returns:
-        A newly made temporary path.
+        A temporary path to a directory holding the wheel; path is guaranteed
+        unique per wheel content hash.
     """
 
     def _get_latest_modification_time(path: pathlib.Path) -> float:
@@ -108,9 +109,17 @@ def build_sky_wheel() -> pathlib.Path:
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             _build_sky_wheel()
 
-        # Use a newly made, unique temporary dir because there may be many
-        # concurrent 'sky launch' happening.
-        temp_wheel_dir = pathlib.Path(tempfile.mkdtemp())
-        shutil.copy(_get_latest_built_wheel(), temp_wheel_dir)
+        latest_wheel_path = _get_latest_built_wheel()
+
+        # Use a unique temporary dir per wheel hash, because there may be many
+        # concurrent 'sky launch' happening.  The path should be stable if the
+        # wheel content hash doesn't change.
+        with open(latest_wheel_path, 'rb') as f:
+            contents = f.read()
+        hash_of_latest_wheel = hashlib.md5(contents).hexdigest()
+        temp_wheel_dir = pathlib.Path(
+            tempfile.gettempdir()) / hash_of_latest_wheel
+        temp_wheel_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(latest_wheel_path, temp_wheel_dir)
 
     return temp_wheel_dir.absolute()

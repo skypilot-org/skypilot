@@ -1317,8 +1317,6 @@ class CloudVmRayBackend(backends.Backend):
                     f'Relax the task\'s resource requirements:\n '
                     f'{task.num_nodes}x {task.resources}')
                 sys.exit(1)
-            finally:
-                wheel_utils.cleanup_wheels_dir(local_wheel_path)
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
