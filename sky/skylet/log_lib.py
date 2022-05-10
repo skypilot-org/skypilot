@@ -96,6 +96,22 @@ def process_subprocess_stream(
     return stdout, stderr
 
 
+# Handle ctrl-c
+def interrupt_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+
+
+# Handle ctrl-z
+def stop_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
+    sys.exit(exceptions.SIGTSTP_CODE)
+
+
 def run_with_log(
     cmd: Union[List[str], str],
     log_path: str,
@@ -136,11 +152,11 @@ def run_with_log(
         stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
     try:
         with subprocess.Popen(cmd,
-                            stdout=stdout,
-                            stderr=stderr,
-                            start_new_session=True,
-                            shell=shell,
-                            **kwargs) as proc:
+                              stdout=stdout,
+                              stderr=stderr,
+                              start_new_session=True,
+                              shell=shell,
+                              **kwargs) as proc:
             # The proc can be defunct if the python program is killed. Here we
             # open a new subprocess to gracefully kill the proc, SIGTERM
             # and then SIGKILL the process group.
@@ -167,6 +183,10 @@ def run_with_log(
             )
             stdout = ''
             stderr = ''
+
+            signal.signal(signal.SIGINT, interrupt_handler)
+            signal.signal(signal.SIGTSTP, stop_handler)
+
             if process_stream:
                 # We need this even if the log_path is '/dev/null' to ensure the
                 # progress bar is shown.
@@ -176,8 +196,8 @@ def run_with_log(
                     log_path,
                     stream_logs,
                     start_streaming_at=start_streaming_at,
-                    # Skip these lines caused by `-i` option of bash. Failed to find
-                    # other way to turn off these two warning.
+                    # Skip these lines caused by `-i` option of bash. Failed to
+                    # find other way to turn off these two warning.
                     # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
                     # `ssh -T -i -tt` still cause the problem.
                     skip_lines=[
@@ -190,10 +210,8 @@ def run_with_log(
                 )
             proc.wait()
             returncode = proc.returncode
-    except KeyboardInterrupt:
-        logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
-        returncode = exceptions.KEYBOARD_INTERRUPT_CODE
+    except SystemExit as e:
+        returncode = e.code
     if require_outputs:
         return returncode, stdout, stderr
     return returncode
@@ -292,6 +310,7 @@ def _follow_job_logs(file,
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
             status = job_lib.get_status(job_id)
+
 
 def tail_logs(job_id: int,
               log_dir: Optional[str],

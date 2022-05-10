@@ -9,7 +9,6 @@ import inspect
 import json
 import os
 import pathlib
-import signal
 import sys
 import subprocess
 import tempfile
@@ -1949,7 +1948,7 @@ class CloudVmRayBackend(backends.Backend):
             handle,
             code,
             stream_logs=True,
-            # We need the outputs to be processed, so that the underlying subprocess
+            # We need process_stream=True, so that the underlying subprocess
             # will not print the logs to the terminal, after this program exits.
             process_stream=True,
             # Allocate a pseudo-terminal to disable output buffering. Otherwise,
