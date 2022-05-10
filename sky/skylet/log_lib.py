@@ -191,6 +191,8 @@ def run_with_log(
             proc.wait()
             returncode = proc.returncode
     except KeyboardInterrupt:
+        logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
         returncode = exceptions.KEYBOARD_INTERRUPT_CODE
     if require_outputs:
         return returncode, stdout, stderr
