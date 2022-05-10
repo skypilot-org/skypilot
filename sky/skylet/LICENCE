@@ -202,6 +202,10 @@
 
 --------------------------------------------------------------------------------
 
+Code in ray_patches/resource_demand_scheduler.py from
+https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/autoscaler/_private/resource_demand_scheduler.py
+Git Revision: 0f70f40a2a398da8be146278c84a8abcc3e1f6d1
+
 Code in ray_patches/worker.py from
 https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/worker.py
 
