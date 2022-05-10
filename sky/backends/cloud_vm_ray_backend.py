@@ -1934,57 +1934,50 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
+    # Handle ctrl-c
+    def interrupt_handler(self, signum, frame):
+        del signum, frame
+        logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                       f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+        sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+
+    # Handle ctrl-z
+    def stop_handler(self, signum, frame):
+        del signum, frame
+        logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                       f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
+        sys.exit(exceptions.SIGTSTP_CODE)
+
     def tail_logs(self,
                   handle: ResourceHandle,
                   job_id: Optional[int],
-                  spot_job_id: Optional[int] = None) -> int:
+                  spot_job_id: Optional[int] = None):
         code = job_lib.JobLibCodeGen.tail_logs(job_id, spot_job_id=spot_job_id)
         if job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
 
-        # Handle ctrl-c
-        def interrupt_handler(signum, frame):
-            del signum, frame
-            logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                           f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
-            sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+        # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+        # kill the process, so we need to handle it manually here.
+        signal.signal(signal.SIGINT, self.interrupt_handler)
+        signal.signal(signal.SIGTSTP, self.stop_handler)
 
-        # Handle ctrl-z
-        def stop_handler(signum, frame):
-            del signum, frame
-            logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                           f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
-            sys.exit(exceptions.SIGTSTP_CODE)
-
-        try:
-            # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
-            # kill the process, so we need to handle it manually here.
-            signal.signal(signal.SIGINT, interrupt_handler)
-            signal.signal(signal.SIGTSTP, stop_handler)
-
-            returncode = self.run_on_head(
-                handle,
-                code,
-                stream_logs=True,
-                # We need process_stream=True, so that the underlying subprocess
-                # will not print the logs to the terminal, after this program
-                # exits.
-                process_stream=True,
-                # Allocate a pseudo-terminal to disable output buffering.
-                # Otherwise, there may be 5 minutes delay in logging.
-                ssh_mode=backend_utils.SshMode.INTERACTIVE,
-                # Disable stdin to avoid ray outputs mess up the terminal with
-                # misaligned output in multithreading/multiprocessing.
-                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
-                stdin=subprocess.DEVNULL,
-            )
-        except SystemExit as e:
-            assert e.code in (exceptions.KEYBOARD_INTERRUPT_CODE,
-                              exceptions.SIGTSTP_CODE)
-            returncode = e.code
-
-        return returncode
+        return self.run_on_head(
+            handle,
+            code,
+            stream_logs=True,
+            # We need process_stream=True, so that the underlying subprocess
+            # will not print the logs to the terminal, after this program
+            # exits.
+            process_stream=True,
+            # Allocate a pseudo-terminal to disable output buffering.
+            # Otherwise, there may be 5 minutes delay in logging.
+            ssh_mode=backend_utils.SshMode.INTERACTIVE,
+            # Disable stdin to avoid ray outputs mess up the terminal with
+            # misaligned output in multithreading/multiprocessing.
+            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
+            stdin=subprocess.DEVNULL,
+        )
 
     def tail_spot_logs(self,
                        handle: ResourceHandle,
@@ -1997,11 +1990,19 @@ class CloudVmRayBackend(backends.Backend):
         else:
             code = spot_lib.SpotCodeGen.stream_logs_by_id(job_id)
 
-        return self.run_on_head(handle,
-                                code,
-                                stream_logs=True,
-                                process_stream=False,
-                                ssh_mode=backend_utils.SshMode.INTERACTIVE)
+        # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+        # kill the process, so we need to handle it manually here.
+        signal.signal(signal.SIGINT, self.interrupt_handler)
+        signal.signal(signal.SIGTSTP, self.stop_handler)
+
+        self.run_on_head(
+            handle,
+            code,
+            stream_logs=True,
+            process_stream=True,
+            ssh_mode=backend_utils.SshMode.INTERACTIVE,
+            stdin=subprocess.DEVNULL,
+        )
 
     def _add_job(self, handle: ResourceHandle, job_name: str,
                  resources_str: str) -> int:

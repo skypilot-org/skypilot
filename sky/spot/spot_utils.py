@@ -11,7 +11,6 @@ import colorama
 import filelock
 
 from sky import backends
-from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -162,12 +161,12 @@ def stream_logs_by_id(job_id: int) -> str:
             continue
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
-        if returncode in [
-                0, exceptions.KEYBOARD_INTERRUPT_CODE, exceptions.SIGTSTP_CODE
-        ]:
-            # If the job succeeded/ctrl-c/ctrl-z, we can safely break the loop.
+        if returncode == 0:
+            # If the job succeeded, we can safely break the loop.
             break
-        logger.debug(f'The return code is {returncode}.')
+        logger.info(
+            f'The return code is {returncode}. '
+            f'Check the job status in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
         # check the spot status again.

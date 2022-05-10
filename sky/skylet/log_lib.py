@@ -86,7 +86,7 @@ def process_subprocess_stream(
                         stderr += line
                         out_stream = sys.stderr
                     if stream_logs and start_streaming_flag:
-                        out_stream.write(str(time.time()) + '\t' + line)
+                        out_stream.write(line)
                         out_stream.flush()
                     if log_path != '/dev/null':
                         fout.write(line)
