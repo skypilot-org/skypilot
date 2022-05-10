@@ -139,7 +139,6 @@ def run_with_log(
                           start_new_session=True,
                           shell=shell,
                           **kwargs) as proc:
-        try:
             # The proc can be defunct if the python program is killed. Here we
             # open a new subprocess to gracefully kill the proc, SIGTERM
             # and then SIGKILL the process group.
@@ -190,10 +189,6 @@ def run_with_log(
                 )
             proc.wait()
             returncode = proc.returncode
-        except SystemExit as e:
-            assert e.code in (exceptions.KEYBOARD_INTERRUPT_CODE,
-                              exceptions.SIGTSTP_CODE), e.code
-            returncode = e.code
     if require_outputs:
         return returncode, stdout, stderr
     return returncode

@@ -162,9 +162,10 @@ def stream_logs_by_id(job_id: int) -> str:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
         if returncode == 0:
-            # If the log tailing exit successfully, we can safely break the
-            # loop. We use the status in job queue to show the information, as
-            # the spot_state is not updated yet.
+            # If the log tailing exit successfully (the real job can be
+            # SUCCEEDED or FAILED), we can safely break the loop. We use the
+            # status in job queue to show the information, as the spot_state is
+            # not updated yet.
             job_status = backend.get_job_status(handle,
                                                 job_id=None,
                                                 stream_logs=False)
