@@ -84,7 +84,7 @@ The console should display a list of healthy nodes the size of the local cluster
 Publishing Cluster YAML
 -------------------
 
-Under the hood, :code:`sky local launch` automaticlaly stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows the same structure as that of the private cluster YAML, with admin authentication cleared out:
+Under the hood, :code:`sky local launch` automaticlaly stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows the same structure as that of the private cluster YAML, with admin authentication replaced with a placeholder value (for regular users to fill in):
 
 .. code-block:: yaml
 
@@ -93,7 +93,11 @@ Under the hood, :code:`sky local launch` automaticlaly stores a public **distrib
       ips: [my.local.cluster.hostname, 3.20.226.96, 3.143.112.6]
       name: my-local-cluster
 
-The distributable cluster YAML can be published on the company's website or sent privately between users. Regular users store this yaml in :code:`~/.sky/local/`.
+    auth:
+      ssh_user: PLACEHOLDER
+      ssh_private_key: PLACEHOLDER
+
+The distributable cluster YAML can be published on the company's website or sent privately between users. Regular users store this yaml in :code:`~/.sky/local/`, and replace :code:`PLACEHOLDER` with their credentials.
 
 
 

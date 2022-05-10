@@ -7,7 +7,7 @@ Registering Local Clusters
 
 To register a local cluster in Sky, regulars users should obtain a **distributable** cluster YAML from the system administrator or follow the steps in the :ref:`prior section <local-setup>`.
 
-The cluster YAML should be stored in :code:`~/.sky/local/`.
+The cluster YAML must have user credentials filled out and should be stored in :code:`~/.sky/local/`.
 
 Listing Registered Clusters
 -------------------
@@ -48,11 +48,6 @@ Copy the following YAML into a ``local_example.yaml`` file:
     # Task resources: 1x NVIDIA V100 GPU
     accelerators: V100:1
 
-  # How a regular user authenticates into the cluster
-  auth:
-    ssh_user: my_user
-    ssh_private_key: ~/.ssh/id_rsa
-
   # Working directory (optional) containing the project codebase.
   # Its contents are synced to ~/sky_workdir/ on the cluster.
   workdir: .
@@ -74,7 +69,7 @@ To connect to the local cluster ``my-local-cluster`` and run a task, use :code:`
 
   $ sky launch -c my-local-cluster local_example.yaml
 
-The above command sets up the user's work environment on ``my_user`` and runs the task. Here, the name of the cluster **must match** the name of the local cluster.
+Here, the name of the cluster **must match** the name of the local cluster.
 
 
 Executing Multiple Jobs
