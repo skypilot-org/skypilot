@@ -25,6 +25,7 @@ SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 JOB_STATUS_CHECK_GAP_SECONDS = 60
 
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
+_SPOT_STATUS_CACHE_ALL = '~/.sky/spot_status_cache_all.txt'
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
@@ -197,11 +198,11 @@ def show_jobs(show_all: bool) -> str:
     jobs = spot_state.get_spot_jobs()
 
     columns = [
-        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'STARTED',
-        'JOB DURATION', '#RECOVERIES', 'STATUS'
+        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
+        '#RECOVERIES', 'STATUS'
     ]
     if show_all:
-        columns += ['CLUSTER', 'REGION']
+        columns += ['STARTED', 'CLUSTER', 'REGION']
     job_table = log_utils.create_table(columns)
     for job in jobs:
         job_duration = log_utils.readable_time_duration(
@@ -213,24 +214,27 @@ def show_jobs(show_all: bool) -> str:
             job_duration = log_utils.readable_time_duration(0,
                                                             job['job_duration'],
                                                             absolute=True)
-
+        ago_suffix = 'ago' if show_all else ''
         values = [
             job['job_id'],
             job['job_name'],
             job['resources'],
             # SUBMITTED
-            log_utils.readable_time_duration(job['submitted_at']),
+            log_utils.readable_time_duration(job['submitted_at'],
+                                             absolute=show_all) + ago_suffix,
             # TOT. DURATION
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
                                              absolute=True),
-            # STARTED
-            log_utils.readable_time_duration(job['start_at']),
             job_duration,
             job['recovery_count'],
             job['status'].value,
         ]
         if show_all:
+            # STARTED
+            values.append(
+                log_utils.readable_time_duration(job['start_at'], absolute=True)
+                + ago_suffix)
             cluster_name = generate_spot_cluster_name(job['job_name'],
                                                       job['job_id'])
             handle = global_user_state.get_handle_from_cluster_name(
@@ -307,16 +311,18 @@ class SpotCodeGen:
         return f'python3 -u -c {shlex.quote(code)}'
 
 
-def dump_job_table_cache(job_table):
+def dump_job_table_cache(job_table: str, all: bool):
     """Dump job table cache to file."""
-    cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
+    status_path = _SPOT_STATUS_CACHE if all else _SPOT_STATUS_CACHE_ALL
+    cache_file = pathlib.Path(status_path).expanduser()
     with cache_file.open('w') as f:
         json.dump((time.time(), job_table), f)
 
 
-def load_job_table_cache() -> Tuple[str, str]:
+def load_job_table_cache(all: bool) -> Tuple[str, str]:
     """Load job table cache from file."""
-    cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
+    status_path = _SPOT_STATUS_CACHE if all else _SPOT_STATUS_CACHE_ALL
+    cache_file = pathlib.Path(status_path).expanduser()
     if not cache_file.exists():
         return None
     with cache_file.open('r') as f:

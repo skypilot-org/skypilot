@@ -2221,7 +2221,7 @@ def spot_launch(
 def spot_status(all: bool, refresh: bool):
     """Show statuses of managed spot jobs."""
     click.secho('Fetching managed spot job statuses...', fg='yellow')
-    cache = spot_lib.load_job_table_cache()
+    cache = spot_lib.load_job_table_cache(all)
     stop_msg = ''
     if not refresh:
         stop_msg = 'To view the latest job table: sky spot status --refresh'
@@ -2253,7 +2253,7 @@ def spot_status(all: bool, refresh: bool):
                                     'Failed to fetch managed job statuses',
                                     stderr)
 
-    spot_lib.dump_job_table_cache(job_table_str)
+    spot_lib.dump_job_table_cache(job_table_str, all)
     click.echo(f'Managed spot jobs:\n{job_table_str}')
 
 
