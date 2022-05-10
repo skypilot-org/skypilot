@@ -1,0 +1,9 @@
+0a1,4
+> # From https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/autoscaler/_private/resource_demand_scheduler.py
+> # Sky patch changes:
+> #  - comment out "assert not unfulfilled": this seems a buggy assert
+> 
+571c575
+<             assert not unfulfilled
+---
+>             # assert not unfulfilled  # NOTE(sky): buggy assert.
