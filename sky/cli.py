@@ -82,6 +82,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              accelerator_args={'tf_version': '2.5.0'},
                              use_spot=False),
 }
+_LOCAL_YAML_PATH = '~/.sky/local/{}.yml'
 
 
 def _truncate_long_string(s: str, max_length: int = 35) -> str:
@@ -120,9 +121,12 @@ def _get_cloud(cloud: Optional[str],
             local_cloud = clouds.Local.get_local_cluster(cluster_name)
             if local_cloud:
                 return local_cloud
-            raise click.UsageError(
+            if cluster_name is None:
+                raise ValueError(
+                    'Specify -c [local_cluster] to launch on a local cluster.\n'
+                    'See `sky status` for local cluster name(s).')
+            raise ValueError(
                 f'Local cluster \'{cluster_name}\' does not exist. \n'
-                'Specify -c [local_cluster] to launch on a local cluster. \n'
                 'See `sky status` for local cluster name(s).')
         raise click.UsageError(
             f'Cloud {cloud!r} is not supported. '
@@ -566,6 +570,18 @@ def _check_yaml(entrypoint: str, with_outputs=False) -> bool:
     return is_yaml
 
 
+def _check_cluster_config(yaml_config: dict):
+    auth = yaml_config['auth']
+    cluster = yaml_config['cluster']['name']
+
+    if (auth['ssh_user'] == 'PLACEHOLDER' or
+            auth['ssh_private_key'] == 'PLACEHOLDER'):
+        raise ValueError(
+            'Authentication into local cluster requires specifying '
+            'username and private key. '
+            f'Please enter credentials in {_LOCAL_YAML_PATH.format(cluster)}.')
+
+
 def _list_local_clusters():
     local_dir = os.path.expanduser('~/.sky/local')
     os.makedirs(local_dir, exist_ok=True)
@@ -715,17 +731,16 @@ def launch(
             if yaml_config['resources'].get('cloud'):
                 yaml_cloud = yaml_config['resources']['cloud']
 
-    if cluster in _list_local_clusters():
-        if (yaml_cloud is not None and yaml_cloud != 'local') or \
-            (cloud is not None and cloud != 'local'):
-            raise ValueError(f'Detected Local cluster {cluster}. Must specify '
-                             '`cloud: local` or no cloud.')
-        else:
-            cloud = 'local'
-
     if cloud is None:
         # Check if yaml file specifies local cloud
         if yaml_cloud == 'local':
+            cloud = 'local'
+
+    if cluster in _list_local_clusters():
+        if yaml_cloud != 'local' or cloud != 'local':
+            raise ValueError(f'Detected Local cluster {cluster}. Must specify '
+                             '`cloud: local` or no cloud.')
+        else:
             cloud = 'local'
 
     # Disallow command entrypoints for local clusters
@@ -784,6 +799,15 @@ def launch(
         assert len(task.resources) == 1
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
+        if isinstance(override_params['cloud'], clouds.Local):
+            local_cluster_path = os.path.expanduser(
+                _LOCAL_YAML_PATH.format(cluster))
+            _, cluster_config = _check_yaml(local_cluster_path,
+                                            with_outputs=True)
+            _check_cluster_config(cluster_config)
+            auth_config = cluster_config['auth']
+            task.set_auth_config(auth_config)
+
         task.set_resources({new_resources})
 
         if num_nodes is not None:

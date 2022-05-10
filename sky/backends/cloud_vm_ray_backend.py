@@ -2144,10 +2144,6 @@ class CloudVmRayBackend(backends.Backend):
             # Allocate a pseudo-terminal to disable output buffering. Otherwise,
             # there may be 5 minutes delay in logging.
             ssh_mode=backend_utils.SshMode.INTERACTIVE,
-            # Disable stdin to avoid ray outputs mess up the terminal with
-            # misaligned output when multithreading/multiprocessing are used.
-            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
-            stdin=subprocess.DEVNULL,
         )
 
         return returncode
@@ -2591,7 +2587,6 @@ class CloudVmRayBackend(backends.Backend):
             handle.cluster_yaml)
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
-
         return backend_utils.run_command_on_ip_via_ssh(
             head_ip,
             cmd,

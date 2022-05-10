@@ -860,12 +860,13 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
 
 def save_distributable_yaml(yaml_config: Dict[str, Dict[str, object]]):
     """Generates a distributable yaml for the system admin to send to users."""
-    del yaml_config['auth']
+    yaml_config['auth']['ssh_user'] = 'PLACEHOLDER'
+    yaml_config['auth']['ssh_private_key'] = 'PLACEHOLDER'
     cluster_name = yaml_config['cluster']['name']
     abs_yaml_path = os.path.expanduser(SKY_USER_LOCAL_CONFIG_PATH)
     os.makedirs(abs_yaml_path, exist_ok=True)
     with open(f'{abs_yaml_path}/{cluster_name}.yml', 'w') as f:
-        yaml.dump(yaml_config, f, default_flow_style=False)
+        yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False)
 
 
 def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
@@ -1136,21 +1137,21 @@ def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
 
 
 def run_command_on_ip_via_ssh(
-        ip: str,
-        cmd: Union[str, List[str]],
-        *,
-        ssh_user: str,
-        ssh_private_key: str,
-        port_forward: Optional[List[int]] = None,
-        # Advanced options.
-        require_outputs: bool = False,
-        log_path: str = '/dev/null',
-        # If False, do not redirect stdout/stderr to optimize performance.
-        process_stream: bool = True,
-        stream_logs: bool = True,
-        ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
-        ssh_control_name: Optional[str] = None,
-        **kwargs) -> Union[int, Tuple[int, str, str]]:
+    ip: str,
+    cmd: Union[str, List[str]],
+    *,
+    ssh_user: str,
+    ssh_private_key: str,
+    port_forward: Optional[List[int]] = None,
+    # Advanced options.
+    require_outputs: bool = False,
+    log_path: str = '/dev/null',
+    # If False, do not redirect stdout/stderr to optimize performance.
+    process_stream: bool = True,
+    stream_logs: bool = True,
+    ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+    ssh_control_name: Optional[str] = None,
+) -> Union[int, Tuple[int, str, str]]:
     """Uses 'ssh' to run 'cmd' on a node with ip.
 
     Args:
@@ -1240,8 +1241,7 @@ def run_command_on_ip_via_ssh(
                                 process_stream=process_stream,
                                 require_outputs=require_outputs,
                                 shell=True,
-                                executable=executable,
-                                **kwargs)
+                                executable=executable)
 
 
 def handle_returncode(returncode: int,

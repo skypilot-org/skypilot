@@ -75,7 +75,6 @@ class Task:
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
         # Advanced:
-        auth_config: Optional[str] = None,
         docker_image: Optional[str] = None,
     ):
         """Initializes a Task.
@@ -107,7 +106,6 @@ class Task:
             treated as 1 node.  If > 1, each node will execute its own
             setup/run command; 'run' can either be a str, meaning all nodes get
             the same command, or a lambda, as documented above.
-          auth_config: Defaults to none.
           docker_image: The base docker image that this Task will be built on.
             In effect when LocalDockerBackend is used.  Defaults to
             'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'.
@@ -133,7 +131,7 @@ class Task:
         self.file_mounts = None
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
-        self.auth_config = auth_config
+        self.auth_config = None
         # Check if the task is legal.
         self._validate()
 
@@ -207,7 +205,6 @@ class Task:
             workdir=config.pop('workdir', None),
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
-            auth_config=config.pop('auth', None),
             envs=config.pop('envs', None),
         )
 
@@ -385,6 +382,9 @@ class Task:
 
     def get_estimated_outputs_size_gigabytes(self):
         return self.estimated_outputs_size_gigabytes
+
+    def set_auth_config(self, auth_config: Dict[str, Dict[str, str]]):
+        self.auth_config = auth_config
 
     def set_resources(self, resources: Union['resources_lib.Resources',
                                              Set['resources_lib.Resources']]):
