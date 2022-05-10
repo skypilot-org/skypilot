@@ -1977,9 +1977,10 @@ class CloudVmRayBackend(backends.Backend):
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
-        signal.signal(signal.SIGINT, self.interrupt_handler)
-        signal.signal(signal.SIGTSTP, self.stop_handler)
+        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
+        # Refer to the notes in tail_logs.
         self.run_on_head(
             handle,
             code,
