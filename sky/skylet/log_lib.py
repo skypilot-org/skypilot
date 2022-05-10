@@ -134,63 +134,67 @@ def run_with_log(
     if process_stream:
         stdout = subprocess.PIPE
         stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
-    with subprocess.Popen(cmd,
-                          stdout=stdout,
-                          stderr=stderr,
-                          start_new_session=True,
-                          shell=shell,
-                          **kwargs) as proc:
-        # The proc can be defunct if the python program is killed. Here we
-        # open a new subprocess to gracefully kill the proc, SIGTERM
-        # and then SIGKILL the process group.
-        # Adapted from ray/dashboard/modules/job/job_manager.py#L154
-        parent_pid = os.getpid()
-        daemon_script = os.path.join(
-            os.path.dirname(os.path.abspath(job_lib.__file__)),
-            'subprocess_daemon.sh')
-        daemon_cmd = [
-            '/bin/bash',
-            daemon_script,
-            str(parent_pid),
-            str(proc.pid),
-            str(int(with_ray)),
-        ]
-        subprocess.Popen(
-            daemon_cmd,
-            start_new_session=True,
-            # Suppress output
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            # Disable input
-            stdin=subprocess.DEVNULL,
-        )
-        stdout = ''
-        stderr = ''
-        if process_stream:
-            # We need this even if the log_path is '/dev/null' to ensure the
-            # progress bar is shown.
-            # NOTE: Lines are printed only when '\r' or '\n' is found.
-            stdout, stderr = process_subprocess_stream(
-                proc,
-                log_path,
-                stream_logs,
-                start_streaming_at=start_streaming_at,
-                # Skip these lines caused by `-i` option of bash. Failed to find
-                # other way to turn off these two warning.
-                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-                # `ssh -T -i -tt` still cause the problem.
-                skip_lines=[
-                    'bash: cannot set terminal process group',
-                    'bash: no job control in this shell',
-                ],
-                line_processor=line_processor,
-                # Replace CRLF when the output is logged to driver by ray.
-                replace_crlf=with_ray,
+    try:
+        with subprocess.Popen(cmd,
+                            stdout=stdout,
+                            stderr=stderr,
+                            start_new_session=True,
+                            shell=shell,
+                            **kwargs) as proc:
+            # The proc can be defunct if the python program is killed. Here we
+            # open a new subprocess to gracefully kill the proc, SIGTERM
+            # and then SIGKILL the process group.
+            # Adapted from ray/dashboard/modules/job/job_manager.py#L154
+            parent_pid = os.getpid()
+            daemon_script = os.path.join(
+                os.path.dirname(os.path.abspath(job_lib.__file__)),
+                'subprocess_daemon.sh')
+            daemon_cmd = [
+                '/bin/bash',
+                daemon_script,
+                str(parent_pid),
+                str(proc.pid),
+                str(int(with_ray)),
+            ]
+            subprocess.Popen(
+                daemon_cmd,
+                start_new_session=True,
+                # Suppress output
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                # Disable input
+                stdin=subprocess.DEVNULL,
             )
-        proc.wait()
-        if require_outputs:
-            return proc.returncode, stdout, stderr
-        return proc.returncode
+            stdout = ''
+            stderr = ''
+            if process_stream:
+                # We need this even if the log_path is '/dev/null' to ensure the
+                # progress bar is shown.
+                # NOTE: Lines are printed only when '\r' or '\n' is found.
+                stdout, stderr = process_subprocess_stream(
+                    proc,
+                    log_path,
+                    stream_logs,
+                    start_streaming_at=start_streaming_at,
+                    # Skip these lines caused by `-i` option of bash. Failed to find
+                    # other way to turn off these two warning.
+                    # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+                    # `ssh -T -i -tt` still cause the problem.
+                    skip_lines=[
+                        'bash: cannot set terminal process group',
+                        'bash: no job control in this shell',
+                    ],
+                    line_processor=line_processor,
+                    # Replace CRLF when the output is logged to driver by ray.
+                    replace_crlf=with_ray,
+                )
+            proc.wait()
+            returncode = proc.returncode
+    except KeyboardInterrupt:
+        returncode = exceptions.KEYBOARD_INTERRUPT_CODE
+    if require_outputs:
+        return returncode, stdout, stderr
+    return returncode
 
 
 def make_task_bash_script(codegen: str,
@@ -287,21 +291,6 @@ def _follow_job_logs(file,
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
             status = job_lib.get_status(job_id)
 
-
-def interrupt_handler(signum, frame):
-    del signum, frame
-    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
-    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
-
-
-def stop_handler(signum, frame):
-    del signum, frame
-    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                   f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
-    sys.exit(exceptions.SIGTSTP_CODE)
-
-
 def tail_logs(job_id: int,
               log_dir: Optional[str],
               spot_job_id: Optional[int] = None) -> None:
@@ -344,8 +333,6 @@ def tail_logs(job_id: int,
         status = job_lib.query_job_status([job_id])[0]
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
-        signal.signal(signal.SIGINT, interrupt_handler)
-        signal.signal(signal.SIGTSTP, stop_handler)
         # Not using `ray job logs` because it will put progress bar in
         # multiple lines.
         with open(log_path, 'r', newline='') as log_file:

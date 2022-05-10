@@ -9,6 +9,7 @@ import inspect
 import json
 import os
 import pathlib
+import signal
 import sys
 import subprocess
 import tempfile
@@ -1942,14 +1943,15 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
 
-        # With interactive mode, the ctrl-c will send directly to the running
-        # program on the remote instance, and the ssh will be disconnected by
-        # sshd, so no error code will appear.
+        # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly kill
+        # the process.
         returncode = self.run_on_head(
             handle,
             code,
             stream_logs=True,
-            process_stream=False,
+            # We need the outputs to be processed, so that the underlying subprocess
+            # will not print the logs to the terminal, after this program exits.
+            process_stream=True,
             # Allocate a pseudo-terminal to disable output buffering. Otherwise,
             # there may be 5 minutes delay in logging.
             ssh_mode=backend_utils.SshMode.INTERACTIVE,
