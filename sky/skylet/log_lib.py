@@ -5,7 +5,6 @@ This is a remote utility module that provides logging functionality.
 import io
 import os
 import selectors
-import signal
 import subprocess
 import sys
 import time
@@ -87,29 +86,13 @@ def process_subprocess_stream(
                         stderr += line
                         out_stream = sys.stderr
                     if stream_logs and start_streaming_flag:
-                        out_stream.write(line)
+                        out_stream.write(str(time.time()) + '\t' + line)
                         out_stream.flush()
                     if log_path != '/dev/null':
                         fout.write(line)
                         fout.flush()
                     line_processor.process_line(line)
     return stdout, stderr
-
-
-# Handle ctrl-c
-def interrupt_handler(signum, frame):
-    del signum, frame
-    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
-    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
-
-
-# Handle ctrl-z
-def stop_handler(signum, frame):
-    del signum, frame
-    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                   f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
-    sys.exit(exceptions.SIGTSTP_CODE)
 
 
 def run_with_log(
@@ -156,17 +139,57 @@ def run_with_log(
                           start_new_session=True,
                           shell=shell,
                           **kwargs) as proc:
-        stdout = stderr = ''
         try:
-            returncode, stdout, stderr = handle_proc(
-                log_path,
-                stream_logs,
-                start_streaming_at,
-                with_ray,
-                process_stream,
-                line_processor,
-                proc,
+            # The proc can be defunct if the python program is killed. Here we
+            # open a new subprocess to gracefully kill the proc, SIGTERM
+            # and then SIGKILL the process group.
+            # Adapted from ray/dashboard/modules/job/job_manager.py#L154
+            parent_pid = os.getpid()
+            daemon_script = os.path.join(
+                os.path.dirname(os.path.abspath(job_lib.__file__)),
+                'subprocess_daemon.sh')
+            daemon_cmd = [
+                '/bin/bash',
+                daemon_script,
+                str(parent_pid),
+                str(proc.pid),
+                str(int(with_ray)),
+            ]
+            subprocess.Popen(
+                daemon_cmd,
+                start_new_session=True,
+                # Suppress output
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                # Disable input
+                stdin=subprocess.DEVNULL,
             )
+            stdout = ''
+            stderr = ''
+
+            if process_stream:
+                # We need this even if the log_path is '/dev/null' to ensure the
+                # progress bar is shown.
+                # NOTE: Lines are printed only when '\r' or '\n' is found.
+                stdout, stderr = process_subprocess_stream(
+                    proc,
+                    log_path,
+                    stream_logs,
+                    start_streaming_at=start_streaming_at,
+                    # Skip these lines caused by `-i` option of bash. Failed to
+                    # find other way to turn off these two warning.
+                    # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+                    # `ssh -T -i -tt` still cause the problem.
+                    skip_lines=[
+                        'bash: cannot set terminal process group',
+                        'bash: no job control in this shell',
+                    ],
+                    line_processor=line_processor,
+                    # Replace CRLF when the output is logged to driver by ray.
+                    replace_crlf=with_ray,
+                )
+            proc.wait()
+            returncode = proc.returncode
         except SystemExit as e:
             assert e.code in (exceptions.KEYBOARD_INTERRUPT_CODE,
                               exceptions.SIGTSTP_CODE), e.code
@@ -174,70 +197,6 @@ def run_with_log(
     if require_outputs:
         return returncode, stdout, stderr
     return returncode
-
-
-def handle_proc(
-    log_path: str,
-    stream_logs: bool,
-    start_streaming_at: str,
-    with_ray: bool,
-    process_stream: bool,
-    line_processor: log_utils.LineProcessor,
-    proc: subprocess.Popen,
-) -> Tuple[int, str, str]:
-    # The proc can be defunct if the python program is killed. Here we
-    # open a new subprocess to gracefully kill the proc, SIGTERM
-    # and then SIGKILL the process group.
-    # Adapted from ray/dashboard/modules/job/job_manager.py#L154
-    parent_pid = os.getpid()
-    daemon_script = os.path.join(
-        os.path.dirname(os.path.abspath(job_lib.__file__)),
-        'subprocess_daemon.sh')
-    daemon_cmd = [
-        '/bin/bash',
-        daemon_script,
-        str(parent_pid),
-        str(proc.pid),
-        str(int(with_ray)),
-    ]
-    subprocess.Popen(
-        daemon_cmd,
-        start_new_session=True,
-        # Suppress output
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        # Disable input
-        stdin=subprocess.DEVNULL,
-    )
-    stdout = ''
-    stderr = ''
-
-    signal.signal(signal.SIGINT, interrupt_handler)
-    signal.signal(signal.SIGTSTP, stop_handler)
-
-    if process_stream:
-        # We need this even if the log_path is '/dev/null' to ensure the
-        # progress bar is shown.
-        # NOTE: Lines are printed only when '\r' or '\n' is found.
-        stdout, stderr = process_subprocess_stream(
-            proc,
-            log_path,
-            stream_logs,
-            start_streaming_at=start_streaming_at,
-            # Skip these lines caused by `-i` option of bash. Failed to
-            # find other way to turn off these two warning.
-            # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-            # `ssh -T -i -tt` still cause the problem.
-            skip_lines=[
-                'bash: cannot set terminal process group',
-                'bash: no job control in this shell',
-            ],
-            line_processor=line_processor,
-            # Replace CRLF when the output is logged to driver by ray.
-            replace_crlf=with_ray,
-        )
-    proc.wait()
-    return proc.returncode, stdout, stderr
 
 
 def make_task_bash_script(codegen: str,

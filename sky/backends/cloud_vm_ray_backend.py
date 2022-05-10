@@ -9,8 +9,9 @@ import inspect
 import json
 import os
 import pathlib
-import sys
+import signal
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -1942,23 +1943,46 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
 
-        # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly kill
-        # the process.
-        returncode = self.run_on_head(
-            handle,
-            code,
-            stream_logs=True,
-            # We need process_stream=True, so that the underlying subprocess
-            # will not print the logs to the terminal, after this program exits.
-            process_stream=True,
-            # Allocate a pseudo-terminal to disable output buffering. Otherwise,
-            # there may be 5 minutes delay in logging.
-            ssh_mode=backend_utils.SshMode.INTERACTIVE,
-            # Disable stdin to avoid ray outputs mess up the terminal with
-            # misaligned output when multithreading/multiprocessing are used.
-            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
-            stdin=subprocess.DEVNULL,
-        )
+        # Handle ctrl-c
+        def interrupt_handler(signum, frame):
+            del signum, frame
+            logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                           f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+            sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+
+        # Handle ctrl-z
+        def stop_handler(signum, frame):
+            del signum, frame
+            logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                           f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
+            sys.exit(exceptions.SIGTSTP_CODE)
+
+        try:
+            # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+            # kill the process, so we need to handle it manually here.
+            signal.signal(signal.SIGINT, interrupt_handler)
+            signal.signal(signal.SIGTSTP, stop_handler)
+
+            returncode = self.run_on_head(
+                handle,
+                code,
+                stream_logs=True,
+                # We need process_stream=True, so that the underlying subprocess
+                # will not print the logs to the terminal, after this program
+                # exits.
+                process_stream=True,
+                # Allocate a pseudo-terminal to disable output buffering.
+                # Otherwise, there may be 5 minutes delay in logging.
+                ssh_mode=backend_utils.SshMode.INTERACTIVE,
+                # Disable stdin to avoid ray outputs mess up the terminal with
+                # misaligned output in multithreading/multiprocessing.
+                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
+                stdin=subprocess.DEVNULL,
+            )
+        except SystemExit as e:
+            assert e.code in (exceptions.KEYBOARD_INTERRUPT_CODE,
+                              exceptions.SIGTSTP_CODE)
+            returncode = e.code
 
         return returncode
 
