@@ -38,7 +38,7 @@ available_node_types:
 {%- else %}
             sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
       guestAccelerators:
-        - acceleratorType: projects/intercloud-320520/zones/{{zones}}/acceleratorTypes/{{gpu}}
+        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
       metadata:
         items:
@@ -69,7 +69,7 @@ available_node_types:
 {%- else %}
             sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
       guestAccelerators:
-        - acceleratorType: projects/intercloud-320520/zones/{{zones}}/acceleratorTypes/{{gpu}}
+        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
       metadata:
         items:
