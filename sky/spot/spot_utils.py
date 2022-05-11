@@ -222,7 +222,7 @@ def show_jobs(show_all: bool) -> str:
             job_duration = log_utils.readable_time_duration(0,
                                                             job['job_duration'],
                                                             absolute=True)
-        ago_suffix = 'ago' if show_all else ''
+        ago_suffix = ' ago' if show_all else ''
         values = [
             job['job_id'],
             job['job_name'],
@@ -240,9 +240,11 @@ def show_jobs(show_all: bool) -> str:
         ]
         if show_all:
             # STARTED
-            values.append(
-                log_utils.readable_time_duration(job['start_at'], absolute=True)
-                + ago_suffix)
+            started = log_utils.readable_time_duration(job['start_at'],
+                                                       absolute=True)
+            if started != '-':
+                started += ago_suffix
+            values.append(started)
             cluster_name = generate_spot_cluster_name(job['job_name'],
                                                       job['job_id'])
             handle = global_user_state.get_handle_from_cluster_name(
