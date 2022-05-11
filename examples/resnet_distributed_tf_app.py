@@ -1,14 +1,16 @@
 import getpass
+import hashlib
+import socket
 import subprocess
 from typing import List, Optional
-import uuid
 
 import sky
 
-# (username, mac addr last 4 chars): for uniquefying users on shared-account
-# cloud providers.
-_user_and_mac = f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}'
-cluster = f'test-distributed-tf-{_user_and_mac}'
+# (username, last 4 chars of hash of hostname): for uniquefying users on
+# shared-account cloud providers.
+hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
+_user_and_host = f'{getpass.getuser()}-{hostname_hash}'
+cluster = f'test-distributed-tf-{_user_and_host}'
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.

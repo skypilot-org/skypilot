@@ -1,13 +1,15 @@
-from multiprocessing import pool
 import getpass
-import uuid
+import hashlib
+from multiprocessing import pool
+import socket
 
 import sky
 
-# (username, mac addr last 4 chars): for uniquefying users on shared-account
-# cloud providers.
-_user_and_mac = f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}'
-cluster = f'test-multi-echo-{_user_and_mac}'
+# (username, last 4 chars of hash of hostname): for uniquefying users on
+# shared-account cloud providers.
+hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
+_user_and_host = f'{getpass.getuser()}-{hostname_hash}'
+cluster = f'test-multi-echo-{_user_and_host}'
 
 # Create the cluster.
 with sky.Dag() as dag:
