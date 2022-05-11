@@ -1,6 +1,10 @@
 """Exceptions."""
 import enum
 
+# Return code for keyboard interruption and SIGTSTP
+KEYBOARD_INTERRUPT_CODE = 130
+SIGTSTP_CODE = 146
+
 
 class ResourcesUnavailableError(Exception):
     """Raised when resources are unavailable."""
@@ -89,3 +93,8 @@ class FetchIPError(Exception):
     def __init__(self, reason: Reason) -> None:
         super().__init__()
         self.reason = reason
+
+
+class NetworkError(Exception):
+    """Raised when network fails."""
+    pass

@@ -1,5 +1,6 @@
 import getpass
 import inspect
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,7 @@ import uuid
 import colorama
 import pytest
 
+import sky
 from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
@@ -54,6 +56,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
                                            delete=False)
     test.echo(f'Test started. Log: less {log_file.name}')
     for command in test.commands:
+        log_file.write(f'+ {command}\n')
+        log_file.flush()
         proc = subprocess.Popen(
             command,
             stdout=log_file,
@@ -75,7 +79,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     fore = colorama.Fore
     outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
                if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-    reason = f'\nReason: {command!r}' if proc.returncode else ''
+    reason = f'\nReason: {command}' if proc.returncode else ''
     test.echo(f'{outcome}.'
               f'{reason}'
               f'\nLog: less {log_file.name}\n')
@@ -181,7 +185,7 @@ def test_job_queue():
     run_one_test(test)
 
 
-def test_multi_node_job_queue():
+def test_n_node_job_queue():
     name = _get_cluster_name()
     test = Test(
         'job_queue_multinode',
@@ -199,14 +203,20 @@ def test_multi_node_job_queue():
     run_one_test(test)
 
 
-# ---------- Submitting multiple tasks to the same cluster.. ----------
+# ---------- Submitting multiple tasks to the same cluster. ----------
 def test_multi_echo():
     name = _get_cluster_name()  # Keep consistent with the py script.
     test = Test(
         'multi_echo',
-        ['python examples/multi_echo.py'] +
+        [
+            'python examples/multi_echo.py',
+            'sleep 20',
+        ] +
         # Ensure jobs succeeded.
-        [f'sky logs {name} {i + 1} --status' for i in range(16)],
+        [f'sky logs {name} {i + 1} --status' for i in range(32)] +
+        # Ensure monitor/autoscaler didn't crash on the 'assert not
+        # unfulfilled' error.  If process not found, grep->ssh returns 1.
+        [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
         f'sky down -y {name}',
     )
     run_one_test(test)
@@ -235,7 +245,9 @@ def test_tpu():
         'tpu_app',
         [
             f'sky launch -y -c {name} examples/tpu_app.yaml',
+            f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky launch -y -c {name} examples/tpu_app.yaml | grep "TPU .* already exists"',  # Ensure sky launch won't create another TPU.
         ],
         f'sky down -y {name}',
     )
@@ -321,12 +333,12 @@ def test_autostop():
         'autostop',
         [
             f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
-            f'sky autostop {name} -i 0',
-            f'sky status --refresh | grep {name} | grep -q "0 min"',  # Ensure the cluster is STOPPED.
-            'sleep 120',
-            f'sky status --refresh | grep {name} | grep -q STOPPED',  # Ensure the cluster is STOPPED.
+            f'sky autostop -y {name} -i 1',
+            f'sky status | grep {name} | grep "1 min"',  # Ensure autostop is set.
+            'sleep 180',
+            f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
             f'sky start -y {name}',
-            f'sky status | grep {name} | grep -q UP',  # Ensure the cluster is UP.
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
@@ -346,11 +358,11 @@ def test_cancel():
             # Wait the GPU process to start.
             'sleep 60',
             f'sky exec {name} "nvidia-smi | grep python"',
-            f'sky logs {name} 2 --status',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel {name} 1',
-            'sleep 5',
+            'sleep 60',
             f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
-            f'sky logs {name} 3 --status',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -361,19 +373,118 @@ def test_cancel():
 def test_cancel_pytorch():
     name = _get_cluster_name()
     test = Test(
-        'cancel',
+        'cancel-pytorch',
         [
             f'sky launch -c {name} examples/resnet_distributed_torch.yaml -y -d',
             # Wait the GPU process to start.
-            'sleep 60',
+            'sleep 90',
             f'sky exec {name} "nvidia-smi | grep python"',
-            f'sky logs {name} 2 --status',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel {name} 1',
-            'sleep 5',
+            'sleep 60',
             f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
-            f'sky logs {name} 3 --status',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing managed spot ----------
+def test_spot():
+    """Test the spot yaml."""
+    name = _get_cluster_name()
+    test = Test(
+        'managed-spot',
+        [
+            f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
+            f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
+            'sleep 5',
+            f'sky spot status | grep {name}-1 | head -n1 | grep STARTING',
+            f'sky spot status | grep {name}-2 | head -n1 | grep STARTING',
+            f'sky spot cancel -y -n {name}-1',
+            'sleep 200',
+            f'sky spot status | grep {name}-1 | head -n1 | grep CANCELLED',
+            f'sky spot status | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+        ],
+        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing managed spot ----------
+def test_gcp_spot():
+    """Test managed spot on GCP."""
+    name = _get_cluster_name()
+    test = Test(
+        'managed-spot-gcp',
+        [
+            f'sky spot launch -n {name} --cloud gcp "sleep 3600" -y -d',
+            'sleep 5',
+            # Captures & prints the table for easier debugging. Two echo's to
+            # separate the table from the grep output.
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep STARTING',
+            'sleep 200',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep RUNNING',
+        ],
+        f'sky spot cancel -y -n {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing storage for managed spot ----------
+def test_spot_storage():
+    """Test storage with managed spot"""
+    name = _get_cluster_name()
+    yaml_str = pathlib.Path(
+        'examples/managed_spot_with_storage.yaml').read_text()
+    yaml_str = yaml_str.replace('sky-workdir-zhwu',
+                                f'sky-test-{int(time.time())}')
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_str)
+        f.flush()
+        file_path = f.name
+        test = Test(
+            'managed-spot-storage',
+            [
+                f'sky spot launch -n {name} {file_path} -y',
+                'sleep 60',  # Wait the spot status to be updated
+                f'sky spot status | grep {name} | grep SUCCEEDED',
+            ],
+            f'sky spot cancel -y -n {name}',
+        )
+        run_one_test(test)
+
+
+# ---------- Testing env ----------
+def test_inline_env():
+    """Test env"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-inline-env',
+        [
+            f'sky launch -c {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing env for spot ----------
+def test_inline_spot_env():
+    """Test env"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-inline-spot-env',
+        [
+            f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
+            'sleep 5',
+            f'sky spot status | grep {name} | grep SUCCEEDED',
+        ],
+        f'sky spot cancel -y -n {name}',
     )
     run_one_test(test)
 
@@ -398,6 +509,7 @@ def test_azure_start_stop_two_nodes():
     run_one_test(test)
 
 
+# ---------- Testing Storage ----------
 class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
 
@@ -413,7 +525,10 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_bucket_name(self):
         # Creates a temporary bucket name
-        yield f'sky-test-{int(time.time())}'
+        # time.time() returns varying precision on different systems, so we
+        # replace the decimal point and use whatever precision we can get.
+        timestamp = str(time.time()).replace('.', '')
+        yield f'sky-test-{timestamp}'
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_mount):
@@ -491,3 +606,59 @@ class TestStorageWithCredentials:
         # It should not exist because the bucket was created externally.
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
+
+
+# ---------- Testing YAML Specs ----------
+# Our sky storage requires credentials to check the bucket existance when
+# loading a task from the yaml file, so we cannot make it a unit test.
+class TestYamlSpecs:
+    # TODO(zhwu): Add test for `to_yaml_config` for the Storage object.
+    #  We should not use `examples/storage_demo.yaml` here, since it requires
+    #  users to ensure bucket names to not exist and/or be unique.
+    _TEST_YAML_PATHS = [
+        'examples/minimal.yaml', 'examples/managed_spot.yaml',
+        'examples/using_file_mounts.yaml', 'examples/resnet_app.yaml',
+        'examples/multi_hostname.yaml'
+    ]
+
+    def _is_dict_subset(self, d1, d2):
+        """Check if d1 is the subset of d2."""
+        for k, v in d1.items():
+            if k not in d2:
+                if isinstance(v, list) or isinstance(v, dict):
+                    assert len(v) == 0, (k, v)
+                else:
+                    assert False, (k, v)
+            elif isinstance(v, dict):
+                assert isinstance(d2[k], dict), (k, v, d2)
+                self._is_dict_subset(v, d2[k])
+            elif isinstance(v, str):
+                if k == 'accelerators':
+                    resources = sky.Resources()
+                    resources._set_accelerators(v, None)
+                    assert resources.accelerators == d2[k], (k, v, d2)
+                else:
+                    assert v.lower() == d2[k].lower(), (k, v, d2[k])
+            else:
+                assert v == d2[k], (k, v, d2[k])
+
+    def _check_equivalent(self, yaml_path):
+        """Check if the yaml is equivalent after load and dump again."""
+        origin_task_config = backend_utils.read_yaml(yaml_path)
+
+        task = sky.Task.from_yaml(yaml_path)
+        new_task_config = task.to_yaml_config()
+        # d1 <= d2
+        self._is_dict_subset(origin_task_config, new_task_config)
+
+    def test_load_dump_yaml_config_equivalent(self):
+        """Test if the yaml config is equivalent after load and dump again."""
+        pathlib.Path('~/datasets').expanduser().mkdir(exist_ok=True)
+        pathlib.Path('~/tmpfile').expanduser().touch()
+        pathlib.Path('~/.ssh').expanduser().mkdir(exist_ok=True)
+        pathlib.Path('~/.ssh/id_rsa.pub').expanduser().touch()
+        pathlib.Path('~/tmp-workdir').expanduser().mkdir(exist_ok=True)
+        pathlib.Path('~/Downloads/tpu').expanduser().mkdir(parents=True,
+                                                           exist_ok=True)
+        for yaml_path in self._TEST_YAML_PATHS:
+            self._check_equivalent(yaml_path)

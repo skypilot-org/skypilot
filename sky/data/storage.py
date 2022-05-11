@@ -278,7 +278,7 @@ class Storage(object):
                  source: Optional[Path] = None,
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
-                 mode: Optional[StorageMode] = StorageMode.MOUNT,
+                 mode: StorageMode = StorageMode.MOUNT,
                  sync_on_reconstruction: Optional[bool] = True):
         """Initializes a Storage object.
 
@@ -321,6 +321,7 @@ class Storage(object):
         self.source = source
         self.persistent = persistent
         self.mode = mode
+        assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
 
         # Validate and correct inputs if necessary
@@ -456,9 +457,7 @@ class Storage(object):
         elif self.source is not None:
             source, is_local_source = Storage._validate_source(
                 self.source, self.mode)
-            if is_local_source:
-                # Expand user in source path
-                self.source = os.path.abspath(os.path.expanduser(self.source))
+
             if not self.name:
                 if is_local_source:
                     raise exceptions.StorageNameError(
@@ -606,6 +605,54 @@ class Storage(object):
         if store.is_sky_managed:
             global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
+    @classmethod
+    def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
+        name = config.pop('name', None)
+        source = config.pop('source', None)
+        store = config.pop('store', None)
+        mode_str = config.pop('mode', None)
+        if isinstance(mode_str, str):
+            # Make mode case insensitive, if specified
+            mode = StorageMode(mode_str.upper())
+        else:
+            # Make sure this keeps the same as the default mode in __init__
+            mode = StorageMode.MOUNT
+        persistent = config.pop('persistent', True)
+        # Validation of the config object happens on instantiation.
+        storage_obj = cls(name=name,
+                          source=source,
+                          persistent=persistent,
+                          mode=mode)
+        if store is not None:
+            storage_obj.add_store(StoreType(store.upper()))
+        if config:
+            raise exceptions.StorageSpecError(
+                f'Invalid storage spec. Unknown fields: {config.keys()}')
+        return storage_obj
+
+    def to_yaml_config(self) -> Dict[str, str]:
+        config = dict()
+
+        def add_if_not_none(key, value):
+            if value is not None:
+                config[key] = value
+
+        name = self.name
+        if self.source is not None and data_utils.is_cloud_store_url(
+                self.source):
+            # Remove name if source is a cloud store URL
+            name = None
+        add_if_not_none('name', name)
+        add_if_not_none('source', self.source)
+
+        stores = None
+        if len(self.stores) > 0:
+            stores = ','.join([store.value for store in self.stores])
+        add_if_not_none('store', stores)
+        add_if_not_none('persistent', self.persistent)
+        add_if_not_none('mode', self.mode.value)
+        return config
+
 
 class S3Store(AbstractStore):
     """S3Store inherits from Storage Object and represents the backend
@@ -695,7 +742,8 @@ class S3Store(AbstractStore):
         increase parallelism, modify max_concurrent_requests in your aws config
         file (Default path: ~/.aws/config).
         """
-        sync_command = f'aws s3 sync {self.source} s3://{self.name}/'
+        source = os.path.abspath(os.path.expanduser(self.source))
+        sync_command = f'aws s3 sync {source} s3://{self.name}/'
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{self.source} to s3://{self.name}/'):
@@ -763,7 +811,7 @@ class S3Store(AbstractStore):
                     return bucket, True
             else:
                 ex = exceptions.StorageBucketGetError(
-                    'Failed to connect to an existing bucket. \n'
+                    f'Failed to connect to an existing bucket {self.name!r}.\n'
                     'Check if the 1) the bucket name is taken and/or '
                     '2) the bucket permissions are not setup correctly. '
                     f'Consider using `aws s3 ls {self.name}` to debug.')
@@ -974,7 +1022,8 @@ class GcsStore(AbstractStore):
 
     def sync_local_dir(self) -> None:
         """Syncs a local directory to a GCS bucket."""
-        sync_command = f'gsutil -m rsync -d -r {self.source} gs://{self.name}/'
+        source = os.path.abspath(os.path.expanduser(self.source))
+        sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
         logger.info(f'Executing: {sync_command}')
         with subprocess.Popen(sync_command.split(' '),
                               stderr=subprocess.PIPE) as process:

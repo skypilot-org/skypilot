@@ -3,7 +3,7 @@ import inspect
 import os
 import re
 import typing
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 import sky
@@ -20,6 +20,7 @@ CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
+_VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
                      ' uppercase letters, digits, underscores, periods,'
                      ' and dashes. Must start and end with alphanumeric'
@@ -56,6 +57,11 @@ def _is_valid_name(name: str) -> bool:
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
 
 
+def _is_valid_env_var(name: str) -> bool:
+    """Checks if the task environment variable name is valid."""
+    return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
+
+
 class Task:
     """Task: a coarse-grained stage in an application."""
 
@@ -65,6 +71,7 @@ class Task:
         *,
         setup: Optional[str] = None,
         run: Optional[CommandOrCommandGen] = None,
+        envs: Optional[Dict[str, str]] = None,
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
         # Advanced:
@@ -89,6 +96,8 @@ class Task:
             some nodes, in which case no commands are run on them).  Commands
             will be run under 'workdir'. Note the command generator should be
             self-contained.
+          envs: A dictionary of environment variables to set before running the
+            setup and run command.
           workdir: The local working directory.  This directory and its files
             will be synced to a location on the remote VM(s), and 'setup' and
             'run' commands will be run under that location (thus, they can rely
@@ -106,6 +115,7 @@ class Task:
         self.storage_mounts = {}
         self.storage_plans = {}
         self.setup = setup
+        self._envs = envs
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04')
@@ -126,7 +136,8 @@ class Task:
         self._validate()
 
         dag = sky.DagContext.get_current_dag()
-        dag.add(self)
+        if dag is not None:
+            dag.add(self)
 
     def _validate(self):
         """Checks if the Task fields are valid."""
@@ -174,7 +185,7 @@ class Task:
                 # Symlink to a dir is legal (isdir() follows symlinks).
                 raise ValueError(
                     'Workdir must exist and must be a directory (or '
-                    f'a symlink to a directory). Found: {self.workdir}')
+                    f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
     def from_yaml(yaml_path):
@@ -188,20 +199,20 @@ class Task:
         if config is None:
             config = {}
 
-        # TODO: perform more checks on yaml and raise meaningful errors.
         task = Task(
-            config.get('name'),
-            run=config.get('run'),
-            workdir=config.get('workdir'),
-            setup=config.get('setup'),
-            num_nodes=config.get('num_nodes'),
+            config.pop('name', None),
+            run=config.pop('run', None),
+            workdir=config.pop('workdir', None),
+            setup=config.pop('setup', None),
+            num_nodes=config.pop('num_nodes', None),
+            envs=config.pop('envs', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
         # These are retained in dicts in the YAML schema and later parsed to
         # storage objects with the storage/storage_mount objects.
         fm_storages = []
-        file_mounts = config.get('file_mounts')
+        file_mounts = config.pop('file_mounts', None)
         if file_mounts is not None:
             copy_mounts = dict()
             for dst_path, src in file_mounts.items():
@@ -211,10 +222,7 @@ class Task:
                 # If the src is not a str path, it is likely a dict. Try to
                 # parse storage object.
                 elif isinstance(src, dict):
-                    name = src.get('name')
-                    # Add mount_path as a field for later parsing
-                    src['mount_path'] = dst_path
-                    fm_storages.append(src)
+                    fm_storages.append((dst_path, src))
                 else:
                     raise ValueError(f'Unable to parse file_mount '
                                      f'{dst_path}:{src}')
@@ -223,39 +231,15 @@ class Task:
         task_storage_mounts = {}  # type: Dict[str, Storage]
         all_storages = fm_storages
         for storage in all_storages:
-            name = storage.get('name')
-            source = storage.get('source')
-            store = storage.get('store')
-            mode_str = storage.get('mode')
-            if isinstance(mode_str, str):
-                # Make mode case insensitive, if specified
-                mode = storage_lib.StorageMode(mode_str.upper())
-            else:
-                mode = None
-            persistent = True if storage.get(
-                'persistent') is None else storage['persistent']
-            mount_path = storage.get('mount_path')
+            mount_path = storage[0]
             assert mount_path, \
                 'Storage mount path cannot be empty.'
-            # Validation of the storage object happens on instantiation.
-            storage_obj = storage_lib.Storage(name=name,
-                                              source=source,
-                                              persistent=persistent,
-                                              mode=mode)
-            if store is not None:
-                if store == 's3':
-                    storage_obj.add_store(storage_lib.StoreType.S3)
-                elif store == 'gcs':
-                    storage_obj.add_store(storage_lib.StoreType.GCS)
-                elif store == 'azure_blob':
-                    storage_obj.add_store(storage_lib.StoreType.AZURE)
-                else:
-                    raise ValueError(f'store type {store} is not supported.')
+            storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             task_storage_mounts[mount_path] = storage_obj
         task.set_storage_mounts(task_storage_mounts)
 
         if config.get('inputs') is not None:
-            inputs_dict = config['inputs']
+            inputs_dict = config.pop('inputs')
             inputs = list(inputs_dict.keys())[0]
             estimated_size_gigabytes = list(inputs_dict.values())[0]
             # TODO: allow option to say (or detect) no download/egress cost.
@@ -263,43 +247,97 @@ class Task:
                             estimated_size_gigabytes=estimated_size_gigabytes)
 
         if config.get('outputs') is not None:
-            outputs_dict = config['outputs']
+            outputs_dict = config.pop('outputs')
             outputs = list(outputs_dict.keys())[0]
             estimated_size_gigabytes = list(outputs_dict.values())[0]
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
-        resources = config.get('resources')
-        if resources is not None:
-            if resources.get('cloud') is not None:
-                resources['cloud'] = clouds.CLOUD_REGISTRY[resources['cloud']]
-            if resources.get('accelerators') is not None:
-                resources['accelerators'] = resources['accelerators']
-            if resources.get('accelerator_args') is not None:
-                resources['accelerator_args'] = dict(
-                    resources['accelerator_args'])
-            if resources.get('use_spot') is not None:
-                resources['use_spot'] = resources['use_spot']
-            if resources.get('region') is not None:
-                resources['region'] = resources.pop('region')
-            if resources.get('options') is not None:
-                resources.pop('options')
-            # FIXME: We should explicitly declare all the parameters
-            # that are sliding through the **resources
-            resources = sky.Resources(**resources)
-        else:
-            resources = sky.Resources()
+        resources = config.pop('resources', None)
+        resources = sky.Resources.from_yaml_config(resources)
         if resources.accelerators is not None:
             acc, _ = list(resources.accelerators.items())[0]
             if acc.startswith('tpu-') and task.num_nodes > 1:
                 raise ValueError('Multi-node TPU cluster not supported. '
                                  f'Got num_nodes={task.num_nodes}')
+        if len(config) > 0:
+            raise ValueError(f'Unknown fields in in YAML: {config.keys()}')
         task.set_resources({resources})
         return task
+
+    def to_yaml_config(self) -> Dict[str, Any]:
+        """Returns a yaml-style dict representation of the task."""
+        config = dict()
+
+        def add_if_not_none(key, value):
+            if value is not None:
+                config[key] = value
+
+        add_if_not_none('name', self.name)
+
+        if self.resources is not None:
+            assert len(self.resources) == 1
+            resources = list(self.resources)[0]
+            add_if_not_none('resources', resources.to_yaml_config())
+        add_if_not_none('num_nodes', self.num_nodes)
+
+        if self.inputs is not None:
+            add_if_not_none('inputs',
+                            {self.inputs: self.estimated_inputs_size_gigabytes})
+        if self.outputs is not None:
+            add_if_not_none(
+                'outputs',
+                {self.outputs: self.estimated_outputs_size_gigabytes})
+
+        add_if_not_none('setup', self.setup)
+        add_if_not_none('workdir', self.workdir)
+        add_if_not_none('run', self.run)
+        add_if_not_none('envs', self.envs)
+
+        add_if_not_none('file_mounts', dict())
+
+        if self.file_mounts is not None:
+            config['file_mounts'].update(self.file_mounts)
+
+        if self.storage_mounts is not None:
+            config['file_mounts'].update({
+                mount_path: storage.to_yaml_config()
+                for mount_path, storage in self.storage_mounts.items()
+            })
+        return config
 
     @property
     def num_nodes(self) -> int:
         return self._num_nodes
+
+    @property
+    def envs(self) -> Dict[str, str]:
+        return self._envs
+
+    @envs.setter
+    def envs(self, envs: Union[None, Tuple[Tuple[str, str]], Dict[str, str]]):
+        if envs is None:
+            self._envs = None
+            return
+        if isinstance(envs, (list, tuple)):
+            keys = set(env[0] for env in envs)
+            if len(keys) != len(envs):
+                raise ValueError('Duplicate env keys provided.')
+            envs = dict(envs)
+        if isinstance(envs, dict):
+            for key in envs:
+                if not isinstance(key, str):
+                    raise ValueError('Env keys must be strings.')
+                if not _is_valid_env_var(key):
+                    raise ValueError(f'Invalid env key: {key}')
+        else:
+            raise ValueError(
+                f'envs must be List[Tuple[str, str]] or Dict[str, str] {envs}')
+        self._envs = envs
+
+    @property
+    def need_spot_recovery(self) -> bool:
+        return any(r.spot_recovery is not None for r in self.resources)
 
     @num_nodes.setter
     def num_nodes(self, num_nodes: Optional[int]) -> None:

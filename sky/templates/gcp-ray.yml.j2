@@ -1,5 +1,3 @@
-# Ref: https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/gcp/example-gpu-docker.yaml
-# FIXME: use variables for project_id, zone.
 
 cluster_name: {{cluster_name}}
 
@@ -40,7 +38,7 @@ available_node_types:
 {%- else %}
             sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
       guestAccelerators:
-        - acceleratorType: projects/intercloud-320520/zones/{{zones}}/acceleratorTypes/{{gpu}}
+        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
       metadata:
         items:
@@ -71,7 +69,7 @@ available_node_types:
 {%- else %}
             sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
       guestAccelerators:
-        - acceleratorType: projects/intercloud-320520/zones/{{zones}}/acceleratorTypes/{{gpu}}
+        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
           acceleratorCount: {{gpu_count}}
       metadata:
         items:
@@ -106,7 +104,7 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+  - (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf; # This is needed for `-o allow_other` option for `goofys`;
   - pip3 uninstall sky -y &> /dev/null;
     pip3 install "$(echo {{sky_remote_path}}/*.whl)";

@@ -28,15 +28,16 @@ if typing.TYPE_CHECKING:
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
-os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
+pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
 class _SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
-    def __init__(self):
+    def __init__(self, db_path: str):
         super().__init__()
-        self.conn = sqlite3.connect(_DB_PATH)
+        self.db_path = db_path
+        self.conn = sqlite3.connect(db_path)
         self.cursor = self.conn.cursor()
         self._create_tables()
 
@@ -78,7 +79,7 @@ class _SQLiteConn(threading.local):
         self.conn.commit()
 
 
-_DB = _SQLiteConn()
+_DB = _SQLiteConn(_DB_PATH)
 
 
 class ClusterStatus(enum.Enum):

@@ -268,10 +268,15 @@ class GCP(clouds.Cloud):
             # Calling `auth.default()` ensures the GCP client library works,
             # which is used by Ray Autoscaler to launch VMs.
             auth.default()
+            # Check google-api-python-client installation.
+            # pylint: disable=import-outside-toplevel,unused-import
+            import googleapiclient
+
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
         except (AssertionError, auth.exceptions.DefaultCredentialsError,
-                subprocess.CalledProcessError, FileNotFoundError, KeyError):
+                subprocess.CalledProcessError, FileNotFoundError, KeyError,
+                ImportError):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
                 'GCP tools are not installed or credentials are not set. '

@@ -21,8 +21,8 @@ class StatusColumn:
         self.trunc_length = trunc_length
         self.show_by_default = show_by_default
 
-    def calc(self, cluster_status):
-        val = self.calc_func(cluster_status)
+    def calc(self, record):
+        val = self.calc_func(record)
         if self.trunc_length != 0:
             val = cli_utils.truncate_long_string(str(val), self.trunc_length)
         return val
@@ -31,7 +31,7 @@ class StatusColumn:
 def show_status_table(show_all: bool, refresh: bool):
     """Compute cluster table values and display."""
     # TODO(zhwu): Update the information for auto-stop clusters.
-    clusters_status = backend_utils.get_clusters(refresh)
+    cluster_records = backend_utils.get_clusters(refresh)
 
     status_columns = [
         StatusColumn('NAME', _get_name),
@@ -55,15 +55,22 @@ def show_status_table(show_all: bool, refresh: bool):
     cluster_table = log_utils.create_table(columns)
 
     pending_autostop = 0
-    for cluster_status in clusters_status:
+    for record in cluster_records:
+        try:
+            backend_utils.check_cluster_name_not_reserved(record['name'])
+        except ValueError:
+            # Skip the reserved cluster names in the status table.
+            if not show_all:
+                continue
+
         row = []
         for status_column in status_columns:
             if status_column.show_by_default or show_all:
-                row.append(status_column.calc(cluster_status))
+                row.append(status_column.calc(record))
         cluster_table.add_row(row)
-        pending_autostop += _is_pending_autostop(cluster_status)
+        pending_autostop += _is_pending_autostop(record)
 
-    if clusters_status:
+    if cluster_records:
         click.echo(cluster_table)
         if pending_autostop:
             click.echo(

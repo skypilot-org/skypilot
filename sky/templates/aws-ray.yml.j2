@@ -13,6 +13,9 @@ provider:
   # Keep (otherwise cannot reuse when re-provisioning).
   # teardown(terminate=True) will override this.
   cache_stopped_nodes: True
+  security_group:
+    # AWS config file must include security group name
+    GroupName: {{security_group}}
 
 auth:
   ssh_user: ubuntu
@@ -80,7 +83,7 @@ setup_commands:
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
   - (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
-    pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     which conda > /dev/null 2>&1 && conda init > /dev/null && conda config --set auto_activate_base false;
     sudo systemctl stop unattended-upgrades;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
