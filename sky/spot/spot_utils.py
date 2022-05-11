@@ -313,7 +313,7 @@ class SpotCodeGen:
 
 def dump_job_table_cache(job_table: str, is_all: bool):
     """Dump job table cache to file."""
-    status_path = _SPOT_STATUS_CACHE if is_all else _SPOT_STATUS_CACHE_ALL
+    status_path = _SPOT_STATUS_CACHE_ALL if is_all else _SPOT_STATUS_CACHE
     cache_file = pathlib.Path(status_path).expanduser()
     with cache_file.open('w') as f:
         json.dump((time.time(), job_table), f)
@@ -321,7 +321,7 @@ def dump_job_table_cache(job_table: str, is_all: bool):
 
 def load_job_table_cache(is_all: bool) -> Tuple[str, str]:
     """Load job table cache from file."""
-    status_path = _SPOT_STATUS_CACHE if is_all else _SPOT_STATUS_CACHE_ALL
+    status_path = _SPOT_STATUS_CACHE_ALL if is_all else _SPOT_STATUS_CACHE
     cache_file = pathlib.Path(status_path).expanduser()
     if not cache_file.exists():
         return None
