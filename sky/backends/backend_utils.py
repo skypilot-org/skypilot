@@ -8,6 +8,7 @@ import getpass
 from multiprocessing import pool
 import os
 import pathlib
+import psutil
 import re
 import shlex
 import socket
@@ -77,6 +78,10 @@ _TEST_IP = '1.1.1.1'
 # cluster name on GCP.  Ref:
 # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
 _MAX_CLUSTER_NAME_LEN = 37
+
+# Allow each CPU thread take 2 tasks.
+# Note: This value cannot be too small, otherwise OOM issue may occur.
+DEFAULT_TASK_CPU_DEMAND = 0.5
 
 SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 
@@ -618,10 +623,12 @@ def write_cluster_config(to_provision: 'resources.Resources',
         scripts = tuple(
             fill_template(
                 template_name,
-                dict(resources_vars, **{
-                    'zones': ','.join(zones),
-                    'tpu_name': tpu_name,
-                }),
+                dict(
+                    resources_vars, **{
+                        'zones': ','.join(zones),
+                        'tpu_name': tpu_name,
+                        'gcp_project_id': gcp_project_id,
+                    }),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
                 # with cluster yamls.
@@ -1359,7 +1366,7 @@ def get_task_demands_dict(
 def get_task_resources_str(task: 'task_lib.Task') -> str:
     resources_dict = get_task_demands_dict(task)
     if resources_dict is None:
-        resources_str = 'CPU:1'
+        resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
     else:
         resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
@@ -1403,3 +1410,34 @@ def check_cluster_name_not_reserved(
         msg += f' {operation_str} is not allowed.'
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         raise ValueError(msg)
+
+
+def kill_children_processes():
+    # We need to kill the children, so that the underlying subprocess
+    # will not print the logs to the terminal, after this program
+    # exits.
+    parent_process = psutil.Process()
+    for child in parent_process.children(recursive=True):
+        try:
+            child.terminate()
+        except psutil.NoSuchProcess:
+            # The child process may have already been terminated.
+            pass
+
+
+# Handle ctrl-c
+def interrupt_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+    kill_children_processes()
+    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+
+
+# Handle ctrl-z
+def stop_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
+    kill_children_processes()
+    sys.exit(exceptions.SIGTSTP_CODE)
