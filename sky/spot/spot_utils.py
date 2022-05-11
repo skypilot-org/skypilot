@@ -25,7 +25,6 @@ SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 JOB_STATUS_CHECK_GAP_SECONDS = 60
 
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
-_SPOT_STATUS_CACHE_ALL = '~/.sky/spot_status_cache_all.txt'
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
@@ -311,18 +310,16 @@ class SpotCodeGen:
         return f'python3 -u -c {shlex.quote(code)}'
 
 
-def dump_job_table_cache(job_table: str, is_all: bool):
+def dump_job_table_cache(job_table: str):
     """Dump job table cache to file."""
-    status_path = _SPOT_STATUS_CACHE_ALL if is_all else _SPOT_STATUS_CACHE
-    cache_file = pathlib.Path(status_path).expanduser()
+    cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     with cache_file.open('w') as f:
         json.dump((time.time(), job_table), f)
 
 
-def load_job_table_cache(is_all: bool) -> Tuple[str, str]:
+def load_job_table_cache() -> Tuple[str, str]:
     """Load job table cache from file."""
-    status_path = _SPOT_STATUS_CACHE_ALL if is_all else _SPOT_STATUS_CACHE
-    cache_file = pathlib.Path(status_path).expanduser()
+    cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     if not cache_file.exists():
         return None
     with cache_file.open('r') as f:
