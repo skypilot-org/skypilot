@@ -7,7 +7,7 @@
 #   2) Ray CLI (= 1.10.0) on all nodes
 #
 # Example usage:
-#   >> sky local launch cluster-config.yaml
+#   >> sky admin deploy cluster-config.yaml
 
 cluster:
   ips: [3.142.141.133, 3.144.206.91]

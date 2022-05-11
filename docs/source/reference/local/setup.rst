@@ -4,10 +4,11 @@ Setting up Local Cluster
 
 Prerequisites
 -------------
-To ensure sky nodes can communicate with each other, please ensure the following ports are open and accessible on each node:
+To ensure sky nodes can communicate with each other, Sky On-prem requires the system admin to open up all ports from :code:`10001` to :code:`19999`, inclusive, on all nodes. This is how Sky differentiates input/output for multiple worker processes on a single node.
 
-..
-   TODO(michaelzhiluo): Check and add ports here. https://docs.ray.io/en/latest/ray-core/configure.html#ports-configurations might help.
+For the head node, Sky requires ports :code:`6379`, for GCS server on Ray, and :code:`8265`, for Ray Dashboard.
+
+For further reference, `here <https://docs.ray.io/en/latest/ray-core/configure.html#ports-configurations>`_ are the required ports from the Ray docs.
 
 Installing Sky Dependencies
 ---------------------------
@@ -18,7 +19,7 @@ To install Ray for all users, run the following command on all local nodes:
 
 .. code-block:: console
 
-   $ sudo -H pip3 install ray==1.10.0
+   $ sudo -H pip3 install ray[default]==1.10.0
 
 Launching Sky Services
 -------------------
@@ -43,7 +44,7 @@ Next, the system admin runs:
 
 .. code-block:: console
 
-   $ sky local launch my-cluster-config.yaml
+   $ sky admin deploy my-cluster-config.yaml
 
 Sky will automatically perform the following 4 tasks:
 
@@ -84,7 +85,7 @@ The console should display a list of healthy nodes the size of the local cluster
 Publishing Cluster YAML
 -------------------
 
-Under the hood, :code:`sky local launch` automaticlaly stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows the same structure as that of the private cluster YAML, with admin authentication replaced with a placeholder value (for regular users to fill in):
+Under the hood, :code:`sky admin deploy` automaticlaly stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows the same structure as that of the private cluster YAML, with admin authentication replaced with a placeholder value (for regular users to fill in):
 
 .. code-block:: yaml
 

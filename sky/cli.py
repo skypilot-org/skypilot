@@ -2143,14 +2143,14 @@ def _is_spot_controller_up(
 
 
 @cli.group(cls=_NaturalOrderGroup)
-def local():
-    """Local/On-premise sky commands."""
+def admin():
+    """Sky Administrator Commands for Local Clusters."""
     pass
 
 
-@local.command('launch', cls=_DocumentedCodeCommand)
+@admin.command('deploy', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
-def local_launch(entrypoint: str):
+def admin_deploy(entrypoint: str):
     """Launches Sky on a local cluster.
 
     Performs preflight checks (environment setup, cluster resources)
@@ -2164,7 +2164,7 @@ def local_launch(entrypoint: str):
 
     .. code-block:: bash
 
-        sky local launch examples/local/cluster-config.yaml
+        sky admin deploy examples/local/cluster-config.yaml
     """
     steps = 1
     entrypoint = ' '.join(entrypoint)
