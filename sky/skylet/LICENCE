@@ -202,13 +202,6 @@
 
 --------------------------------------------------------------------------------
 
-Code in ray_patches/resource_demand_scheduler.py from
-https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/autoscaler/_private/resource_demand_scheduler.py
-Git Revision: 0f70f40a2a398da8be146278c84a8abcc3e1f6d1
-
-Code in ray_patches/worker.py from
-https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/worker.py
-
 Code in providers/azure from
 https://github.com/ray-project/ray/tree/master/python/ray/autoscaler/_private/_azure
 Git Revision: 7f1bacc7dc9caf6d0ec042e39499bbf1d9a7d065

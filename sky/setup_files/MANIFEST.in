@@ -4,6 +4,7 @@ include sky/skylet/providers/aws/*
 include sky/skylet/providers/aws/cloudwatch/*
 include sky/skylet/providers/azure/*
 include sky/skylet/providers/gcp/*
+include sky/skylet/ray_patches/*.patch
 include sky/templates/*
 include sky/setup_files/*
 include sky/utils/*
