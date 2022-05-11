@@ -1100,12 +1100,13 @@ def user_and_hostname_hash() -> str:
     Changing this string will render AWS clusters shown in `sky status`
     unreusable and potentially cause leakage:
 
-    - If a cluster is STOPPED, any command restarting it will launch a NEW
-      cluster.
-    - If a cluster is UP, any command reusing it will launch a NEW cluster. The
-      original cluster will be stopped and thus leaked from Sky's perspective.
-    - `sky down` on these pre-change clusters still works, if no new clusters
-      with the same name have been launched.
+    - If a cluster is STOPPED, any command restarting it (`sky launch`, `sky
+      start`) will launch a NEW cluster.
+    - If a cluster is UP, a `sky launch` command reusing it will launch a NEW
+      cluster. The original cluster will be stopped and thus leaked from Sky's
+      perspective.
+    - `sky down/stop/exec` on these pre-change clusters still works, if no new
+      clusters with the same name have been launched.
 
     The reason is AWS security group names are derived from this string, and
     thus changing the SG name makes these clusters unrecognizable.
