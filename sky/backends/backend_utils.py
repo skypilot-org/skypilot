@@ -1101,7 +1101,7 @@ def user_and_hostname_hash() -> str:
     unreusable and potentially cause leakage:
 
     - If a cluster is STOPPED, any command restarting it will launch a NEW
-      clusters.
+      cluster.
     - If a cluster is UP, any command reusing it will launch a NEW cluster. The
       original cluster will be stopped and thus leaked from Sky's perspective.
     - `sky down` on these pre-change clusters still works, if no new clusters
