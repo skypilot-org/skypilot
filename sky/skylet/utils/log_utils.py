@@ -5,7 +5,7 @@ from typing import Optional
 import colorama
 import pendulum
 import prettytable
-# import rich.status
+import rich.status
 
 from sky import sky_logging
 
@@ -36,23 +36,23 @@ class RayUpLineProcessor(LineProcessor):
 
     def __enter__(self):
         self.state = self.ProvisionStatus.LAUNCH
-        # self.status_display = rich.status.Status('[bold cyan]Launching')
-        # self.status_display.start()
+        self.status_display = rich.status.Status('[bold cyan]Launching')
+        self.status_display.start()
 
     def process_line(self, log_line):
         if ('Shared connection to' in log_line and
                 self.state == self.ProvisionStatus.LAUNCH):
-            # self.status_display.stop()
+            self.status_display.stop()
             logger.info(f'{colorama.Fore.GREEN}Head node is up.'
                         f'{colorama.Style.RESET_ALL}')
-            # self.status_display.start()
-            # self.status_display.update(
-            #     '[bold cyan]Launching - Preparing Sky runtime')
+            self.status_display.start()
+            self.status_display.update(
+                '[bold cyan]Launching - Preparing Sky runtime')
             self.state = self.ProvisionStatus.RUNTIME_SETUP
 
     def __exit__(self, except_type, except_value, traceback):
         del except_type, except_value, traceback  # unused
-        # self.status_display.stop()
+        self.status_display.stop()
 
 
 def create_table(field_names):
