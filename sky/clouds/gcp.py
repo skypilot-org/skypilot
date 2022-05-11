@@ -182,7 +182,8 @@ class GCP(clouds.Cloud):
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
         default_type = 'n1-highmem-8'
         if accelerator is not None:
-            assert len(accelerator.items()) == 1, 'more than one accelerator candidates'
+            assert len(accelerator.items()
+                      ) == 1, 'more than one accelerator candidates'
             acc, acc_count = list(accelerator.items())[0]
             if acc == 'A100':
                 default_type = f'a2-highgpu-{acc_count}g'
