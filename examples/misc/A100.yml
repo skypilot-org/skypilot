@@ -1,0 +1,11 @@
+name: A100
+
+resources:
+  cloud: gcp
+  accelerators: A100
+
+setup: |
+  echo "running setup"
+
+run: |
+  nvidia-smi

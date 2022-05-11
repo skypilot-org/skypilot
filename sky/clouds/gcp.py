@@ -51,6 +51,12 @@ class GCP(clouds.Cloud):
         'n1-highmem-32': 1.892848,
         'n1-highmem-64': 3.785696,
         'n1-highmem-96': 5.678544,
+        # A2 highgpu for A100
+        'a2-highgpu-1g': 0.749750,
+        'a2-highgpu-2g': 1.499500,
+        'a2-highgpu-4g': 2.998986,
+        'a2-highgpu-8g': 5.997986,
+        'a2-highgpu-16g': 8.919152,
     }
 
     _SPOT_PRICES = {
@@ -172,9 +178,15 @@ class GCP(clouds.Cloud):
         return isinstance(other, GCP)
 
     @classmethod
-    def get_default_instance_type(cls):
+    def get_default_instance_type(cls, accelerator):
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
-        return 'n1-highmem-8'
+        default_type = 'n1-highmem-8'
+        if accelerator is not None:
+            assert len(accelerator.items()) == 1, 'more than one accelerator candidates'
+            acc, acc_count = list(accelerator.items())[0]
+            if acc == 'A100':
+                default_type = f'a2-highgpu-{acc_count}g'
+        return default_type
 
     @classmethod
     def get_default_region(cls) -> clouds.Region:
@@ -238,7 +250,7 @@ class GCP(clouds.Cloud):
         # default VM type.
         r = resources.copy(
             cloud=GCP(),
-            instance_type=GCP.get_default_instance_type(),
+            instance_type=GCP.get_default_instance_type(accelerator_match),
             accelerators=accelerator_match,
         )
         return ([r], fuzzy_candidate_list)
