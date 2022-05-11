@@ -1398,11 +1398,12 @@ class CloudVmRayBackend(backends.Backend):
     def benchmark_summary(self, handle: ResourceHandle, log_dir: str, output_path: str, logger_name: str) -> str:
         code = benchmark_lib.BenchmarkCodeGen.generate_summary(log_dir, output_path, logger_name)
         returncode, _, stderr = self.run_on_head(handle,
-                                                      code,
-                                                      require_outputs=True)
+                                                 code,
+                                                 require_outputs=True)
         backend_utils.handle_returncode(returncode, code,
                                         'Failed to generate a benchmark summary',
-                                        stderr=stderr)
+                                        stderr=stderr,
+                                        raise_error=True)
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
