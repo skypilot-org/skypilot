@@ -31,9 +31,11 @@ def process_subprocess_stream(
     log_path: str,
     stream_logs: bool,
     start_streaming_at: str = '',
+    end_streaming_at: Optional[str] = None,
     skip_lines: Optional[List[str]] = None,
     replace_crlf: bool = False,
-    line_processor: Optional[log_utils.LineProcessor] = None
+    line_processor: Optional[log_utils.LineProcessor] = None,
+    prefix: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
 
@@ -57,6 +59,7 @@ def process_subprocess_stream(
     stderr = ''
 
     start_streaming_flag = False
+    end_streaming_flag = False
     with line_processor:
         with open(log_path, 'a') as fout:
             while len(sel.get_map()) > 0:
@@ -78,13 +81,17 @@ def process_subprocess_stream(
                         continue
                     if start_streaming_at in line:
                         start_streaming_flag = True
+                    if end_streaming_at is not None and end_streaming_at in line:
+                        end_streaming_flag = True
+                    if prefix is not None:
+                        line = prefix + line
                     if key.fileobj is out_io:
                         stdout += line
                         out_stream = sys.stdout
                     else:
                         stderr += line
                         out_stream = sys.stderr
-                    if stream_logs and start_streaming_flag:
+                    if stream_logs and start_streaming_flag and not end_streaming_flag:
                         out_stream.write(line)
                         out_stream.flush()
                     if log_path != '/dev/null':
@@ -99,11 +106,14 @@ def run_with_log(
     log_path: str,
     stream_logs: bool = False,
     start_streaming_at: str = '',
+    end_streaming_at: Optional[str] = None,
+    skip_lines: Optional[List[str]] = None,
     require_outputs: bool = False,
     shell: bool = False,
     with_ray: bool = False,
     process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
+    prefix: Optional[str] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -166,6 +176,12 @@ def run_with_log(
         stderr = ''
 
         if process_stream:
+            if skip_lines is None:
+                skip_lines = []
+            skip_lines += [
+                'bash: cannot set terminal process group',
+                'bash: no job control in this shell',
+            ]
             # We need this even if the log_path is '/dev/null' to ensure the
             # progress bar is shown.
             # NOTE: Lines are printed only when '\r' or '\n' is found.
@@ -174,17 +190,16 @@ def run_with_log(
                 log_path,
                 stream_logs,
                 start_streaming_at=start_streaming_at,
+                end_streaming_at=end_streaming_at,
                 # Skip these lines caused by `-i` option of bash. Failed to
                 # find other way to turn off these two warning.
                 # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
                 # `ssh -T -i -tt` still cause the problem.
-                skip_lines=[
-                    'bash: cannot set terminal process group',
-                    'bash: no job control in this shell',
-                ],
+                skip_lines=skip_lines,
                 line_processor=line_processor,
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
+                prefix=prefix,
             )
         proc.wait()
         if require_outputs:

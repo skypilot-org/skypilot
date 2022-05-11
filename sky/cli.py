@@ -930,8 +930,13 @@ def _parallel_launch(yaml_paths: List[str],
         log_lib.run_with_log(
             cmd,
             log_path='/dev/null',
-            stream_logs=False,
-            require_outputs=True,
+            stream_logs=True,
+            prefix=f'({cluster}) ',
+            skip_lines=[
+                'optimizer.py',
+                'Tip: to reuse an existing cluster, specify --cluster (-c). Run `sky status` to see existing clusters.',
+            ],
+            end_streaming_at='Job submitted with Job ID:',
         )
 
     backend_utils.run_in_parallel(
