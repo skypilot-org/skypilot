@@ -82,11 +82,15 @@ class StrategyExecutor:
                 self.cluster_name, force_refresh=True)
             if cluster_status == global_user_state.ClusterStatus.UP:
                 # Wait the job to be started
-                status = spot_utils.job_status_check()
+                status = spot_utils.job_status_check(self.backend,
+                                                     self.cluster_name)
                 while status is None or status == job_lib.JobStatus.INIT:
-                    status = spot_utils.job_status_check()
+                    status = spot_utils.job_status_check(
+                        self.backend, self.cluster_name)
                     time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
-                time = spot_utils.get_job_time(is_end=False)
+                time = spot_utils.get_job_time(self.backend,
+                                               self.cluster_name,
+                                               is_end=False)
                 return time
 
             # TODO(zhwu): maybe exponential backoff is better?
@@ -154,8 +158,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
 
         # Step 3
         launched_time = self.launch(max_retry=self._MAX_RETRY_CNT,
-                                  retry_gap_seconds=self._RETRY_GAP_SECONDS,
-                                  raise_on_failure=False)
+                                    retry_gap_seconds=self._RETRY_GAP_SECONDS,
+                                    raise_on_failure=False)
         if launched_time is None:
             logger.error(f'Failed to recover the spot cluster after retrying '
                          f'{self._MAX_RETRY_CNT} times every '

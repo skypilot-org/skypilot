@@ -5,13 +5,13 @@ import json
 import pathlib
 import shlex
 import time
-import typing
 from typing import List, Optional, Tuple
 
 import colorama
 import filelock
 
 from sky import backends
+from sky.backends import backend_utils
 from sky import global_user_state
 from sky import sky_logging
 from sky.skylet import job_lib
@@ -21,7 +21,7 @@ from sky.spot import spot_state
 logger = sky_logging.init_logger(__name__)
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
-JOB_STATUS_CHECK_GAP_SECONDS = 60
+JOB_STATUS_CHECK_GAP_SECONDS = 20
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
@@ -35,8 +35,10 @@ class UserSignal(enum.Enum):
     # NOTE: We can have more communication signals here if needed
     # in the future.
 
+
 # ====== internal functions ======
-def job_status_check(backend: 'backends.CloudVmRayBackend', cluster_name: str) -> Optional['job_lib.JobStatus']:
+def job_status_check(backend: 'backends.CloudVmRayBackend',
+                     cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on the spot cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED or CANCELLED.
@@ -53,12 +55,18 @@ def job_status_check(backend: 'backends.CloudVmRayBackend', cluster_name: str) -
     return status
 
 
-def get_job_time(backend: 'backends.CloudVmRayBackend', cluster_name: str, is_end: bool) -> int:
+def get_job_time(backend: 'backends.CloudVmRayBackend', cluster_name: str,
+                 is_end: bool) -> int:
     """Get the started/ended time of the job."""
     code = job_lib.JobLibCodeGen.get_job_time(job_id=None, is_end=is_end)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    time_str = backend.run_on_head(handle, code, stream_logs=False, require_outputs=True)
-    return float(time_str)
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     stream_logs=False,
+                                                     require_outputs=True)
+    backend_utils.handle_returncode(returncode, code, 'Failed to get job time.',
+                                    stdout + stderr)
+    return float(stdout)
 
 
 # ======== user functions ========
