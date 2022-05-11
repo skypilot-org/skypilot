@@ -448,6 +448,7 @@ def test_spot_storage():
             'managed-spot-storage',
             [
                 f'sky spot launch -n {name} {file_path} -y',
+                'sleep 60',  # Wait the spot status to be updated
                 f'sky spot status | grep {name} | grep SUCCEEDED',
             ],
             f'sky spot cancel -y -n {name}',
