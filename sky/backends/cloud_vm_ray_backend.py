@@ -9,8 +9,9 @@ import inspect
 import json
 import os
 import pathlib
-import sys
+import signal
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -104,10 +105,6 @@ class RayCodeGen:
       >> code = codegen.build()
     """
 
-    # Allow each CPU thread take 2 tasks.
-    # Note: This value cannot be too small, otherwise OOM issue may occur.
-    _EACH_TASK_NUM_CPU = 0.5
-
     def __init__(self):
         # Code generated so far, to be joined via '\n'.
         self._code = []
@@ -185,7 +182,9 @@ class RayCodeGen:
         # Set CPU to avoid ray hanging the resources allocation
         # for remote functions, since the task will request 1 CPU
         # by default.
-        bundles = [{'CPU': self._EACH_TASK_NUM_CPU} for _ in range(num_nodes)]
+        bundles = [{
+            'CPU': backend_utils.DEFAULT_TASK_CPU_DEMAND
+        } for _ in range(num_nodes)]
 
         if accelerator_dict is not None:
             acc_name = list(accelerator_dict.keys())[0]
@@ -231,7 +230,7 @@ class RayCodeGen:
                 def check_ip():
                     return ray.util.get_node_ip_address()
                 ip_list = ray.get([
-                    check_ip.options(num_cpus={self._EACH_TASK_NUM_CPU},
+                    check_ip.options(num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND},
                                      placement_group=pg,
                                      placement_group_bundle_index=i).remote()
                     for i in range(pg.bundle_count)
@@ -283,7 +282,7 @@ class RayCodeGen:
         if task_name is None:
             # Make the task name more meaningful in ray log.
             name_str = 'name=\'task\''
-        cpu_str = f', num_cpus={self._EACH_TASK_NUM_CPU}'
+        cpu_str = f', num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}'
 
         resources_str = ''
         num_gpus_str = ''
@@ -1940,23 +1939,27 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
 
-        # With interactive mode, the ctrl-c will send directly to the running
-        # program on the remote instance, and the ssh will be disconnected by
-        # sshd, so no error code will appear.
-        returncode = self.run_on_head(
-            handle,
-            code,
-            stream_logs=True,
-            process_stream=False,
-            # Allocate a pseudo-terminal to disable output buffering. Otherwise,
-            # there may be 5 minutes delay in logging.
-            ssh_mode=backend_utils.SshMode.INTERACTIVE,
-            # Disable stdin to avoid ray outputs mess up the terminal with
-            # misaligned output when multithreading/multiprocessing are used.
-            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
-            stdin=subprocess.DEVNULL,
-        )
+        # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+        # kill the process, so we need to handle it manually here.
+        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
+        try:
+            returncode = self.run_on_head(
+                handle,
+                code,
+                stream_logs=True,
+                process_stream=False,
+                # Allocate a pseudo-terminal to disable output buffering.
+                # Otherwise, there may be 5 minutes delay in logging.
+                ssh_mode=backend_utils.SshMode.INTERACTIVE,
+                # Disable stdin to avoid ray outputs mess up the terminal with
+                # misaligned output in multithreading/multiprocessing.
+                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
+                stdin=subprocess.DEVNULL,
+            )
+        except SystemExit as e:
+            returncode = e.code
         return returncode
 
     def tail_spot_logs(self,
@@ -1970,11 +1973,20 @@ class CloudVmRayBackend(backends.Backend):
         else:
             code = spot_lib.SpotCodeGen.stream_logs_by_id(job_id)
 
-        return self.run_on_head(handle,
-                                code,
-                                stream_logs=True,
-                                process_stream=False,
-                                ssh_mode=backend_utils.SshMode.INTERACTIVE)
+        # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+        # kill the process, so we need to handle it manually here.
+        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
+        # Refer to the notes in tail_logs.
+        self.run_on_head(
+            handle,
+            code,
+            stream_logs=True,
+            process_stream=False,
+            ssh_mode=backend_utils.SshMode.INTERACTIVE,
+            stdin=subprocess.DEVNULL,
+        )
 
     def _add_job(self, handle: ResourceHandle, job_name: str,
                  resources_str: str) -> int:

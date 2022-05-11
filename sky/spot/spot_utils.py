@@ -11,7 +11,6 @@ import colorama
 import filelock
 
 from sky import backends
-from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -154,27 +153,37 @@ def stream_logs_by_id(job_id: int) -> str:
     spot_status = spot_state.get_status(job_id)
     while not spot_status.is_terminal():
         if spot_status != spot_state.SpotStatus.RUNNING:
-            logger.info(f'The log is not ready yet, as the spot job is '
-                        f'{spot_status.value}. '
+            logger.info(f'SKY INFO: The log is not ready yet, as the spot job '
+                        f'is {spot_status.value}. '
                         f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
             spot_status = spot_state.get_status(job_id)
             continue
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
-        if returncode in [
-                0, exceptions.KEYBOARD_INTERRUPT_CODE, exceptions.SIGTSTP_CODE
-        ]:
-            # If the job succeeded/ctrl-c/ctrl-z, we can safely break the loop.
+        if returncode == 0:
+            # If the log tailing exit successfully (the real job can be
+            # SUCCEEDED or FAILED), we can safely break the loop. We use the
+            # status in job queue to show the information, as the spot_state is
+            # not updated yet.
+            job_status = backend.get_job_status(handle,
+                                                job_id=None,
+                                                stream_logs=False)
+            logger.info(f'Logs finished for job {job_id} '
+                        f'(status: {job_status.value}).')
             break
-        logger.debug(f'The return code is {returncode}.')
+        logger.info(
+            f'SKY INFO: The return code is {returncode}. '
+            f'Check the job status in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
         # check the spot status again.
         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
         spot_status = spot_state.get_status(job_id)
-    logger.info(f'Logs finished for job {job_id} '
-                f'(status: {spot_state.get_status(job_id).value}).')
+    else:
+        # The spot_status is in terminal state.
+        logger.info(f'Logs finished for job {job_id} '
+                    f'(status: {spot_state.get_status(job_id).value}).')
     return ''
 
 
