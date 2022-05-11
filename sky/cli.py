@@ -2238,7 +2238,8 @@ def spot_status(all: bool, refresh: bool):
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
             job_table_str = (
-                f'\nCached job status table [last updated: {readable_time}]:\n'
+                f'\n{colorama.Fore.YELLOW}Cached job status table '
+                f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
                 f'{cache[1]}\n')
         click.echo(job_table_str)
         return
