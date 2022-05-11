@@ -617,10 +617,12 @@ def write_cluster_config(to_provision: 'resources.Resources',
         scripts = tuple(
             fill_template(
                 template_name,
-                dict(resources_vars, **{
-                    'zones': ','.join(zones),
-                    'tpu_name': tpu_name,
-                }),
+                dict(
+                    resources_vars, **{
+                        'zones': ','.join(zones),
+                        'tpu_name': tpu_name,
+                        'gcp_project_id': gcp_project_id,
+                    }),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
                 # with cluster yamls.
