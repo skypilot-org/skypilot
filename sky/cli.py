@@ -936,11 +936,11 @@ def _parallel_launch(yaml_paths: List[str],
             cmd,
             log_path='/dev/null',
             stream_logs=True,
-            prefix=f'({cluster}) ',
+            prefix=f'{colorama.Fore.MAGENTA}({cluster}){colorama.Style.RESET_ALL} ', # FIXME
             skip_lines=[
                 'optimizer.py',
                 'Tip: to reuse an existing cluster, specify --cluster (-c). Run `sky status` to see existing clusters.',
-            ],
+            ], # FIXME
             end_streaming_at='Job submitted with Job ID:',
         )
 
@@ -1160,7 +1160,7 @@ def benchmark_ls() -> None:
 
 def _download_and_update_benchmark_logs(benchmark: str, logger_name: str, clusters: List[str]) -> None:
     summaries = benchmark_utils.get_benchmark_summaries(benchmark, logger_name, clusters)
-    for cluster, summary in zip(clusters, summaries):
+    for cluster, summary in summaries.items():
         benchmark_state.update_benchmark_result(
             benchmark,
             cluster,

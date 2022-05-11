@@ -2,12 +2,14 @@ import json
 import os
 import subprocess
 from typing import List
-from sky import global_user_state
+from sky import global_user_state, sky_logging
 from sky import backends
+from sky import exceptions
 
 from sky.backends import backend_utils
 from sky.skylet import log_lib
 
+logger = sky_logging.init_logger(__name__)
 
 SKY_CLOUD_BENCHMARK_DIR = '~/sky_benchmark_dir'
 SKY_CLOUD_BENCHMARK_SUMMARY = os.path.join(SKY_CLOUD_BENCHMARK_DIR, 'summary.json')
@@ -48,19 +50,24 @@ def get_benchmark_summaries(benchmark: str, logger_name: str, clusters: List[str
             log_dir = os.path.join(SKY_CLOUD_BENCHMARK_DIR, 'wandb', 'latest-run')
         elif logger_name == 'tensorboard':
             log_dir = SKY_CLOUD_BENCHMARK_DIR
-        backend.benchmark_summary(handle, log_dir, SKY_CLOUD_BENCHMARK_SUMMARY, logger_name)
-        _download_benchmark_summary(benchmark, cluster)
+        try:
+            backend.benchmark_summary(handle, log_dir, SKY_CLOUD_BENCHMARK_SUMMARY, logger_name)
+            _download_benchmark_summary(benchmark, cluster)
+        except exceptions.CommandError as e:
+            logger.error(
+                f'Command failed with code {e.returncode}: {e.command}')
+            logger.error(e.error_msg)
 
-    # TODO: handle errors
-    with backend_utils.safe_console_status('[bold cyan]Downloading logs[/]'):
+    with backend_utils.safe_console_status('[bold cyan]Downloading logs[/]'): # FIXME
         backend_utils.run_in_parallel(_get_summary, clusters)
 
-    summaries = []
+    summaries = {}
     for cluster in clusters:
         summary_path = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster, 'summary.json')
-        with open(summary_path, 'r') as f:
-            summary = json.load(f)
-        summaries.append(summary)
+        if os.path.exists(summary_path):
+            with open(summary_path, 'r') as f:
+                summary = json.load(f)
+            summaries[cluster] = summary
     return summaries
 
 
