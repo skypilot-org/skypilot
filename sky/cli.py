@@ -521,6 +521,13 @@ def _check_yaml(entrypoint: str) -> bool:
     return is_yaml
 
 
+def _get_task_name_from_yaml(entrypoint: str) -> str:
+    """Gets the task name from a YAML file."""
+    with open(entrypoint, 'r') as f:
+        config = yaml.safe_load(f)
+    return config.get('name')
+
+
 def _start_cluster(cluster_name: str,
                    idle_minutes_to_autostop: Optional[int] = None):
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -906,8 +913,7 @@ def _get_resource_options(yaml_path: str) -> Union[None, Dict[str, str]]:
 
 def _parallel_launch(yaml_paths: List[str],
                      cluster_names: List[str],
-                     launch_params: List[Dict[str, Any]],
-                     dryrun: bool = False) -> None:
+                     launch_params: List[Dict[str, Any]]) -> None:
     num_clusters = len(cluster_names)
     assert len(yaml_paths) == num_clusters and len(launch_params) == num_clusters
 
@@ -916,30 +922,21 @@ def _parallel_launch(yaml_paths: List[str],
         cmd = ['sky', 'launch', yaml_path, '-c', cluster, '-d', '-y']
         for k, v in param.items():
             cmd.extend([f'--{k}', str(v)])
-        if dryrun:
-            cmd.append('--dryrun')
         launch_cmds.append(cmd)
 
-    plural = 's' if num_clusters > 1 else ''
-    with rich_progress.Progress() as progress:
-        launch = progress.add_task(f'[bold red]Launching {num_clusters} cluster{plural}[/]', total=num_clusters)
-        runtime_setup = progress.add_task(f'[bold yellow]Preparing Sky runtime for {num_clusters} cluster{plural}[/]', total=num_clusters)
-        user_setup = progress.add_task(f'[bold blue]Setting up {num_clusters} cluster{plural}[/]', total=num_clusters)
+    # TODO: Display a rich progress bar summarizing the provision/setup status of clusters.
+    def _launch_with_log(cluster: str, cmd: List[str], wait: int) -> None:
+        time.sleep(wait) # A bandage solution to avoid boto errors.
+        log_lib.run_with_log(
+            cmd,
+            log_path='/dev/null',
+            stream_logs=False,
+            require_outputs=True,
+        )
 
-        def _launch_with_log(cluster: str, cmd: List[str], wait: int) -> None:
-            time.sleep(wait) # A bandage solution to avoid boto errors.
-            log_lib.run_with_log(
-                cmd,
-                log_path='/dev/null',
-                stream_logs=False,
-                require_outputs=True,
-                line_processor=log_utils.SkyLaunchLineProcessor(
-                    cluster, progress, launch, runtime_setup, user_setup),
-            )
-
-        backend_utils.run_in_parallel(
-            lambda arg: _launch_with_log(*arg),
-            list(zip(cluster_names, launch_cmds, range(num_clusters))))
+    backend_utils.run_in_parallel(
+        lambda arg: _launch_with_log(*arg),
+        list(zip(cluster_names, launch_cmds, range(num_clusters))))
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -988,7 +985,7 @@ def benchmark_launch(
     disk_size: Optional[int],
     yes: bool,
 ) -> None:
-    """Benchmark a task on different GPU types."""
+    """Benchmark a task on different resources."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
         raise click.BadParameter(f'Benchmark {benchmark} already exists.')
@@ -998,10 +995,10 @@ def benchmark_launch(
         is_yaml = _check_yaml(entrypoint)
         if is_yaml:
             # Treat entrypoint as a yaml.
-            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+            click.secho('Benchmarking a task from YAML spec: ', fg='yellow', nl=False)
         else:
             # Treat entrypoint as a bash command.
-            click.secho('Task from command: ', fg='yellow', nl=False)
+            click.secho('Benchmarking a task from command: ', fg='yellow', nl=False)
         click.secho(entrypoint, bold=True)
     else:
         entrypoint = None
@@ -1010,6 +1007,10 @@ def benchmark_launch(
     options = None
     if is_yaml:
         options = _get_resource_options(entrypoint)
+
+    # The user can specify the benchmark candidates in either of the two ways:
+    # 1. By specifying resources.options in the YAML.
+    # 2. By specifying multiple gpu types with --gpus.
     if gpus is not None:
         gpus = gpus.split(',')
         gpus = [gpu.strip() for gpu in gpus]
@@ -1022,7 +1023,7 @@ def benchmark_launch(
                 options = [{'accelerators': gpu} for gpu in gpus]
                 gpus = None
             else:
-                raise ValueError('Ambiguous') # FIXME
+                raise ValueError('The benchmark candidates are ambiguous. The user should not specify --gpus and resources.options together.')
     if options is None:
         options = [{}]
 
@@ -1054,8 +1055,8 @@ def benchmark_launch(
     if disk_size is not None:
         override_params['disk_size'] = disk_size
 
-    # TODO: check cluster names
-    cluster_names = [f'{benchmark}-{i}' for i in range(len(options))]
+    # Generate command line arguments for each benchmark candidate.
+    clusters = [f'{benchmark}-{i}' for i in range(len(options))]
     launch_params = []
     for option in options:
         params = override_params.copy()
@@ -1066,10 +1067,13 @@ def benchmark_launch(
             elif k == 'accelerators':
                 params['gpus'] = params.pop(k)
         launch_params.append(params)
-    _parallel_launch([entrypoint] * len(options), cluster_names, launch_params)
+    _parallel_launch([entrypoint] * len(options), clusters, launch_params)
 
-    benchmark_state.add_benchmark(benchmark, task_name=None, logger_name=logger_name) # FIXME
-    for cluster in cluster_names:
+    # If the clusters are launched successfully,
+    # add the benchmark to the state.
+    task_name = _get_task_name_from_yaml(entrypoint) if is_yaml else None
+    benchmark_state.add_benchmark(benchmark, task_name, logger_name=logger_name)
+    for cluster in clusters:
         record = global_user_state.get_cluster_from_name(cluster)
         if record is not None:
             global_user_state.set_cluster_benchmark_name(cluster, benchmark)
