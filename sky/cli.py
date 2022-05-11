@@ -919,9 +919,14 @@ def _parallel_launch(yaml_paths: List[str],
 
     launch_cmds = []
     for yaml_path, cluster, param in zip(yaml_paths, cluster_names, launch_params):
+        # detached run is required for parallel launch
         cmd = ['sky', 'launch', yaml_path, '-c', cluster, '-d', '-y']
-        for k, v in param.items():
-            cmd.extend([f'--{k}', str(v)])
+        for arg_name, arg in param.items():
+            if isinstance(arg, list):
+                for v in arg:
+                    cmd += [f'--{arg_name}', str(v)]
+            else:
+                cmd += [f'--{arg_name}', str(arg)]
         launch_cmds.append(cmd)
 
     # TODO: Display a rich progress bar summarizing the provision/setup status of clusters.
@@ -987,6 +992,7 @@ def benchmark_launch(
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     instance_type: Optional[str],
+    env: List[Dict[str, str]],
     disk_size: Optional[int],
     yes: bool,
 ) -> None:
@@ -1059,6 +1065,8 @@ def benchmark_launch(
         override_params['instance_type'] = instance_type
     if disk_size is not None:
         override_params['disk_size'] = disk_size
+    if env is not None:
+        override_params['env'] = [f'{k}={v}' for k, v in env.items()]
 
     # Generate command line arguments for each benchmark candidate.
     clusters = [f'{benchmark}-{i}' for i in range(len(options))]
@@ -1074,23 +1082,26 @@ def benchmark_launch(
         launch_params.append(params)
     _parallel_launch([entrypoint] * len(options), clusters, launch_params)
 
-    # If the clusters are launched successfully,
+    # If at least one cluster was launched successfully,
     # add the benchmark to the state.
-    task_name = _get_task_name_from_yaml(entrypoint) if is_yaml else None
-    benchmark_state.add_benchmark(benchmark, task_name, logger_name=logger_name)
+    benchmark_created = False
     for cluster in clusters:
         record = global_user_state.get_cluster_from_name(cluster)
         if record is not None:
+            if not benchmark_created:
+                task_name = _get_task_name_from_yaml(entrypoint) if is_yaml else None
+                benchmark_state.add_benchmark(benchmark, task_name, logger_name=logger_name)
+                benchmark_created = True
             global_user_state.set_cluster_benchmark_name(cluster, benchmark)
             benchmark_state.add_benchmark_result(benchmark, record['handle'])
 
     logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
                 f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
-                '\nTo check the benchmark results:\t'
+                '\nTo check the benchmark results (on the fly): '
                 f'{backend_utils.BOLD}sky benchmark show {benchmark}{backend_utils.RESET_BOLD}'
-                '\nTo stop the clusters:\t'
+                '\nTo stop the clusters: '
                 f'{backend_utils.BOLD}sky benchmark stop {benchmark}{backend_utils.RESET_BOLD}'
-                '\nTo teardown the clusters:\t'
+                '\nTo teardown the clusters: '
                 f'{backend_utils.BOLD}sky benchmark down {benchmark}{backend_utils.RESET_BOLD}')
 
 
