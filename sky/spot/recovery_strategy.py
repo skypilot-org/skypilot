@@ -1,11 +1,13 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
-import time
 import typing
+from typing import Optional
 
 import sky
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.skylet import job_lib
+from sky.spot import spot_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -54,13 +56,13 @@ class StrategyExecutor:
     def launch(self,
                max_retry=3,
                retry_gap_seconds=60,
-               raise_on_failure=True) -> bool:
+               raise_on_failure=True) -> Optional[float]:
         """Launch the spot cluster for the first time.
 
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
 
-        Returns: True if the cluster is successfully launched.
+        Returns: The timestamp job started, or None if failed.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
@@ -79,7 +81,14 @@ class StrategyExecutor:
             cluster_status, _ = backend_utils.refresh_cluster_status_handle(
                 self.cluster_name, force_refresh=True)
             if cluster_status == global_user_state.ClusterStatus.UP:
-                return True
+                # Wait the job to be started
+                status = spot_utils.job_status_check()
+                while status is None or status == job_lib.JobStatus.INIT:
+                    status = spot_utils.job_status_check()
+                    time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
+                time = spot_utils.get_job_time(is_end=False)
+                return time
+
             # TODO(zhwu): maybe exponential backoff is better?
             if retry_cnt >= max_retry:
                 if raise_on_failure:
@@ -87,17 +96,18 @@ class StrategyExecutor:
                         f'Failed to launch the spot cluster after {max_retry} '
                         'retries.')
                 else:
-                    return False
+                    return None
             logger.info(
                 f'Retrying to launch the spot cluster in {retry_gap_seconds} '
                 'seconds.')
             time.sleep(retry_gap_seconds)
 
-    def recover(self):
+    def recover(self) -> float:
         """Relaunch the spot cluster after failure and wait until job starts.
 
         When recover() is called the cluster should be in STOPPED status (i.e.
         partially down).
+        Returns: The timestamp job started.
         """
         raise NotImplementedError
 
@@ -115,7 +125,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
     _RETRY_GAP_SECONDS = 60
 
-    def recover(self):
+    def recover(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.
         # 2. Tear down the cluster, if the step 1 failed to launch the cluster.
@@ -135,19 +145,20 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             logger.info('Ignoring the job cancellation failure; the spot '
                         'cluster is likely completely stopped. Recovering.')
 
-        is_launched = self.launch(raise_on_failure=False)
-        if is_launched:
-            return
+        launched_time = self.launch(raise_on_failure=False)
+        if launched_time is not None:
+            return launched_time
 
         # Step 2
         self.terminate_cluster()
 
         # Step 3
-        is_launched = self.launch(max_retry=self._MAX_RETRY_CNT,
+        launched_time = self.launch(max_retry=self._MAX_RETRY_CNT,
                                   retry_gap_seconds=self._RETRY_GAP_SECONDS,
                                   raise_on_failure=False)
-        if not is_launched:
+        if launched_time is None:
             logger.error(f'Failed to recover the spot cluster after retrying '
                          f'{self._MAX_RETRY_CNT} times every '
                          f'{self._RETRY_GAP_SECONDS} seconds.')
             raise RuntimeError('Failed to recover the spot cluster.')
+        return launched_time

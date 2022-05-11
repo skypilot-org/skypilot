@@ -85,13 +85,13 @@ def set_starting(job_id: int):
     _CONN.commit()
 
 
-def set_started(job_id: int):
+def set_started(job_id: int, start_at: float):
     logger.info('Job started.')
     _CURSOR.execute(
         """\
         UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
         WHERE job_id=(?)""",
-        (SpotStatus.RUNNING.value, time.time(), time.time(), job_id))
+        (SpotStatus.RUNNING.value, start_at, start_at, job_id))
     _CONN.commit()
 
 
@@ -106,31 +106,31 @@ def set_recovering(job_id: int):
     _CONN.commit()
 
 
-def set_recovered(job_id: int):
+def set_recovered(job_id: int, recovered_at: float):
     _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
-        WHERE job_id=(?)""", (SpotStatus.RUNNING.value, time.time(), job_id))
+        WHERE job_id=(?)""", (SpotStatus.RUNNING.value, recovered_at, job_id))
     _CONN.commit()
     logger.info('==== Recovered. ====')
 
 
-def set_succeeded(job_id: int):
+def set_succeeded(job_id: int, end_at: float):
     _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), end_at=(?)
         WHERE job_id=(?) AND end_at IS null""",
-        (SpotStatus.SUCCEEDED.value, time.time(), job_id))
+        (SpotStatus.SUCCEEDED.value, end_at, job_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 
 
-def set_failed(job_id: int):
-    end_time = time.time()
+def set_failed(job_id: int, end_at: Optional[float] = None):
+    end_at = time.time() if end_at is None else end_at
     fields_to_set = {
-        'end_at': end_time,
+        'end_at': end_at,
         'status': SpotStatus.FAILED.value,
     }
     previsou_status = _CURSOR.execute(
@@ -141,7 +141,7 @@ def set_failed(job_id: int):
         # last_recovered_at to the end_time, so that the
         # end_at - last_recovered_at will not be affect the job duration
         # calculation.
-        fields_to_set['last_recovered_at'] = end_time
+        fields_to_set['last_recovered_at'] = end_at
     set_str = ', '.join(f'{k}=(?)' for k in fields_to_set)
     _CURSOR.execute(
         f"""\
