@@ -2,6 +2,7 @@
 import colorama
 import datetime
 import enum
+import hashlib
 import http.client as httplib
 import getpass
 from multiprocessing import pool
@@ -9,6 +10,7 @@ import os
 import pathlib
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import textwrap
@@ -583,12 +585,11 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'aws_default_ami': aws_default_ami,
                 # Temporary measure, as deleting per-cluster SGs is too slow.
                 # See https://github.com/sky-proj/sky/pull/742.
-                # Generate the name of the security group we're looking for...
-                # (username, mac addr last 4 chars): for uniquefying users on
-                # shared-account cloud providers.
-                'security_group':
-                    f'sky-security-group-'
-                    f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}',
+                # Generate the name of the security group we're looking for.
+                # (username, last 4 chars of hash of hostname): for uniquefying
+                # users on shared-account cloud providers. Using uuid.getnode()
+                # is incorrect; observed to collide on Macs.
+                'security_group': f'sky-sg-{user_and_hostname_hash()}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region}',
@@ -1062,8 +1063,7 @@ def run_no_outputs(cmd, **kwargs):
 
 
 def check_local_gpus() -> bool:
-    """
-    Checks if GPUs are available locally.
+    """Checks if GPUs are available locally.
 
     Returns whether GPUs are available on the local machine by checking
     if nvidia-smi is installed and returns zero return code.
@@ -1084,6 +1084,34 @@ def check_local_gpus() -> bool:
                                          check=False)
         is_functional = execution_check.returncode == 0
     return is_functional
+
+
+def user_and_hostname_hash() -> str:
+    """Returns a string containing <user>-<hostname hash last 4 chars>.
+
+    For uniquefying user clusters on shared-account cloud providers. Also used
+    for AWS security group.
+
+    Using uuid.getnode() instead of gethostname() is incorrect; observed to
+    collide on Macs.
+
+    NOTE: BACKWARD INCOMPATIBILITY NOTES
+
+    Changing this string will render AWS clusters shown in `sky status`
+    unreusable and potentially cause leakage:
+
+    - If a cluster is STOPPED, any command restarting it will launch a NEW
+      clusters.
+    - If a cluster is UP, any command reusing it will launch a NEW cluster. The
+      original cluster will be stopped and thus leaked from Sky's perspective.
+    - `sky down` on these pre-change clusters still works, if no new clusters
+      with the same name have been launched.
+
+    The reason is AWS security group names are derived from this string, and
+    thus changing the SG name makes these clusters unrecognizable.
+    """
+    hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
+    return f'{getpass.getuser()}-{hostname_hash}'
 
 
 def generate_cluster_name():
