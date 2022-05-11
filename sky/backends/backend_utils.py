@@ -1388,7 +1388,11 @@ def kill_children_processes():
     # exits.
     parent_process = psutil.Process()
     for child in parent_process.children(recursive=True):
-        child.terminate()
+        try:
+            child.terminate()
+        except psutil.NoSuchProcess:
+            # The child process may have already been terminated.
+            pass
 
 
 # Handle ctrl-c

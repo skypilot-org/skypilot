@@ -187,10 +187,9 @@ def run_with_log(
                 replace_crlf=with_ray,
             )
         proc.wait()
-        returncode = proc.returncode
-    if require_outputs:
-        return returncode, stdout, stderr
-    return returncode
+        if require_outputs:
+            return proc.returncode, stdout, stderr
+        return proc.returncode
 
 
 def make_task_bash_script(codegen: str,
