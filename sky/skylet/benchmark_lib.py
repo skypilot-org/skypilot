@@ -55,7 +55,7 @@ def summarize_wandb(log_dir: str, output_path: str) -> None:
     from wandb.proto import wandb_internal_pb2
     from wandb.sdk.internal import datastore
 
-    wandb_logs = glob.glob(os.path.join(log_dir, 'run-*.wandb'))
+    wandb_logs = glob.glob(os.path.join(log_dir, 'latest-run', 'run-*.wandb'))
     assert len(wandb_logs) == 1
     wandb_log = wandb_logs[0]
 
