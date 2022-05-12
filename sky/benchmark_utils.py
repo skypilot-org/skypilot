@@ -31,7 +31,7 @@ def get_benchmark_summaries(benchmark: str, callback: str, clusters: List[str]) 
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
-        if callback == 'default':
+        if callback == 'sky':
             log_dir = SKY_CLOUD_BENCHMARK_DIR
         elif callback == 'tensorboard':
             log_dir = SKY_CLOUD_BENCHMARK_DIR
