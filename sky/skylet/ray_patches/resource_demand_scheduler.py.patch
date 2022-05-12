@@ -4,7 +4,7 @@
 > #  - no new nodes are allowed to be launched launched when the upscaling_speed is 0
 > #  - comment out "assert not unfulfilled": this seems a buggy assert
 > 
-428,429c433,441
+428,429c433,437
 < 
 <             if upper_bound > 0:
 ---
@@ -13,7 +13,7 @@
 >             if self.upscaling_speed == 0:
 >                 upper_bound = 0
 >             if upper_bound >= 0:
-556c568
+556c564
 <             assert not unfulfilled
 ---
 >             # assert not unfulfilled  # NOTE(sky): buggy assert.
