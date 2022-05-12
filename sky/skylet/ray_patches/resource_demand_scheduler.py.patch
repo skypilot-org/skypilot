@@ -4,16 +4,20 @@
 > #  - no new nodes are allowed to be launched launched when the upscaling_speed is 0
 > #  - comment out "assert not unfulfilled": this seems a buggy assert
 > 
-428,429c433,437
+428,429c433,441
 < 
 <             if upper_bound > 0:
 ---
 >             
 >             # NOTE(sky): do not autoscale when upsclaing speed is 0.
+>             with open('/tmp/myautoscale.log', 'a') as f:
+>                 print('My resource demand scheduler, upscaling_speed:', self.upscaling_speed, file=f)
 >             if self.upscaling_speed == 0:
+>                 with open('/tmp/myautoscale.log', 'a') as f:
+>                     print('Upscaling=0', file=f)
 >                 upper_bound = 0
 >             if upper_bound >= 0:
-556c564
+556c568
 <             assert not unfulfilled
 ---
 >             # assert not unfulfilled  # NOTE(sky): buggy assert.
