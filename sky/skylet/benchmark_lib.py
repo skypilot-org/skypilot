@@ -1,3 +1,4 @@
+"""Sky benchmark callback log parsers."""
 import glob
 import json
 import os
@@ -13,7 +14,7 @@ def _dict_to_json(json_dict: Dict[str, int], output_path: str):
         f.write(json_str)
 
 
-def summarize_timestamps(log_dir: str, output_path: str) -> None:
+def parse_timestamps(log_dir: str, output_path: str) -> None:
 
     def read_timestamp(f):
         b = f.read(sky_callback.NUM_BYTES_PER_TIMESTAMP)
@@ -41,7 +42,7 @@ def summarize_timestamps(log_dir: str, output_path: str) -> None:
     _dict_to_json(summary, output_path)
 
 
-def summarize_tensorboard(log_dir: str, output_path: str) -> None:
+def parse_tensorboard(log_dir: str, output_path: str) -> None:
     import pandas as pd  # pylint: disable=import-outside-toplevel
     from tensorboard.backend.event_processing import event_accumulator  # pylint: disable=import-outside-toplevel
 
@@ -67,7 +68,7 @@ def summarize_tensorboard(log_dir: str, output_path: str) -> None:
     _dict_to_json(summary, output_path)
 
 
-def summarize_wandb(log_dir: str, output_path: str) -> None:
+def parse_wandb(log_dir: str, output_path: str) -> None:
     import pandas as pd  # pylint: disable=import-outside-toplevel
 
     # Use the latest wandb log.
@@ -108,6 +109,12 @@ def summarize_wandb(log_dir: str, output_path: str) -> None:
 
 
 class BenchmarkCodeGen:
+    """Code generator for benchmark log parsers.
+
+    Usage:
+
+      >> codegen = BenchmarkCodeGen.generate_summary(...)
+    """
 
     _PREFIX = ['from sky.skylet import benchmark_lib']
 
@@ -117,9 +124,9 @@ class BenchmarkCodeGen:
         """Generate a summary of the log."""
         assert callback in ['sky', 'tensorboard', 'wandb']
         parse_fn = {
-            'sky': 'summarize_timestamps',
-            'tensorboard': 'summarize_tensorboard',
-            'wandb': 'summarize_wandb',
+            'sky': 'parse_timestamps',
+            'tensorboard': 'parse_tensorboard',
+            'wandb': 'parse_wandb',
         }
         code = [
             'import os',
