@@ -4,8 +4,6 @@ import os
 import shlex
 from typing import Dict, List
 
-from sky.skylet.logger import base_logger
-
 
 def _dict_to_json(json_dict: Dict[str, int], output_path: str):
     json_str = json.dumps(json_dict)
@@ -13,13 +11,15 @@ def _dict_to_json(json_dict: Dict[str, int], output_path: str):
         f.write(json_str)
 
 
-def summarize_default_logger(log_dir: str, output_path: str) -> None:
+def summarize_timestamps(log_dir: str, output_path: str) -> None:
+    from sky.skylet.callback import base as sky_callback
+
     def read_timestamp(f):
-        b = f.read(base_logger.NUM_BYTES_PER_TIMESTAMP)
-        ts = int.from_bytes(b, base_logger.BYTE_ORDER)
+        b = f.read(sky_callback.NUM_BYTES_PER_TIMESTAMP)
+        ts = int.from_bytes(b, sky_callback.BYTE_ORDER)
         return ts
 
-    timestamp_log = os.path.join(log_dir, base_logger.TIMESTAMP_LOG)
+    timestamp_log = os.path.join(log_dir, sky_callback.TIMESTAMP_LOG)
     timestamps = []
     with open(timestamp_log, 'rb') as f:
         while True:
@@ -110,11 +110,11 @@ class BenchmarkCodeGen:
     _PREFIX = ['from sky.skylet import benchmark_lib']
 
     @classmethod
-    def generate_summary(cls, log_dir: str, output_path: str, logger_name: str) -> None:
+    def generate_summary(cls, log_dir: str, output_path: str, callback: str) -> None:
         """Generate a summary of the log."""
-        assert logger_name in ['default', 'tensorboard', 'wandb']
+        assert callback in ['sky', 'tensorboard', 'wandb']
         parse_fn = {
-            'default': 'summarize_default_logger',
+            'sky': 'summarize_timestamps',
             'tensoboard': 'summarize_tensorboard',
             'wandb': 'summarize_wandb',
         }
@@ -123,7 +123,7 @@ class BenchmarkCodeGen:
             f'log_dir = os.path.expanduser({log_dir!r})',
             f'output_path = os.path.expanduser({output_path!r})',
             f'os.makedirs(os.path.dirname(output_path), exist_ok=True)',
-            f'benchmark_lib.{parse_fn[logger_name]}(log_dir, output_path)',
+            f'benchmark_lib.{parse_fn[callback]}(log_dir, output_path)',
         ]
         return cls._build(code)
 

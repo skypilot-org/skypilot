@@ -9,7 +9,7 @@ NUM_BYTES_PER_TIMESTAMP = 4
 BYTE_ORDER = 'big'
 
 
-class SkyLogger(object):
+class SkyCallback(object):
 
     def __init__(self, log_dir: str = SKY_CLOUD_BENCHMARK_DIR, max_queue_size: int = 10, flush_secs: int = 30) -> None:
         self.log_dir = os.path.expanduser(log_dir)

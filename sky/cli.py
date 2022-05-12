@@ -962,13 +962,11 @@ def benchmark():
               required=True,
               type=str,
               help='Benchmark name.')
-@click.option('--logger',
-              '-l',
-              'logger_name',
-              default='default',
+@click.option('--callback',
+              default='sky',
               required=False,
-              type=click.Choice(['default', 'tensorboard', 'wandb']),
-              help='Logger to track the task progress.')
+              type=click.Choice(['sky', 'tensorboard', 'wandb']),
+              help='Callback to track the task progress on the fly.')
 @_add_click_options(_TASK_OPTIONS)
 @click.option('--disk-size',
               default=None,
@@ -984,7 +982,7 @@ def benchmark():
 def benchmark_launch(
     entrypoint: str,
     benchmark: str,
-    logger_name: str,
+    callback: str,
     name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
@@ -1091,7 +1089,7 @@ def benchmark_launch(
         if record is not None:
             if not benchmark_created:
                 task_name = _get_task_name_from_yaml(entrypoint) if is_yaml else None
-                benchmark_state.add_benchmark(benchmark, task_name, logger_name=logger_name)
+                benchmark_state.add_benchmark(benchmark, task_name, callback=callback)
                 benchmark_created = True
             global_user_state.set_cluster_benchmark_name(cluster, benchmark)
             benchmark_state.add_benchmark_result(benchmark, record['handle'])
@@ -1160,8 +1158,8 @@ def benchmark_ls() -> None:
         click.echo('No benchmark history found.')
 
 
-def _download_and_update_benchmark_logs(benchmark: str, logger_name: str, clusters: List[str]) -> None:
-    summaries = benchmark_utils.get_benchmark_summaries(benchmark, logger_name, clusters)
+def _download_and_update_benchmark_logs(benchmark: str, callback: str, clusters: List[str]) -> None:
+    summaries = benchmark_utils.get_benchmark_summaries(benchmark, callback, clusters)
     for cluster, summary in summaries.items():
         benchmark_state.update_benchmark_result(
             benchmark,
@@ -1197,7 +1195,7 @@ def benchmark_show(benchmark: str, total_iters: Optional[int], force_download: b
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
 
-    logger_name = record['logger']
+    callback = record['callback']
     if record['status'] == benchmark_state.BenchmarkStatus.RUNNING or force_download:
         clusters = global_user_state.get_clusters_from_benchmark(benchmark)
         running = [
@@ -1205,7 +1203,7 @@ def benchmark_show(benchmark: str, total_iters: Optional[int], force_download: b
             if cluster['status'] == global_user_state.ClusterStatus.UP
         ]
         if len(running) > 0:
-            _download_and_update_benchmark_logs(benchmark, logger_name, running)
+            _download_and_update_benchmark_logs(benchmark, callback, running)
 
     # Generate a report.
     columns = [
@@ -1311,8 +1309,8 @@ def _terminate_or_stop_benchmark(benchmark, except_clusters, terminate, yes):
     ]
 
     if record['status'] == benchmark_state.BenchmarkStatus.RUNNING:
-        logger_name = record['logger']
-        _download_and_update_benchmark_logs(benchmark, logger_name, running)
+        callback = record['callback']
+        _download_and_update_benchmark_logs(benchmark, callback, running)
 
     to_stop = [cluster['name'] for cluster in clusters
                 if cluster['name'] not in except_clusters]
