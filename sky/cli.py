@@ -1069,7 +1069,7 @@ def benchmark_launch(
         override_params['env'] = [f'{k}={v}' for k, v in env.items()]
 
     # Generate command line arguments for each benchmark candidate.
-    clusters = [f'{benchmark}-{i}' for i in range(len(options))]
+    clusters = [f'{benchmark}-cluster{i}' for i in range(len(options))]
     launch_params = []
     for option in options:
         params = override_params.copy()
