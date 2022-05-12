@@ -1204,7 +1204,8 @@ def benchmark_show(benchmark: str, total_iters: Optional[int], force_download: b
             cluster['name'] for cluster in clusters
             if cluster['status'] == global_user_state.ClusterStatus.UP
         ]
-        _download_and_update_benchmark_logs(benchmark, logger_name, running)
+        if len(running) > 0:
+            _download_and_update_benchmark_logs(benchmark, logger_name, running)
 
     # Generate a report.
     columns = [
