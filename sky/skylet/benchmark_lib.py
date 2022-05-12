@@ -118,7 +118,7 @@ class BenchmarkCodeGen:
         assert callback in ['sky', 'tensorboard', 'wandb']
         parse_fn = {
             'sky': 'summarize_timestamps',
-            'tensoboard': 'summarize_tensorboard',
+            'tensorboard': 'summarize_tensorboard',
             'wandb': 'summarize_wandb',
         }
         code = [
