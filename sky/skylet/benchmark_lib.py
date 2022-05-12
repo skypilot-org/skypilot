@@ -41,7 +41,7 @@ def summarize_wandb(log_dir: str, output_path: str) -> None:
     import pandas as pd
 
     # Use the latest wandb log.
-    wandb_summary = os.path.join(log_dir, 'latest-run', 'files', 'wandb-summary.json')
+    wandb_summary = os.path.join(log_dir, 'latest-run/files/wandb-summary.json')
     wandb_summary = pd.read_json(wandb_summary, lines=True)
     assert len(wandb_summary) == 1
     wandb_summary = wandb_summary.iloc[0]
