@@ -2361,7 +2361,7 @@ class CloudVmRayBackend(backends.Backend):
         filter_with_gitignore: bool = True,
     ) -> None:
         """Runs rsync from 'source' to the cluster's node 'target'.
-        
+
         If is_down is True, the rsync will be run from the cluster's node
         'source' to the local 'target'.
         """
