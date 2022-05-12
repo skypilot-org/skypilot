@@ -1395,8 +1395,16 @@ class CloudVmRayBackend(backends.Backend):
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop)
 
-    def benchmark_summary(self, handle: ResourceHandle, log_dir: str, output_path: str, logger_name: str) -> str:
-        code = benchmark_lib.BenchmarkCodeGen.generate_summary(log_dir, output_path, logger_name)
+    def get_benchmark_summary(
+        self,
+        handle: ResourceHandle,
+        remote_log_dir: str,
+        remote_output_path: str,
+        local_log_dir: str,
+        logger_name: str) -> None:
+        # generate a benchmark summary on a remote cluster.
+        code = benchmark_lib.BenchmarkCodeGen.generate_summary(
+            remote_log_dir, remote_output_path, logger_name)
         returncode, _, stderr = self.run_on_head(handle,
                                                  code,
                                                  require_outputs=True)
@@ -1404,6 +1412,15 @@ class CloudVmRayBackend(backends.Backend):
                                         'Failed to generate a benchmark summary',
                                         stderr=stderr,
                                         raise_error=True)
+
+        # download the summary to the local machine.
+        self._rsync_up(handle,
+                       remote_output_path,
+                       local_log_dir,
+                       stream_logs=False,
+                       is_down=True,
+                       filter_with_gitignore=False,
+                       raise_error=True)
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
@@ -2342,8 +2359,14 @@ class CloudVmRayBackend(backends.Backend):
         log_path: str = '/dev/null',
         ip: Optional[str] = None,
         raise_error: bool = True,
+        is_down: bool = False,
+        filter_with_gitignore: bool = True,
     ) -> None:
-        """Runs rsync from 'source' to the cluster's node 'target'."""
+        """Runs rsync from 'source' to the cluster's node 'target'.
+        
+        If is_down is True, the rsync will be run from the cluster's node
+        'source' to the local 'target'.
+        """
         # Attempt to use 'rsync user@ip' directly, which is much faster than
         # going through ray (either 'ray rsync_*' or sdk.rsync()).
         if ip is None:
@@ -2361,27 +2384,36 @@ class CloudVmRayBackend(backends.Backend):
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
         rsync_command = ['rsync', _RSYNC_DISPLAY_OPTION]
-        # Legend
-        #   dir-merge: ignore file can appear in any subdir, applies to that
-        #     subdir downwards
-        # Note that "-" is mandatory for rsync and means all patterns in the
-        # ignore files are treated as *exclude* patterns.  Non-exclude
-        # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
-        # allows it.
-        rsync_command.append(_RSYNC_FILTER_OPTION)
-        git_exclude = '.git/info/exclude'
-        if (pathlib.Path(source) / git_exclude).exists():
-            # Ensure file exists; otherwise, rsync will error out.
-            rsync_command.append(_RSYNC_EXCLUDE_OPTION)
+
+        if filter_with_gitignore:
+            # Legend
+            #   dir-merge: ignore file can appear in any subdir, applies to that
+            #     subdir downwards
+            # Note that "-" is mandatory for rsync and means all patterns in the
+            # ignore files are treated as *exclude* patterns.  Non-exclude
+            # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
+            # allows it.
+            rsync_command.append(_RSYNC_FILTER_OPTION)
+            git_exclude = '.git/info/exclude'
+            if (pathlib.Path(source) / git_exclude).exists():
+                # Ensure file exists; otherwise, rsync will error out.
+                rsync_command.append(_RSYNC_EXCLUDE_OPTION)
 
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,
                                            self._ssh_control_name(handle)))
         rsync_command.append(f'-e "ssh {ssh_options}"')
-        rsync_command.extend([
-            source,
-            f'{ssh_user}@{ip}:{target}',
-        ])
+
+        if is_down:
+            rsync_command.extend([
+                f'{ssh_user}@{ip}:{source}',
+                target,
+            ])
+        else:
+            rsync_command.extend([
+                source,
+                f'{ssh_user}@{ip}:{target}',
+            ])
         command = ' '.join(rsync_command)
 
         returncode = log_lib.run_with_log(command,
