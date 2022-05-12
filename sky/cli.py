@@ -45,8 +45,6 @@ from rich import progress as rich_progress
 
 import sky
 from sky import backends
-from sky import benchmark_state
-from sky import benchmark_utils
 from sky import check as sky_check
 from sky import clouds
 from sky import data
@@ -54,6 +52,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
+from sky.benchmark import benchmark_state, benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import data_utils
 from sky.data.storage import StoreType
@@ -951,12 +950,12 @@ def _parallel_launch(yaml_paths: List[str], cluster_names: List[str],
 
 
 @cli.group(cls=_NaturalOrderGroup)
-def benchmark():
+def bench():
     """Benchmark related commands."""
     pass
 
 
-@benchmark.command('launch', cls=_DocumentedCodeCommand)
+@bench.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 @click.option('--benchmark',
               '-b',
@@ -1119,7 +1118,7 @@ def benchmark_launch(
     backend_utils.run('sky status')
 
 
-@benchmark.command('ls', cls=_DocumentedCodeCommand)
+@bench.command('ls', cls=_DocumentedCodeCommand)
 def benchmark_ls() -> None:
     """List the benchmark history."""
     benchmarks = benchmark_state.get_benchmarks()
@@ -1190,7 +1189,7 @@ def _download_and_update_benchmark_logs(benchmark: str, callback: str,
         )
 
 
-@benchmark.command('show', cls=_DocumentedCodeCommand)
+@bench.command('show', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
 @click.option('--total-iters',
               type=int,
@@ -1347,7 +1346,7 @@ def _terminate_or_stop_benchmark(benchmark, except_clusters, terminate, yes):
     benchmark_state.finish_benchmark(benchmark)
 
 
-@benchmark.command('stop', cls=_DocumentedCodeCommand)
+@bench.command('stop', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
 @click.option('--except',
               '-e',
@@ -1374,7 +1373,7 @@ def benchmark_stop(
                                  yes=yes)
 
 
-@benchmark.command('down', cls=_DocumentedCodeCommand)
+@bench.command('down', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
 @click.option('--except',
               '-e',
@@ -1401,7 +1400,7 @@ def benchmark_down(
                                  yes=yes)
 
 
-@benchmark.command('delete', cls=_DocumentedCodeCommand)
+@bench.command('delete', cls=_DocumentedCodeCommand)
 @click.argument('benchmarks', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
