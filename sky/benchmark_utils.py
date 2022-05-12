@@ -14,10 +14,13 @@ logger = sky_logging.init_logger(__name__)
 
 SKY_CLOUD_BENCHMARK_DIR = '~/sky_benchmark_dir'
 SKY_BENCHMARK_SUMMARY = '_summary.json'
-SKY_CLOUD_BENCHMARK_SUMMARY = os.path.join(SKY_CLOUD_BENCHMARK_DIR, SKY_BENCHMARK_SUMMARY)
+SKY_CLOUD_BENCHMARK_SUMMARY = os.path.join(SKY_CLOUD_BENCHMARK_DIR,
+                                           SKY_BENCHMARK_SUMMARY)
 SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 
-def get_benchmark_summaries(benchmark: str, callback: str, clusters: List[str]) -> Dict[str, Dict[str, int]]:
+
+def get_benchmark_summaries(benchmark: str, callback: str,
+                            clusters: List[str]) -> Dict[str, Dict[str, int]]:
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
@@ -41,8 +44,9 @@ def get_benchmark_summaries(benchmark: str, callback: str, clusters: List[str]) 
         download_dir = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
         os.makedirs(download_dir, exist_ok=True)
         try:
-            backend.get_benchmark_summary(
-                handle, log_dir, SKY_CLOUD_BENCHMARK_SUMMARY, download_dir, callback)
+            backend.get_benchmark_summary(handle, log_dir,
+                                          SKY_CLOUD_BENCHMARK_SUMMARY,
+                                          download_dir, callback)
             progress.update(task, advance=1)
         except exceptions.CommandError as e:
             logger.error(
@@ -58,7 +62,8 @@ def get_benchmark_summaries(benchmark: str, callback: str, clusters: List[str]) 
     # Read the summaries from the locally saved files.
     summaries = {}
     for cluster in clusters:
-        summary_path = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster, SKY_BENCHMARK_SUMMARY)
+        summary_path = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster,
+                                    SKY_BENCHMARK_SUMMARY)
         if os.path.exists(summary_path):
             with open(summary_path, 'r') as f:
                 summary = json.load(f)

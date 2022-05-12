@@ -58,26 +58,28 @@ class BenchmarkStatus(enum.Enum):
     FINISHED = 'FINISHED'
 
 
-def add_benchmark(benchmark_name: str, task_name: Union[None, str], callback: str) -> None:
+def add_benchmark(benchmark_name: str, task_name: Union[None, str],
+                  callback: str) -> None:
     """Add a new benchmark."""
     launched_at = int(time.time())
     if task_name is None:
         _BENCHMARK_DB.cursor.execute(
             'INSERT INTO benchmark'
             '(name, task, launched_at, callback, status) '
-            'VALUES (?, NULL, ?, ?, ?)',
-            (benchmark_name, launched_at, callback, BenchmarkStatus.RUNNING.value))
+            'VALUES (?, NULL, ?, ?, ?)', (benchmark_name, launched_at, callback,
+                                          BenchmarkStatus.RUNNING.value))
     else:
         _BENCHMARK_DB.cursor.execute(
             'INSERT INTO benchmark'
             '(name, task, launched_at, callback, status) '
-            'VALUES (?, ?, ?, ?, ?)',
-            (benchmark_name, task_name, launched_at, callback, BenchmarkStatus.RUNNING.value))
+            'VALUES (?, ?, ?, ?, ?)', (benchmark_name, task_name, launched_at,
+                                       callback, BenchmarkStatus.RUNNING.value))
     _BENCHMARK_DB.conn.commit()
 
 
-def add_benchmark_result(benchmark_name: str,
-                         cluster_handle: 'backend_lib.Backend.ResourceHandle') -> None:
+def add_benchmark_result(
+        benchmark_name: str,
+        cluster_handle: 'backend_lib.Backend.ResourceHandle') -> None:
     name = cluster_handle.cluster_name
     num_nodes = cluster_handle.launched_nodes
     resources = pickle.dumps(cluster_handle.launched_resources)
@@ -90,12 +92,9 @@ def add_benchmark_result(benchmark_name: str,
     _BENCHMARK_DB.conn.commit()
 
 
-def update_benchmark_result(benchmark_name: str,
-                            cluster_name: str,
-                            start_ts: int,
-                            first_ts: Union[None, int],
-                            last_ts: int,
-                            iters: int) -> None:
+def update_benchmark_result(benchmark_name: str, cluster_name: str,
+                            start_ts: int, first_ts: Union[None, int],
+                            last_ts: int, iters: int) -> None:
     if first_ts is None:
         _BENCHMARK_DB.cursor.execute(
             'UPDATE benchmark_results SET '
@@ -121,17 +120,17 @@ def finish_benchmark(benchmark_name: str):
 
 def delete_benchmark(benchmark_name: str) -> None:
     """Delete a benchmark result."""
-    _BENCHMARK_DB.cursor.execute('DELETE FROM benchmark_results where benchmark=(?)',
-                                (benchmark_name,))
+    _BENCHMARK_DB.cursor.execute(
+        'DELETE FROM benchmark_results where benchmark=(?)', (benchmark_name,))
     _BENCHMARK_DB.cursor.execute('DELETE FROM benchmark WHERE name=(?)',
-                                (benchmark_name,))
+                                 (benchmark_name,))
     _BENCHMARK_DB.conn.commit()
 
 
 def get_benchmark_from_name(benchmark_name: str) -> Optional[Dict[str, Any]]:
     """Get a benchmark from its name."""
-    rows = _BENCHMARK_DB.cursor.execute('SELECT * FROM benchmark WHERE name=(?)',
-                                        (benchmark_name,))
+    rows = _BENCHMARK_DB.cursor.execute(
+        'SELECT * FROM benchmark WHERE name=(?)', (benchmark_name,))
     for name, task, launched_at, callback, status in rows:
         record = {
             'name': name,
@@ -160,7 +159,9 @@ def get_benchmarks() -> List[Dict[str, Any]]:
 
 
 def get_benchmark_results(benchmark_name: str) -> List[Dict[str, Any]]:
-    rows = _BENCHMARK_DB.cursor.execute('select * from benchmark_results where benchmark=(?)', (benchmark_name,))
+    rows = _BENCHMARK_DB.cursor.execute(
+        'select * from benchmark_results where benchmark=(?)',
+        (benchmark_name,))
     records = []
     for cluster, num_nodes, resources, start_ts, first_ts, last_ts, iters, benchmark in rows:
         record = {

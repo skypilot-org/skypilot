@@ -78,7 +78,8 @@ def summarize_wandb(log_dir: str, output_path: str) -> None:
     summary = {}
     summary['last_ts'] = int(wandb_summary['_timestamp'])
     summary['iters'] = int(wandb_summary['_step'])
-    summary['start_ts'] = int(wandb_summary['_timestamp'] - wandb_summary['_runtime'])
+    summary['start_ts'] = int(wandb_summary['_timestamp'] -
+                              wandb_summary['_runtime'])
 
     # FIXME: This is a hack.
     from wandb.proto import wandb_internal_pb2
@@ -110,7 +111,10 @@ class BenchmarkCodeGen:
     _PREFIX = ['from sky.skylet import benchmark_lib']
 
     @classmethod
-    def generate_summary(cls, log_dir: str, output_path: str, callback: str) -> None:
+    def generate_summary(cls,
+                         log_dir: str,
+                         output_path: str,
+                         callback: str) -> None:
         """Generate a summary of the log."""
         assert callback in ['sky', 'tensorboard', 'wandb']
         parse_fn = {

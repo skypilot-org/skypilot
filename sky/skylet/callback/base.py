@@ -11,12 +11,17 @@ BYTE_ORDER = 'big'
 
 class SkyCallback(object):
 
-    def __init__(self, log_dir=SKY_CLOUD_BENCHMARK_DIR, max_queue_size=10, flush_secs=30):
+    def __init__(self,
+                 log_dir=SKY_CLOUD_BENCHMARK_DIR,
+                 max_queue_size=10,
+                 flush_secs=30):
         self.log_dir = os.path.expanduser(log_dir)
         os.makedirs(self.log_dir, exist_ok=True)
 
-        self._general_file_writer = open(os.path.join(self.log_dir, TIMESTAMP_LOG), 'wb')
-        self._async_writer = _AsyncWriter(self._general_file_writer, max_queue_size, flush_secs)
+        self._general_file_writer = open(
+            os.path.join(self.log_dir, TIMESTAMP_LOG), 'wb')
+        self._async_writer = _AsyncWriter(self._general_file_writer,
+                                          max_queue_size, flush_secs)
         # Save the first timestamp
         self.save_timestamp()
         self.flush()
@@ -56,9 +61,8 @@ class _AsyncWriter(object):
         self._writer = record_writer
         self._closed = False
         self._byte_queue = queue.Queue(max_queue_size)
-        self._worker = _AsyncWriterThread(
-            self._byte_queue, self._writer, flush_secs
-        )
+        self._worker = _AsyncWriterThread(self._byte_queue, self._writer,
+                                          flush_secs)
         self._lock = threading.Lock()
         self._worker.start()
 

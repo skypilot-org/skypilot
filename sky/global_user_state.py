@@ -158,8 +158,7 @@ def add_or_update_cluster(cluster_name: str,
         '(SELECT benchmark FROM clusters WHERE name=?), NULL)'
         ')',  # VALUES
         (cluster_name, cluster_launched_at, handle, last_use, status.value,
-         cluster_name, ClusterStatus.STOPPED.value,
-         cluster_name))
+         cluster_name, ClusterStatus.STOPPED.value, cluster_name))
     _DB.conn.commit()
 
 
@@ -241,8 +240,8 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def set_cluster_benchmark_name(
-    cluster_name: str, benchmark_name: Union[None, str]) -> None:
+def set_cluster_benchmark_name(cluster_name: str,
+                               benchmark_name: Union[None, str]) -> None:
     if benchmark_name is None:
         _DB.cursor.execute('UPDATE clusters SET benchmark=NULL WHERE name=(?)',
                            (cluster_name,))
@@ -257,8 +256,8 @@ def set_cluster_benchmark_name(
 
 
 def get_clusters_from_benchmark(benchmark_name: str) -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute(
-        'SELECT * FROM clusters WHERE benchmark=(?)', (benchmark_name,))
+    rows = _DB.cursor.execute('SELECT * FROM clusters WHERE benchmark=(?)',
+                              (benchmark_name,))
     records = []
     for name, launched_at, handle, last_use, status, autostop, benchmark in rows:
         record = {

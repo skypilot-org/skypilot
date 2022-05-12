@@ -1395,23 +1395,24 @@ class CloudVmRayBackend(backends.Backend):
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop)
 
-    def get_benchmark_summary(
-        self,
-        handle: ResourceHandle,
-        remote_log_dir: str,
-        remote_output_path: str,
-        local_log_dir: str,
-        callback: str) -> None:
+    def get_benchmark_summary(self,
+                              handle: ResourceHandle,
+                              remote_log_dir: str,
+                              remote_output_path: str,
+                              local_log_dir: str,
+                              callback: str) -> None:
         # Generate a benchmark summary on a remote cluster.
         code = benchmark_lib.BenchmarkCodeGen.generate_summary(
             remote_log_dir, remote_output_path, callback)
         returncode, _, stderr = self.run_on_head(handle,
                                                  code,
                                                  require_outputs=True)
-        backend_utils.handle_returncode(returncode, code,
-                                        'Failed to generate a benchmark summary',
-                                        stderr=stderr,
-                                        raise_error=True)
+        backend_utils.handle_returncode(
+            returncode,
+            code,
+            'Failed to generate a benchmark summary',
+            stderr=stderr,
+            raise_error=True)
 
         # Download the summary to the local machine.
         self._rsync_up(handle,
