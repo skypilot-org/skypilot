@@ -11,7 +11,7 @@ BYTE_ORDER = 'big'
 
 class SkyCallback(object):
 
-    def __init__(self, log_dir: str = SKY_CLOUD_BENCHMARK_DIR, max_queue_size: int = 10, flush_secs: int = 30) -> None:
+    def __init__(self, log_dir=SKY_CLOUD_BENCHMARK_DIR, max_queue_size=10, flush_secs=30):
         self.log_dir = os.path.expanduser(log_dir)
         os.makedirs(self.log_dir, exist_ok=True)
 
