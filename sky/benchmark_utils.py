@@ -1,7 +1,9 @@
 import json
 import os
+from rich import progress as rich_progress
 import subprocess
 from typing import List, Dict
+
 from sky import global_user_state, sky_logging
 from sky import backends
 from sky import exceptions
@@ -15,6 +17,14 @@ SKY_CLOUD_BENCHMARK_SUMMARY = os.path.join(SKY_CLOUD_BENCHMARK_DIR, 'summary.jso
 SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 
 def get_benchmark_summaries(benchmark: str, logger_name: str, clusters: List[str]) -> Dict[str, Dict[str, int]]:
+    plural = 's' if len(clusters) > 1 else ''
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
+    task = progress.add_task(
+        f'[bold cyan]Downloading {len(clusters)} benchmark log{plural}[/]',
+        total=len(clusters))
+
     def _get_summary(cluster: str):
         handle = global_user_state.get_handle_from_cluster_name(cluster)
         backend = backend_utils.get_backend_from_handle(handle)
@@ -30,14 +40,19 @@ def get_benchmark_summaries(benchmark: str, logger_name: str, clusters: List[str
         try:
             backend.get_benchmark_summary(
                 handle, log_dir, SKY_CLOUD_BENCHMARK_SUMMARY, download_dir, logger_name)
+            progress.update(task, advance=1)
         except exceptions.CommandError as e:
             logger.error(
                 f'Command failed with code {e.returncode}: {e.command}')
             logger.error(e.error_msg)
 
-    with backend_utils.safe_console_status('[bold cyan]Downloading logs[/]'): # FIXME
+    with progress:
         backend_utils.run_in_parallel(_get_summary, clusters)
+        progress.live.transient = False
+        # Make sure the progress bar not mess up the terminal.
+        progress.refresh()
 
+    # Read the summaries from the locally saved files.
     summaries = {}
     for cluster in clusters:
         summary_path = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster, 'summary.json')
