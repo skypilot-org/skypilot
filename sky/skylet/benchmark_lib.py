@@ -4,11 +4,40 @@ import os
 import shlex
 from typing import Dict, List
 
+from sky.skylet.logger import base_logger
+
 
 def _dict_to_json(json_dict: Dict[str, int], output_path: str):
     json_str = json.dumps(json_dict)
     with open(output_path, 'w') as f:
         f.write(json_str)
+
+
+def summarize_default_logger(log_dir: str, output_path: str) -> None:
+    def read_timestamp(f):
+        b = f.read(base_logger.NUM_BYTES_PER_TIMESTAMP)
+        ts = int.from_bytes(b, base_logger.BYTE_ORDER)
+        return ts
+
+    timestamp_log = os.path.join(log_dir, base_logger.TIMESTAMP_LOG)
+    timestamps = []
+    with open(timestamp_log, 'rb') as f:
+        while True:
+            ts = read_timestamp(f)
+            if ts == 0:
+                # EOF
+                break
+            else:
+                timestamps.append(ts)
+    if len(timestamps) < 2:
+        raise ValueError(f'Not enough timestamps found in {f}.')
+
+    summary = {}
+    summary['start_ts'] = int(timestamps[0])
+    summary['first_ts'] = int(timestamps[1])
+    summary['last_ts'] = int(timestamps[-1])
+    summary['iters'] = len(timestamps[1:])
+    _dict_to_json(summary, output_path)
 
 
 def summarize_tensorboard(log_dir: str, output_path: str) -> None:
@@ -83,13 +112,18 @@ class BenchmarkCodeGen:
     @classmethod
     def generate_summary(cls, log_dir: str, output_path: str, logger_name: str) -> None:
         """Generate a summary of the log."""
-        assert logger_name in ['tensorboard', 'wandb']
+        assert logger_name in ['default', 'tensorboard', 'wandb']
+        parse_fn = {
+            'default': 'summarize_default_logger',
+            'tensoboard': 'summarize_tensorboard',
+            'wandb': 'summarize_wandb',
+        }
         code = [
             'import os',
             f'log_dir = os.path.expanduser({log_dir!r})',
             f'output_path = os.path.expanduser({output_path!r})',
             f'os.makedirs(os.path.dirname(output_path), exist_ok=True)',
-            f'benchmark_lib.summarize_{logger_name}(log_dir, output_path)',
+            f'benchmark_lib.{parse_fn[logger_name]}(log_dir, output_path)',
         ]
         return cls._build(code)
 

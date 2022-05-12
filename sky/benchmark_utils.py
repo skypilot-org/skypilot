@@ -31,10 +31,12 @@ def get_benchmark_summaries(benchmark: str, logger_name: str, clusters: List[str
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
-        if logger_name == 'wandb':
-            log_dir = os.path.join(SKY_CLOUD_BENCHMARK_DIR, 'wandb')
+        if logger_name == 'default':
+            log_dir = SKY_CLOUD_BENCHMARK_DIR
         elif logger_name == 'tensorboard':
             log_dir = SKY_CLOUD_BENCHMARK_DIR
+        elif logger_name == 'wandb':
+            log_dir = os.path.join(SKY_CLOUD_BENCHMARK_DIR, 'wandb')
 
         download_dir = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
         os.makedirs(download_dir, exist_ok=True)

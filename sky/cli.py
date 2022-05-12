@@ -965,8 +965,9 @@ def benchmark():
 @click.option('--logger',
               '-l',
               'logger_name',
-              required=True,
-              type=click.Choice(['wandb', 'tensorboard']),  # TODO: add none
+              default='default',
+              required=False,
+              type=click.Choice(['default', 'tensorboard', 'wandb']),
               help='Logger to track the task progress.')
 @_add_click_options(_TASK_OPTIONS)
 @click.option('--disk-size',
