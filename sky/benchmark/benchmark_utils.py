@@ -2,12 +2,12 @@ import json
 import os
 from rich import progress as rich_progress
 import subprocess
-from typing import List, Dict
+from typing import Dict, List
 
-from sky import global_user_state, sky_logging
 from sky import backends
 from sky import exceptions
-
+from sky import global_user_state
+from sky import sky_logging
 from sky.backends import backend_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -29,18 +29,17 @@ def get_benchmark_summaries(benchmark: str, callback: str,
         f'[bold cyan]Downloading {len(clusters)} benchmark log{plural}[/]',
         total=len(clusters))
 
+    # Generate a summary of the log in each cluster,
+    # and download the summary to the local benchmark directory.
     def _get_summary(cluster: str):
         handle = global_user_state.get_handle_from_cluster_name(cluster)
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
-        if callback == 'sky':
-            log_dir = SKY_CLOUD_BENCHMARK_DIR
-        elif callback == 'tensorboard':
-            log_dir = SKY_CLOUD_BENCHMARK_DIR
-        elif callback == 'wandb':
+        if callback == 'wandb':
             log_dir = os.path.join(SKY_CLOUD_BENCHMARK_DIR, 'wandb')
-
+        else:
+            log_dir = SKY_CLOUD_BENCHMARK_DIR
         download_dir = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
         os.makedirs(download_dir, exist_ok=True)
         try:
