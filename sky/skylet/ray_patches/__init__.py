@@ -51,5 +51,4 @@ def patch() -> None:
                _to_absolute('resource_demand_scheduler.py.patch'))
 
     from ray.autoscaler._private import autoscaler
-    _run_patch(autoscaler.__file__,
-               _to_absolute('autoscaler.py.patch'))
+    _run_patch(autoscaler.__file__, _to_absolute('autoscaler.py.patch'))
