@@ -457,6 +457,9 @@ class Resources:
             resources_fields['disk_size'] = int(config.pop('disk_size'))
         if config.get('region') is not None:
             resources_fields['region'] = config.pop('region')
+        if config.get('options') is not None:
+            # TODO: cosider benchmark options as resource options?
+            config.pop('options')
 
         if len(config) > 0:
             raise ValueError(f'Unknown fields in resources config: {config}')
