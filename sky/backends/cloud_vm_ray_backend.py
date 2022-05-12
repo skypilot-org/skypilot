@@ -449,7 +449,10 @@ class RetryingVmProvisioner(object):
                         # Per region.  Ex: Quota 'CPUS' exceeded.  Limit: 24.0
                         # in region us-west1.
                         self._blocked_regions.add(region.name)
-                elif code == 'ZONE_RESOURCE_POOL_EXHAUSTED':  # Per zone.
+                elif code in [
+                        'ZONE_RESOURCE_POOL_EXHAUSTED',
+                        'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS'
+                ]:  # Per zone.
                     self._blocked_zones.add(zone.name)
                 else:
                     assert False, error
