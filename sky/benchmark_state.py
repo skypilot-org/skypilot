@@ -163,16 +163,16 @@ def get_benchmark_results(benchmark_name: str) -> List[Dict[str, Any]]:
         'select * from benchmark_results where benchmark=(?)',
         (benchmark_name,))
     records = []
-    for cluster, num_nodes, resources, start_ts, first_ts, last_ts, iters, benchmark in rows:
+    for row in rows:
         record = {
-            'cluster': cluster,
-            'num_nodes': num_nodes,
-            'resources': pickle.loads(resources),
-            'start_ts': start_ts,
-            'first_ts': first_ts,
-            'last_ts': last_ts,
-            'iters': iters,
-            'benchmark': benchmark,
+            'cluster': row[0],
+            'num_nodes': row[1],
+            'resources': pickle.loads(row[2]),
+            'start_ts': row[3],
+            'first_ts': row[4],
+            'last_ts': row[5],
+            'iters': row[6],
+            'benchmark': row[7],
         }
         records.append(record)
     return records

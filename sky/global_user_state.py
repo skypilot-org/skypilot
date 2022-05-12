@@ -259,15 +259,15 @@ def get_clusters_from_benchmark(benchmark_name: str) -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE benchmark=(?)',
                               (benchmark_name,))
     records = []
-    for name, launched_at, handle, last_use, status, autostop, benchmark in rows:
+    for row in rows:
         record = {
-            'name': name,
-            'launched_at': launched_at,
-            'handle': pickle.loads(handle),
-            'last_use': last_use,
-            'status': ClusterStatus[status],
-            'autostop': autostop,
-            'benchmark': benchmark,
+            'name': row[0],
+            'launched_at': row[1],
+            'handle': pickle.loads(row[2]),
+            'last_use': row[3],
+            'status': ClusterStatus[row[4]],
+            'autostop': row[5],
+            'benchmark': row[6],
         }
         records.append(record)
     return records
@@ -277,15 +277,15 @@ def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
                               (cluster_name,))
-    for name, launched_at, handle, last_use, status, autostop, benchmark in rows:
+    for row in rows:
         record = {
-            'name': name,
-            'launched_at': launched_at,
-            'handle': pickle.loads(handle),
-            'last_use': last_use,
-            'status': ClusterStatus[status],
-            'autostop': autostop,
-            'benchmark': benchmark,
+            'name': row[0],
+            'launched_at': row[1],
+            'handle': pickle.loads(row[2]),
+            'last_use': row[3],
+            'status': ClusterStatus[row[4]],
+            'autostop': row[5],
+            'benchmark': row[6],
         }
         return record
 
@@ -293,16 +293,16 @@ def get_cluster_from_name(
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from clusters')
     records = []
-    for name, launched_at, handle, last_use, status, autostop, benchmark in rows:
+    for row in rows:
         # TODO: use namedtuple instead of dict
         record = {
-            'name': name,
-            'launched_at': launched_at,
-            'handle': pickle.loads(handle),
-            'last_use': last_use,
-            'status': ClusterStatus[status],
-            'autostop': autostop,
-            'benchmark': benchmark,
+            'name': row[0],
+            'launched_at': row[1],
+            'handle': pickle.loads(row[2]),
+            'last_use': row[3],
+            'status': ClusterStatus[row[4]],
+            'autostop': row[5],
+            'benchmark': row[6],
         }
         records.append(record)
     return records

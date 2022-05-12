@@ -81,7 +81,8 @@ def process_subprocess_stream(
                         continue
                     if start_streaming_at in line:
                         start_streaming_flag = True
-                    if end_streaming_at is not None and end_streaming_at in line:
+                    if (end_streaming_at is not None and
+                            end_streaming_at in line):
                         end_streaming_flag = True
                     if prefix is not None:
                         line = prefix + line
@@ -91,7 +92,8 @@ def process_subprocess_stream(
                     else:
                         stderr += line
                         out_stream = sys.stderr
-                    if stream_logs and start_streaming_flag and not end_streaming_flag:
+                    if (stream_logs and start_streaming_flag and
+                            not end_streaming_flag):
                         out_stream.write(line)
                         out_stream.flush()
                     if log_path != '/dev/null':

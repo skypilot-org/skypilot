@@ -929,7 +929,7 @@ def _parallel_launch(yaml_paths: List[str], cluster_names: List[str],
                 cmd += [f'--{arg_name}', str(arg)]
         launch_cmds.append(cmd)
 
-    # TODO: Display a rich progress bar summarizing the provision/setup status of clusters.
+    # TODO: Provide a rich progress bar for summarizing cluster setup status.
     def _launch_with_log(cluster: str, cmd: List[str], wait: int) -> None:
         time.sleep(wait)  # A bandage solution to avoid boto3 errors.
         log_lib.run_with_log(
@@ -1038,9 +1038,8 @@ def benchmark_launch(
                 options = [{'accelerators': gpu} for gpu in gpus]
                 gpus = None
             else:
-                raise ValueError(
-                    'The benchmark candidates are ambiguous. The user should not specify --gpus and resources.options together.'
-                )
+                raise ValueError('Provide benchmark candidates in either of '
+                                 '--gpus and resources.options in the YAML.')
     if options is None:
         options = [{}]
 
@@ -1106,16 +1105,17 @@ def benchmark_launch(
             global_user_state.set_cluster_benchmark_name(cluster, benchmark)
             benchmark_state.add_benchmark_result(benchmark, record['handle'])
 
-    logger.info(
-        f'\n{colorama.Fore.CYAN}Benchmark name: '
-        f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
-        '\nTo check the benchmark results (on the fly): '
-        f'{backend_utils.BOLD}sky benchmark show {benchmark}{backend_utils.RESET_BOLD}'
-        '\nTo stop the clusters: '
-        f'{backend_utils.BOLD}sky benchmark stop {benchmark}{backend_utils.RESET_BOLD}'
-        '\nTo teardown the clusters: '
-        f'{backend_utils.BOLD}sky benchmark down {benchmark}{backend_utils.RESET_BOLD}'
-    )
+    logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
+                f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
+                '\nTo check the benchmark results (on the fly): '
+                f'{backend_utils.BOLD}sky benchmark show '
+                f'{benchmark}{backend_utils.RESET_BOLD}'
+                '\nTo stop the clusters: '
+                f'{backend_utils.BOLD}sky benchmark stop '
+                f'{benchmark}{backend_utils.RESET_BOLD}'
+                '\nTo teardown the clusters: '
+                f'{backend_utils.BOLD}sky benchmark down '
+                f'{benchmark}{backend_utils.RESET_BOLD}')
     backend_utils.run('sky status')
 
 
@@ -1414,6 +1414,7 @@ def benchmark_down(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+# pylint: disable=redefined-builtin
 def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                      yes: bool) -> None:
     """Delete benchmarks from the history."""
@@ -1427,9 +1428,8 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
     if all:
         to_delete = benchmark_state.get_benchmarks()
         if len(benchmarks) > 0:
-            print(
-                'Both --all and benchmark(s) specified for sky benchmark delete. '
-                'Letting --all take effect.')
+            print('Both --all and benchmark(s) specified '
+                  'for sky benchmark delete. Letting --all take effect.')
 
     benchmark_list = ', '.join([r['name'] for r in to_delete])
     if not yes:

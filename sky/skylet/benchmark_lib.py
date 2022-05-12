@@ -4,6 +4,8 @@ import os
 import shlex
 from typing import Dict, List
 
+from sky.skylet.callback import base as sky_callback
+
 
 def _dict_to_json(json_dict: Dict[str, int], output_path: str):
     json_str = json.dumps(json_dict)
@@ -12,7 +14,6 @@ def _dict_to_json(json_dict: Dict[str, int], output_path: str):
 
 
 def summarize_timestamps(log_dir: str, output_path: str) -> None:
-    from sky.skylet.callback import base as sky_callback
 
     def read_timestamp(f):
         b = f.read(sky_callback.NUM_BYTES_PER_TIMESTAMP)
@@ -124,7 +125,7 @@ class BenchmarkCodeGen:
             'import os',
             f'log_dir = os.path.expanduser({log_dir!r})',
             f'output_path = os.path.expanduser({output_path!r})',
-            f'os.makedirs(os.path.dirname(output_path), exist_ok=True)',
+            'os.makedirs(os.path.dirname(output_path), exist_ok=True)',
             f'benchmark_lib.{parse_fn[callback]}(log_dir, output_path)',
         ]
         return cls._build(code)
