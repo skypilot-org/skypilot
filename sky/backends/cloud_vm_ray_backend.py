@@ -35,7 +35,8 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
-from sky.skylet import autostop_lib, benchmark_lib
+from sky.skylet import autostop_lib
+from sky.skylet import benchmark_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
