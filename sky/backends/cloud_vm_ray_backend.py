@@ -1401,10 +1401,10 @@ class CloudVmRayBackend(backends.Backend):
         remote_log_dir: str,
         remote_output_path: str,
         local_log_dir: str,
-        logger_name: str) -> None:
+        callback: str) -> None:
         # Generate a benchmark summary on a remote cluster.
         code = benchmark_lib.BenchmarkCodeGen.generate_summary(
-            remote_log_dir, remote_output_path, logger_name)
+            remote_log_dir, remote_output_path, callback)
         returncode, _, stderr = self.run_on_head(handle,
                                                  code,
                                                  require_outputs=True)
