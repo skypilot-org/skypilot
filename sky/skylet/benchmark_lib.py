@@ -42,8 +42,8 @@ def summarize_timestamps(log_dir: str, output_path: str) -> None:
 
 
 def summarize_tensorboard(log_dir: str, output_path: str) -> None:
-    import pandas as pd
-    from tensorboard.backend.event_processing import event_accumulator
+    import pandas as pd  # pylint: disable=import-outside-toplevel
+    from tensorboard.backend.event_processing import event_accumulator  # pylint: disable=import-outside-toplevel
 
     event_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
     if not event_files:
@@ -68,7 +68,7 @@ def summarize_tensorboard(log_dir: str, output_path: str) -> None:
 
 
 def summarize_wandb(log_dir: str, output_path: str) -> None:
-    import pandas as pd
+    import pandas as pd  # pylint: disable=import-outside-toplevel
 
     # Use the latest wandb log.
     wandb_summary = os.path.join(log_dir, 'latest-run/files/wandb-summary.json')
@@ -83,8 +83,8 @@ def summarize_wandb(log_dir: str, output_path: str) -> None:
                               wandb_summary['_runtime'])
 
     # FIXME: This is a hack.
-    from wandb.proto import wandb_internal_pb2
-    from wandb.sdk.internal import datastore
+    from wandb.proto import wandb_internal_pb2  # pylint: disable=import-outside-toplevel
+    from wandb.sdk.internal import datastore  # pylint: disable=import-outside-toplevel
 
     wandb_logs = glob.glob(os.path.join(log_dir, 'latest-run', 'run-*.wandb'))
     assert len(wandb_logs) == 1
