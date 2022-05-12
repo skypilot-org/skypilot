@@ -1,5 +1,6 @@
 include sky/clouds/service_catalog/data/*
 include sky/skylet/*.sh
+include sky/skylet/callback/*
 include sky/skylet/providers/aws/*
 include sky/skylet/providers/aws/cloudwatch/*
 include sky/skylet/providers/azure/*
