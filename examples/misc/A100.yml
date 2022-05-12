@@ -1,6 +1,7 @@
-name: A100
+name: gcp-a100
 
 resources:
+  cloud: gcp
   accelerators: A100
 
 setup: |
