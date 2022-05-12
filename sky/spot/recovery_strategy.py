@@ -111,6 +111,7 @@ class StrategyExecutor:
 
         When recover() is called the cluster should be in STOPPED status (i.e.
         partially down).
+
         Returns: The timestamp job started.
         """
         raise NotImplementedError
