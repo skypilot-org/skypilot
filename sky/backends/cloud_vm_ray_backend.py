@@ -2420,9 +2420,10 @@ class CloudVmRayBackend(backends.Backend):
                                           log_path=log_path,
                                           stream_logs=stream_logs,
                                           shell=True)
+        up_or_down = 'up' if not is_down else 'down'
         backend_utils.handle_returncode(
             returncode,
-            command, f'Failed to rsync up {source} -> {target}, '
+            command, f'Failed to rsync {up_or_down} {source} -> {target}, '
             f'see {log_path} for details.',
             raise_error=raise_error)
 
