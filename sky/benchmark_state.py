@@ -121,15 +121,17 @@ def finish_benchmark(benchmark_name: str):
 
 def delete_benchmark(benchmark_name: str) -> None:
     """Delete a benchmark result."""
+    _BENCHMARK_DB.cursor.execute('DELETE FROM benchmark_results where benchmark=(?)',
+                                (benchmark_name,))
     _BENCHMARK_DB.cursor.execute('DELETE FROM benchmark WHERE name=(?)',
-                       (benchmark_name,))
+                                (benchmark_name,))
     _BENCHMARK_DB.conn.commit()
 
 
 def get_benchmark_from_name(benchmark_name: str) -> Optional[Dict[str, Any]]:
     """Get a benchmark from its name."""
     rows = _BENCHMARK_DB.cursor.execute('SELECT * FROM benchmark WHERE name=(?)',
-                              (benchmark_name,))
+                                        (benchmark_name,))
     for name, task, launched_at, logger_name, status in rows:
         record = {
             'name': name,
