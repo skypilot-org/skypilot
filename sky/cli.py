@@ -914,7 +914,7 @@ def _parallel_launch(yaml_paths: List[str], cluster_names: List[str],
                      launch_params: List[Dict[str, Any]]) -> None:
     num_clusters = len(cluster_names)
     assert (len(yaml_paths) == num_clusters and
-        len(launch_params) == num_clusters)
+            len(launch_params) == num_clusters)
 
     launch_cmds = []
     for yaml_path, cluster, param in zip(yaml_paths, cluster_names,
@@ -1175,8 +1175,7 @@ def benchmark_ls() -> None:
         click.echo('No benchmark history found.')
 
 
-def _download_and_update_benchmark_logs(benchmark: str,
-                                        callback: str,
+def _download_and_update_benchmark_logs(benchmark: str, callback: str,
                                         clusters: List[str]) -> None:
     summaries = benchmark_utils.get_benchmark_summaries(benchmark, callback,
                                                         clusters)
@@ -1209,8 +1208,7 @@ def _download_and_update_benchmark_logs(benchmark: str,
               required=False,
               help='Show all information in full.')
 # pylint: disable=redefined-builtin
-def benchmark_show(benchmark: str,
-                   total_iters: Optional[int],
+def benchmark_show(benchmark: str, total_iters: Optional[int],
                    force_download: bool, all: bool) -> None:
     """Show a benchmark report."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
@@ -1218,7 +1216,8 @@ def benchmark_show(benchmark: str,
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
 
     callback = record['callback']
-    if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or force_download):
+    if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or
+            force_download):
         clusters = global_user_state.get_clusters_from_benchmark(benchmark)
         running = [
             cluster['name']
@@ -1415,8 +1414,7 @@ def benchmark_down(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-def benchmark_delete(benchmarks: Tuple[str],
-                     all: Optional[bool],
+def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                      yes: bool) -> None:
     """Delete benchmarks from the history."""
     to_delete = []

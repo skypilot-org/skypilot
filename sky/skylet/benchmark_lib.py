@@ -111,9 +111,7 @@ class BenchmarkCodeGen:
     _PREFIX = ['from sky.skylet import benchmark_lib']
 
     @classmethod
-    def generate_summary(cls,
-                         log_dir: str,
-                         output_path: str,
+    def generate_summary(cls, log_dir: str, output_path: str,
                          callback: str) -> None:
         """Generate a summary of the log."""
         assert callback in ['sky', 'tensorboard', 'wandb']
