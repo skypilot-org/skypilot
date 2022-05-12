@@ -26,7 +26,6 @@ class LineProcessor(object):
         pass
 
 
-# FIXME: the rich status library is turned off because it is not thread-safe.
 class RayUpLineProcessor(LineProcessor):
     """A processor for `ray up` log lines."""
 
