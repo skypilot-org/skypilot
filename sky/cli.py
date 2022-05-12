@@ -52,11 +52,13 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
-from sky.benchmark import benchmark_state, benchmark_utils
+from sky.benchmark import benchmark_state
+from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import data_utils
 from sky.data.storage import StoreType
-from sky.skylet import log_lib, job_lib
+from sky.skylet import log_lib
+from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.utils.cli_utils import status_utils
 
