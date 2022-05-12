@@ -10,11 +10,7 @@
 ---
 >             
 >             # NOTE(sky): do not autoscale when upsclaing speed is 0.
->             with open('/tmp/myautoscale.log', 'a') as f:
->                 print('My resource demand scheduler, upscaling_speed:', self.upscaling_speed, file=f)
 >             if self.upscaling_speed == 0:
->                 with open('/tmp/myautoscale.log', 'a') as f:
->                     print('Upscaling=0', file=f)
 >                 upper_bound = 0
 >             if upper_bound >= 0:
 556c568
