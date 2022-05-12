@@ -24,7 +24,7 @@ _TPU_REGIONS = [
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
 # count -> vm type
-_A100_INSTANCE_TYPES = {
+A100_INSTANCE_TYPES = {
     1: 'a2-highgpu-1g',
     2: 'a2-highgpu-2g',
     4: 'a2-highgpu-4g',
@@ -32,7 +32,7 @@ _A100_INSTANCE_TYPES = {
     16: 'a2-megagpu-16g',
 }
 # count -> host memory
-_A100_HOST_MEMORY = {
+A100_HOST_MEMORY = {
     1: 85,
     2: 170,
     4: 340,
@@ -42,7 +42,7 @@ _A100_HOST_MEMORY = {
 
 # Pricing.  All info assumes us-central1.
 # In general, query pricing from the cloud.
-_ON_DEMAND_PRICES = {
+ON_DEMAND_PRICES = {
     # VMs: https://cloud.google.com/compute/all-pricing.
     # N1 standard
     'n1-standard-1': 0.04749975,
@@ -69,7 +69,7 @@ _ON_DEMAND_PRICES = {
     'a2-megagpu-16g': 8.919152,
 }
 
-_SPOT_PRICES = {
+SPOT_PRICES = {
     # VMs: https://cloud.google.com/compute/all-pricing.
     # N1 standard
     'n1-standard-1': 0.01,
@@ -162,13 +162,13 @@ def list_accelerators(
             assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
             new_infos.append(
                 info._replace(
-                    instance_type=_A100_INSTANCE_TYPES[info.accelerator_count],
-                    memory=_A100_HOST_MEMORY[info.accelerator_count],
+                    instance_type=A100_INSTANCE_TYPES[info.accelerator_count],
+                    memory=A100_HOST_MEMORY[info.accelerator_count],
                     # total cost = VM instance + GPU.
-                    price=info.price + _ON_DEMAND_PRICES[_A100_INSTANCE_TYPES[
+                    price=info.price + ON_DEMAND_PRICES[A100_INSTANCE_TYPES[
                         info.accelerator_count]],
                     spot_price=info.spot_price +
-                    _SPOT_PRICES[_A100_INSTANCE_TYPES[info.accelerator_count]],
+                    SPOT_PRICES[A100_INSTANCE_TYPES[info.accelerator_count]],
                 ))
         results['A100'] = new_infos
     return results

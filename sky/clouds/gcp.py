@@ -101,8 +101,8 @@ class GCP(clouds.Cloud):
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
         if use_spot:
-            return gcp_catalog._SPOT_PRICES[instance_type]
-        return gcp_catalog._ON_DEMAND_PRICES[instance_type]
+            return gcp_catalog.SPOT_PRICES[instance_type]
+        return gcp_catalog.ON_DEMAND_PRICES[instance_type]
 
     def accelerators_to_hourly_cost(self, accelerators):
         assert len(accelerators) == 1, accelerators
@@ -137,7 +137,7 @@ class GCP(clouds.Cloud):
                       ) == 1, 'more than one accelerator candidates'
             acc, acc_count = list(accelerator.items())[0]
             if acc == 'A100':
-                default_type = gcp_catalog._A100_INSTANCE_TYPES[acc_count]
+                default_type = gcp_catalog.A100_INSTANCE_TYPES[acc_count]
         return default_type
 
     @classmethod
@@ -268,7 +268,7 @@ class GCP(clouds.Cloud):
         return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
 
     def instance_type_exists(self, instance_type):
-        return instance_type in gcp_catalog._ON_DEMAND_PRICES.keys()
+        return instance_type in gcp_catalog.ON_DEMAND_PRICES.keys()
 
     def region_exists(self, region: str) -> bool:
         return service_catalog.region_exists(region, 'gcp')
