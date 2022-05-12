@@ -1,3 +1,4 @@
+"""Sky benchmark database, backed by sqlite."""
 import enum
 import os
 import pathlib
@@ -15,6 +16,14 @@ os.makedirs(pathlib.Path(_BENCHMARK_DB_PATH).parents[0], exist_ok=True)
 
 
 class _BenchmarkSQLiteConn(threading.local):
+    """Thread-local connection to the sqlite3 database.
+
+    The database has two types of tables.
+    1. Benchmark table stores the benchmark name and
+        which resources are used for benchmarking.
+    2. Benchmark Results table stores the benchmark results
+        of the individual clusters used for benchmarking.
+    """
 
     def __init__(self) -> None:
         super().__init__()

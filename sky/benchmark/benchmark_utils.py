@@ -1,3 +1,4 @@
+"""Functions to download and parse the benchmark data."""
 import json
 import os
 from rich import progress as rich_progress
