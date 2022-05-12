@@ -29,5 +29,5 @@ def _exec(i):
     sky.exec(dag, cluster_name=cluster, detach_run=True)
 
 
-with pool.ThreadPool() as p:
+with pool.ThreadPool(8) as p:
     list(p.imap(_exec, range(32)))

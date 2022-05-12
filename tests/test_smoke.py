@@ -479,7 +479,7 @@ def test_inline_spot_env():
         'test-inline-spot-env',
         [
             f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
-            'sleep 5',
+            'sleep 10',
             f'sky spot status | grep {name} | grep SUCCEEDED',
         ],
         f'sky spot cancel -y -n {name}',
