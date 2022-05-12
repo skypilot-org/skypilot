@@ -46,8 +46,9 @@ class SpotController:
         logger.info(f'Started monitoring spot task {self._task_name} '
                     f'(id: {self._job_id})')
         spot_state.set_starting(self._job_id)
-        self._strategy_executor.launch()
-        spot_state.set_started(self._job_id)
+        start_at = self._strategy_executor.launch()
+
+        spot_state.set_started(self._job_id, start_time=start_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
             # Handle the signal if it is sent by the user.
@@ -69,15 +70,19 @@ class SpotController:
 
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
-            job_status = self._job_status_check()
+            job_status = spot_utils.get_job_status(self.backend,
+                                                   self._cluster_name)
 
             if job_status is not None and not job_status.is_terminal():
                 # The job is healthy, continue to monitor the job status.
                 continue
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
+                end_time = spot_utils.get_job_timestamp(self.backend,
+                                                        self._cluster_name,
+                                                        get_end_time=True)
                 # The job is done.
-                spot_state.set_succeeded(self._job_id)
+                spot_state.set_succeeded(self._job_id, end_time=end_time)
                 break
 
             assert (job_status is None or
@@ -90,7 +95,10 @@ class SpotController:
                     self._cluster_name, force_refresh=True)[0]
                 if cluster_status == global_user_state.ClusterStatus.UP:
                     # The user code has probably crashed.
-                    spot_state.set_failed(self._job_id)
+                    end_time = spot_utils.get_job_timestamp(self.backend,
+                                                            self._cluster_name,
+                                                            get_end_time=True)
+                    spot_state.set_failed(self._job_id, end_time=end_time)
                     break
                 assert (cluster_status == global_user_state.ClusterStatus.
                         STOPPED), ('The cluster should be STOPPED, but is '
@@ -99,8 +107,9 @@ class SpotController:
             # job_status is None or job_status == job_lib.JobStatus.FAILED
             logger.info('The cluster is preempted.')
             spot_state.set_recovering(self._job_id)
-            self._strategy_executor.recover()
-            spot_state.set_recovered(self._job_id)
+            recovered_time = self._strategy_executor.recover()
+            spot_state.set_recovered(self._job_id,
+                                     recovered_time=recovered_time)
 
     def start(self):
         """Start the controller."""
@@ -118,25 +127,6 @@ class SpotController:
 
             # Clean up Storages with persistent=False.
             self.backend.teardown_ephemeral_storage(self._task)
-
-    def _job_status_check(self) -> Optional['job_lib.JobStatus']:
-        """Check the status of the job running on the spot cluster.
-
-        It can be None, RUNNING, SUCCEEDED, FAILED or CANCELLED.
-        """
-        handle = global_user_state.get_handle_from_cluster_name(
-            self._cluster_name)
-        status = None
-        try:
-            logger.info('=== Checking the job status... ===')
-            status = self.backend.get_job_status(handle, stream_logs=False)
-            logger.info(f'Job status: {status}')
-        except SystemExit:
-            logger.info('Failed to connect to the cluster.')
-        assert status != job_lib.JobStatus.INIT, (
-            'Job status should not be INIT')
-        logger.info('=' * 34)
-        return status
 
     def _check_signal(self) -> Optional[spot_utils.UserSignal]:
         """Check if the user has sent down signal."""
