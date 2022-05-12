@@ -40,6 +40,62 @@ _A100_HOST_MEMORY = {
     16: 1360,
 }
 
+# Pricing.  All info assumes us-central1.
+# In general, query pricing from the cloud.
+_ON_DEMAND_PRICES = {
+    # VMs: https://cloud.google.com/compute/all-pricing.
+    # N1 standard
+    'n1-standard-1': 0.04749975,
+    'n1-standard-2': 0.0949995,
+    'n1-standard-4': 0.189999,
+    'n1-standard-8': 0.379998,
+    'n1-standard-16': 0.759996,
+    'n1-standard-32': 1.519992,
+    'n1-standard-64': 3.039984,
+    'n1-standard-96': 4.559976,
+    # N1 highmem
+    'n1-highmem-2': 0.118303,
+    'n1-highmem-4': 0.236606,
+    'n1-highmem-8': 0.473212,
+    'n1-highmem-16': 0.946424,
+    'n1-highmem-32': 1.892848,
+    'n1-highmem-64': 3.785696,
+    'n1-highmem-96': 5.678544,
+    # A2 highgpu for A100
+    'a2-highgpu-1g': 0.749750,
+    'a2-highgpu-2g': 1.499500,
+    'a2-highgpu-4g': 2.998986,
+    'a2-highgpu-8g': 5.997986,
+    'a2-megagpu-16g': 8.919152,
+}
+
+_SPOT_PRICES = {
+    # VMs: https://cloud.google.com/compute/all-pricing.
+    # N1 standard
+    'n1-standard-1': 0.01,
+    'n1-standard-2': 0.02,
+    'n1-standard-4': 0.04,
+    'n1-standard-8': 0.08,
+    'n1-standard-16': 0.16,
+    'n1-standard-32': 0.32,
+    'n1-standard-64': 0.64,
+    'n1-standard-96': 0.96,
+    # N1 highmem
+    'n1-highmem-2': 0.024906,
+    'n1-highmem-4': 0.049812,
+    'n1-highmem-8': 0.099624,
+    'n1-highmem-16': 0.199248,
+    'n1-highmem-32': 0.398496,
+    'n1-highmem-64': 0.796992,
+    'n1-highmem-96': 1.195488,
+    # A2 highgpu for A100
+    'a2-highgpu-1g': 0.224930,
+    'a2-highgpu-2g': 0.449847,
+    'a2-highgpu-4g': 0.899694,
+    'a2-highgpu-8g': 1.799388,
+    'a2-megagpu-16g': 2.675750,
+}
+
 
 def instance_type_exists(instance_type: str) -> bool:
     """Check the existence of the instance type."""
@@ -107,7 +163,13 @@ def list_accelerators(
             new_infos.append(
                 info._replace(
                     instance_type=_A100_INSTANCE_TYPES[info.accelerator_count],
-                    memory=_A100_HOST_MEMORY[info.accelerator_count]))
+                    memory=_A100_HOST_MEMORY[info.accelerator_count],
+                    # total cost = VM instance + GPU.
+                    price=info.price + _ON_DEMAND_PRICES[_A100_INSTANCE_TYPES[
+                        info.accelerator_count]],
+                    spot_price=info.spot_price +
+                    _SPOT_PRICES[_A100_INSTANCE_TYPES[info.accelerator_count]],
+                ))
         results['A100'] = new_infos
     return results
 
