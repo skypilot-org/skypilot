@@ -939,8 +939,8 @@ def _parallel_launch(yaml_paths: List[str],
             prefix=f'{colorama.Fore.MAGENTA}({cluster}){colorama.Style.RESET_ALL} ', # FIXME
             skip_lines=[
                 'optimizer.py',
-                'Tip: to reuse an existing cluster, specify --cluster (-c). Run `sky status` to see existing clusters.',
-            ], # FIXME
+                'Tip: ',
+            ], # FIXME: Use regex
             end_streaming_at='Job submitted with Job ID:',
         )
 
@@ -1103,6 +1103,7 @@ def benchmark_launch(
                 f'{backend_utils.BOLD}sky benchmark stop {benchmark}{backend_utils.RESET_BOLD}'
                 '\nTo teardown the clusters: '
                 f'{backend_utils.BOLD}sky benchmark down {benchmark}{backend_utils.RESET_BOLD}')
+    backend_utils.run('sky status')
 
 
 @benchmark.command('ls', cls=_DocumentedCodeCommand)
