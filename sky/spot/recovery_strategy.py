@@ -62,7 +62,7 @@ class StrategyExecutor:
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
 
-        Returns: The timestamp job started, or None if failed.
+        Returns: The job's start timestamp, or None if failed to start.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
@@ -82,15 +82,15 @@ class StrategyExecutor:
                 self.cluster_name, force_refresh=True)
             if cluster_status == global_user_state.ClusterStatus.UP:
                 # Wait the job to be started
-                status = spot_utils.job_status_check(self.backend,
-                                                     self.cluster_name)
+                status = spot_utils.get_job_status(self.backend,
+                                                   self.cluster_name)
                 while status is None or status == job_lib.JobStatus.INIT:
-                    status = spot_utils.job_status_check(
-                        self.backend, self.cluster_name)
                     time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
-                time = spot_utils.get_job_time(self.backend,
-                                               self.cluster_name,
-                                               is_end=False)
+                    status = spot_utils.get_job_status(self.backend,
+                                                       self.cluster_name)
+                time = spot_utils.get_job_timestamp(self.backend,
+                                                    self.cluster_name,
+                                                    get_end_time=False)
                 return time
 
             # TODO(zhwu): maybe exponential backoff is better?

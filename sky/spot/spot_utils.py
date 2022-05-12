@@ -11,9 +11,9 @@ import colorama
 import filelock
 
 from sky import backends
-from sky.backends import backend_utils
 from sky import global_user_state
 from sky import sky_logging
+from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.spot import spot_state
@@ -21,7 +21,10 @@ from sky.spot import spot_state
 logger = sky_logging.init_logger(__name__)
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
+# Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
+
+# Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
@@ -37,8 +40,8 @@ class UserSignal(enum.Enum):
 
 
 # ====== internal functions ======
-def job_status_check(backend: 'backends.CloudVmRayBackend',
-                     cluster_name: str) -> Optional['job_lib.JobStatus']:
+def get_job_status(backend: 'backends.CloudVmRayBackend',
+                   cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on the spot cluster.
 
     It can be None, INIT, RUNNING, SUCCEEDED, FAILED or CANCELLED.
@@ -55,10 +58,10 @@ def job_status_check(backend: 'backends.CloudVmRayBackend',
     return status
 
 
-def get_job_time(backend: 'backends.CloudVmRayBackend', cluster_name: str,
-                 is_end: bool) -> int:
+def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
+                      get_end_time: bool) -> float:
     """Get the started/ended time of the job."""
-    code = job_lib.JobLibCodeGen.get_job_time(job_id=None, is_end=is_end)
+    code = job_lib.JobLibCodeGen.get_job_time(job_id=None, is_end=get_end_time)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     returncode, stdout, stderr = backend.run_on_head(handle,
                                                      code,

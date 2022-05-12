@@ -48,7 +48,7 @@ class SpotController:
         spot_state.set_starting(self._job_id)
         start_at = self._strategy_executor.launch()
 
-        spot_state.set_started(self._job_id, start_at=start_at)
+        spot_state.set_started(self._job_id, start_time=start_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
             # Handle the signal if it is sent by the user.
@@ -70,19 +70,19 @@ class SpotController:
 
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
-            job_status = spot_utils.job_status_check(self.backend,
-                                                     self._cluster_name)
+            job_status = spot_utils.get_job_status(self.backend,
+                                                   self._cluster_name)
 
             if job_status is not None and not job_status.is_terminal():
                 # The job is healthy, continue to monitor the job status.
                 continue
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                end_time = spot_utils.get_job_time(self.backend,
-                                                   self._cluster_name,
-                                                   is_end=True)
+                end_time = spot_utils.get_job_timestamp(self.backend,
+                                                        self._cluster_name,
+                                                        get_end_time=True)
                 # The job is done.
-                spot_state.set_succeeded(self._job_id, end_at=end_time)
+                spot_state.set_succeeded(self._job_id, end_time=end_time)
                 break
 
             assert (job_status is None or
@@ -95,10 +95,10 @@ class SpotController:
                     self._cluster_name, force_refresh=True)[0]
                 if cluster_status == global_user_state.ClusterStatus.UP:
                     # The user code has probably crashed.
-                    end_time = spot_utils.get_job_time(self.backend,
-                                                       self._cluster_name,
-                                                       is_end=True)
-                    spot_state.set_failed(self._job_id, end_at=end_time)
+                    end_time = spot_utils.get_job_timestamp(self.backend,
+                                                            self._cluster_name,
+                                                            get_end_time=True)
+                    spot_state.set_failed(self._job_id, end_time=end_time)
                     break
                 assert (cluster_status == global_user_state.ClusterStatus.
                         STOPPED), ('The cluster should be STOPPED, but is '
@@ -107,8 +107,9 @@ class SpotController:
             # job_status is None or job_status == job_lib.JobStatus.FAILED
             logger.info('The cluster is preempted.')
             spot_state.set_recovering(self._job_id)
-            recovered_at = self._strategy_executor.recover()
-            spot_state.set_recovered(self._job_id, recovered_at=recovered_at)
+            recovered_time = self._strategy_executor.recover()
+            spot_state.set_recovered(self._job_id,
+                                     recovered_time=recovered_time)
 
     def start(self):
         """Start the controller."""
