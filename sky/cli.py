@@ -931,12 +931,12 @@ def _parallel_launch(yaml_paths: List[str],
 
     # TODO: Display a rich progress bar summarizing the provision/setup status of clusters.
     def _launch_with_log(cluster: str, cmd: List[str], wait: int) -> None:
-        time.sleep(wait) # A bandage solution to avoid boto errors.
+        time.sleep(wait) # A bandage solution to avoid boto3 errors.
         log_lib.run_with_log(
             cmd,
             log_path='/dev/null',
             stream_logs=True,
-            prefix=f'{colorama.Fore.MAGENTA}({cluster}){colorama.Style.RESET_ALL} ', # FIXME
+            prefix=f'{colorama.Fore.MAGENTA}({cluster}){colorama.Style.RESET_ALL} ',
             skip_lines=[
                 'optimizer.py',
                 'Tip: ',
