@@ -13,7 +13,8 @@ from sky.backends import backend_utils
 logger = sky_logging.init_logger(__name__)
 
 SKY_CLOUD_BENCHMARK_DIR = '~/sky_benchmark_dir'
-SKY_CLOUD_BENCHMARK_SUMMARY = os.path.join(SKY_CLOUD_BENCHMARK_DIR, 'summary.json')
+SKY_BENCHMARK_SUMMARY = '_summary.json'
+SKY_CLOUD_BENCHMARK_SUMMARY = os.path.join(SKY_CLOUD_BENCHMARK_DIR, SKY_BENCHMARK_SUMMARY)
 SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 
 def get_benchmark_summaries(benchmark: str, logger_name: str, clusters: List[str]) -> Dict[str, Dict[str, int]]:
@@ -55,7 +56,7 @@ def get_benchmark_summaries(benchmark: str, logger_name: str, clusters: List[str
     # Read the summaries from the locally saved files.
     summaries = {}
     for cluster in clusters:
-        summary_path = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster, 'summary.json')
+        summary_path = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster, SKY_BENCHMARK_SUMMARY)
         if os.path.exists(summary_path):
             with open(summary_path, 'r') as f:
                 summary = json.load(f)
