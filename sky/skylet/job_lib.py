@@ -138,6 +138,14 @@ def get_latest_job_id() -> Optional[int]:
         return job_id
 
 
+def get_job_time(job_id: int, is_end: bool) -> Optional[int]:
+    field = 'end_at' if is_end else 'start_at'
+    rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
+                           (job_id,))
+    for (timestamp,) in rows:
+        return timestamp
+
+
 def set_job_started(job_id: int) -> None:
     _CURSOR.execute(
         'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
@@ -471,6 +479,18 @@ class JobLibCodeGen:
             'job_status = job_lib.get_status(job_id)',
             'status_str = None if job_status is None else job_status.value',
             'print("Job", job_id, status_str, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def get_job_time(cls,
+                     job_id: Optional[int] = None,
+                     is_end: bool = False) -> str:
+        code = [
+            f'job_id = {job_id} if {job_id} is not None '
+            'else job_lib.get_latest_job_id()',
+            f'job_time = job_lib.get_job_time(job_id, {is_end})',
+            'print(job_time, flush=True)',
         ]
         return cls._build(code)
 
