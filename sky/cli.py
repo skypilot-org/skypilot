@@ -50,6 +50,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
+from sky.backends import timeline
 from sky.clouds import service_catalog
 from sky.data import data_utils
 from sky.data.storage import StoreType
@@ -2028,6 +2029,7 @@ def spot():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@timeline.event('cli.spot_launch')
 def spot_launch(
     entrypoint: str,
     name: Optional[str],

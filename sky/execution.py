@@ -25,6 +25,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
+from sky.backends import timeline
 
 logger = sky_logging.init_logger(__name__)
 
@@ -192,6 +193,7 @@ def _execute(dag: sky.Dag,
             print('\x1b[?25h', end='')  # Show cursor.
 
 
+@timeline.event('execution.launch')
 def launch(dag: sky.Dag,
            dryrun: bool = False,
            teardown: bool = False,

@@ -35,6 +35,7 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
+from sky.backends import timeline
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -894,6 +895,7 @@ class RetryingVmProvisioner(object):
         logger.error(message)
         raise exceptions.ResourcesUnavailableError()
 
+    @timeline.event('backend.gang_schedule_ray_up')
     def _gang_schedule_ray_up(
             self, to_provision_cloud: clouds.Cloud, num_nodes: int,
             cluster_config_file: str, log_abs_path: str, stream_logs: bool,
@@ -1022,6 +1024,7 @@ class RetryingVmProvisioner(object):
             # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
             stdin=subprocess.DEVNULL)
 
+    @timeline.event('backend.provision_with_retries')
     def provision_with_retries(
         self,
         task: task_lib.Task,
@@ -1224,6 +1227,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: sky down {cluster_name}')
 
+    @timeline.event
     def _check_existing_cluster(
             self, task: task_lib.Task, to_provision: 'resources_lib.Resources',
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
@@ -1265,6 +1269,7 @@ class CloudVmRayBackend(backends.Backend):
             backend_utils.handle_returncode(returncode, cmd,
                                             'Failed to set TPU_NAME on node.')
 
+    @timeline.event('backend.provision')
     def provision(self,
                   task: task_lib.Task,
                   to_provision: Optional['resources_lib.Resources'],
@@ -1283,7 +1288,7 @@ class CloudVmRayBackend(backends.Backend):
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
         # TODO(mraheja): remove pylint disabling when filelock version updated
         # pylint: disable=abstract-class-instantiated
-        with filelock.FileLock(lock_path):
+        with timeline.LockEvent(lock_path):
             to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, to_provision, task.num_nodes)
             prev_cluster_status = None
@@ -1294,9 +1299,10 @@ class CloudVmRayBackend(backends.Backend):
                     backend_utils.refresh_cluster_status_handle(cluster_name))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
-            # TODO(suquark): once we have sky on PYPI, we should directly
-            # install sky from PYPI.
-            local_wheel_path = wheel_utils.build_sky_wheel()
+            with timeline.Event('backend.provision.wheel_build'):
+                # TODO(suquark): once we have sky on PYPI, we should directly
+                # install sky from PYPI.
+                local_wheel_path = wheel_utils.build_sky_wheel()
             try:
                 provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                                     self._optimize_target,
@@ -1325,9 +1331,10 @@ class CloudVmRayBackend(backends.Backend):
                                    config_dict['launched_nodes'],
                                    config_dict['tpu_name'])
 
-            ip_list = backend_utils.get_node_ips(cluster_config_file,
-                                                 config_dict['launched_nodes'])
-            head_ip = ip_list[0]
+            with timeline.Event('backend.provision.get_node_ips'):
+                ip_list = backend_utils.get_node_ips(
+                    cluster_config_file, config_dict['launched_nodes'])
+                head_ip = ip_list[0]
 
             handle = self.ResourceHandle(
                 cluster_name=cluster_name,
@@ -1370,15 +1377,17 @@ class CloudVmRayBackend(backends.Backend):
                     'Failed to set previously in-progress jobs to FAILED',
                     stderr)
 
-            global_user_state.add_or_update_cluster(cluster_name,
-                                                    handle,
-                                                    ready=True)
-            auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-            backend_utils.SSHConfigHelper.add_cluster(cluster_name, ip_list,
-                                                      auth_config)
+            with timeline.Event('backend.provision.post_process'):
+                global_user_state.add_or_update_cluster(cluster_name,
+                                                        handle,
+                                                        ready=True)
+                auth_config = backend_utils.read_yaml(
+                    handle.cluster_yaml)['auth']
+                backend_utils.SSHConfigHelper.add_cluster(
+                    cluster_name, ip_list, auth_config)
 
-            os.remove(lock_path)
-            return handle
+                os.remove(lock_path)
+                return handle
 
     def set_autostop(self, handle: ResourceHandle,
                      idle_minutes_to_autostop: Optional[int]) -> None:
@@ -1395,6 +1404,7 @@ class CloudVmRayBackend(backends.Backend):
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop)
 
+    @timeline.event('backend.sync_workdir')
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
@@ -1450,6 +1460,7 @@ class CloudVmRayBackend(backends.Backend):
         with backend_utils.safe_console_status('[bold cyan]Syncing[/]'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
+    @timeline.event('backend.sync_file_mounts')
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
@@ -1716,6 +1727,7 @@ class CloudVmRayBackend(backends.Backend):
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
+    @timeline.event('backend.setup')
     def setup(self, handle: ResourceHandle, task: task_lib.Task) -> None:
         start = time.time()
         style = colorama.Style
@@ -2009,6 +2021,7 @@ class CloudVmRayBackend(backends.Backend):
                              f'Returncode: {returncode}') from e
         return job_id
 
+    @timeline.event('backend.execute')
     def execute(
         self,
         handle: ResourceHandle,
@@ -2122,6 +2135,7 @@ class CloudVmRayBackend(backends.Backend):
                                 executable='python3',
                                 detach_run=detach_run)
 
+    @timeline.event('backend.post_execute')
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
         fore = colorama.Fore
@@ -2152,6 +2166,7 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
+    @timeline.event('backend.teardown')
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
@@ -2389,6 +2404,7 @@ class CloudVmRayBackend(backends.Backend):
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
+    @timeline.event('backend.run_on_head')
     def run_on_head(
         self,
         handle: ResourceHandle,
