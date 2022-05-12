@@ -56,7 +56,7 @@ class GCP(clouds.Cloud):
         'a2-highgpu-2g': 1.499500,
         'a2-highgpu-4g': 2.998986,
         'a2-highgpu-8g': 5.997986,
-        'a2-highgpu-16g': 8.919152,
+        'a2-megagpu-16g': 8.919152,
     }
 
     _SPOT_PRICES = {
@@ -78,6 +78,12 @@ class GCP(clouds.Cloud):
         'n1-highmem-32': 0.398496,
         'n1-highmem-64': 0.796992,
         'n1-highmem-96': 1.195488,
+        # A2 highgpu for A100
+        'a2-highgpu-1g': 0.224930,
+        'a2-highgpu-2g': 0.449847,
+        'a2-highgpu-4g': 0.899694,
+        'a2-highgpu-8g': 1.799388,
+        'a2-megagpu-16g': 2.675750,
     }
 
     #### Regions/Zones ####
@@ -186,7 +192,10 @@ class GCP(clouds.Cloud):
                       ) == 1, 'more than one accelerator candidates'
             acc, acc_count = list(accelerator.items())[0]
             if acc == 'A100':
-                default_type = f'a2-highgpu-{acc_count}g'
+                if acc_count == 16:
+                    default_type = 'a2-megagpu-16g'
+                else:
+                    default_type = f'a2-highgpu-{acc_count}g'
         return default_type
 
     @classmethod
