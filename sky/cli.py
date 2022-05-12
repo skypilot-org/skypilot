@@ -1065,7 +1065,7 @@ def benchmark_launch(
         override_params['instance_type'] = instance_type
     if disk_size is not None:
         override_params['disk_size'] = disk_size
-    if env is not None:
+    if len(env) > 0:
         override_params['env'] = [f'{k}={v}' for k, v in env.items()]
 
     # Generate command line arguments for each benchmark candidate.
