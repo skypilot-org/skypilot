@@ -250,6 +250,7 @@ def test_tpu():
             f'sky launch -y -c {name} examples/tpu_app.yaml | grep "TPU .* already exists"',  # Ensure sky launch won't create another TPU.
         ],
         f'sky down -y {name}',
+        timeout=30 * 60,  # can take >20 mins
     )
     run_one_test(test)
 
@@ -348,24 +349,44 @@ def test_autostop():
     run_one_test(test)
 
 
-# ---------- Testing `sky cancel` ----------
-def test_cancel():
-    name = _get_cluster_name()
+def _get_cancel_task_with_cloud(name, cloud):
     test = Test(
-        'cancel',
+        f'{cloud}-cancel-task',
         [
-            f'sky launch -c {name} examples/resnet_app.yaml -y -d',
+            f'sky launch -c {name} examples/resnet_app.yaml --cloud {cloud} -y -d',
             # Wait the GPU process to start.
             'sleep 60',
             f'sky exec {name} "nvidia-smi | grep python"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel {name} 1',
             'sleep 60',
-            f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
+            # check if the python job is gone.
+            f'sky exec {name} "! nvidia-smi | grep python"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
+    return test
+
+
+# ---------- Testing `sky cancel` on AWS ----------
+def test_cancel_aws():
+    name = _get_cluster_name()
+    test = _get_cancel_task_with_cloud(name, 'aws')
+    run_one_test(test)
+
+
+# ---------- Testing `sky cancel` on Azure ----------
+def test_cancel_azure():
+    name = _get_cluster_name()
+    test = _get_cancel_task_with_cloud(name, 'azure')
+    run_one_test(test)
+
+
+# ---------- Testing `sky cancel` on GCP ----------
+def test_cancel_gcp():
+    name = _get_cluster_name()
+    test = _get_cancel_task_with_cloud(name, 'gcp')
     run_one_test(test)
 
 

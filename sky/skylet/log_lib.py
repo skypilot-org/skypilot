@@ -152,13 +152,14 @@ def run_with_log(
         parent_pid = os.getpid()
         daemon_script = os.path.join(
             os.path.dirname(os.path.abspath(job_lib.__file__)),
-            'subprocess_daemon.sh')
+            'subprocess_daemon.py')
         daemon_cmd = [
-            '/bin/bash',
+            'python',
             daemon_script,
+            '--parent-pid',
             str(parent_pid),
+            '--proc-pid',
             str(proc.pid),
-            str(int(with_ray)),
         ]
         subprocess.Popen(
             daemon_cmd,
