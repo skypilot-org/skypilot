@@ -45,7 +45,7 @@ install_requires = [
     # polling strategies`
     'grpcio<=1.43.0',
     'pulp',
-    # FIXME
+    # FIXME: these libraries are only required for remote VMs, not the local laptop.
     'tensorboard',
     'wandb',
 ]
