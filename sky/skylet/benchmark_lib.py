@@ -14,18 +14,20 @@ def _dict_to_json(json_dict: Dict[str, int], output_path: str):
         f.write(json_str)
 
 
-def parse_timestamps(log_dir: str, output_path: str) -> None:
+def parse_skycallback(log_dir: str, output_path: str) -> None:
+    log_dirs = glob.glob(os.path.join(log_dir, 'sky-*'))
+    if len(log_dirs) == 0:
+        raise ValueError(f'No skycallback logs found in {log_dir}.')
 
-    def read_timestamp(f):
-        b = f.read(sky_callback.NUM_BYTES_PER_TIMESTAMP)
-        ts = int.from_bytes(b, sky_callback.BYTE_ORDER)
-        return ts
-
+    # Use the latest log.
+    log_dir = sorted(log_dirs)[-1]
     timestamp_log = os.path.join(log_dir, sky_callback.TIMESTAMP_LOG)
+
     timestamps = []
     with open(timestamp_log, 'rb') as f:
         while True:
-            ts = read_timestamp(f)
+            b = f.read(sky_callback.NUM_BYTES_PER_TIMESTAMP)
+            ts = int.from_bytes(b, sky_callback.BYTE_ORDER)
             if ts == 0:
                 # EOF
                 break
@@ -47,11 +49,11 @@ def parse_tensorboard(log_dir: str, output_path: str) -> None:
     from tensorboard.backend.event_processing import event_accumulator  # pylint: disable=import-outside-toplevel
 
     event_files = glob.glob(os.path.join(log_dir, 'events.out.tfevents.*'))
-    if not event_files:
+    if len(event_files) == 0:
         raise ValueError(f'No tensorboard logs found in {log_dir}.')
 
     # Use the latest event file.
-    event_file = event_files[-1]
+    event_file = sorted(event_files)[-1]
 
     ea = event_accumulator.EventAccumulator(
         event_file, size_guidance={event_accumulator.SCALARS: 0})
@@ -124,7 +126,7 @@ class BenchmarkCodeGen:
         """Generate a summary of the log."""
         assert callback in ['sky', 'tensorboard', 'wandb']
         parse_fn = {
-            'sky': 'parse_timestamps',
+            'sky': 'parse_skycallback',
             'tensorboard': 'parse_tensorboard',
             'wandb': 'parse_wandb',
         }

@@ -1,10 +1,11 @@
-import queue
-import threading
+from datetime import datetime
 import os
+import threading
 import time
+import queue
 
 SKY_CLOUD_BENCHMARK_DIR = '~/sky_benchmark_dir'
-TIMESTAMP_LOG = 'benchmark_timestamps.log'
+TIMESTAMP_LOG = 'timestamps.log'
 NUM_BYTES_PER_TIMESTAMP = 4
 BYTE_ORDER = 'big'
 
@@ -15,7 +16,9 @@ class SkyCallback(object):
                  log_dir=SKY_CLOUD_BENCHMARK_DIR,
                  max_queue_size=10,
                  flush_secs=30):
-        self.log_dir = os.path.expanduser(log_dir)
+        self.log_dir = os.path.join(
+            log_dir, 'sky-' + datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f'))
+        self.log_dir = os.path.expanduser(self.log_dir)
         os.makedirs(self.log_dir, exist_ok=True)
 
         self._general_file_writer = open(
