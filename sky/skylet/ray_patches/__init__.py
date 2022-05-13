@@ -23,28 +23,28 @@ def _to_absolute(pwd_file):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), pwd_file)
 
 
-def _run_patch(original_file, patch_file):
+def _run_patch(target_file, patch_file):
     """Applies a patch if it has not been applied already."""
     #  s: silent
     #  R: reverse (to test whether it has been applied)
     #  f: no confirmation in the normal case of when patch not applied
+    #  b: create a backup of the original file .orig
     # Adapted from https://unix.stackexchange.com/a/86872/9411
-    # .orig is the original file that is not patched. We recover the original
-    # file if it exists, before applying the patch to avoid the patching failure
-    # when the file is already patched with an older version.
-    orig_file = os.path.abspath(original_file + '.orig')
+
+    # .orig is the original file that is not patched.
+    orig_file = os.path.abspath(target_file + '.orig')
     script = f"""\
-    if [ -f {orig_file} ]; then
-        mv {orig_file} {original_file}
+    if [ ! -f {orig_file} ]; then
+        echo Create backup file {orig_file}
+        cp {target_file} {orig_file}
     fi
-    if ! patch -sRf --dry-run {original_file} {patch_file} >/dev/null; then
-        patch {original_file} {patch_file}
+    if ! patch -sRf --dry-run {target_file} {patch_file} >/dev/null; then
+        patch {orig_file} -i {patch_file} -o {target_file}
     else
         echo Patch {patch_file} skipped.
     fi
     """
-    # /bin/bash is required to support True/False in the patch command.
-    subprocess.run(script, shell=True, check=True, executable='/bin/bash')
+    subprocess.run(script, shell=True, check=True)
 
 
 def patch() -> None:
