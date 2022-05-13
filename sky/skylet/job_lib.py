@@ -75,12 +75,12 @@ _CURSOR.execute("""\
     job_id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_name TEXT,
     username TEXT,
-    submitted_at INTEGER,
+    submitted_at FLOAT,
     status TEXT,
     run_timestamp TEXT CANDIDATE KEY,
-    start_at INTEGER)""")
+    start_at FLOAT)""")
 
-db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'end_at', 'INTEGER')
+db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'end_at', 'FLOAT')
 db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'resources', 'TEXT')
 
 _CONN.commit()
@@ -89,7 +89,7 @@ _CONN.commit()
 def add_job(job_name: str, username: str, run_timestamp: str,
             resources_str: str) -> int:
     """Atomically reserve the next available job id for the user."""
-    job_submitted_at = int(time.time())
+    job_submitted_at = time.time()
     # job_id will autoincrement with the null value
     _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?)',
                     (job_name, username, job_submitted_at, JobStatus.INIT.value,
@@ -108,7 +108,7 @@ def set_status(job_id: int, status: JobStatus) -> None:
         'Please use set_job_started() to set job status to RUNNING')
 
     if status.is_terminal():
-        end_at = int(time.time())
+        end_at = time.time()
         # status does not need to be set if the end_at is not null, since the
         # job must be in a terminal state already.
         _CURSOR.execute(
@@ -149,7 +149,7 @@ def get_job_time(job_id: int, is_end: bool) -> Optional[int]:
 def set_job_started(job_id: int) -> None:
     _CURSOR.execute(
         'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
-        'WHERE job_id=(?)', (JobStatus.RUNNING.value, int(time.time()), job_id))
+        'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
     _CONN.commit()
 
 
