@@ -34,7 +34,7 @@ def _run_patch(original_file, patch_file):
     # when the file is already patched with an older version.
     orig_file = os.path.abspath(original_file + '.orig')
     script = f"""\
-    if {os.path.exists(orig_file)}; then
+    if [ -f {orig_file} ]; then
         mv {orig_file} {original_file}
     fi
     if ! patch -sRf --dry-run {original_file} {patch_file} >/dev/null; then
@@ -43,7 +43,8 @@ def _run_patch(original_file, patch_file):
         echo Patch {patch_file} skipped.
     fi
     """
-    subprocess.run(script, shell=True, check=True)
+    # /bin/bash is required to support True/False in the patch command.
+    subprocess.run(script, shell=True, check=True, executable='/bin/bash')
 
 
 def patch() -> None:
