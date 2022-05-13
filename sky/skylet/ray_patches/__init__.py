@@ -29,7 +29,11 @@ def _run_patch(original_file, patch_file):
     #  R: reverse (to test whether it has been applied)
     #  f: no confirmation in the normal case of when patch not applied
     # Adapted from https://unix.stackexchange.com/a/86872/9411
+    orig_file = os.path.abspath(original_file+'.orig')
     script = f"""\
+    if {os.path.exists(orig_file)}; then
+        mv {orig_file} {original_file}
+    fi
     if ! patch -sRf --dry-run {original_file} {patch_file} >/dev/null; then
         patch {original_file} {patch_file}
     else
