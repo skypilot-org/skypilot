@@ -15,7 +15,7 @@ class SkyCallback(object):
     def __init__(self,
                  log_dir=SKY_CLOUD_BENCHMARK_DIR,
                  max_queue_size=10,
-                 flush_secs=30):
+                 flush_secs=5):
         self.log_dir = os.path.join(
             log_dir, 'sky-' + datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f'))
         self.log_dir = os.path.expanduser(self.log_dir)
