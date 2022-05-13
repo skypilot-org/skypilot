@@ -37,11 +37,8 @@ def _run_patch(target_file, patch_file):
         echo Create backup file {orig_file}
         cp {target_file} {orig_file}
     fi
-    if ! patch -sRf --dry-run {target_file} {patch_file} >/dev/null; then
-        patch {orig_file} -i {patch_file} -o {target_file}
-    else
-        echo Patch {patch_file} skipped.
-    fi
+    # It is ok to patch again from the original file.
+    patch {orig_file} -i {patch_file} -o {target_file}
     """
     subprocess.run(script, shell=True, check=True)
 
