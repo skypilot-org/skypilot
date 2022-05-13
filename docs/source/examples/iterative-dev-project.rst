@@ -1,4 +1,5 @@
 .. _iter-dev:
+
 Iteratively Developing a Project
 ====================================
 
@@ -6,7 +7,7 @@ This page shows a typical workflow for iteratively developing and running a
 project on Sky.
 
 Getting an interactive node
-------------------
+----------------------------
 :ref:`Interactive nodes <interactive-nodes>` are easy-to-spin-up VMs that enable **fast development and interactive debugging**.
 
 To provision a GPU interactive node named :code:`dev`, run

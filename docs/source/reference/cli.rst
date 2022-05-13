@@ -1,4 +1,5 @@
 .. _cli:
+
 CLI Reference
 =============
 
@@ -33,8 +34,9 @@ Core
    :prog: sky autostop
    :nested: full
 
+
 Interactive Nodes
-------------
+------------------
 
 .. click:: sky.cli:cpunode
    :prog: sky cpunode
