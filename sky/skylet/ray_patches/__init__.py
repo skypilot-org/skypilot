@@ -29,7 +29,10 @@ def _run_patch(original_file, patch_file):
     #  R: reverse (to test whether it has been applied)
     #  f: no confirmation in the normal case of when patch not applied
     # Adapted from https://unix.stackexchange.com/a/86872/9411
-    orig_file = os.path.abspath(original_file+'.orig')
+    # .orig is the original file that is not patched. We recover the original
+    # file if it exists, before applying the patch to avoid the patching failure
+    # when the file is already patched with an older version.
+    orig_file = os.path.abspath(original_file + '.orig')
     script = f"""\
     if {os.path.exists(orig_file)}; then
         mv {orig_file} {original_file}
