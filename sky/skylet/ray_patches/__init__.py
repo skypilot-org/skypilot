@@ -28,7 +28,6 @@ def _run_patch(target_file, patch_file):
     #  s: silent
     #  R: reverse (to test whether it has been applied)
     #  f: no confirmation in the normal case of when patch not applied
-    #  b: create a backup of the original file .orig
     # Adapted from https://unix.stackexchange.com/a/86872/9411
 
     # .orig is the original file that is not patched.
