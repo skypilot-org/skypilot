@@ -1409,9 +1409,8 @@ def _terminate_or_stop_clusters(
         # normal clusters and purge is True.
         if len(reserved_clusters) > 0:
             if not purge:
-                msg = (
-                    f'{operation} Sky reserved cluster(s) '
-                    f'{reserved_clusters_str} is not supported.')
+                msg = (f'{operation} Sky reserved cluster(s) '
+                       f'{reserved_clusters_str} is not supported.')
                 if terminate:
                     msg += (
                         '\nPlease specify --purge to force termination of the '
