@@ -89,7 +89,7 @@ def readable_time_duration(start: Optional[int],
     duration = start_time.diff(end)
     if absolute:
         diff = start_time.diff(end).in_words()
-        if duration.in_seconds() < 0:
+        if duration.in_seconds() <= 1:
             diff = '< 1 second'
         diff = diff.replace(' seconds', 's')
         diff = diff.replace(' second', 's')
@@ -99,7 +99,7 @@ def readable_time_duration(start: Optional[int],
         diff = diff.replace(' hour', 'h')
     else:
         diff = start_time.diff_for_humans(end)
-        if duration.in_seconds() < 1:
+        if duration.in_seconds() <= 1:
             diff = '< 1 second'
         diff = diff.replace('second', 'sec')
         diff = diff.replace('minute', 'min')
