@@ -1,5 +1,5 @@
 """User interfaces with managed spot jobs."""
-
+import collections
 import enum
 import json
 import pathlib
@@ -249,6 +249,7 @@ def show_jobs(show_all: bool) -> str:
     if show_all:
         columns += ['STARTED', 'CLUSTER', 'REGION']
     job_table = log_utils.create_table(columns)
+    status_counts = collections.defaultdict(int)
     for job in jobs:
         job_duration = log_utils.readable_time_duration(
             job['last_recovered_at'] - job['job_duration'],
@@ -275,6 +276,8 @@ def show_jobs(show_all: bool) -> str:
             job['recovery_count'],
             job['status'].value,
         ]
+        if not job['status'].is_terminal():
+            status_counts[job['status'].value] += 1
         if show_all:
             # STARTED
             started = log_utils.readable_time_duration(job['start_at'],
@@ -294,7 +297,12 @@ def show_jobs(show_all: bool) -> str:
                     handle.launched_resources.region
                 ])
         job_table.add_row(values)
-    return str(job_table)
+    status_str = ', '.join([
+        f'{count} {status}' for status, count in sorted(status_counts.items())
+    ])
+    if status_str:
+        status_str = f'In progress jobs: {status_str}\n\n'
+    return status_str + str(job_table)
 
 
 class SpotCodeGen:

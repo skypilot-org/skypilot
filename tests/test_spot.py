@@ -97,8 +97,8 @@ class TestReservedClustersOperations:
 
         result = cli_runner.invoke(cli.down, ['sky-spot-controller'])
         assert result.exit_code == click.UsageError.exit_code
-        assert ('Terminating sky reserved clusters \'sky-spot-controller\' is '
-                'not supported' in result.output)
+        assert ('Terminating Sky reserved cluster(s) \'sky-spot-controller\' '
+                'is not supported' in result.output)
 
         result = cli_runner.invoke(cli.down, ['sky-spot-con*'])
         assert not result.exception
@@ -121,7 +121,7 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.stop, ['sky-spot-controller'])
         assert result.exit_code == click.UsageError.exit_code
-        assert ('Stopping sky reserved clusters \'sky-spot-controller\' is '
+        assert ('Stopping Sky reserved cluster(s) \'sky-spot-controller\' is '
                 'not supported' in result.output)
 
         result = cli_runner.invoke(cli.stop, ['sky-spot-con*'])
@@ -137,7 +137,7 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.autostop, ['sky-spot-controller'])
         assert result.exit_code == click.UsageError.exit_code
-        assert ('Scheduling auto-stop on sky reserved clusters '
+        assert ('Scheduling auto-stop on Sky reserved cluster(s) '
                 '\'sky-spot-controller\' is not supported' in result.output)
 
         result = cli_runner.invoke(cli.autostop, ['sky-spot-con*'])
