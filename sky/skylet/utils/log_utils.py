@@ -66,8 +66,6 @@ def create_table(field_names):
     return table
 
 
-_MICROSECONDS_PATTERN = re.compile(r'(\d+) microsecond(s?)')
-
 
 def readable_time_duration(start: Optional[int],
                            end: Optional[int] = None,
@@ -90,10 +88,11 @@ def readable_time_duration(start: Optional[int],
     if end is not None:
         end = pendulum.from_timestamp(end)
     start_time = pendulum.from_timestamp(start)
+    duration = start_time.diff(end)
     if absolute:
         diff = start_time.diff(end).in_words()
-        # Microseconds only appears when .diff (not .diff_for_humans) is called
-        diff = re.sub(_MICROSECONDS_PATTERN, '< 1 second', diff)
+        if duration.in_seconds() < 0:
+            diff = '< 1 second'
         diff = diff.replace(' seconds', 's')
         diff = diff.replace(' second', 's')
         diff = diff.replace(' minutes', 'm')
@@ -102,6 +101,8 @@ def readable_time_duration(start: Optional[int],
         diff = diff.replace(' hour', 'h')
     else:
         diff = start_time.diff_for_humans(end)
+        if duration.in_seconds() < 1:
+            diff = '< 1 second'
         diff = diff.replace('second', 'sec')
         diff = diff.replace('minute', 'min')
         diff = diff.replace('hour', 'hr')
