@@ -25,11 +25,6 @@ def _to_absolute(pwd_file):
 
 def _run_patch(target_file, patch_file):
     """Applies a patch if it has not been applied already."""
-    #  s: silent
-    #  R: reverse (to test whether it has been applied)
-    #  f: no confirmation in the normal case of when patch not applied
-    # Adapted from https://unix.stackexchange.com/a/86872/9411
-
     # .orig is the original file that is not patched.
     orig_file = os.path.abspath(target_file + '.orig')
     script = f"""\
