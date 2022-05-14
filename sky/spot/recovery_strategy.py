@@ -1,4 +1,5 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
+import time
 import typing
 from typing import Optional
 
@@ -88,10 +89,10 @@ class StrategyExecutor:
                     time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
                     status = spot_utils.get_job_status(self.backend,
                                                        self.cluster_name)
-                time = spot_utils.get_job_timestamp(self.backend,
-                                                    self.cluster_name,
-                                                    get_end_time=False)
-                return time
+                launch_time = spot_utils.get_job_timestamp(self.backend,
+                                                           self.cluster_name,
+                                                           get_end_time=False)
+                return launch_time
 
             # TODO(zhwu): maybe exponential backoff is better?
             if retry_cnt >= max_retry:
