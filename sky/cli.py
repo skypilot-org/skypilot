@@ -452,7 +452,7 @@ def _create_and_ssh_into_node(
                         commands,
                         port_forward=port_forward,
                         ssh_mode=backend_utils.SshMode.LOGIN)
-    cluster_name = global_user_state.get_cluster_name_from_handle(handle)
+    cluster_name = handle.cluster_name
 
     click.echo('To attach to it again:  ', nl=False)
     if cluster_name == _default_interactive_node_name(node_type):
