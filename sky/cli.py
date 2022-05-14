@@ -877,7 +877,18 @@ def exec(
               required=False,
               help='Query remote clusters for their latest autostop settings.')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
-    """Show clusters."""
+    """Show clusters.
+
+    The following metadata for each cluster is stored: cluster name, time since
+    last launch, resources, region, status, duration, command, hourly price.
+
+    \b
+    Each cluster can have one of the following statuses:
+    \b
+    - INIT: Undergoing setup, may have failed setup, and may be live or down.
+    - UP: Both provisioning and setup have succeeded and the cluster is live.
+    - STOPPED: Successfully stopped by :code:`sky stop`.
+    """
     status_utils.show_status_table(all, refresh)
 
 
