@@ -23,18 +23,17 @@ def _to_absolute(pwd_file):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), pwd_file)
 
 
-def _run_patch(original_file, patch_file):
+def _run_patch(target_file, patch_file):
     """Applies a patch if it has not been applied already."""
-    #  s: silent
-    #  R: reverse (to test whether it has been applied)
-    #  f: no confirmation in the normal case of when patch not applied
-    # Adapted from https://unix.stackexchange.com/a/86872/9411
+    # .orig is the original file that is not patched.
+    orig_file = os.path.abspath(target_file + '.orig')
     script = f"""\
-    if ! patch -sRf --dry-run {original_file} {patch_file} >/dev/null; then
-        patch {original_file} {patch_file}
-    else
-        echo Patch {patch_file} skipped.
+    if [ ! -f {orig_file} ]; then
+        echo Create backup file {orig_file}
+        cp {target_file} {orig_file}
     fi
+    # It is ok to patch again from the original file.
+    patch {orig_file} -i {patch_file} -o {target_file}
     """
     subprocess.run(script, shell=True, check=True)
 
