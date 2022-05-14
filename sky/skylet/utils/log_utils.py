@@ -1,6 +1,5 @@
 """Sky logging utils."""
 import enum
-import re
 from typing import Optional
 
 import colorama
@@ -64,7 +63,6 @@ def create_table(field_names):
     table.right_padding_width = 2
     table.align = 'l'
     return table
-
 
 
 def readable_time_duration(start: Optional[int],
