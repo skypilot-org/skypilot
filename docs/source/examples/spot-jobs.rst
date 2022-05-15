@@ -80,6 +80,10 @@ find the resources and launch the job again.
   (:code:`/checkpoint` in the example), and is responsible for reload the state when the job is
   recovered.
 
+  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
+  supported for spot jobs.
+  Please use file mounts with bucket or :ref:`sky storage <sky-storage>` for syncing codes and artifacts.
+
 Sky also provides two CLIs to interact with the spot jobs:
 
 .. code-block:: console
