@@ -82,7 +82,7 @@ find the resources and launch the job again.
 
   :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
   supported for spot jobs.
-  Please use file mounts with bucket or :ref:`sky storage <sky-storage>` for syncing codes and artifacts.
+  Please use file mounts with buckets or :ref:`sky storage <sky-storage>` for syncing codes and artifacts.
 
 Sky also provides two CLIs to interact with the spot jobs:
 
