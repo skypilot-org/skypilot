@@ -2,7 +2,7 @@
 Spot Jobs
 ================================================
 
-Sky supports serverless spot jobs that can automatically recovered from preemptions.
+Sky supports serverless spot jobs that can automatically be recovered from preemptions.
 
 The following is an example of a spot job that is managed by Sky:
 
@@ -77,7 +77,7 @@ find the resources and launch the job again.
 .. note::
 
   The training code needs to save the training state periodically to the mounted directory 
-  (:code:`/checkpoint` in the example), and is responsible for reload the state when the job is
+  (:code:`/checkpoint` in the example), and is responsible for reloading the state when the job is
   recovered.
 
   :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
