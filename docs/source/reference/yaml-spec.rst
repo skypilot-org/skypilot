@@ -48,6 +48,11 @@ describe all fields available.
       # If unspecified, defaults to False (on-demand instances).
       use_spot: False
 
+      # The recovery strategy for spot jobs (optional).
+      # `use_spot` must be True for this to have any effect. For now, only
+      # `FAILOVER` strategy is supported.
+      spot_recovery: none
+
       # Disk size in GB to allocate for OS (mounted at /). Increase this if you
       # have a large working directory or tasks that write out large outputs.
       disk_size: 256

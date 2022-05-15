@@ -33,6 +33,7 @@ Key features:
    reference/auto-stop
    examples/grid-search
    examples/distributed-jobs
+   examples/spot-jobs
 .. Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
 
 
