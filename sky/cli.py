@@ -2287,16 +2287,15 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     You can provide either a job name or a list of job ids to be cancelled.
     They are exclusive options.
-
     Examples:
 
-        .. code-block:: bash
+    .. code-block:: bash
 
         # Cancel managed spot job with name 'my-job'
-        sky spot cancel -n my-job
+        $ sky spot cancel -n my-job
 
         # Cancel managed spot jobs with IDs 1, 2, 3
-        sky spot cancel 1 2 3
+        $ sky spot cancel 1 2 3
 
     """
 
@@ -2364,7 +2363,7 @@ def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
     """Show spot controller logs.
 
     If --sync-down is specified, the all the logs from every recovery will be
-     downloaded from the controller.
+    downloaded from the controller.
     Otherwise, the realtime logs from the job will be streamed.
     """
     # TODO(zhwu): Automatically restart the spot controller

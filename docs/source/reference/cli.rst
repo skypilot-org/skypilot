@@ -77,6 +77,24 @@ Storage
    :prog: sky storage delete
    :nested: full
 
+Managed Spot Jobs
+---------
+
+.. click:: sky.cli:spot_launch
+   :prog: sky spot launch
+   :nested: full
+
+.. click:: sky.cli:spot_status
+   :prog: sky spot status
+   :nested: full
+
+.. click:: sky.cli:spot_cancel
+   :prog: sky spot cancel
+   :nested: full
+
+.. click:: sky.cli:spot_logs
+   :prog: sky spot logs
+   :nested: full
 
 Miscellaneous
 -------------
