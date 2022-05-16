@@ -1,4 +1,12 @@
-# Launches jupyter notebook
+# Launches a Jupyter notebook.
+#
+# To access the jupyter notebook locally, we use ssh port forwarding.
+#
+# Usage:
+#   sky launch -c jupyter jupyter_app.yaml
+#   ssh -L 8888:localhost:8888 jupyter
+#   sky down jupyter
+
 name: jupyter
 
 resources:

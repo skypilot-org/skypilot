@@ -16,9 +16,7 @@ Below, we describe all fields available.
       ips: [my.local.cluster.hostname, 3.20.226.96, 3.143.112.6]
       name: my-local-cluster
 
-    # How the system admin authenticates into the local cluster.
-    #
-    # This field is removed in distributable cluster YAMLs.
+    # How users authenticate into the local cluster
     auth:
-      ssh_user: ubuntu  # Adminstrator's user account.
+      ssh_user: ubuntu  # User account.
       ssh_private_key: ~/.ssh/ubuntu.pem # Private keypair.

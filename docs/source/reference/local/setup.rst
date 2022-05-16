@@ -4,22 +4,28 @@ Setting up Local Cluster
 
 Prerequisites
 -------------
-To ensure sky nodes can communicate with each other, Sky On-prem requires the system admin to open up all ports from :code:`10001` to :code:`19999`, inclusive, on all nodes. This is how Sky differentiates input/output for multiple worker processes on a single node.
+To ensure sky nodes can communicate with each other, Sky On-prem requires the system admin to open up all ports from :code:`10001` to :code:`19999`, inclusive, on all nodes. This is how Sky differentiates input/output for multiple worker processes on a single node. In addition, Sky requires port :code:`8265` for Ray Dashboard on all nodes.
 
-For the head node, Sky requires ports :code:`6379`, for GCS server on Ray, and :code:`8265`, for Ray Dashboard.
+For the head node, Sky requires port :code:`6379` for the GCS server on Ray.
 
 For further reference, `here <https://docs.ray.io/en/latest/ray-core/configure.html#ports-configurations>`_ are the required ports from the Ray docs.
 
 Installing Sky Dependencies
 ---------------------------
 
-Sky On-prem requires :code:`python3` and :code:`ray==1.10.0` to be setup on all local nodes and globally available to all users.
+Sky On-prem requires :code:`python3`, :code:`ray==1.10.0`, and `sky` to be setup on all local nodes and globally available to all users.
 
-To install Ray for all users, run the following command on all local nodes:
+To install Ray and Sky for all users, run the following commands on all local nodes:
 
 .. code-block:: console
 
    $ sudo -H pip3 install ray[default]==1.10.0
+
+   $ # Sky requires python >= 3.6 and < 3.10.
+   $ git clone ssh://git@github.com/sky-proj/sky.git
+   $ cd sky
+   $ sudo -H pip3 install -e .
+
 
 Launching Sky Services
 -------------------
@@ -85,7 +91,7 @@ The console should display a list of healthy nodes the size of the local cluster
 Publishing Cluster YAML
 -------------------
 
-Under the hood, :code:`sky admin deploy` automaticlaly stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows the same structure as that of the private cluster YAML, with admin authentication replaced with a placeholder value (for regular users to fill in):
+Under the hood, :code:`sky admin deploy` automatically stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows the same structure as that of the private cluster YAML, with admin authentication replaced with a placeholder value (for regular users to fill in):
 
 .. code-block:: yaml
 

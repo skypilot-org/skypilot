@@ -7,7 +7,7 @@ Registering Local Clusters
 
 To register a local cluster in Sky, regulars users should obtain a **distributable** cluster YAML from the system administrator or follow the steps in the :ref:`prior section <local-setup>`.
 
-The cluster YAML must have user credentials filled out and should be stored in :code:`~/.sky/local/`.
+The cluster YAML must have user credentials filled out and should be stored in :code:`~/.sky/local/`. An example is shown in the :ref:`cluster config docs <cluster-config>`.
 
 Listing Registered Clusters
 -------------------
@@ -43,7 +43,7 @@ Copy the following YAML into a ``local_example.yaml`` file:
 .. code-block:: yaml
   
   resources:
-    # All local clusters fall under local cloud
+    # (Optional) Specifies that the task is run in the local cloud.
     cloud: local
     # Task resources: 1x NVIDIA V100 GPU
     accelerators: V100:1
@@ -61,7 +61,7 @@ Copy the following YAML into a ``local_example.yaml`` file:
     echo "Hello, Sky On-prem!"
     conda env list
 
-This defines a task to be run on the Local cloud. The task takes up 1 V100 GPU.
+This defines a task to be run. The task takes up 1 V100 GPU. The cloud field is optional. Sky will automatically detect if the cloud is local when the user specifies the name of the local cluster in `sky launch`.
 
 To connect to the local cluster ``my-local-cluster`` and run a task, use :code:`sky launch`:
 
