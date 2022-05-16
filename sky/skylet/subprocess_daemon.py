@@ -30,6 +30,8 @@ if __name__ == '__main__':
 
     # If Ray job id is passed in, wait until the job is done/cancelled/failed
     if job_id is None:
+        parent_process.wait()
+    else:
         try:
             client = JobSubmissionClient('http://127.0.0.1:8265')
             while True:
@@ -43,8 +45,6 @@ if __name__ == '__main__':
         except requests.exceptions.ConnectionError as e:
             print(e)
             parent_process.wait()
-    else:
-        parent_process.wait()
 
     if process is None or not process.is_running():
         sys.exit()
