@@ -142,8 +142,11 @@ def get_accelerator_hourly_cost(
     clouds: CloudFilter = None,
 ) -> float:
     """Returns the hourly cost with the accelerators."""
-    return _map_clouds_catalog(clouds, 'get_accelerator_hourly_cost', acc_name,
-                               acc_count, use_spot=use_spot)
+    return _map_clouds_catalog(clouds,
+                               'get_accelerator_hourly_cost',
+                               acc_name,
+                               acc_count,
+                               use_spot=use_spot)
 
 
 def get_region_zones_for_accelerators(
