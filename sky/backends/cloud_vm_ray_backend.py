@@ -133,13 +133,14 @@ class RayCodeGen:
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
-    def add_prologue(self, job_id: int) -> None:
+    def add_prologue(self, job_id: int, cluster_name: str) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
         self._code = [
             textwrap.dedent(f"""\
             import getpass
+            import hashlib
             import io
             import os
             import pathlib
@@ -161,6 +162,9 @@ class RayCodeGen:
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             ray.init(address = 'ray://localhost:10001', _redis_password='5241590000000000', namespace='__sky__{job_id}__', log_to_driver=True)
+
+            job_id = {job_id!r}
+            cluster_name = {cluster_name!r}
 
             run_fn = None
             futures = []"""),
@@ -334,6 +338,8 @@ class RayCodeGen:
                         script,
                         log_path,
                         getpass.getuser(),
+                        cluster_name = cluster_name,
+                        job_id = job_id,
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
                         with_ray=True,
@@ -2081,6 +2087,7 @@ class CloudVmRayBackend(backends.Backend):
             'ray job submit -v '
             f'--address=127.0.0.1:8265 --job-id {job_id_hash} --no-wait '
             f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
+        print(job_submit_cmd)
         returncode, _, _ = self.run_on_head(handle,
                                             job_submit_cmd,
                                             require_outputs=True,
@@ -2222,7 +2229,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
+        codegen.add_prologue(job_id, handle.cluster_name)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         if callable(task.run):
@@ -2257,7 +2264,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
+        codegen.add_prologue(job_id, handle.cluster_name)
         codegen.add_gang_scheduling_placement_group(task.num_nodes,
                                                     accelerator_dict)
 

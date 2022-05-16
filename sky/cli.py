@@ -799,7 +799,8 @@ def launch(
         assert len(task.resources) == 1
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
-        if isinstance(override_params['cloud'], clouds.Local):
+        if 'cloud' in override_params and isinstance(override_params['cloud'],
+                                                     clouds.Local):
             local_cluster_path = os.path.expanduser(
                 _LOCAL_YAML_PATH.format(cluster))
             _, cluster_config = _check_yaml(local_cluster_path,

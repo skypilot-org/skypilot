@@ -686,6 +686,36 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
                                             'Ray is not installed on {ip}')
 
 
+def rsync_no_handle(ip: str, source: str, target: str, ssh_user: str,
+                    ssh_key: str):
+    """Helper method that rsyncs files to remote."""
+    rsync_command = [
+        'rsync',
+        '-Pavz',
+        '--filter=\'dir-merge,- .gitignore\'',
+    ]
+    rc = run_command_on_ip_via_ssh(ip,
+                                   f'mkdir -p {os.path.dirname(target)}',
+                                   ssh_user=ssh_user,
+                                   ssh_private_key=ssh_key,
+                                   stream_logs=False)
+    ssh_options = ' '.join(ssh_options_list(ssh_key, None))
+    rsync_command.append(f'-e "ssh {ssh_options}"')
+    rsync_command.extend([
+        source,
+        f'{ssh_user}@{ip}:{target}',
+    ])
+    command = ' '.join(rsync_command)
+    rc = log_lib.run_with_log(command,
+                              stream_logs=False,
+                              log_path='/dev/null',
+                              shell=True)
+    handle_returncode(
+        rc, command, 'Failed to rsync files to local cluster. '
+        'Tip: run this command to test connectivity: '
+        f'ssh -i {ssh_key} {ssh_user}@{ip}')
+
+
 def get_local_custom_resources(
         ips: List[str], auth_config: Dict[str, str]) -> List[Dict[str, int]]:
     """Gets the custom accelerators for the local cluster.
@@ -697,33 +727,6 @@ def get_local_custom_resources(
     ssh_key = auth_config['ssh_private_key']
     remote_resource_path = '~/.sky/resource_group.py'
     custom_resources = []
-
-    def rsync_no_handle(ip: str, source: str, target: str):
-        rsync_command = [
-            'rsync',
-            '-Pavz',
-            '--filter=\'dir-merge,- .gitignore\'',
-        ]
-        rc = run_command_on_ip_via_ssh(ip,
-                                       'mkdir -p ~/.sky',
-                                       ssh_user=ssh_user,
-                                       ssh_private_key=ssh_key,
-                                       stream_logs=False)
-        ssh_options = ' '.join(ssh_options_list(ssh_key, None))
-        rsync_command.append(f'-e "ssh {ssh_options}"')
-        rsync_command.extend([
-            source,
-            f'{ssh_user}@{ip}:{target}',
-        ])
-        command = ' '.join(rsync_command)
-        rc = log_lib.run_with_log(command,
-                                  stream_logs=False,
-                                  log_path='/dev/null',
-                                  shell=True)
-        handle_returncode(
-            rc, command, 'Failed to rsync files to local cluster. '
-            'Tip: run this command to test connectivity: '
-            f'ssh -i {ssh_key} {ssh_user}@{ip}')
 
     code = \
     textwrap.dedent("""\
@@ -752,7 +755,8 @@ def get_local_custom_resources(
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(code)
             fp.flush()
-            rsync_no_handle(ip, fp.name, remote_resource_path)
+            rsync_no_handle(ip, fp.name, remote_resource_path, ssh_user,
+                            ssh_key)
 
         rc, output, _ = run_command_on_ip_via_ssh(
             ip,
@@ -796,7 +800,7 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     display.start()
 
     run_command_on_ip_via_ssh(head_ip,
-                              'ray stop -f',
+                              'sudo ray stop -f',
                               ssh_user=ssh_user,
                               ssh_private_key=ssh_key,
                               stream_logs=False,
@@ -804,7 +808,7 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
 
     for idx, ip in enumerate(worker_ips):
         run_command_on_ip_via_ssh(ip,
-                                  'ray stop -f',
+                                  'sudo ray stop -f',
                                   ssh_user=ssh_user,
                                   ssh_private_key=ssh_key,
                                   stream_logs=False,
@@ -813,7 +817,7 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     display.stop()
 
     head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
-    head_cmd = ('ray start --head --port=6379 '
+    head_cmd = ('sudo ray start --head --port=6379 '
                 '--object-manager-port=8076 --dashboard-port 8265 '
                 f'--resources={head_resources!r}')
     display = rich_status.Status('[bold cyan]Launching Ray Cluster on Head')
@@ -828,6 +832,16 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     handle_returncode(rc, head_cmd, 'Failed to launch Ray on Head node.')
     display.stop()
 
+    remote_ssh_key = f'~/.ssh/{os.path.basename(ssh_key)}'
+    dashboard_remote_path = '~/.sky/dashboard.sh'
+    port_cmd = (
+        f'ssh -tt -L 8265:localhost:8265 -i {remote_ssh_key} -o '
+        'StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o '
+        'IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o '
+        'ServerAliveInterval=5 -o ServerAliveCountMax=3 -o ControlMaster=auto '
+        f'-o ControlPersist=10s -o ConnectTimeout=120s {ssh_user}@{head_ip} '
+        '\'while true; do sleep 86400; done\'')
+
     for idx, ip in enumerate(worker_ips):
         display = rich_status.Status(
             f'[bold cyan]Workers {idx}/{total_workers} Ready')
@@ -835,8 +849,8 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
 
         worker_resources = json.dumps(custom_resources[idx + 1],
                                       separators=(',', ':'))
-        worker_cmd = (f'ray start --address={head_ip}:6379 '
-                      '--object-manager-port=8076 '
+        worker_cmd = (f'sudo ray start --address={head_ip}:6379 '
+                      '--object-manager-port=8076 --dashboard-port 8265 '
                       f'--resources={worker_resources!r}')
 
         rc, _, _ = run_command_on_ip_via_ssh(ip,
@@ -848,6 +862,22 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
 
         handle_returncode(rc, worker_cmd,
                           'Failed to launch Ray on Worker node:')
+
+        # Connect head node's Ray dashboard to worker nodes
+        rsync_no_handle(ip, ssh_key, remote_ssh_key, ssh_user, ssh_key)
+
+        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+            fp.write(port_cmd)
+            fp.flush()
+            rsync_no_handle(ip, fp.name, dashboard_remote_path, ssh_user,
+                            ssh_key)
+        rc = run_command_on_ip_via_ssh(
+            ip, f'chmod a+rwx {dashboard_remote_path};'
+            'screen -S ray-dashboard -X quit;'
+            f'screen -S ray-dashboard -dm {dashboard_remote_path}',
+            ssh_user=ssh_user,
+            ssh_private_key=ssh_key,
+            stream_logs=True)
 
         display.stop()
 

@@ -2,6 +2,7 @@
 
 This is a remote utility module that provides logging functionality.
 """
+import hashlib
 import io
 import os
 import ray
@@ -106,6 +107,7 @@ def run_with_log(
     with_ray: bool = False,
     process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
+    job_id: str = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -126,11 +128,13 @@ def run_with_log(
         process_stream, require_outputs,
         'require_outputs should be False when process_stream is False')
 
+    use_sudo = False
     try:
         log_path = os.path.expanduser(log_path)
         dirname = os.path.dirname(log_path)
         os.makedirs(dirname, exist_ok=True)
     except OSError:
+        use_sudo = True
         os.system(f'sudo mkdir -p {dirname} && sudo touch {log_path} '
                   f'&& sudo chmod a+rwx {log_path}')
     # Redirect stderr to stdout when using ray, to preserve the order of
@@ -154,21 +158,27 @@ def run_with_log(
             os.path.dirname(os.path.abspath(job_lib.__file__)),
             'subprocess_daemon.py')
         daemon_cmd = [
-            'python',
+            'python3',
             daemon_script,
             '--parent-pid',
             str(parent_pid),
             '--proc-pid',
             str(proc.pid),
         ]
+        if use_sudo:
+            daemon_cmd.insert(0, 'sudo')
+        if job_id is not None:
+            print(job_id)
+            daemon_cmd.extend(['--job-id', str(job_id)])
         subprocess.Popen(
             daemon_cmd,
             start_new_session=True,
             # Suppress output
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            # stdout=subprocess.DEVNULL,
+            # stderr=subprocess.DEVNULL,
             # Disable input
             stdin=subprocess.DEVNULL,
+            #shell=True,
         )
         stdout = ''
         stderr = ''
@@ -227,9 +237,14 @@ def make_task_bash_script(codegen: str,
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               username: str,
+                              cluster_name: str,
+                              job_id: str,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False):
+
+    job_hash_id = hashlib.sha256(
+        f'{cluster_name}-{job_id}-{username}'.encode()).hexdigest()
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         if env_vars is not None:
             export_env_vars = '\n'.join(
@@ -254,6 +269,7 @@ def run_bash_command_with_log(bash_command: str,
             # the cmd to be a list.
             ['sudo', '-H', 'su', '-', username, '-c', inner_command],
             log_path,
+            job_id=job_hash_id,
             stream_logs=stream_logs,
             with_ray=with_ray)
 
