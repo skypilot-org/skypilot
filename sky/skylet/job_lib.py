@@ -320,15 +320,14 @@ def is_cluster_idle() -> bool:
 
 def _show_job_queue(jobs) -> None:
     job_table = log_utils.create_table([
-        'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
-        'STATUS', 'LOG'
+        'ID', 'NAME', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES', 'STATUS',
+        'LOG'
     ])
 
     for job in jobs:
         job_table.add_row([
             job['job_id'],
             job['job_name'],
-            job['username'],
             log_utils.readable_time_duration(job['submitted_at']),
             log_utils.readable_time_duration(job['start_at']),
             log_utils.readable_time_duration(job['start_at'],

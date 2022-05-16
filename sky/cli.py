@@ -585,9 +585,15 @@ def _check_cluster_config(yaml_config: dict):
 def _list_local_clusters():
     local_dir = os.path.expanduser('~/.sky/local')
     os.makedirs(local_dir, exist_ok=True)
-    local_clusters = [os.path.basename(f) for f in os.listdir(local_dir) \
-    if os.path.isfile(os.path.join(local_dir, f))]
-    return [clus.split('.')[0] for clus in local_clusters]
+    local_cluster_paths = [os.path.join(local_dir, f) for f in \
+    os.listdir(local_dir) if os.path.isfile(os.path.join(local_dir, f))]
+
+    local_cluster_names = []
+    for clus in local_cluster_paths:
+        is_yaml, yaml_config = _check_yaml(clus, with_outputs=True)
+        if is_yaml:
+            local_cluster_names.append(yaml_config['cluster']['name'])
+    return local_cluster_names
 
 
 def _start_cluster(cluster_name: str,
@@ -737,7 +743,8 @@ def launch(
             cloud = 'local'
 
     if cluster in _list_local_clusters():
-        if yaml_cloud != 'local' or cloud != 'local':
+        if (yaml_cloud and yaml_cloud != 'local') or (cloud and
+                                                      cloud != 'local'):
             raise ValueError(f'Detected Local cluster {cluster}. Must specify '
                              '`cloud: local` or no cloud.')
         else:

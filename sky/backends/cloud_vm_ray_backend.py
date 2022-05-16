@@ -965,9 +965,13 @@ class RetryingVmProvisioner(object):
 
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
-
-        logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
-                    f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
+        if isinstance(to_provision_cloud, clouds.Local):
+            logger.info(
+                f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud}')
+        else:
+            logger.info(
+                f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
+                f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
         # Edge case: /tmp/ray does not exist, so autoscaler can't create/store
         # cluster lock and cluster state.
@@ -1711,9 +1715,16 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}{action_message} (to {num_nodes} node{plural})'
                     f': {style.BRIGHT}{src}{style.RESET_ALL} -> '
                     f'{style.BRIGHT}{dst}{style.RESET_ALL}')
-        with backend_utils.safe_console_status(
-                f'[bold cyan]{action_message}[/]'):
-            backend_utils.run_in_parallel(_sync_node, ip_list)
+        cloud = handle.launched_resources.cloud
+        # TODO: Support Mounting for Local (remove sudo installation)
+        if action_message == 'Mounting' and isinstance(cloud, clouds.Local):
+            logger.warning(
+                f'{colorama.Fore.RED}Sky On-prem does not support '
+                f'mounting. No action will be taken.{colorama.Style.RESET_ALL}')
+        else:
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]{action_message}[/]'):
+                backend_utils.run_in_parallel(_sync_node, ip_list)
 
     def _execute_file_mounts(self, handle: ResourceHandle,
                              file_mounts: Dict[Path, Path]):
@@ -2087,7 +2098,6 @@ class CloudVmRayBackend(backends.Backend):
             'ray job submit -v '
             f'--address=127.0.0.1:8265 --job-id {job_id_hash} --no-wait '
             f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
-        print(job_submit_cmd)
         returncode, _, _ = self.run_on_head(handle,
                                             job_submit_cmd,
                                             require_outputs=True,

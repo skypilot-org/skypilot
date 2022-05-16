@@ -61,7 +61,7 @@ Copy the following YAML into a ``local_example.yaml`` file:
     echo "Hello, Sky On-prem!"
     conda env list
 
-This defines a task to be run. The task takes up 1 V100 GPU. The cloud field is optional. Sky will automatically detect if the cloud is local when the user specifies the name of the local cluster in `sky launch`.
+This defines a task to be run. The task takes up 1 V100 GPU.
 
 To connect to the local cluster ``my-local-cluster`` and run a task, use :code:`sky launch`:
 
@@ -69,7 +69,7 @@ To connect to the local cluster ``my-local-cluster`` and run a task, use :code:`
 
   $ sky launch -c my-local-cluster local_example.yaml
 
-Here, the name of the cluster **must match** the name of the local cluster.
+Here, the name of the cluster **must match** the name of the local cluster. The cloud field is optional. Sky will automatically detect if the cloud is local when the user specifies the name of the local cluster in `sky launch`.
 
 
 Executing Multiple Jobs
