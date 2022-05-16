@@ -2047,7 +2047,7 @@ def spot_launch(
     detach_run: bool,
     yes: bool,
 ):
-    """Launch a managed spot task."""
+    """Launch a managed spot job."""
     # TODO(zhwu): Refactor this function with sky launch, extracting common
     # code.
     entrypoint = ' '.join(entrypoint)
