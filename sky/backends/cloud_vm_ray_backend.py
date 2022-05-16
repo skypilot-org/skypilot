@@ -451,8 +451,12 @@ class RetryingVmProvisioner(object):
                         self._blocked_regions.add(region.name)
                 elif code in [
                         'ZONE_RESOURCE_POOL_EXHAUSTED',
-                        'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS'
+                        'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS',
+                        'UNSUPPORTED_OPERATION'
                 ]:  # Per zone.
+                    # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation # pylint: disable=line-too-long
+                    # However, UNSUPPORTED_OPERATION is observed empirically when VM is preempted during creation.
+                    # This seems to be not documented by GCP.
                     self._blocked_zones.add(zone.name)
                 else:
                     assert False, error

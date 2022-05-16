@@ -129,16 +129,9 @@ class GCP(clouds.Cloud):
         return isinstance(other, GCP)
 
     @classmethod
-    def get_default_instance_type(cls, accelerator):
+    def get_default_instance_type(cls):
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
-        default_type = 'n1-highmem-8'
-        if accelerator is not None:
-            assert len(accelerator.items()
-                      ) == 1, 'more than one accelerator candidates'
-            acc, acc_count = list(accelerator.items())[0]
-            if acc == 'A100':
-                default_type = gcp_catalog.A100_INSTANCE_TYPES[acc_count]
-        return default_type
+        return 'n1-highmem-8'
 
     @classmethod
     def get_default_region(cls) -> clouds.Region:
@@ -200,9 +193,17 @@ class GCP(clouds.Cloud):
                     return ([], fuzzy_candidate_list)
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
+        # But if A100 is used, host VM type must be A2.
+        # https://cloud.google.com/compute/docs/gpus#a100-gpus
+        host_vm_type = GCP.get_default_instance_type()
+        assert len(accelerator_match.items()
+                  ) == 1, 'cannot handle more than one accelerator candidates.'
+        acc, acc_count = list(accelerator_match.items())[0]
+        if acc == 'A100':
+            host_vm_type = gcp_catalog.A100_INSTANCE_TYPES[acc_count]
         r = resources.copy(
             cloud=GCP(),
-            instance_type=GCP.get_default_instance_type(accelerator_match),
+            instance_type=host_vm_type,
             accelerators=accelerator_match,
         )
         return ([r], fuzzy_candidate_list)

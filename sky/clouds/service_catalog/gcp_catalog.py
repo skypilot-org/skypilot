@@ -160,15 +160,14 @@ def list_accelerators(
         new_infos = []
         for info in a100_infos:
             assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
+            a100_host_vm_type = A100_INSTANCE_TYPES[info.accelerator_count]
             new_infos.append(
                 info._replace(
-                    instance_type=A100_INSTANCE_TYPES[info.accelerator_count],
+                    instance_type=a100_host_vm_type,
                     memory=A100_HOST_MEMORY[info.accelerator_count],
                     # total cost = VM instance + GPU.
-                    price=info.price + ON_DEMAND_PRICES[A100_INSTANCE_TYPES[
-                        info.accelerator_count]],
-                    spot_price=info.spot_price +
-                    SPOT_PRICES[A100_INSTANCE_TYPES[info.accelerator_count]],
+                    price=info.price + ON_DEMAND_PRICES[a100_host_vm_type],
+                    spot_price=info.spot_price + SPOT_PRICES[a100_host_vm_type],
                 ))
         results['A100'] = new_infos
     return results
