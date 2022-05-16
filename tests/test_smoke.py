@@ -1,4 +1,3 @@
-import getpass
 import inspect
 import pathlib
 import subprocess
@@ -6,7 +5,6 @@ import sys
 import tempfile
 import time
 from typing import List, Optional, Tuple, NamedTuple
-import uuid
 
 import colorama
 import pytest
@@ -16,9 +14,9 @@ from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 
-# (username, mac addr last 4 chars): for uniquefying users on shared-account
-# cloud providers.
-_user_and_mac = f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}'
+# (username, last 4 chars of hash of hostname): for uniquefying users on
+# shared-account cloud providers.
+_user_and_host = backend_utils.user_and_hostname_hash()
 
 
 class Test(NamedTuple):
@@ -46,7 +44,7 @@ def _get_cluster_name():
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-')
-    return f'{test_name}-{_user_and_mac}'
+    return f'{test_name}-{_user_and_host}'
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
@@ -469,6 +467,7 @@ def test_spot_storage():
             'managed-spot-storage',
             [
                 f'sky spot launch -n {name} {file_path} -y',
+                'sleep 60',  # Wait the spot status to be updated
                 f'sky spot status | grep {name} | grep SUCCEEDED',
             ],
             f'sky spot cancel -y -n {name}',
@@ -501,7 +500,7 @@ def test_inline_spot_env():
         'test-inline-spot-env',
         [
             f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
-            'sleep 5',
+            'sleep 10',
             f'sky spot status | grep {name} | grep SUCCEEDED',
         ],
         f'sky spot cancel -y -n {name}',

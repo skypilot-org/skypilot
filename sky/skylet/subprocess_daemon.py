@@ -29,7 +29,7 @@ if __name__ == '__main__':
     job_id = args.job_id
 
     # If Ray job id is passed in, wait until the job is done/cancelled/failed
-    if job_id:
+    if job_id is None:
         try:
             client = JobSubmissionClient('http://127.0.0.1:8265')
             while True:

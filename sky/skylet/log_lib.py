@@ -7,7 +7,6 @@ import io
 import os
 import ray
 import selectors
-import signal
 import subprocess
 import sys
 import time
@@ -17,7 +16,6 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
-from sky import exceptions
 from sky import sky_logging
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
@@ -181,6 +179,7 @@ def run_with_log(
         )
         stdout = ''
         stderr = ''
+
         if process_stream:
             # We need this even if the log_path is '/dev/null' to ensure the
             # progress bar is shown.
@@ -190,8 +189,8 @@ def run_with_log(
                 log_path,
                 stream_logs,
                 start_streaming_at=start_streaming_at,
-                # Skip these lines caused by `-i` option of bash. Failed to find
-                # other way to turn off these two warning.
+                # Skip these lines caused by `-i` option of bash. Failed to
+                # find other way to turn off these two warning.
                 # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
                 # `ssh -T -i -tt` still cause the problem.
                 skip_lines=[
@@ -317,20 +316,6 @@ def _follow_job_logs(file,
             status = job_lib.get_status(job_id)
 
 
-def interrupt_handler(signum, frame):
-    del signum, frame
-    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
-    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
-
-
-def stop_handler(signum, frame):
-    del signum, frame
-    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
-                   f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
-    sys.exit(exceptions.SIGTSTP_CODE)
-
-
 def tail_logs(cluster_name: str,
               ssh_user: str,
               job_id: int,
@@ -376,8 +361,6 @@ def tail_logs(cluster_name: str,
         status = job_lib.query_job_status(cluster_name, ssh_user, [job_id])[0]
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
-        signal.signal(signal.SIGINT, interrupt_handler)
-        signal.signal(signal.SIGTSTP, stop_handler)
         # Not using `ray job logs` because it will put progress bar in
         # multiple lines.
         with open(log_path, 'r', newline='') as log_file:

@@ -3,12 +3,14 @@ import ast
 import colorama
 import datetime
 import enum
+import hashlib
 import http.client as httplib
 import getpass
 import json
 from multiprocessing import pool
 import os
 import pathlib
+import psutil
 import re
 import shlex
 import socket
@@ -85,6 +87,10 @@ _TEST_IP = '1.1.1.1'
 # cluster name on GCP.  Ref:
 # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
 _MAX_CLUSTER_NAME_LEN = 37
+
+# Allow each CPU thread take 2 tasks.
+# Note: This value cannot be too small, otherwise OOM issue may occur.
+DEFAULT_TASK_CPU_DEMAND = 0.5
 
 SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 
@@ -598,12 +604,11 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'aws_default_ami': aws_default_ami,
                 # Temporary measure, as deleting per-cluster SGs is too slow.
                 # See https://github.com/sky-proj/sky/pull/742.
-                # Generate the name of the security group we're looking for...
-                # (username, mac addr last 4 chars): for uniquefying users on
-                # shared-account cloud providers.
-                'security_group':
-                    f'sky-security-group-'
-                    f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}',
+                # Generate the name of the security group we're looking for.
+                # (username, last 4 chars of hash of hostname): for uniquefying
+                # users on shared-account cloud providers. Using uuid.getnode()
+                # is incorrect; observed to collide on Macs.
+                'security_group': f'sky-sg-{user_and_hostname_hash()}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region}',
@@ -640,10 +645,12 @@ def write_cluster_config(to_provision: 'resources.Resources',
         scripts = tuple(
             fill_template(
                 template_name,
-                dict(resources_vars, **{
-                    'zones': ','.join(zones),
-                    'tpu_name': tpu_name,
-                }),
+                dict(
+                    resources_vars, **{
+                        'zones': ','.join(zones),
+                        'tpu_name': tpu_name,
+                        'gcp_project_id': gcp_project_id,
+                    }),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
                 # with cluster yamls.
@@ -1348,8 +1355,7 @@ def run_no_outputs(cmd, **kwargs):
 
 
 def check_local_gpus() -> bool:
-    """
-    Checks if GPUs are available locally.
+    """Checks if GPUs are available locally.
 
     Returns whether GPUs are available on the local machine by checking
     if nvidia-smi is installed and returns zero return code.
@@ -1370,6 +1376,35 @@ def check_local_gpus() -> bool:
                                          check=False)
         is_functional = execution_check.returncode == 0
     return is_functional
+
+
+def user_and_hostname_hash() -> str:
+    """Returns a string containing <user>-<hostname hash last 4 chars>.
+
+    For uniquefying user clusters on shared-account cloud providers. Also used
+    for AWS security group.
+
+    Using uuid.getnode() instead of gethostname() is incorrect; observed to
+    collide on Macs.
+
+    NOTE: BACKWARD INCOMPATIBILITY NOTES
+
+    Changing this string will render AWS clusters shown in `sky status`
+    unreusable and potentially cause leakage:
+
+    - If a cluster is STOPPED, any command restarting it (`sky launch`, `sky
+      start`) will launch a NEW cluster.
+    - If a cluster is UP, a `sky launch` command reusing it will launch a NEW
+      cluster. The original cluster will be stopped and thus leaked from Sky's
+      perspective.
+    - `sky down/stop/exec` on these pre-change clusters still works, if no new
+      clusters with the same name have been launched.
+
+    The reason is AWS security group names are derived from this string, and
+    thus changing the SG name makes these clusters unrecognizable.
+    """
+    hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
+    return f'{getpass.getuser()}-{hostname_hash}'
 
 
 def generate_cluster_name():
@@ -1629,7 +1664,7 @@ def get_task_demands_dict(
 def get_task_resources_str(task: 'task_lib.Task') -> str:
     resources_dict = get_task_demands_dict(task)
     if resources_dict is None:
-        resources_str = 'CPU:1'
+        resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
     else:
         resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
@@ -1668,9 +1703,39 @@ def check_cluster_name_not_reserved(
     usage = 'internal use'
     if cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
         usage = 'spot controller'
-    msg = (f'Cluster {cluster_name!r} is reserved for {usage}.')
+    msg = f'Cluster {cluster_name!r} is reserved for {usage}.'
     if operation_str is not None:
-        msg += (f'{colorama.Fore.RED}{operation_str} is not allowed.'
-                f'{colorama.Style.RESET_ALL}')
+        msg += f' {operation_str} is not allowed.'
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         raise ValueError(msg)
+
+
+def kill_children_processes():
+    # We need to kill the children, so that the underlying subprocess
+    # will not print the logs to the terminal, after this program
+    # exits.
+    parent_process = psutil.Process()
+    for child in parent_process.children(recursive=True):
+        try:
+            child.terminate()
+        except psutil.NoSuchProcess:
+            # The child process may have already been terminated.
+            pass
+
+
+# Handle ctrl-c
+def interrupt_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+    kill_children_processes()
+    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+
+
+# Handle ctrl-z
+def stop_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
+    kill_children_processes()
+    sys.exit(exceptions.SIGTSTP_CODE)

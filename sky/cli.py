@@ -320,7 +320,7 @@ _TASK_OPTIONS = [
         type=_parse_env_var,
         multiple=True,
         help="""
-        Environment variable to set on the remote node. 
+        Environment variable to set on the remote node.
         It can be specified multiple times.
 
         Example:
@@ -332,7 +332,7 @@ _TASK_OPTIONS = [
         be the same value of $HOME in the local environment where the
         sky command is run.
 
-        3. --env MY_ENV3: set the $MY_ENV3 on the cluster to be the 
+        3. --env MY_ENV3: set the $MY_ENV3 on the cluster to be the
         same value of $MY_ENV3 in the local environment.""",
     )
 ]
@@ -506,7 +506,7 @@ def _create_and_ssh_into_node(
                         commands,
                         port_forward=port_forward,
                         ssh_mode=backend_utils.SshMode.LOGIN)
-    cluster_name = global_user_state.get_cluster_name_from_handle(handle)
+    cluster_name = handle.cluster_name
 
     click.echo('To attach to it again:  ', nl=False)
     if cluster_name == _default_interactive_node_name(node_type):
@@ -1052,7 +1052,10 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
             unsupported_clusters.append(cluster)
             continue
         if cluster_status != global_user_state.ClusterStatus.UP:
-            print(f'Cluster {cluster} is not up. Skipping.')
+            click.secho(
+                f'Cluster {cluster} is not up (status: {cluster_status.value});'
+                ' skipped.',
+                fg='yellow')
             continue
         _show_job_queue_on_cluster(cluster, handle, backend, code)
     if unsupported_clusters:
@@ -1118,9 +1121,9 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
                                'LocalDockerBackend.')
     if cluster_status != global_user_state.ClusterStatus.UP:
         click.secho(
-            f'Cluster {cluster_name} (status: {cluster_status}) '
-            'is not up.',
-            fg='red')
+            f'Cluster {cluster_name} is not up '
+            f'(status: {cluster_status.value}).',
+            fg='yellow')
         return
 
     if sync_down and status:
@@ -1163,7 +1166,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
               default=False,
               is_flag=True,
               required=False,
-              help='Cancel all jobs.')
+              help='Cancel all jobs on the specified cluster.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     """Cancel job(s)."""
@@ -1193,8 +1196,8 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             f'is created by {backend.NAME}.')
     if cluster_status != global_user_state.ClusterStatus.UP:
         click.secho(
-            f'Cluster {cluster} (status: {cluster_status}) '
-            'is not up...skipped.',
+            f'Cluster {cluster} is not up (status: {cluster_status.value}); '
+            'skipped.',
             fg='yellow')
         return
 
@@ -1553,21 +1556,20 @@ def _terminate_or_stop_clusters(
         # normal clusters and purge is True.
         if len(reserved_clusters) > 0:
             if not purge:
-                msg = (
-                    f'{operation} sky reserved clusters {reserved_clusters_str}'
-                    ' is not supported.')
+                msg = (f'{operation} Sky reserved cluster(s) '
+                       f'{reserved_clusters_str} is not supported.')
                 if terminate:
                     msg += (
                         '\nPlease specify --purge to force termination of the '
-                        'reserved clusters.')
+                        'reserved cluster(s).')
                 raise click.UsageError(msg)
             if len(names) != 0:
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
-                    f'{operation} sky reserved clusters {reserved_clusters_str}'
-                    f' with multiple other clusters {names_str} is not '
-                    'supported.\n'
-                    f'Please omit the reserved clusters {reserved_clusters}.')
+                    f'{operation} Sky reserved cluster(s) '
+                    f'{reserved_clusters_str} with multiple other cluster(s) '
+                    f'{names_str} is not supported.\n'
+                    f'Please omit the reserved cluster(s) {reserved_clusters}.')
         names += reserved_clusters
 
     if apply_to_all:
@@ -1587,10 +1589,15 @@ def _terminate_or_stop_clusters(
     clusters = []
     for name in names:
         handle = global_user_state.get_handle_from_cluster_name(name)
+        if handle is None:
+            # This codepath is used for 'sky down -p <controller>' when the
+            # controller is not in 'sky status'.  Cluster-not-found message
+            # should've been printed by _get_glob_clusters() above.
+            continue
         clusters.append({'name': name, 'handle': handle})
 
-    if not clusters and not names:
-        print('Cluster(s) not found (see `sky status`).')
+    if not clusters:
+        print('\nCluster(s) not found (tip: see `sky status`).')
         return
 
     if not no_confirm and len(clusters) > 0:
@@ -2331,7 +2338,7 @@ def spot_launch(
     detach_run: bool,
     yes: bool,
 ):
-    """Launch a managed spot task."""
+    """Launch a managed spot job."""
     # TODO(zhwu): Refactor this function with sky launch, extracting common
     # code.
     entrypoint = ' '.join(entrypoint)
@@ -2526,7 +2533,8 @@ def spot_status(all: bool, refresh: bool):
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
             job_table_str = (
-                f'\nCached job status table [last updated: {readable_time}]:\n'
+                f'\n{colorama.Fore.YELLOW}Cached job status table '
+                f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
                 f'{cache[1]}\n')
         click.echo(job_table_str)
         return
@@ -2570,16 +2578,15 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     You can provide either a job name or a list of job ids to be cancelled.
     They are exclusive options.
-
     Examples:
 
-        .. code-block:: bash
+    .. code-block:: bash
 
         # Cancel managed spot job with name 'my-job'
-        sky spot cancel -n my-job
+        $ sky spot cancel -n my-job
 
         # Cancel managed spot jobs with IDs 1, 2, 3
-        sky spot cancel 1 2 3
+        $ sky spot cancel 1 2 3
 
     """
 
@@ -2647,7 +2654,7 @@ def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
     """Show spot controller logs.
 
     If --sync-down is specified, the all the logs from every recovery will be
-     downloaded from the controller.
+    downloaded from the controller.
     Otherwise, the realtime logs from the job will be streamed.
     """
     # TODO(zhwu): Automatically restart the spot controller

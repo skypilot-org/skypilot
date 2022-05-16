@@ -1,5 +1,5 @@
 """User interfaces with managed spot jobs."""
-
+import collections
 import enum
 import json
 import pathlib
@@ -11,7 +11,6 @@ import colorama
 import filelock
 
 from sky import backends
-from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -22,7 +21,11 @@ from sky.spot import spot_state
 logger = sky_logging.init_logger(__name__)
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
-JOB_STATUS_CHECK_GAP_SECONDS = 60
+# Controller checks its job's status every this many seconds.
+JOB_STATUS_CHECK_GAP_SECONDS = 20
+
+# Controller checks if its job has started every this many seconds.
+JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
@@ -34,6 +37,39 @@ class UserSignal(enum.Enum):
     CANCEL = 'CANCEL'
     # NOTE: We can have more communication signals here if needed
     # in the future.
+
+
+# ====== internal functions ======
+def get_job_status(backend: 'backends.CloudVmRayBackend',
+                   cluster_name: str) -> Optional['job_lib.JobStatus']:
+    """Check the status of the job running on the spot cluster.
+
+    It can be None, INIT, RUNNING, SUCCEEDED, FAILED or CANCELLED.
+    """
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    status = None
+    try:
+        logger.info('=== Checking the job status... ===')
+        status = backend.get_job_status(handle, stream_logs=False)
+        logger.info(f'Job status: {status}')
+    except SystemExit:
+        logger.info('Failed to connect to the cluster.')
+    logger.info('=' * 34)
+    return status
+
+
+def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
+                      get_end_time: bool) -> float:
+    """Get the started/ended time of the job."""
+    code = job_lib.JobLibCodeGen.get_job_time(job_id=None, is_end=get_end_time)
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     stream_logs=False,
+                                                     require_outputs=True)
+    backend_utils.handle_returncode(returncode, code, 'Failed to get job time.',
+                                    stdout + stderr)
+    return float(stdout)
 
 
 # ======== user functions ========
@@ -154,27 +190,37 @@ def stream_logs_by_id(job_id: int) -> str:
     spot_status = spot_state.get_status(job_id)
     while not spot_status.is_terminal():
         if spot_status != spot_state.SpotStatus.RUNNING:
-            logger.info(f'The log is not ready yet, as the spot job is '
-                        f'{spot_status.value}. '
+            logger.info(f'SKY INFO: The log is not ready yet, as the spot job '
+                        f'is {spot_status.value}. '
                         f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
             spot_status = spot_state.get_status(job_id)
             continue
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
-        if returncode in [
-                0, exceptions.KEYBOARD_INTERRUPT_CODE, exceptions.SIGTSTP_CODE
-        ]:
-            # If the job succeeded/ctrl-c/ctrl-z, we can safely break the loop.
+        if returncode == 0:
+            # If the log tailing exit successfully (the real job can be
+            # SUCCEEDED or FAILED), we can safely break the loop. We use the
+            # status in job queue to show the information, as the spot_state is
+            # not updated yet.
+            job_status = backend.get_job_status(handle,
+                                                job_id=None,
+                                                stream_logs=False)
+            logger.info(f'Logs finished for job {job_id} '
+                        f'(status: {job_status.value}).')
             break
-        logger.debug(f'The return code is {returncode}.')
+        logger.info(
+            f'SKY INFO: The return code is {returncode}. '
+            f'Check the job status in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
         # check the spot status again.
         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
         spot_status = spot_state.get_status(job_id)
-    logger.info(f'Logs finished for job {job_id} '
-                f'(status: {spot_state.get_status(job_id).value}).')
+    else:
+        # The spot_status is in terminal state.
+        logger.info(f'Logs finished for job {job_id} '
+                    f'(status: {spot_state.get_status(job_id).value}).')
     return ''
 
 
@@ -197,12 +243,13 @@ def show_jobs(show_all: bool) -> str:
     jobs = spot_state.get_spot_jobs()
 
     columns = [
-        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'STARTED',
-        'JOB DURATION', '#RECOVERIES', 'STATUS'
+        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
+        '#RECOVERIES', 'STATUS'
     ]
     if show_all:
-        columns += ['CLUSTER', 'REGION']
+        columns += ['STARTED', 'CLUSTER', 'REGION']
     job_table = log_utils.create_table(columns)
+    status_counts = collections.defaultdict(int)
     for job in jobs:
         job_duration = log_utils.readable_time_duration(
             job['last_recovered_at'] - job['job_duration'],
@@ -213,24 +260,31 @@ def show_jobs(show_all: bool) -> str:
             job_duration = log_utils.readable_time_duration(0,
                                                             job['job_duration'],
                                                             absolute=True)
-
+        ago_suffix = ' ago' if show_all else ''
         values = [
             job['job_id'],
             job['job_name'],
             job['resources'],
             # SUBMITTED
-            log_utils.readable_time_duration(job['submitted_at']),
+            log_utils.readable_time_duration(job['submitted_at'],
+                                             absolute=show_all) + ago_suffix,
             # TOT. DURATION
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
                                              absolute=True),
-            # STARTED
-            log_utils.readable_time_duration(job['start_at']),
             job_duration,
             job['recovery_count'],
             job['status'].value,
         ]
+        if not job['status'].is_terminal():
+            status_counts[job['status'].value] += 1
         if show_all:
+            # STARTED
+            started = log_utils.readable_time_duration(job['start_at'],
+                                                       absolute=True)
+            if started != '-':
+                started += ago_suffix
+            values.append(started)
             cluster_name = generate_spot_cluster_name(job['job_name'],
                                                       job['job_id'])
             handle = global_user_state.get_handle_from_cluster_name(
@@ -243,7 +297,12 @@ def show_jobs(show_all: bool) -> str:
                     handle.launched_resources.region
                 ])
         job_table.add_row(values)
-    return str(job_table)
+    status_str = ', '.join([
+        f'{count} {status}' for status, count in sorted(status_counts.items())
+    ])
+    if status_str:
+        status_str = f'In progress jobs: {status_str}\n\n'
+    return status_str + str(job_table)
 
 
 class SpotCodeGen:
@@ -307,7 +366,7 @@ class SpotCodeGen:
         return f'python3 -u -c {shlex.quote(code)}'
 
 
-def dump_job_table_cache(job_table):
+def dump_job_table_cache(job_table: str):
     """Dump job table cache to file."""
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     with cache_file.open('w') as f:

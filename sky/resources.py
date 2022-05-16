@@ -332,7 +332,7 @@ class Resources:
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators)
+                self.accelerators, self.use_spot)
         return hourly_cost * hours
 
     def set_local_resources(self, auth_config):
