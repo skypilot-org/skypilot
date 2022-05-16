@@ -94,5 +94,9 @@ To interact with spot jobs, use ``sky spot status`` and ``sky spot cancel``:
     2  roberta  1x [A100:8]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
     1  bert-qa  1x [V100:1]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
 
+    # Stream the logs of a running spot job
+    $ sky spot logs -n bert-qa
+
     # Cancel a spot job by name
     $ sky spot cancel -n bert-qa
+
