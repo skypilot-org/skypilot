@@ -168,7 +168,6 @@ def run_with_log(
         if use_sudo:
             daemon_cmd.insert(0, 'sudo')
         if job_id is not None:
-            print(job_id)
             daemon_cmd.extend(['--job-id', str(job_id)])
         subprocess.Popen(
             daemon_cmd,
