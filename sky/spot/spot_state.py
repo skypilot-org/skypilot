@@ -85,13 +85,13 @@ def set_starting(job_id: int):
     _CONN.commit()
 
 
-def set_started(job_id: int):
+def set_started(job_id: int, start_time: float):
     logger.info('Job started.')
     _CURSOR.execute(
         """\
         UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
         WHERE job_id=(?)""",
-        (SpotStatus.RUNNING.value, time.time(), time.time(), job_id))
+        (SpotStatus.RUNNING.value, start_time, start_time, job_id))
     _CONN.commit()
 
 
@@ -106,29 +106,29 @@ def set_recovering(job_id: int):
     _CONN.commit()
 
 
-def set_recovered(job_id: int):
+def set_recovered(job_id: int, recovered_time: float):
     _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
-        WHERE job_id=(?)""", (SpotStatus.RUNNING.value, time.time(), job_id))
+        WHERE job_id=(?)""", (SpotStatus.RUNNING.value, recovered_time, job_id))
     _CONN.commit()
     logger.info('==== Recovered. ====')
 
 
-def set_succeeded(job_id: int):
+def set_succeeded(job_id: int, end_time: float):
     _CURSOR.execute(
         """\
         UPDATE spot SET
         status=(?), end_at=(?)
         WHERE job_id=(?) AND end_at IS null""",
-        (SpotStatus.SUCCEEDED.value, time.time(), job_id))
+        (SpotStatus.SUCCEEDED.value, end_time, job_id))
     _CONN.commit()
     logger.info('Job succeeded.')
 
 
-def set_failed(job_id: int):
-    end_time = time.time()
+def set_failed(job_id: int, end_time: Optional[float] = None):
+    end_time = time.time() if end_time is None else end_time
     fields_to_set = {
         'end_at': end_time,
         'status': SpotStatus.FAILED.value,

@@ -190,6 +190,9 @@ class Task:
     @staticmethod
     def from_yaml(yaml_path):
         with open(os.path.expanduser(yaml_path), 'r') as f:
+            # TODO(zongheng): use
+            #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
+            # to raise errors on duplicate keys.
             config = yaml.safe_load(f)
 
         if isinstance(config, str):
