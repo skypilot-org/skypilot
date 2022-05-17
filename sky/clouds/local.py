@@ -70,7 +70,7 @@ class Local(clouds.Cloud):
         # (minus electricity/utility bills)
         return 0.0
 
-    def accelerators_to_hourly_cost(self, accelerators):
+    def accelerators_to_hourly_cost(self, accelerators, use_spot):
         # Hourly cost of accelerators is 0 for local cloud
         return 0.0
 

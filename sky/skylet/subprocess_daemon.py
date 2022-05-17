@@ -4,13 +4,14 @@ Wait for parent_pid to exit, then SIGTERM (or SIGKILL if needed) the child
 processes of proc_pid.
 """
 
-import psutil
 import argparse
 from ray.dashboard.modules.job.common import JobStatus
 from ray.dashboard.modules.job.sdk import JobSubmissionClient
 import requests
 import sys
 import time
+
+import psutil
 
 if __name__ == '__main__':
 
@@ -19,6 +20,7 @@ if __name__ == '__main__':
     parser.add_argument('--proc-pid', type=int, required=True)
     parser.add_argument('--job-id', type=str, required=False)
     args = parser.parse_args()
+    job_id = args.job_id
 
     parent_process = psutil.Process(args.parent_pid)
     try:
@@ -26,11 +28,14 @@ if __name__ == '__main__':
     except psutil.NoSuchProcess:
         process = None
         pass
-    job_id = args.job_id
 
+    if process is None or parent_process is None:
+        sys.exit()
+
+    wait_for_process = False
     # If Ray job id is passed in, wait until the job is done/cancelled/failed
     if job_id is None:
-        parent_process.wait()
+        wait_for_process = True
     else:
         try:
             client = JobSubmissionClient('http://127.0.0.1:8265')
@@ -44,12 +49,20 @@ if __name__ == '__main__':
                 time.sleep(1)
         except requests.exceptions.ConnectionError as e:
             print(e)
-            parent_process.wait()
+            wait_for_process = True
 
-    if process is None or not process.is_running():
+    # Wait for either parent or target process to exit.
+    while wait_for_process:
+        time.sleep(1)
+        if not process.is_running() or not parent_process.is_running():
+            break
+
+    try:
+        children = process.children(recursive=True)
+        children.append(process)
+    except psutil.NoSuchProcess:
         sys.exit()
-    children = process.children(recursive=True)
-    children.append(process)
+
     for pid in children:
         try:
             pid.terminate()

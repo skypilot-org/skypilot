@@ -44,6 +44,7 @@ install_requires = [
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
     'grpcio<=1.43.0',
+    'psutil',
     'pulp',
     'psutil',
 ]
