@@ -1108,14 +1108,14 @@ def benchmark_launch(
 
     logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
                 f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
-                '\nTo check the benchmark results (on the fly): '
+                '\nTo check the bench results (on the fly): '
                 f'{backend_utils.BOLD}sky benchmark show '
                 f'{benchmark}{backend_utils.RESET_BOLD}'
                 '\nTo stop the clusters: '
-                f'{backend_utils.BOLD}sky benchmark stop '
+                f'{backend_utils.BOLD}sky bench stop '
                 f'{benchmark}{backend_utils.RESET_BOLD}'
                 '\nTo teardown the clusters: '
-                f'{backend_utils.BOLD}sky benchmark down '
+                f'{backend_utils.BOLD}sky bench down '
                 f'{benchmark}{backend_utils.RESET_BOLD}')
     backend_utils.run('sky status')
 
@@ -1430,7 +1430,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         to_delete = benchmark_state.get_benchmarks()
         if len(benchmarks) > 0:
             print('Both --all and benchmark(s) specified '
-                  'for sky benchmark delete. Letting --all take effect.')
+                  'for sky bench delete. Letting --all take effect.')
 
     benchmark_list = ', '.join([r['name'] for r in to_delete])
     if not yes:
