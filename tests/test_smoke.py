@@ -357,7 +357,7 @@ def _get_cancel_task_with_cloud(name, cloud):
             f'sky exec {name} "nvidia-smi | grep python"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel {name} 1',
-            'sleep 60',
+            'sleep 120',
             # check if the python job is gone.
             f'sky exec {name} "! nvidia-smi | grep python"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
