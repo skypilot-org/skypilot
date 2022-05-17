@@ -38,7 +38,6 @@ class _BenchmarkSQLiteConn(threading.local):
             name TEXT PRIMARY KEY,
             task TEXT,
             launched_at INTEGER,
-            callback TEXT,
             status TEXT)""")
         # Table for Benchmark Results
         self.cursor.execute("""\
@@ -67,22 +66,21 @@ class BenchmarkStatus(enum.Enum):
     FINISHED = 'FINISHED'
 
 
-def add_benchmark(benchmark_name: str, task_name: Union[None, str],
-                  callback: str) -> None:
+def add_benchmark(benchmark_name: str, task_name: Union[None, str]) -> None:
     """Add a new benchmark."""
     launched_at = int(time.time())
     if task_name is None:
         _BENCHMARK_DB.cursor.execute(
             'INSERT INTO benchmark'
-            '(name, task, launched_at, callback, status) '
-            'VALUES (?, NULL, ?, ?, ?)', (benchmark_name, launched_at, callback,
+            '(name, task, launched_at, status) '
+            'VALUES (?, NULL, ?, ?, ?)', (benchmark_name, launched_at,
                                           BenchmarkStatus.RUNNING.value))
     else:
         _BENCHMARK_DB.cursor.execute(
             'INSERT INTO benchmark'
-            '(name, task, launched_at, callback, status) '
+            '(name, task, launched_at, status) '
             'VALUES (?, ?, ?, ?, ?)', (benchmark_name, task_name, launched_at,
-                                       callback, BenchmarkStatus.RUNNING.value))
+                                       BenchmarkStatus.RUNNING.value))
     _BENCHMARK_DB.conn.commit()
 
 
@@ -140,12 +138,11 @@ def get_benchmark_from_name(benchmark_name: str) -> Optional[Dict[str, Any]]:
     """Get a benchmark from its name."""
     rows = _BENCHMARK_DB.cursor.execute(
         'SELECT * FROM benchmark WHERE name=(?)', (benchmark_name,))
-    for name, task, launched_at, callback, status in rows:
+    for name, task, launched_at, status in rows:
         record = {
             'name': name,
             'task': task,
             'launched_at': launched_at,
-            'callback': callback,
             'status': BenchmarkStatus[status],
         }
         return record
@@ -155,12 +152,11 @@ def get_benchmarks() -> List[Dict[str, Any]]:
     """Get all benchmarks."""
     rows = _BENCHMARK_DB.cursor.execute('select * from benchmark')
     records = []
-    for name, task, launched_at, callback, status in rows:
+    for name, task, launched_at, status in rows:
         record = {
             'name': name,
             'task': task,
             'launched_at': launched_at,
-            'callback': callback,
             'status': BenchmarkStatus[status],
         }
         records.append(record)

@@ -20,7 +20,7 @@ SKY_CLOUD_BENCHMARK_SUMMARY = os.path.join(SKY_CLOUD_BENCHMARK_DIR,
 SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 
 
-def get_benchmark_summaries(benchmark: str, callback: str,
+def get_benchmark_summaries(benchmark: str, 
                             clusters: List[str]) -> Dict[str, Dict[str, int]]:
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,
@@ -37,16 +37,13 @@ def get_benchmark_summaries(benchmark: str, callback: str,
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
 
-        if callback == 'wandb':
-            log_dir = os.path.join(SKY_CLOUD_BENCHMARK_DIR, 'wandb')
-        else:
-            log_dir = SKY_CLOUD_BENCHMARK_DIR
+        log_dir = SKY_CLOUD_BENCHMARK_DIR
         download_dir = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
         os.makedirs(download_dir, exist_ok=True)
         try:
             backend.get_benchmark_summary(handle, log_dir,
                                           SKY_CLOUD_BENCHMARK_SUMMARY,
-                                          download_dir, callback)
+                                          download_dir)
             progress.update(task, advance=1)
         except exceptions.CommandError as e:
             logger.error(
