@@ -194,13 +194,13 @@ class GCP(clouds.Cloud):
                     return ([], fuzzy_candidate_list)
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
-        # But if A100 is used, host VM type must be A2.
-        # https://cloud.google.com/compute/docs/gpus#a100-gpus
         host_vm_type = GCP.get_default_instance_type()
         assert len(accelerator_match.items()
                   ) == 1, 'cannot handle more than one accelerator candidates.'
         acc, acc_count = list(accelerator_match.items())[0]
         if acc == 'A100':
+            # If A100 is used, host VM type must be A2.
+            # https://cloud.google.com/compute/docs/gpus#a100-gpus
             host_vm_type = gcp_catalog.A100_INSTANCE_TYPES[acc_count]
         r = resources.copy(
             cloud=GCP(),
