@@ -749,6 +749,7 @@ def launch(
     #            detach_run=detach_run,
     #            backend=backend,
     #            idle_minutes_to_autostop=idle_minutes_to_autostop)
+    raise Exception
     launch_logger.set_return_code(0)
     return 0
 
