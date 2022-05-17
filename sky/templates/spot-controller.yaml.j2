@@ -15,7 +15,6 @@ file_mounts:
 
 setup: |
   # Install cli dependencies
-  echo "Preparing controller runtime..."
   (pip list | grep boto3 2>&1 > /dev/null && \
    pip list | grep google-api-python-client 2>&1 > /dev/null) || \
    pip3 install "$(echo {{sky_remote_path}}/*.whl)[aws,gcp]" 2>&1 > /dev/null
@@ -24,16 +23,14 @@ setup: |
   # pip list | grep azure-cli 2>&1 > /dev/null || \
   #  pip3 install "$(echo {{sky_remote_path}}/*.whl)[azure]" 2>&1 > /dev/null 
 
-  gcloud --version || \
+  gcloud --version 2>&1 > /dev/null || \
   (wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && \
     tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && \
     mv google-cloud-sdk ~/ && \
     ~/google-cloud-sdk/install.sh -q && \
-    echo 'source ~/google-cloud-sdk/path.bash.inc' >> ~/.bashrc)
+    echo 'source ~/google-cloud-sdk/path.bash.inc' >> ~/.bashrc) 2>&1 > /dev/null
 
 run: |
   python -u -m sky.spot.controller \
     ~/.sky/sky_spot_tasks/{{cluster_name}}.yaml \
     --job-id $SKY_JOB_ID
-
-

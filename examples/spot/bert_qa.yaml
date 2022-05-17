@@ -1,0 +1,41 @@
+name: bert_qa
+
+resources:
+    accelerators: V100:1
+    cloud: aws
+    use_spot: true
+    spot_recovery: FAILOVER
+
+num_nodes: 1
+
+file_mounts:
+    /checkpoint:
+        name: # NOTE: Fill in your bucket name
+        mode: MOUNT
+
+setup: |
+    # Fill in your wandb key: copy from https://wandb.ai/authorize
+    echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
+
+    git clone https://github.com/huggingface/transformers.git
+    cd transformers && git checkout v4.18.0
+    pip install -e .
+    cd examples/pytorch/question-answering/
+    pip install -r requirements.txt
+    pip install wandb
+
+run: |
+    cd transformers/examples/pytorch/question-answering/
+    python run_qa.py \
+    --model_name_or_path bert-base-uncased \
+    --dataset_name squad \
+    --do_train \
+    --do_eval \
+    --per_device_train_batch_size 12 \
+    --learning_rate 3e-5 \
+    --num_train_epochs 50 \
+    --max_seq_length 384 \
+    --doc_stride 128 \
+    --output_dir /checkpoint/bert_qa/ \
+    --report_to wandb \
+    --save_total_limit 10

@@ -5,25 +5,33 @@ import json
 import pathlib
 import shlex
 import time
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import colorama
 import filelock
 
+from sky import backends
 from sky import global_user_state
+from sky import sky_logging
+from sky.backends import backend_utils
+from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.spot import spot_state
+
+logger = sky_logging.init_logger(__name__)
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 JOB_STATUS_CHECK_GAP_SECONDS = 60
 
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
+_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
+
 
 class UserSignal(enum.Enum):
     """The signal to be sent to the user."""
     CANCEL = 'CANCEL'
-    # TODO(zhwu): We can have more communication signals here if needed
+    # NOTE: We can have more communication signals here if needed
     # in the future.
 
 
@@ -35,11 +43,50 @@ def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
     return f'{task_name}-{job_id}'
 
 
-def cancel_jobs_by_id(job_ids: List[int]) -> str:
-    """Cancel jobs by id."""
+def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
+    """Cancel jobs by id.
+
+    If job_ids is None, cancel all jobs.
+    """
+    if job_ids is None:
+        job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
     if len(job_ids) == 0:
         return 'No job to cancel.'
+    job_id_str = ', '.join(map(str, job_ids))
+    logger.info(f'Cancelling jobs {job_id_str}.')
+    cancelled_job_ids = []
     for job_id in job_ids:
+        # Check the status of the managed spot job status. If it is in
+        # terminal state, we can safely skip it.
+        job_status = spot_state.get_status(job_id)
+        if job_status.is_terminal():
+            logger.info(f'Job {job_id} is already in terminal state '
+                        f'{job_status.value}. Skipped.')
+            continue
+
+        # Check the status of the controller. If it is not running, it must be
+        # exited abnormally, and we should set the job status to FAILED.
+        # TODO(zhwu): instead of having the liveness check here, we may need
+        # to make it as a event in skylet.
+        controller_status = job_lib.get_status(job_id)
+        if controller_status.is_terminal():
+            logger.error(f'Controller for job {job_id} have exited abnormally. '
+                         'Set the job status to FAILED.')
+            task_name = spot_state.get_task_name_by_job_id(job_id)
+
+            # Tear down the abnormal spot cluster to avoid resource leakage.
+            cluster_name = generate_spot_cluster_name(task_name, job_id)
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            if handle is not None:
+                backend = backend_utils.get_backend_from_handle(handle)
+                backend.teardown(handle, terminate=True)
+
+            # Set the job status to FAILED.
+            spot_state.set_failed(job_id)
+            continue
+
+        # Send the signal to the spot job controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
@@ -49,12 +96,16 @@ def cancel_jobs_by_id(job_ids: List[int]) -> str:
             with signal_file.open('w') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
+        cancelled_job_ids.append(job_id)
 
-    identity_str = f'job ID {job_ids[0]} is'
-    if len(job_ids) > 1:
-        identity_str = f'job IDs {job_ids} are'
+    if len(cancelled_job_ids) == 0:
+        return 'No job to cancel.'
+    identity_str = f'Job with ID {cancelled_job_ids[0]} is'
+    if len(cancelled_job_ids) > 1:
+        cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
+        identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
-    return (f'Jobs with {identity_str} scheduled to be cancelled within '
+    return (f'{identity_str} scheduled to be cancelled within '
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
 
 
@@ -62,8 +113,7 @@ def cancel_job_by_name(job_name: str) -> str:
     """Cancel a job by name."""
     job_ids = spot_state.get_nonterminal_job_ids_by_name(job_name)
     if len(job_ids) == 0:
-        return (f'{colorama.Fore.RED}No job found with name {job_name!r}.'
-                f'{colorama.Style.RESET_ALL}')
+        return f'No running job found with name {job_name!r}.'
     if len(job_ids) > 1:
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
@@ -73,16 +123,94 @@ def cancel_job_by_name(job_name: str) -> str:
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
 
 
+def stream_logs_by_id(job_id: int) -> str:
+    """Stream logs by job id."""
+    controller_status = job_lib.get_status(job_id)
+    while (controller_status != job_lib.JobStatus.RUNNING and
+           (controller_status is None or not controller_status.is_terminal())):
+        status_str = 'None'
+        if controller_status is not None:
+            status_str = controller_status.value
+        logger.info(
+            'Waiting for the spot controller process to be RUNNING (status: '
+            f'{status_str}).')
+        time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
+        controller_status = job_lib.get_status(job_id)
+
+    job_status = spot_state.get_status(job_id)
+    while job_status is None:
+        logger.info('Waiting for the spot job to be started.')
+        time.sleep(1)
+        job_status = spot_state.get_status(job_id)
+
+    if job_status.is_terminal():
+        return (
+            f'Job {job_id} is already in terminal state {job_status.value}. '
+            'Logs will not be shown.')
+    task_name = spot_state.get_task_name_by_job_id(job_id)
+    cluster_name = generate_spot_cluster_name(task_name, job_id)
+    backend = backends.CloudVmRayBackend()
+    spot_status = spot_state.get_status(job_id)
+    while not spot_status.is_terminal():
+        if spot_status != spot_state.SpotStatus.RUNNING:
+            logger.info(f'SKY INFO: The log is not ready yet, as the spot job '
+                        f'is {spot_status.value}. '
+                        f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+            spot_status = spot_state.get_status(job_id)
+            continue
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
+        if returncode == 0:
+            # If the log tailing exit successfully (the real job can be
+            # SUCCEEDED or FAILED), we can safely break the loop. We use the
+            # status in job queue to show the information, as the spot_state is
+            # not updated yet.
+            job_status = backend.get_job_status(handle,
+                                                job_id=None,
+                                                stream_logs=False)
+            logger.info(f'Logs finished for job {job_id} '
+                        f'(status: {job_status.value}).')
+            break
+        logger.info(
+            f'SKY INFO: The return code is {returncode}. '
+            f'Check the job status in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+        # If the tailing fails, it is likely that the cluster fails, so we wait
+        # a while to make sure the spot state is updated by the controller, and
+        # check the spot status again.
+        time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+        spot_status = spot_state.get_status(job_id)
+    else:
+        # The spot_status is in terminal state.
+        logger.info(f'Logs finished for job {job_id} '
+                    f'(status: {spot_state.get_status(job_id).value}).')
+    return ''
+
+
+def stream_logs_by_name(job_name: str) -> str:
+    """Stream logs by name."""
+    job_ids = spot_state.get_nonterminal_job_ids_by_name(job_name)
+    if len(job_ids) == 0:
+        return (f'{colorama.Fore.RED}No job found with name {job_name!r}.'
+                f'{colorama.Style.RESET_ALL}')
+    if len(job_ids) > 1:
+        return (f'{colorama.Fore.RED}Multiple running jobs found '
+                f'with name {job_name!r}.\n'
+                f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
+    stream_logs_by_id(job_ids[0])
+    return ''
+
+
 def show_jobs(show_all: bool) -> str:
     """Show all spot jobs."""
     jobs = spot_state.get_spot_jobs()
 
     columns = [
-        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'STARTED',
-        'JOB DURATION', '#RECOVERIES', 'STATUS'
+        'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
+        '#RECOVERIES', 'STATUS'
     ]
     if show_all:
-        columns += ['CLUSTER', 'REGION']
+        columns += ['STARTED', 'CLUSTER', 'REGION']
     job_table = log_utils.create_table(columns)
     for job in jobs:
         job_duration = log_utils.readable_time_duration(
@@ -94,24 +222,27 @@ def show_jobs(show_all: bool) -> str:
             job_duration = log_utils.readable_time_duration(0,
                                                             job['job_duration'],
                                                             absolute=True)
-
+        ago_suffix = 'ago' if show_all else ''
         values = [
             job['job_id'],
             job['job_name'],
             job['resources'],
             # SUBMITTED
-            log_utils.readable_time_duration(job['submitted_at']),
+            log_utils.readable_time_duration(job['submitted_at'],
+                                             absolute=show_all) + ago_suffix,
             # TOT. DURATION
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
                                              absolute=True),
-            # STARTED
-            log_utils.readable_time_duration(job['start_at']),
             job_duration,
             job['recovery_count'],
             job['status'].value,
         ]
         if show_all:
+            # STARTED
+            values.append(
+                log_utils.readable_time_duration(job['start_at'], absolute=True)
+                + ago_suffix)
             cluster_name = generate_spot_cluster_name(job['job_name'],
                                                       job['job_id'])
             handle = global_user_state.get_handle_from_cluster_name(
@@ -132,41 +263,63 @@ class SpotCodeGen:
 
     Usage:
 
-      >> codegen = SpotCodegen().show_jobs(...)
+      >> codegen = SpotCodegen.show_jobs(...)
     """
-    _PREFIX = ['from sky.spot import spot_utils']
+    _PREFIX = [
+        'from sky.spot import spot_state',
+        'from sky.spot import spot_utils',
+    ]
 
-    def __init__(self):
-        self._code = []
-
-    def show_jobs(self, show_all: bool) -> str:
-        self._code += [
+    @classmethod
+    def show_jobs(cls, show_all: bool) -> str:
+        code = [
             f'job_table = spot_utils.show_jobs({show_all})',
             'print(job_table)',
         ]
-        return self._build()
+        return cls._build(code)
 
-    def cancel_jobs_by_id(self, job_ids: List[int]) -> str:
-        self._code += [
-            f'result = spot_utils.cancel_jobs_by_id({job_ids})',
-            'print(result, end="", flush=True)',
+    @classmethod
+    def cancel_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
+        code = [
+            f'msg = spot_utils.cancel_jobs_by_id({job_ids})',
+            'print(msg, end="", flush=True)',
         ]
-        return self._build()
+        return cls._build(code)
 
-    def cancel_job_by_name(self, job_name: str) -> str:
-        self._code += [
-            f'result = spot_utils.cancel_job_by_name({job_name!r})',
-            'print(result, end="", flush=True)',
+    @classmethod
+    def cancel_job_by_name(cls, job_name: str) -> str:
+        code = [
+            f'msg = spot_utils.cancel_job_by_name({job_name!r})',
+            'print(msg, end="", flush=True)',
         ]
-        return self._build()
+        return cls._build(code)
 
-    def _build(self):
-        code = self._PREFIX + self._code
+    @classmethod
+    def stream_logs_by_name(cls, job_name: str) -> str:
+        code = [
+            f'msg = spot_utils.stream_logs_by_name({job_name!r})',
+            'print(msg, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def stream_logs_by_id(cls, job_id: Optional[int]) -> str:
+        code = [
+            f'job_id = {job_id} if {job_id} is not None '
+            'else spot_state.get_latest_job_id()',
+            'msg = spot_utils.stream_logs_by_id(job_id)',
+            'print(msg, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def _build(cls, code: List[str] = None) -> str:
+        code = cls._PREFIX + code
         code = '; '.join(code)
         return f'python3 -u -c {shlex.quote(code)}'
 
 
-def dump_job_table_cache(job_table):
+def dump_job_table_cache(job_table: str):
     """Dump job table cache to file."""
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     with cache_file.open('w') as f:

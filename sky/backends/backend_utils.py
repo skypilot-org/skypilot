@@ -7,6 +7,7 @@ import getpass
 from multiprocessing import pool
 import os
 import pathlib
+import psutil
 import re
 import shlex
 import subprocess
@@ -69,6 +70,18 @@ WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 # with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
 _TEST_IP = '1.1.1.1'
+
+# GCP has a 63 char limit; however, Ray autoscaler adds many
+# characters. Through testing, 37 chars is the maximum length for the Sky
+# cluster name on GCP.  Ref:
+# https://cloud.google.com/compute/docs/naming-resources#resource-name-format
+_MAX_CLUSTER_NAME_LEN = 37
+
+# Allow each CPU thread take 2 tasks.
+# Note: This value cannot be too small, otherwise OOM issue may occur.
+DEFAULT_TASK_CPU_DEMAND = 0.5
+
+SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 
 
 def fill_template(template_name: str,
@@ -227,8 +240,8 @@ class SSHConfigHelper(object):
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
-        sky_autogen_comment = '# Added by sky (use `sky stop/down ' + \
-                            f'{cluster_name}` to remove)'
+        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
+                               f'{cluster_name}` to remove)')
         overwrite = False
         overwrite_begin_idx = None
         ip = ips[0]
@@ -403,8 +416,12 @@ class SSHConfigHelper(object):
                 f.write('\n')
 
     @classmethod
-    def remove_cluster(cls, cluster_name: str, ip: str, auth_config: Dict[str,
-                                                                          str]):
+    def remove_cluster(
+        cls,
+        cluster_name: str,
+        ip: str,
+        auth_config: Dict[str, str],
+    ):
         """Remove authentication information for cluster from local SSH config.
 
         If no existing host matching the provided specification is found, then
@@ -426,8 +443,8 @@ class SSHConfigHelper(object):
         # Scan the config for the cluster name.
         for i, line in enumerate(config):
             next_line = config[i + 1] if i + 1 < len(config) else ''
-            if line.strip() == f'HostName {ip}' and next_line.strip(
-            ) == f'User {username}':
+            if (line.strip() == f'HostName {ip}' and
+                    next_line.strip() == f'User {username}'):
                 start_line_idx = i - 1
                 break
 
@@ -569,6 +586,14 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'zones': ','.join(zones),
                 # AWS only.
                 'aws_default_ami': aws_default_ami,
+                # Temporary measure, as deleting per-cluster SGs is too slow.
+                # See https://github.com/sky-proj/sky/pull/742.
+                # Generate the name of the security group we're looking for...
+                # (username, mac addr last 4 chars): for uniquefying users on
+                # shared-account cloud providers.
+                'security_group':
+                    f'sky-security-group-'
+                    f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region}',
@@ -591,16 +616,18 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if resources_vars.get('tpu_type') is not None:
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
-            tpu_name = generate_tpu_name(cluster_name)
+            tpu_name = cluster_name
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
         scripts = tuple(
             fill_template(
                 template_name,
-                dict(resources_vars, **{
-                    'zones': ','.join(zones),
-                    'tpu_name': tpu_name,
-                }),
+                dict(
+                    resources_vars, **{
+                        'zones': ','.join(zones),
+                        'tpu_name': tpu_name,
+                        'gcp_project_id': gcp_project_id,
+                    }),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
                 # with cluster yamls.
@@ -860,21 +887,21 @@ def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
 
 
 def run_command_on_ip_via_ssh(
-    ip: str,
-    cmd: Union[str, List[str]],
-    *,
-    ssh_user: str,
-    ssh_private_key: str,
-    port_forward: Optional[List[int]] = None,
-    # Advanced options.
-    require_outputs: bool = False,
-    log_path: str = '/dev/null',
-    # If False, do not redirect stdout/stderr to optimize performance.
-    process_stream: bool = True,
-    stream_logs: bool = True,
-    ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
-    ssh_control_name: Optional[str] = None,
-) -> Union[int, Tuple[int, str, str]]:
+        ip: str,
+        cmd: Union[str, List[str]],
+        *,
+        ssh_user: str,
+        ssh_private_key: str,
+        port_forward: Optional[List[int]] = None,
+        # Advanced options.
+        require_outputs: bool = False,
+        log_path: str = '/dev/null',
+        # If False, do not redirect stdout/stderr to optimize performance.
+        process_stream: bool = True,
+        stream_logs: bool = True,
+        ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+        ssh_control_name: Optional[str] = None,
+        **kwargs) -> Union[int, Tuple[int, str, str]]:
     """Uses 'ssh' to run 'cmd' on a node with ip.
 
     Args:
@@ -937,23 +964,35 @@ def run_command_on_ip_via_ssh(
             #  bash: cannot set terminal process group
             #  bash: no job control in this shell
             '| stdbuf -o0 tail -n +5',
+            # This is required to make sure the executor of the command can get the
+            # correct returncode, since linux pipe is used.
+            '; exit ${PIPESTATUS[0]}'
         ]
 
     command = ' '.join(command)
     command = base_ssh_command + [shlex.quote(command)]
 
+    executable = None
     if not process_stream:
         if stream_logs:
-            command += [f'| tee {log_path}']
+            command += [
+                f'| tee {log_path}',
+                # This also requires the executor to be '/bin/bash' instead
+                # of the default '/bin/sh'.
+                '; exit ${PIPESTATUS[0]}'
+            ]
         else:
             command += [f'> {log_path}']
+        executable = '/bin/bash'
 
     return log_lib.run_with_log(' '.join(command),
                                 log_path,
                                 stream_logs,
                                 process_stream=process_stream,
                                 require_outputs=require_outputs,
-                                shell=True)
+                                shell=True,
+                                executable=executable,
+                                **kwargs)
 
 
 def handle_returncode(returncode: int,
@@ -1060,10 +1099,6 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def generate_tpu_name(cluster_name):
-    return f'{cluster_name}-sky-{uuid.uuid4().hex[:4]}'
-
-
 def get_node_ips(
         cluster_yaml: str,
         expected_num_nodes: int,
@@ -1136,15 +1171,26 @@ def get_head_ip(
 
 
 def check_network_connection():
-    conn = httplib.HTTPSConnection(_TEST_IP, timeout=1)
+    # A timeout of 1s seems to infrequently encounter 'socket.timeout'.
+    conn = httplib.HTTPSConnection(_TEST_IP, timeout=3)
     try:
         conn.request('HEAD', '/')
     except OSError as e:
         raise exceptions.NetworkError(
-            'Could not refresh the cluster. Network is down.') from e
+            'Could not refresh the cluster. Network seems down.') from e
 
 
-def _ping_cluster_and_set_status(record: Dict[str, Any]) -> Dict[str, Any]:
+def _ping_cluster_and_set_status(
+        record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Pings a cluster and potentially sets it to stopped.
+
+    Setting it to STOPPED means (1) setting the clusters table, (2) removing it
+    from the SSH config.
+
+    Returns:
+      If the cluster yaml is found to be concurrently removed, returns None.
+      Otherwise returns the input record with status potentially updated.
+    """
     handle = record['handle']
     cluster_name = handle.cluster_name
 
@@ -1170,8 +1216,18 @@ def _ping_cluster_and_set_status(record: Dict[str, Any]) -> Dict[str, Any]:
     # 1. Autostop case: the whole cluster will be properly stopped soon.
     # 2. Managed spot case: We will soon relaunch the cluster by the strategy
     #    on the same region or terminate the cluster.
+    try:
+        config = read_yaml(handle.cluster_yaml)
+    except FileNotFoundError:
+        # This happens e.g., during smoke tests. A test calls `sky status
+        # --refresh`, processes another cluster (running this current func),
+        # while a concurrent test has torn down itself.
+        #
+        # We know we can't ping the IP and the cluster yaml has been
+        # removed. With high likelihood the cluster has been removed.
+        return None
+    auth_config = config['auth']
     global_user_state.remove_cluster(cluster_name, terminate=False)
-    auth_config = read_yaml(handle.cluster_yaml)['auth']
     SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
     return global_user_state.get_cluster_from_name(cluster_name)
 
@@ -1191,6 +1247,8 @@ def refresh_cluster_status_handle(
             # Refresh the status only when force_refresh is True or the cluster
             # has autostopped turned on.
             record = _ping_cluster_and_set_status(record)
+            if record is None:
+                return None, None
     return record['status'], handle
 
 
@@ -1202,7 +1260,8 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
     for record in rich_progress.track(records,
                                       description='Refreshing cluster status'):
         record = _ping_cluster_and_set_status(record)
-        updated_records.append(record)
+        if record is not None:
+            updated_records.append(record)
     return updated_records
 
 
@@ -1278,7 +1337,7 @@ def get_task_demands_dict(
 def get_task_resources_str(task: 'task_lib.Task') -> str:
     resources_dict = get_task_demands_dict(task)
     if resources_dict is None:
-        resources_str = 'CPU:1'
+        resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
     else:
         resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
@@ -1300,12 +1359,57 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
     if re.fullmatch(valid_regex, cluster_name) is None:
         raise ValueError(f'Cluster name "{cluster_name}" is invalid; '
                          f'ensure it is fully matched by regex: {valid_regex}')
-
-
-def disallow_sky_reserved_cluster_name(cluster_name: Optional[str],
-                                       operation_str: str):
-    if cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
+    if len(cluster_name) > _MAX_CLUSTER_NAME_LEN:
         raise ValueError(
-            f'Cluster {cluster_name!r} is reserved for the spot controller.\n'
-            f'{colorama.Fore.RED}{operation_str} is not allowed.'
-            f'{colorama.Style.RESET_ALL}')
+            f'Cluster name {cluster_name!r} has {len(cluster_name)}'
+            f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
+
+
+def check_cluster_name_not_reserved(
+        cluster_name: Optional[str],
+        operation_str: Optional[str] = None) -> None:
+    """Errors out if cluster name is reserved by sky.
+
+    If the cluster name is reserved, return the error message. Otherwise,
+    return None.
+    """
+    usage = 'internal use'
+    if cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
+        usage = 'spot controller'
+    msg = (f'Cluster {cluster_name!r} is reserved for {usage}.')
+    if operation_str is not None:
+        msg += (f'{colorama.Fore.RED}{operation_str} is not allowed.'
+                f'{colorama.Style.RESET_ALL}')
+    if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
+        raise ValueError(msg)
+
+
+def kill_children_processes():
+    # We need to kill the children, so that the underlying subprocess
+    # will not print the logs to the terminal, after this program
+    # exits.
+    parent_process = psutil.Process()
+    for child in parent_process.children(recursive=True):
+        try:
+            child.terminate()
+        except psutil.NoSuchProcess:
+            # The child process may have already been terminated.
+            pass
+
+
+# Handle ctrl-c
+def interrupt_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
+    kill_children_processes()
+    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+
+
+# Handle ctrl-z
+def stop_handler(signum, frame):
+    del signum, frame
+    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+                   f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
+    kill_children_processes()
+    sys.exit(exceptions.SIGTSTP_CODE)

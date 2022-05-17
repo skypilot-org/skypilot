@@ -107,7 +107,7 @@ class SpotController:
         try:
             self._run()
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.error(f'Unexpected error occured: Exception {type(e)}({e})')
+            logger.error(f'Unexpected error occurred: {type(e).__name__}: {e}')
         finally:
             self._strategy_executor.terminate_cluster()
             job_status = spot_state.get_status(self._job_id)
@@ -115,6 +115,9 @@ class SpotController:
             # e.g. failed to launch cluster after reaching the MAX_RETRY.
             if not job_status.is_terminal():
                 spot_state.set_failed(self._job_id)
+
+            # Clean up Storages with persistent=False.
+            self.backend.teardown_ephemeral_storage(self._task)
 
     def _job_status_check(self) -> Optional['job_lib.JobStatus']:
         """Check the status of the job running on the spot cluster.
@@ -129,8 +132,7 @@ class SpotController:
             status = self.backend.get_job_status(handle, stream_logs=False)
             logger.info(f'Job status: {status}')
         except SystemExit:
-            # Fail to connect to the cluster
-            logger.info('Fail to connect to the cluster.')
+            logger.info('Failed to connect to the cluster.')
         assert status != job_lib.JobStatus.INIT, (
             'Job status should not be INIT')
         logger.info('=' * 34)
