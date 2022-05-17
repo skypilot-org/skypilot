@@ -38,6 +38,7 @@ from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
+from sky.utils import metrics
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -64,6 +65,13 @@ _FILELOCK_TIMEOUT_SECONDS = 10
 _RSYNC_DISPLAY_OPTION = '-Pavz'
 _RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
 _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
+
+#### Metrics ####
+teardown_logger = metrics.MetricLogger(
+    'teardown',
+    labels = [metrics.Label('cluster_name')],
+    with_runtime=True
+)
 
 
 def _get_cluster_config_template(cloud):
@@ -2140,12 +2148,15 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
+    @teardown_logger.decorator
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
                  purge: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
+
+        teardown_logger.set_labels({'cluster_name': cluster_name})
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
@@ -2155,10 +2166,12 @@ class CloudVmRayBackend(backends.Backend):
                 success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
+            teardown_logger.set_return_code(0 if success else 1)
             return success
         except filelock.Timeout:
             logger.error(f'Cluster {cluster_name} is locked by {lock_path}. '
                          'Check to see if it is still being launched.')
+        teardown_logger.set_return_code(1)
         return False
 
     def teardown_no_lock(self,

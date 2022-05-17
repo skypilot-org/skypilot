@@ -102,10 +102,10 @@ start_logger = metrics.MetricLogger('start',
                                     labels=[metrics.Label('cluster_name')])
 
 stop_logger = metrics.MetricLogger('stop',
-                                   labels=[metrics.Label('cluster_name')])
+                                   labels=[metrics.Label('clusters')])
 
 down_logger = metrics.MetricLogger('down',
-                                   labels=[metrics.Label('cluster_name')])
+                                   labels=[metrics.Label('clusters')])
 
 status_logger = metrics.MetricLogger('status')
 
