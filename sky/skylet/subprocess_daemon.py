@@ -4,10 +4,11 @@ Wait for parent_pid to exit, then SIGTERM (or SIGKILL if needed) the child
 processes of proc_pid.
 """
 
-import psutil
 import argparse
 import time
 import sys
+
+import psutil
 
 if __name__ == '__main__':
 
