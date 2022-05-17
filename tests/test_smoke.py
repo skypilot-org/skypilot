@@ -1,4 +1,3 @@
-import getpass
 import inspect
 import pathlib
 import subprocess
@@ -6,7 +5,6 @@ import sys
 import tempfile
 import time
 from typing import List, Optional, Tuple, NamedTuple
-import uuid
 
 import colorama
 import pytest
@@ -16,9 +14,9 @@ from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 
-# (username, mac addr last 4 chars): for uniquefying users on shared-account
-# cloud providers.
-_user_and_mac = f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}'
+# (username, last 4 chars of hash of hostname): for uniquefying users on
+# shared-account cloud providers.
+_user_and_host = backend_utils.user_and_hostname_hash()
 
 
 class Test(NamedTuple):
@@ -46,7 +44,7 @@ def _get_cluster_name():
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-')
-    return f'{test_name}-{_user_and_mac}'
+    return f'{test_name}-{_user_and_host}'
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
@@ -250,6 +248,7 @@ def test_tpu():
             f'sky launch -y -c {name} examples/tpu_app.yaml | grep "TPU .* already exists"',  # Ensure sky launch won't create another TPU.
         ],
         f'sky down -y {name}',
+        timeout=30 * 60,  # can take >20 mins
     )
     run_one_test(test)
 
@@ -348,24 +347,44 @@ def test_autostop():
     run_one_test(test)
 
 
-# ---------- Testing `sky cancel` ----------
-def test_cancel():
-    name = _get_cluster_name()
+def _get_cancel_task_with_cloud(name, cloud):
     test = Test(
-        'cancel',
+        f'{cloud}-cancel-task',
         [
-            f'sky launch -c {name} examples/resnet_app.yaml -y -d',
+            f'sky launch -c {name} examples/resnet_app.yaml --cloud {cloud} -y -d',
             # Wait the GPU process to start.
             'sleep 60',
             f'sky exec {name} "nvidia-smi | grep python"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel {name} 1',
             'sleep 60',
-            f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
+            # check if the python job is gone.
+            f'sky exec {name} "! nvidia-smi | grep python"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
+    return test
+
+
+# ---------- Testing `sky cancel` on AWS ----------
+def test_cancel_aws():
+    name = _get_cluster_name()
+    test = _get_cancel_task_with_cloud(name, 'aws')
+    run_one_test(test)
+
+
+# ---------- Testing `sky cancel` on Azure ----------
+def test_cancel_azure():
+    name = _get_cluster_name()
+    test = _get_cancel_task_with_cloud(name, 'azure')
+    run_one_test(test)
+
+
+# ---------- Testing `sky cancel` on GCP ----------
+def test_cancel_gcp():
+    name = _get_cluster_name()
+    test = _get_cancel_task_with_cloud(name, 'gcp')
     run_one_test(test)
 
 
@@ -481,7 +500,7 @@ def test_inline_spot_env():
         'test-inline-spot-env',
         [
             f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
-            'sleep 5',
+            'sleep 10',
             f'sky spot status | grep {name} | grep SUCCEEDED',
         ],
         f'sky spot cancel -y -n {name}',

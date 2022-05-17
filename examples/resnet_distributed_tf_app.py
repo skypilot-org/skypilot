@@ -1,30 +1,25 @@
 import getpass
+import hashlib
+import socket
 import subprocess
 from typing import List, Optional
-import uuid
 
 import sky
 
-# (username, mac addr last 4 chars): for uniquefying users on shared-account
-# cloud providers.
-_user_and_mac = f'{getpass.getuser()}-{hex(uuid.getnode())[-4:]}'
-cluster = f'test-distributed-tf-{_user_and_mac}'
+# (username, last 4 chars of hash of hostname): for uniquefying users on
+# shared-account cloud providers.
+hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
+_user_and_host = f'{getpass.getuser()}-{hostname_hash}'
+cluster = f'test-distributed-tf-{_user_and_host}'
 
 with sky.Dag() as dag:
-    # The working directory contains all code and will be synced to remote.
-    workdir = '~/Downloads/tpu'
-    subprocess.run(
-        'cd ~/Downloads; '
-        '(git clone https://github.com/concretevitamin/tpu || true); '
-        f'cd {workdir} && git checkout 9459fee',
-        shell=True,
-        check=True)
-
     # Total Nodes, INCLUDING Head Node
     num_nodes = 2
 
     # The setup command.  Will be run under the working directory.
     setup = """
+            git clone https://github.com/concretevitamin/tpu || true
+            cd tpu && git checkout 9459fee
             conda create -n resnet python=3.7 -y
             conda activate resnet
             conda install cudatoolkit=11.0 -y
@@ -52,6 +47,7 @@ with sky.Dag() as dag:
         str_tf_config = json.dumps(tf_config)
         print(f'{str_tf_config!r}')
         run = f"""
+            cd tpu
             conda activate resnet
             rm -rf resnet_model-dir
             export TF_CONFIG={str_tf_config!r}
@@ -66,7 +62,6 @@ with sky.Dag() as dag:
 
     train = sky.Task(
         'train',
-        workdir=workdir,
         setup=setup,
         num_nodes=num_nodes,
         run=run_fn,
