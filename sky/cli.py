@@ -55,6 +55,7 @@ from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.utils import metrics
 from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
@@ -82,6 +83,31 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              accelerator_args={'tf_version': '2.5.0'},
                              use_spot=False),
 }
+
+#### METRICS ####
+
+launch_logger = metrics.MetricLogger(
+    'launch',
+    labels=[
+        metrics.Label('resources'),
+        metrics.Label('yaml_info'),
+    ],
+)
+
+exec_logger = metrics.MetricLogger(
+    'exec', labels=[metrics.Label('cluster_name'),
+                    metrics.Label('yaml_info')])
+
+start_logger = metrics.MetricLogger('start',
+                                    labels=[metrics.Label('cluster_name')])
+
+stop_logger = metrics.MetricLogger('stop',
+                                   labels=[metrics.Label('cluster_name')])
+
+down_logger = metrics.MetricLogger('down',
+                                   labels=[metrics.Label('cluster_name')])
+
+status_logger = metrics.MetricLogger('status')
 
 
 def _get_cloud(cloud: Optional[str]) -> Optional[clouds.Cloud]:
@@ -599,6 +625,7 @@ def cli():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@launch_logger.decorator
 def launch(
     entrypoint: str,
     cluster: Optional[str],
@@ -709,13 +736,21 @@ def launch(
     else:
         raise ValueError(f'{backend_name} backend is not supported.')
 
-    sky.launch(dag,
-               dryrun=dryrun,
-               stream_logs=True,
-               cluster_name=cluster,
-               detach_run=detach_run,
-               backend=backend,
-               idle_minutes_to_autostop=idle_minutes_to_autostop)
+    with open(entrypoint, 'r') as f:
+        yaml_info = f.readlines()
+    launch_logger.set_labels({
+        'resources': str(new_resources),
+        'yaml_info': str(yaml_info)
+    })
+    # sky.launch(dag,
+    #            dryrun=dryrun,
+    #            stream_logs=True,
+    #            cluster_name=cluster,
+    #            detach_run=detach_run,
+    #            backend=backend,
+    #            idle_minutes_to_autostop=idle_minutes_to_autostop)
+    launch_logger.set_return_code(0)
+    return 0
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -728,6 +763,7 @@ def launch(
               help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
 @_add_click_options(_TASK_OPTIONS)
+@exec_logger.decorator
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
@@ -859,8 +895,12 @@ def exec(
             task.name = name
         task.envs = env
 
+    with open(entrypoint, 'r') as f:
+        yaml_info = f.readlines()
+    exec_logger.set_labels({'cluster_name': cluster, 'yaml_info': yaml_info})
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
-    sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
+    #sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
+    return 0
 
 
 @cli.command()
@@ -876,9 +916,11 @@ def exec(
               is_flag=True,
               required=False,
               help='Query remote clusters for their latest autostop settings.')
+@status_logger.decorator
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters."""
     status_utils.show_status_table(all, refresh)
+    status_logger.set_return_code(0)
 
 
 @cli.command()
@@ -1210,6 +1252,7 @@ def autostop(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@start_logger.decorator
 def start(clusters: Tuple[str], yes: bool):
     """Restart cluster(s).
 
@@ -1298,9 +1341,11 @@ def start(clusters: Tuple[str], yes: bool):
             abort=True,
             show_default=True)
 
+    start_logger.set_labels({'clusters': ",".join(clusters)})
     for name in to_start:
         _start_cluster(name)
         click.secho(f'Cluster {name} started.', fg='green')
+    start_logger.set_return_code(0)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1323,6 +1368,7 @@ def start(clusters: Tuple[str], yes: bool):
               required=False,
               help='Ignore cloud provider errors (if any); '
               'useful for cleaning up manually deleted cluster(s).')
+@down_logger.decorator
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1362,11 +1408,13 @@ def down(
         sky down -a
 
     """
+    down_logger.set_labels({'clusters': ",".join(clusters)})
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
                                 terminate=True,
                                 no_confirm=yes,
                                 purge=purge)
+    down_logger.set_return_code(0)
 
 
 def _terminate_or_stop_clusters(
