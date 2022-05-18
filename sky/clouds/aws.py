@@ -159,7 +159,10 @@ class AWS(clouds.Cloud):
         return isinstance(other, AWS)
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
+    def get_default_instance_type(cls,
+                                  accelerators: Optional[Dict[str, int]] = None
+                                 ) -> str:
+        del accelerators  # unused
         # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
         return 'm4.2xlarge'
 

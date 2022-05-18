@@ -67,7 +67,10 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
-    def get_default_instance_type(cls):
+    def get_default_instance_type(cls,
+                                  accelerators: Optional[Dict[str, int]] = None
+                                 ) -> str:
+        del accelerators
         # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
         return 'Standard_D8_v4'
 

@@ -225,8 +225,8 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls,
-                                  accelerators: Optional[Dict[str,
-                                                              int]] = None):
+                                  accelerators: Optional[Dict[str, int]] = None
+                                 ) -> str:
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
         if accelerators is None:
             return 'n1-standard-8'
