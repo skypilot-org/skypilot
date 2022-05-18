@@ -1856,6 +1856,8 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
             yield f'Resources \'{gpu_name}\' not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
+        yield '\n\nNOTE: Price does not include host VM cost '
+        yield 'if INSTANCE_TYPE==(attachable).'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = log_utils.create_table([
