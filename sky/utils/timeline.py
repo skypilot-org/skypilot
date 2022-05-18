@@ -104,35 +104,33 @@ class LockEvent:
         self.release()
 
 
-def event(name: Union[str, Callable], message: Optional[str] = None):
+def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
     """A decorator for logging events when applied to functions.
 
     Args:
-        name: The name of the event.
+        name_or_fn: The name of the event or the function to be wrapped.
         message: The message attached to the event.
     """
-    if isinstance(name, str):
+    if isinstance(name_or_fn, str):
 
         def _wrapper(f):
 
             def _record(*args, **kwargs):
-                nonlocal name
-                if name is None:
-                    name = getattr(f, '__qualname__', f.__name__)
-                with Event(name=name, message=message):
+                nonlocal name_or_fn
+                with Event(name=name_or_fn, message=message):
                     return f(*args, **kwargs)
 
             return _record
 
         return _wrapper
     else:
-        if not inspect.isfunction(name):
+        if not inspect.isfunction(name_or_fn):
             raise ValueError(
                 'Should directly apply the decorator to a function.')
 
         def _record(*args, **kwargs):
-            nonlocal name
-            f = name
+            nonlocal name_or_fn
+            f = name_or_fn
             func_name = getattr(f, '__qualname__', f.__name__)
             module_name = getattr(f, '__module__', '')
             if module_name:
