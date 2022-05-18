@@ -1286,7 +1286,7 @@ class CloudVmRayBackend(backends.Backend):
         # each other.
 
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
-        with timeline.LockEvent(lock_path):
+        with timeline.FileLockEvent(lock_path):
             to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, to_provision, task.num_nodes)
             prev_cluster_status = None

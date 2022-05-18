@@ -71,7 +71,7 @@ class Event:
         self.end()
 
 
-class LockEvent:
+class FileLockEvent:
     """Serve both as a file lock and event for the lock."""
 
     def __init__(self, lockfile: Union[str, os.PathLike]):
@@ -79,11 +79,11 @@ class LockEvent:
         # TODO(mraheja): remove pylint disabling when filelock version updated
         # pylint: disable=abstract-class-instantiated
         self._lock = filelock.FileLock(self._lockfile)
-        self._hold_lock_event = Event(f'[Lock.hold]:{self._lockfile}')
+        self._hold_lock_event = Event(f'[FileLock.hold]:{self._lockfile}')
 
     def acquire(self):
         was_locked = self._lock.is_locked
-        with Event(f'[Lock.acquire]:{self._lockfile}'):
+        with Event(f'[FileLock.acquire]:{self._lockfile}'):
             self._lock.acquire()
         if not was_locked and self._lock.is_locked:
             # start holding the lock after initial acquiring

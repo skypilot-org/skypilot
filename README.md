@@ -54,7 +54,7 @@ with timeline.Event(name='event_name'):
   ...
 
 # use a file lock with event:
-with timeline.LockEvent(lockpath):
+with timeline.FileLockEvent(lockpath):
   pass
 ```
 
