@@ -13,6 +13,11 @@ DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
+_CREDENTIAL_FILES = [
+    'credentials.db', 'application_default_credentials.json',
+    'access_tokens.db', 'configurations', 'legacy_credentials',
+]
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -72,6 +77,23 @@ class GCP(clouds.Cloud):
         'n1-highmem-32': 0.398496,
         'n1-highmem-64': 0.796992,
         'n1-highmem-96': 1.195488,
+    }
+
+    # Number of CPU cores per GPU based on the AWS setting.
+    # GCP A100 has its own instance type mapping. 
+    # Refer to sky/clouds/service_catalog/gcp_catalog.py
+    _GPU_TO_NUM_CPU_MAPPING = {
+        # Based on p2 on AWS.
+        'K80': {1: 4, 2: 8, 4: 16, 8: 32},
+        # Based on p3 on AWS.
+        'V100': {1: 8, 2: 16, 4: 32, 8: 64},
+        # Based on g4dn on AWS, we round it down to the closest power of 2.
+        'T4': {1: 4, 2: 8, 4: 32, 8: 96},
+        # P100 is not supported on AWS, and azure has a weird CPU count.
+        # Based on Azure NCv2, We round it up to the closest power of 2
+        'P100': {1: 8, 2: 16, 4: 32, 8: 64},
+        # P4 and other GPUs/TPUs are not supported on aws and azure.
+        'DEFAULT': {1: 8, 2: 16, 4: 32, 8: 64, 16: 96},
     }
 
     #### Regions/Zones ####
@@ -173,9 +195,15 @@ class GCP(clouds.Cloud):
         return isinstance(other, GCP)
 
     @classmethod
-    def get_default_instance_type(cls):
+    def get_default_instance_type(cls, accelerators: Optional[Dict[str, int]] = None):
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
-        return 'n1-highmem-8'
+        if accelerators is None:
+            return 'n1-standard-8'
+        assert len(accelerators) == 1, accelerators
+        acc, acc_count = list(accelerators.items())[0]
+        if acc not in cls._GPU_TO_NUM_CPU_MAPPING:
+            acc = 'DEFAULT'
+        return f'n1-highmem-{cls._GPU_TO_NUM_CPU_MAPPING[acc][acc_count]}'
 
     @classmethod
     def get_default_region(cls) -> clouds.Region:
@@ -239,7 +267,7 @@ class GCP(clouds.Cloud):
         # default VM type.
         r = resources.copy(
             cloud=GCP(),
-            instance_type=GCP.get_default_instance_type(),
+            instance_type=GCP.get_default_instance_type(accelerator_match),
             accelerators=accelerator_match,
         )
         return ([r], fuzzy_candidate_list)
@@ -295,14 +323,17 @@ class GCP(clouds.Cloud):
             )
         return True, None
 
-    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
+    def get_credential_file_mounts(self) -> Dict[str, str]:
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
         # rsync_exclude only supports relative paths.
         # TODO(zhwu): rsync_exclude here is unsafe as it may exclude the folder
         # from other file_mounts as well in ray yaml.
-        return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
+        return {
+            f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
+            for filename in _CREDENTIAL_FILES
+        }
 
     def instance_type_exists(self, instance_type):
         return instance_type in self._ON_DEMAND_PRICES.keys()

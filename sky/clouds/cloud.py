@@ -153,7 +153,7 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
+    def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the files necessary to access this cloud.
 
         Returns a dictionary that will be added to a task's file mounts

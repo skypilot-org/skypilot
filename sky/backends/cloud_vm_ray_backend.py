@@ -1547,18 +1547,20 @@ class CloudVmRayBackend(backends.Backend):
 
         def _sync_node(ip):
             if command is not None:
-                returncode = backend_utils.run_command_on_ip_via_ssh(
+                rc, stdout, stderr = backend_utils.run_command_on_ip_via_ssh(
                     ip,
                     command,
                     ssh_user=ssh_user,
                     ssh_private_key=ssh_key,
                     log_path=log_path,
                     stream_logs=False,
+                    require_outputs=True,
                     ssh_control_name=self._ssh_control_name(handle))
                 backend_utils.handle_returncode(
-                    returncode,
+                    rc,
                     command,
                     f'Failed to sync {src} to {dst}.',
+                    stderr=stdout + stderr,
                     raise_error=True)
 
             if run_rsync:

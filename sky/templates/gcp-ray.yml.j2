@@ -94,11 +94,7 @@ file_mounts: {
 {%- endfor %}
 }
 
-rsync_exclude: [
-{%- for exclude_file in credential_excludes %}
-  "{{exclude_file}}",
-{%- endfor %}
-]
+rsync_exclude: []
 
 initialization_commands: []
 

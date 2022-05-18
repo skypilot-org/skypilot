@@ -243,8 +243,8 @@ class Azure(clouds.Cloud):
             return True, None
         return False, 'Azure credentials not set.' + help_str
 
-    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
-        return {'~/.azure': '~/.azure'}, []
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        return {'~/.azure': '~/.azure'}
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type,
