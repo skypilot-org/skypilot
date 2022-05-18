@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import psutil
 import threading
 import time
 import queue
@@ -21,18 +22,26 @@ class SkyCallback(object):
         self.log_dir = os.path.expanduser(self.log_dir)
         os.makedirs(self.log_dir, exist_ok=True)
 
+        # TODO: For generality, use protobuf to write the timestamp log.
         self._general_file_writer = open(
             os.path.join(self.log_dir, TIMESTAMP_LOG), 'wb')
         self._async_writer = _AsyncWriter(self._general_file_writer,
                                           max_queue_size, flush_secs)
-        # Save the first timestamp
-        self.save_timestamp()
+        # Save the start timestamp
+        self._save_start_time()
         self.flush()
+
+    def _save_timestamp(self, timestamp):
+        timestamp = timestamp.to_bytes(NUM_BYTES_PER_TIMESTAMP, byteorder=BYTE_ORDER)
+        self._async_writer.write(timestamp)
+
+    def _save_start_time(self):
+        start_time = int(psutil.Process(os.getpid()).create_time())
+        self._save_timestamp(start_time)
 
     def save_timestamp(self):
         now = int(time.time())
-        now = now.to_bytes(NUM_BYTES_PER_TIMESTAMP, byteorder=BYTE_ORDER)
-        self._async_writer.write(now)
+        self._save_timestamp(now)
 
     def flush(self):
         self._async_writer.flush()
