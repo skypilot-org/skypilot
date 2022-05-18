@@ -22,14 +22,15 @@ if __name__ == '__main__':
     args = parser.parse_args()
     job_id = args.job_id
 
-    parent_process = psutil.Process(args.parent_pid)
+    process = None
+    parent_process = None
     try:
         process = psutil.Process(args.proc_pid)
+        parent_process = psutil.Process(args.parent_pid)
     except psutil.NoSuchProcess:
-        process = None
         pass
 
-    if process is None or parent_process is None:
+    if process is None:
         sys.exit()
 
     wait_for_process = False
@@ -51,11 +52,10 @@ if __name__ == '__main__':
             print(e)
             wait_for_process = True
 
-    # Wait for either parent or target process to exit.
-    while wait_for_process:
-        time.sleep(1)
-        if not process.is_running() or not parent_process.is_running():
-            break
+    if wait_for_process and parent_process is not None:
+        # Wait for either parent or target process to exit.
+        while process.is_running() and parent_process.is_running():
+            time.sleep(1)
 
     try:
         children = process.children(recursive=True)
