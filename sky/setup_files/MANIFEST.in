@@ -1,5 +1,6 @@
 include sky/clouds/service_catalog/data/*
 include sky/skylet/*.sh
+include sky/skylet/callbacks/setup.py
 include sky/skylet/callbacks/sky_callback/*
 include sky/skylet/providers/aws/*
 include sky/skylet/providers/aws/cloudwatch/*
