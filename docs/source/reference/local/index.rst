@@ -12,7 +12,7 @@ Sky cluster manager is central for running Sky On-prem. It consists of the Sky j
 
 Sky has two types of users, the **system administrator**, who has **sudo** access to the machine, and **regular users**, who submit jobs to the local cluster.
 
-The **system administrator** plays 3 important roles:
+The **system administrator** plays 4 important roles:
 
 - Creates and maintains user accounts on all nodes in the cluster.
 - Installs Sky's dependency on all nodes

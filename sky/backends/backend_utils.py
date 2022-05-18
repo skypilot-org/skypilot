@@ -785,10 +785,8 @@ def get_local_custom_resources(
 
 def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
                          custom_resources: List[Dict[str, int]] = None):
-
+    """Launches Ray on all nodes for local cluster."""
     local_cluster_config = yaml_config['cluster']
-    if local_cluster_config['name'] in ['aws', 'gcp', 'azure']:
-        raise ValueError('Local Cluster Name cannot be an existing cloud.')
     ip_list = local_cluster_config['ips']
     if not isinstance(ip_list, list):
         ip_list = [ip_list]
@@ -812,7 +810,7 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
                               ssh_private_key=ssh_key,
                               stream_logs=False,
                               require_outputs=False)
-
+    # TODO: Parallelize local cluster launching
     for idx, ip in enumerate(worker_ips):
         run_command_on_ip_via_ssh(ip,
                                   'sudo ray stop -f',
@@ -871,8 +869,10 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
                           'Failed to launch Ray on Worker node:')
 
         # Connect head node's Ray dashboard to worker nodes
+        # Worker nodes need access to Ray dashboard to poll the
+        # JobSubmissionClient (in subprocess_daemon.py) for completed,
+        # failed, or cancelled jobs.
         rsync_no_handle(ip, ssh_key, remote_ssh_key, ssh_user, ssh_key)
-
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(port_cmd)
             fp.flush()
@@ -1006,10 +1006,8 @@ def wait_until_ray_cluster_ready(
                 if len(result) == 0:
                     ready_workers = 0
                 else:
-                    ready_workers = int(result[0])
-
-                if result:
                     assert len(result) == 1, result
+                    ready_workers = int(result[0])
 
             result = _LAUNCHED_HEAD_PATTERN.findall(output)
             ready_head = 0
@@ -1022,6 +1020,8 @@ def wait_until_ray_cluster_ready(
                                  f'{ready_workers} out of {num_nodes - 1} '
                                  'workers ready')
 
+            # In the local case, ready_head=0 and ready_workers=num_nodes
+            # This is because there is no matching regex for _LAUNCHED_HEAD_PATTERN
             if ready_head + ready_workers == num_nodes or \
             ready_workers == num_nodes - 1:
                 # All nodes are up.

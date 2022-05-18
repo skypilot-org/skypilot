@@ -72,7 +72,7 @@ class Local(clouds.Cloud):
 
     def accelerators_to_hourly_cost(self, accelerators, use_spot):
         # Hourly cost of accelerators is 0 for local cloud
-        return 0.0
+        return 0
 
     def get_egress_cost(self, num_gigabytes: float):
         # Egress cost to a local cluster is assumed to be 0
