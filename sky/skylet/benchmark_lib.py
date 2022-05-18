@@ -62,7 +62,7 @@ class BenchmarkCodeGen:
             f'log_dir = os.path.expanduser({log_dir!r})',
             f'output_path = os.path.expanduser({output_path!r})',
             'os.makedirs(os.path.dirname(output_path), exist_ok=True)',
-            f'benchmark_lib.parse_log(log_dir, output_path)',
+            'benchmark_lib.parse_log(log_dir, output_path)',
         ]
         return cls._build(code)
 
