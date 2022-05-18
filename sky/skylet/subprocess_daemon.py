@@ -30,10 +30,8 @@ if __name__ == '__main__':
 
     if parent_process is not None:
         # Wait for either parent or target process to exit.
-        while True:
+        while process.is_running() and parent_process.is_running():
             time.sleep(1)
-            if not process.is_running() or not parent_process.is_running():
-                break
 
     try:
         children = process.children(recursive=True)
