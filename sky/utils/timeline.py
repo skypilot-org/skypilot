@@ -41,7 +41,7 @@ class Event:
         if self._message is not None:
             self._event['args'] = {'message': self._message}
 
-    def __enter__(self):
+    def begin(self):
         event_begin = self._event.copy()
         event_begin.update({
             'ph': 'B',
@@ -52,7 +52,7 @@ class Event:
         global _events
         _events.append(event_begin)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def end(self):
         event_end = self._event.copy()
         event_end.update({
             'ph': 'E',
@@ -63,6 +63,13 @@ class Event:
         global _events
         _events.append(event_end)
 
+    def __enter__(self):
+        self.begin()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.end()
+
 
 class LockEvent:
     """Serve both as a file lock and event for the lock."""
@@ -72,17 +79,29 @@ class LockEvent:
         # TODO(mraheja): remove pylint disabling when filelock version updated
         # pylint: disable=abstract-class-instantiated
         self._lock = filelock.FileLock(self._lockfile)
-        self._event = Event(f'[Lock.keep]:{self._lockfile}')
+        self._hold_lock_event = Event(f'[Lock.hold]:{self._lockfile}')
+
+    def acquire(self):
+        was_locked = self._lock.is_locked
+        with Event(f'[Lock.acquire]:{self._lockfile}'):
+            self._lock.acquire()
+        if not was_locked and self._lock.is_locked:
+            # start holding the lock after initial acquiring
+            self._hold_lock_event.begin()
+
+    def release(self):
+        was_locked = self._lock.is_locked
+        self._lock.release()
+        if was_locked and not self._lock.is_locked:
+            # stop holding the lock after initial releasing
+            self._hold_lock_event.end()
 
     def __enter__(self):
-        with Event(f'[Lock.acquire]:{self._lockfile}'):
-            lock = self._lock.__enter__()
-            self._event.__enter__()
-            return lock
+        self.acquire()
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self._lock.__exit__(exc_type, exc_val, exc_tb)
-        self._event.__exit__(exc_type, exc_val, exc_tb)
+        self.release()
 
 
 def event(name: Union[str, Callable], message: Optional[str] = None):
