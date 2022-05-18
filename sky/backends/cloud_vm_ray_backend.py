@@ -1397,11 +1397,10 @@ class CloudVmRayBackend(backends.Backend):
                 handle.cluster_name, idle_minutes_to_autostop)
 
     def get_benchmark_summary(self, handle: ResourceHandle, remote_log_dir: str,
-                              remote_output_path: str, local_log_dir: str,
-                              callback: str) -> None:
+                              remote_output_path: str, local_log_dir: str) -> None:
         # Generate a benchmark summary on a remote cluster.
         code = benchmark_lib.BenchmarkCodeGen.generate_summary(
-            remote_log_dir, remote_output_path, callback)
+            remote_log_dir, remote_output_path)
         returncode, _, stderr = self.run_on_head(handle,
                                                  code,
                                                  require_outputs=True)
