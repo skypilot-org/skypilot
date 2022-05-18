@@ -78,9 +78,11 @@ def _build_sky_wheel() -> pathlib.Path:
 
 def _get_latest_built_sky_callback_wheel() -> pathlib.Path:
     try:
-        latest_wheel = max(CALLBACK_WHEEL_DIR.glob('sky_callback-*.whl'), key=os.path.getctime)
+        latest_wheel = max(CALLBACK_WHEEL_DIR.glob('sky_callback-*.whl'),
+                           key=os.path.getctime)
     except ValueError:
-        raise FileNotFoundError('Could not find built Sky callback wheels.') from None
+        raise FileNotFoundError(
+            'Could not find built Sky callback wheels.') from None
     return latest_wheel
 
 
@@ -128,7 +130,8 @@ def build_sky_wheel() -> pathlib.Path:
         # race conditions.
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
-        last_callback_wheel_modification_time = _get_latest_modification_time(CALLBACK_WHEEL_DIR)
+        last_callback_wheel_modification_time = _get_latest_modification_time(
+            CALLBACK_WHEEL_DIR)
 
         # only build wheels if the wheel is outdated
         if last_wheel_modification_time < last_modification_time:

@@ -73,8 +73,8 @@ def add_benchmark(benchmark_name: str, task_name: Union[None, str]) -> None:
         _BENCHMARK_DB.cursor.execute(
             'INSERT INTO benchmark'
             '(name, task, launched_at, status) '
-            'VALUES (?, NULL, ?, ?)', (benchmark_name, launched_at,
-                                       BenchmarkStatus.RUNNING.value))
+            'VALUES (?, NULL, ?, ?)',
+            (benchmark_name, launched_at, BenchmarkStatus.RUNNING.value))
     else:
         _BENCHMARK_DB.cursor.execute(
             'INSERT INTO benchmark'

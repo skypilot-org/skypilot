@@ -20,7 +20,7 @@ SKY_CLOUD_BENCHMARK_SUMMARY = os.path.join(SKY_CLOUD_BENCHMARK_DIR,
 SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 
 
-def get_benchmark_summaries(benchmark: str, 
+def get_benchmark_summaries(benchmark: str,
                             clusters: List[str]) -> Dict[str, Dict[str, int]]:
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,

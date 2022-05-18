@@ -32,7 +32,8 @@ class SkyCallback(object):
         self.flush()
 
     def _save_timestamp(self, timestamp):
-        timestamp = timestamp.to_bytes(NUM_BYTES_PER_TIMESTAMP, byteorder=BYTE_ORDER)
+        timestamp = timestamp.to_bytes(NUM_BYTES_PER_TIMESTAMP,
+                                       byteorder=BYTE_ORDER)
         self._async_writer.write(timestamp)
 
     def _save_start_time(self):
