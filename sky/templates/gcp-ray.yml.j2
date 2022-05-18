@@ -107,7 +107,7 @@ setup_commands:
   - (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf; # This is needed for `-o allow_other` option for `goofys`;
   - pip3 uninstall sky -y &> /dev/null;
-    pip3 install "$(echo {{sky_remote_path}}/*.whl)";
+    pip3 install "$(echo {{sky_remote_path}}/sky-*.whl)";
     python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
 
 # Command to start ray on the head node. You don't need to change this.

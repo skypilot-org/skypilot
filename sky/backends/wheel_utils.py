@@ -14,6 +14,7 @@ from sky.backends import backend_utils
 
 # Local wheel path is same as the remote path.
 WHEEL_DIR = pathlib.Path(os.path.expanduser(backend_utils.SKY_REMOTE_PATH))
+CALLBACK_WHEEL_DIR = pathlib.Path(os.path.expanduser('~/.sky/callback_wheels'))
 SKY_PACKAGE_PATH = pathlib.Path(sky.__file__).parent.parent / 'sky'
 
 
@@ -32,7 +33,7 @@ def cleanup_wheels_dir(wheel_dir: pathlib.Path,
                 f.unlink()
 
 
-def _get_latest_built_wheel() -> pathlib.Path:
+def _get_latest_built_sky_wheel() -> pathlib.Path:
     try:
         latest_wheel = max(WHEEL_DIR.glob('sky-*.whl'), key=os.path.getctime)
     except ValueError:
@@ -70,9 +71,34 @@ def _build_sky_wheel() -> pathlib.Path:
         raise RuntimeError('Fail to build pip wheel for Sky. '
                            f'Error message: {e.stderr.decode()}') from e
 
-    latest_wheel = _get_latest_built_wheel()
+    latest_wheel = _get_latest_built_sky_wheel()
     cleanup_wheels_dir(WHEEL_DIR, latest_wheel)
     return WHEEL_DIR.absolute()
+
+
+def _get_latest_built_sky_callback_wheel() -> pathlib.Path:
+    try:
+        latest_wheel = max(CALLBACK_WHEEL_DIR.glob('sky_callback-*.whl'), key=os.path.getctime)
+    except ValueError:
+        raise FileNotFoundError('Could not find built Sky callback wheels.') from None
+    return latest_wheel
+
+
+def _build_sky_callback_wheel() -> pathlib.Path:
+    """Build a wheel for Sky Callback."""
+    norm_path = str(SKY_PACKAGE_PATH / 'skylet' / 'callbacks') + os.sep
+    try:
+        subprocess.run([
+            'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
+            str(CALLBACK_WHEEL_DIR)
+        ],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE,
+                       check=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError('Fail to build pip wheel for Sky Callback. '
+                           f'Error message: {e.stderr.decode()}') from e
+    return CALLBACK_WHEEL_DIR.absolute()
 
 
 def build_sky_wheel() -> pathlib.Path:
@@ -102,6 +128,7 @@ def build_sky_wheel() -> pathlib.Path:
         # race conditions.
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
+        last_callback_wheel_modification_time = _get_latest_modification_time(CALLBACK_WHEEL_DIR)
 
         # only build wheels if the wheel is outdated
         if last_wheel_modification_time < last_modification_time:
@@ -109,17 +136,25 @@ def build_sky_wheel() -> pathlib.Path:
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             _build_sky_wheel()
 
-        latest_wheel_path = _get_latest_built_wheel()
+        # only build wheels if the callback wheel is outdated
+        if last_callback_wheel_modification_time < last_modification_time:
+            if not CALLBACK_WHEEL_DIR.exists():
+                CALLBACK_WHEEL_DIR.mkdir(parents=True, exist_ok=True)
+            _build_sky_callback_wheel()
+
+        latest_sky_wheel_path = _get_latest_built_sky_wheel()
+        latest_sky_callback_wheel_path = _get_latest_built_sky_callback_wheel()
 
         # Use a unique temporary dir per wheel hash, because there may be many
         # concurrent 'sky launch' happening.  The path should be stable if the
         # wheel content hash doesn't change.
-        with open(latest_wheel_path, 'rb') as f:
+        with open(latest_sky_wheel_path, 'rb') as f:
             contents = f.read()
         hash_of_latest_wheel = hashlib.md5(contents).hexdigest()
         temp_wheel_dir = pathlib.Path(
             tempfile.gettempdir()) / hash_of_latest_wheel
         temp_wheel_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(latest_wheel_path, temp_wheel_dir)
+        shutil.copy(latest_sky_wheel_path, temp_wheel_dir)
+        shutil.copy(latest_sky_callback_wheel_path, temp_wheel_dir)
 
     return temp_wheel_dir.absolute()
