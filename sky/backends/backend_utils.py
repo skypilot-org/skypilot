@@ -1161,12 +1161,15 @@ def get_node_ips(cluster_yaml: str,
     if cluster_name is not None:
         # get the latest handle
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-        head_ip = handle.head_ip
-        if not _check_node_alive_fast(head_ip):
-            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
-        # Try optimize for the common case where we have 1 node.
-        if not return_private_ips and expected_num_nodes == 1:
-            return [head_ip]
+        if handle is not None:
+            head_ip = handle.head_ip
+            if not _check_node_alive_fast(head_ip):
+                raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+            # Try optimize for the common case where we have 1 node.
+            if not return_private_ips and expected_num_nodes == 1:
+                return [head_ip]
+        else:
+            head_ip = None
     else:
         head_ip = None
 
