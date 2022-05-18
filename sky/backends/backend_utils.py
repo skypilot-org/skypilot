@@ -1146,7 +1146,8 @@ def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
                  return_private_ips: bool = False,
                  handle: Optional[backends.Backend.ResourceHandle] = None,
-                 cluster_name: Optional[str] = None) -> List[str]:
+                 cluster_name: Optional[str] = None,
+                 check_cached_ips: bool = False) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
     yaml_handle = cluster_yaml
     if return_private_ips:
@@ -1156,22 +1157,16 @@ def get_node_ips(cluster_yaml: str,
         yaml_handle = cluster_yaml + '.tmp'
         dump_yaml(yaml_handle, config)
 
-    if cluster_name is None and handle is not None:
-        cluster_name = handle.cluster_name
-    if cluster_name is not None:
+    head_ip = None
+    if handle is not None:
+        head_ip = handle.head_ip
+        if cluster_name is None:
+            cluster_name = handle.cluster_name
+    if head_ip is None and cluster_name is not None:
         # get the latest handle
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             head_ip = handle.head_ip
-            if not _check_node_alive_fast(head_ip):
-                raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
-            # Try optimize for the common case where we have 1 node.
-            if not return_private_ips and expected_num_nodes == 1:
-                return [head_ip]
-        else:
-            head_ip = None
-    else:
-        head_ip = None
 
     try:
         if head_ip is None:
@@ -1186,6 +1181,12 @@ def get_node_ips(cluster_yaml: str,
             head_ip = head_ips[0]
             if cluster_name is not None:
                 global_user_state.set_cluster_head_ip(cluster_name, head_ip)
+        else:
+            if check_cached_ips and not _check_node_alive_fast(head_ip):
+                raise exceptions.FetchIPError(
+                    exceptions.FetchIPError.Reason.HEAD)
+            if not return_private_ips and expected_num_nodes == 1:
+                return [head_ip]
     except subprocess.CalledProcessError as e:
         raise exceptions.FetchIPError(
             exceptions.FetchIPError.Reason.HEAD) from e
@@ -1259,7 +1260,9 @@ def _ping_cluster_and_set_status(
     try:
         ips = get_node_ips(handle.cluster_yaml,
                            handle.launched_nodes,
-                           cluster_name=cluster_name)
+                           handle=handle,
+                           cluster_name=cluster_name,
+                           check_cached_ips=True)
         # If we get node ips correctly, the cluster is UP. It is safe to
         # set the status to UP, as the `get_node_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.

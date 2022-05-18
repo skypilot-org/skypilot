@@ -22,5 +22,8 @@ def test_head_ip_cache_invalidated():
     )
     global_user_state.add_or_update_cluster(cluster_name, handle, ready=True)
     with pytest.raises(exceptions.FetchIPError):
-        backend_utils.get_node_ips('', 1, cluster_name=cluster_name)
+        backend_utils.get_node_ips('',
+                                   1,
+                                   cluster_name=cluster_name,
+                                   check_cached_ips=True)
     global_user_state.remove_cluster(cluster_name, terminate=True)
