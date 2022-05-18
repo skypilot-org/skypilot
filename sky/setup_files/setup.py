@@ -46,6 +46,7 @@ install_requires = [
     'grpcio<=1.43.0',
     'psutil',
     'pulp',
+    'requests',
 ]
 
 extras_require = {

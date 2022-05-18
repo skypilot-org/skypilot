@@ -1596,7 +1596,8 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
         start = time.time()
         ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes)
+                                             handle.launched_nodes,
+                                             handle=handle)
         ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')

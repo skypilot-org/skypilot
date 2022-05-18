@@ -20,9 +20,11 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
+import urllib3
 import yaml
 
 import jinja2
+import requests
 import rich.console as rich_console
 import rich.progress as rich_progress
 
@@ -1128,11 +1130,23 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-def get_node_ips(
-        cluster_yaml: str,
-        expected_num_nodes: int,
-        return_private_ips: bool = False,
-        handle: Optional[backends.Backend.ResourceHandle] = None) -> List[str]:
+def _check_node_alive_fast(head_ip: str) -> bool:
+    # access ssh port to check the liveness of the node
+    try:
+        requests.head(f'http://{head_ip}:22', timeout=3)
+    except requests.exceptions.ConnectionError as e:
+        # If the node is alive, then we get 'ProtocolError' because SSH
+        # service would tell us protocol is SSH instead of HTTP.
+        return isinstance(e.args[0], urllib3.exceptions.ProtocolError)
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
+def get_node_ips(cluster_yaml: str,
+                 expected_num_nodes: int,
+                 return_private_ips: bool = False,
+                 handle: Optional[backends.Backend.ResourceHandle] = None,
+                 cluster_name: Optional[str] = None) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
     yaml_handle = cluster_yaml
     if return_private_ips:
@@ -1142,22 +1156,36 @@ def get_node_ips(
         yaml_handle = cluster_yaml + '.tmp'
         dump_yaml(yaml_handle, config)
 
-    # Try optimize for the common case where we have 1 node.
-    if (not return_private_ips and expected_num_nodes == 1 and
-            handle is not None and handle.head_ip is not None):
-        return [handle.head_ip]
+    if cluster_name is None and handle is not None:
+        cluster_name = handle.cluster_name
+    if cluster_name is not None:
+        # get the latest handle
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        head_ip = handle.head_ip
+        if not _check_node_alive_fast(head_ip):
+            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+        # Try optimize for the common case where we have 1 node.
+        if not return_private_ips and expected_num_nodes == 1:
+            return [head_ip]
+    else:
+        head_ip = None
 
     try:
-        proc = run(f'ray get-head-ip {yaml_handle}',
-                   stdout=subprocess.PIPE,
-                   stderr=subprocess.PIPE)
-        out = proc.stdout.decode().strip()
-        head_ip = re.findall(IP_ADDR_REGEX, out)
+        if head_ip is None:
+            proc = run(f'ray get-head-ip {yaml_handle}',
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+            out = proc.stdout.decode().strip()
+            head_ips = re.findall(IP_ADDR_REGEX, out)
+            if len(head_ips) != 1:
+                raise exceptions.FetchIPError(
+                    exceptions.FetchIPError.Reason.HEAD)
+            head_ip = head_ips[0]
+            if cluster_name is not None:
+                global_user_state.set_cluster_head_ip(cluster_name, head_ip)
     except subprocess.CalledProcessError as e:
         raise exceptions.FetchIPError(
             exceptions.FetchIPError.Reason.HEAD) from e
-    if len(head_ip) != 1:
-        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
 
     if expected_num_nodes > 1:
         try:
@@ -1175,7 +1203,7 @@ def get_node_ips(
         worker_ips = []
     if return_private_ips:
         os.remove(yaml_handle)
-    return head_ip + worker_ips
+    return [head_ip] + worker_ips
 
 
 def get_head_ip(
@@ -1226,7 +1254,9 @@ def _ping_cluster_and_set_status(
     check_network_connection()
 
     try:
-        ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        ips = get_node_ips(handle.cluster_yaml,
+                           handle.launched_nodes,
+                           cluster_name=cluster_name)
         # If we get node ips correctly, the cluster is UP. It is safe to
         # set the status to UP, as the `get_node_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.

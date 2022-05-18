@@ -212,6 +212,20 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
+def set_cluster_head_ip(cluster_name: str, head_ip: str):
+    handle = get_handle_from_cluster_name(cluster_name)
+    handle.head_ip = head_ip
+    _DB.cursor.execute('UPDATE clusters SET handle=(?) WHERE name=(?)', (
+        pickle.dumps(handle),
+        cluster_name,
+    ))
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
+
+
 def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
     _DB.cursor.execute('UPDATE clusters SET autostop=(?) WHERE name=(?)', (
         idle_minutes,
