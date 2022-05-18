@@ -2,6 +2,6 @@
 > # From https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/autoscaler/_private/updater.py
 > # Sky patch changes:
 > #  - Ensure the node state is refreshed before checking if the node is terminated.
->
+> 
 248a249
 >                     self.provider.non_terminated_nodes({})
