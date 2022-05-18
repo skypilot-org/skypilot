@@ -5,7 +5,7 @@ import os
 import shlex
 from typing import Dict, List
 
-from sky.skylet.callback import base as sky_callback
+from sky.skylet.callbacks.sky_callback import base as sky_callback
 
 
 def _dict_to_json(json_dict: Dict[str, int], output_path: str):
@@ -14,10 +14,10 @@ def _dict_to_json(json_dict: Dict[str, int], output_path: str):
         f.write(json_str)
 
 
-def parse_skycallback(log_dir: str, output_path: str) -> None:
+def parse_log(log_dir: str, output_path: str) -> None:
     log_dirs = glob.glob(os.path.join(log_dir, 'sky-*'))
     if len(log_dirs) == 0:
-        raise ValueError(f'No skycallback logs found in {log_dir}.')
+        raise ValueError(f'No callback logs found in {log_dir}.')
 
     # Use the latest log.
     log_dir = sorted(log_dirs)[-1]
@@ -62,7 +62,7 @@ class BenchmarkCodeGen:
             f'log_dir = os.path.expanduser({log_dir!r})',
             f'output_path = os.path.expanduser({output_path!r})',
             'os.makedirs(os.path.dirname(output_path), exist_ok=True)',
-            f'benchmark_lib.parse_skycallback(log_dir, output_path)',
+            f'benchmark_lib.parse_log(log_dir, output_path)',
         ]
         return cls._build(code)
 
