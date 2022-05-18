@@ -14,8 +14,11 @@ DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     'application_default_credentials.json')
 
 _CREDENTIAL_FILES = [
-    'credentials.db', 'application_default_credentials.json',
-    'access_tokens.db', 'configurations', 'legacy_credentials',
+    'credentials.db',
+    'application_default_credentials.json',
+    'access_tokens.db',
+    'configurations',
+    'legacy_credentials',
 ]
 
 
@@ -80,20 +83,46 @@ class GCP(clouds.Cloud):
     }
 
     # Number of CPU cores per GPU based on the AWS setting.
-    # GCP A100 has its own instance type mapping. 
+    # GCP A100 has its own instance type mapping.
     # Refer to sky/clouds/service_catalog/gcp_catalog.py
     _GPU_TO_NUM_CPU_MAPPING = {
         # Based on p2 on AWS.
-        'K80': {1: 4, 2: 8, 4: 16, 8: 32},
+        'K80': {
+            1: 4,
+            2: 8,
+            4: 16,
+            8: 32
+        },
         # Based on p3 on AWS.
-        'V100': {1: 8, 2: 16, 4: 32, 8: 64},
+        'V100': {
+            1: 8,
+            2: 16,
+            4: 32,
+            8: 64
+        },
         # Based on g4dn on AWS, we round it down to the closest power of 2.
-        'T4': {1: 4, 2: 8, 4: 32, 8: 96},
+        'T4': {
+            1: 4,
+            2: 8,
+            4: 32,
+            8: 96
+        },
         # P100 is not supported on AWS, and azure has a weird CPU count.
         # Based on Azure NCv2, We round it up to the closest power of 2
-        'P100': {1: 8, 2: 16, 4: 32, 8: 64},
+        'P100': {
+            1: 8,
+            2: 16,
+            4: 32,
+            8: 64
+        },
         # P4 and other GPUs/TPUs are not supported on aws and azure.
-        'DEFAULT': {1: 8, 2: 16, 4: 32, 8: 64, 16: 96},
+        'DEFAULT': {
+            1: 8,
+            2: 16,
+            4: 32,
+            8: 64,
+            16: 96
+        },
     }
 
     #### Regions/Zones ####
@@ -195,7 +224,9 @@ class GCP(clouds.Cloud):
         return isinstance(other, GCP)
 
     @classmethod
-    def get_default_instance_type(cls, accelerators: Optional[Dict[str, int]] = None):
+    def get_default_instance_type(cls,
+                                  accelerators: Optional[Dict[str,
+                                                              int]] = None):
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
         if accelerators is None:
             return 'n1-standard-8'
@@ -327,9 +358,6 @@ class GCP(clouds.Cloud):
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
-        # rsync_exclude only supports relative paths.
-        # TODO(zhwu): rsync_exclude here is unsafe as it may exclude the folder
-        # from other file_mounts as well in ray yaml.
         return {
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES

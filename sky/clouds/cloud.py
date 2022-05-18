@@ -156,8 +156,7 @@ class Cloud:
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the files necessary to access this cloud.
 
-        Returns a dictionary that will be added to a task's file mounts
-        and a list of patterns that will be excluded (used as rsync_exclude).
+        Returns a dictionary that will be added to a task's file mounts.
         """
         raise NotImplementedError
 
