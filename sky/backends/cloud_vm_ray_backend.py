@@ -2025,7 +2025,8 @@ class CloudVmRayBackend(backends.Backend):
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
         backend_utils.handle_returncode(returncode, code,
-                                        'Failed to fetch job id.', stderr)
+                                        'Failed to fetch job id.',
+                                        job_id_str + stderr)
         try:
             job_id = int(job_id_str)
         except ValueError as e:

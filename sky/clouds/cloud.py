@@ -90,7 +90,7 @@ class Cloud:
         """Returns the hourly on-demand/spot price for an instance type."""
         raise NotImplementedError
 
-    def accelerators_to_hourly_cost(self, accelerators):
+    def accelerators_to_hourly_cost(self, accelerators, use_spot):
         """Returns the hourly on-demand price for accelerators."""
         raise NotImplementedError
 

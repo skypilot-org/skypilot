@@ -224,7 +224,7 @@ class LocalDockerBackend(backends.Backend):
         runtime = 'nvidia' if self._use_gpu else None
         logger.info(f'Image {image_tag} found. Running container now. use_gpu '
                     f'is {self._use_gpu}')
-        cluster_name = global_user_state.get_cluster_name_from_handle(handle)
+        cluster_name = handle.get_cluster_name()
         # Encode metadata in docker labels:
         labels = {f'{_DOCKER_LABEL_PREFIX}{k}': v for k, v in metadata.items()}
         labels.update(_DOCKER_DEFAULT_LABELS)
@@ -364,6 +364,6 @@ class LocalDockerBackend(backends.Backend):
         if handle in self.containers:
             container = self.containers[handle]
             container.remove(force=True)
-        cluster_name = global_user_state.get_cluster_name_from_handle(handle)
+        cluster_name = handle.get_cluster_name()
         global_user_state.remove_cluster(cluster_name, terminate=True)
         return True

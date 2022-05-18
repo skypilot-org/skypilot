@@ -75,12 +75,12 @@ _CURSOR.execute("""\
     job_id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_name TEXT,
     username TEXT,
-    submitted_at INTEGER,
+    submitted_at FLOAT,
     status TEXT,
     run_timestamp TEXT CANDIDATE KEY,
-    start_at INTEGER)""")
+    start_at FLOAT)""")
 
-db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'end_at', 'INTEGER')
+db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'end_at', 'FLOAT')
 db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'resources', 'TEXT')
 
 _CONN.commit()
@@ -89,7 +89,7 @@ _CONN.commit()
 def add_job(job_name: str, username: str, run_timestamp: str,
             resources_str: str) -> int:
     """Atomically reserve the next available job id for the user."""
-    job_submitted_at = int(time.time())
+    job_submitted_at = time.time()
     # job_id will autoincrement with the null value
     _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?)',
                     (job_name, username, job_submitted_at, JobStatus.INIT.value,
@@ -108,7 +108,7 @@ def set_status(job_id: int, status: JobStatus) -> None:
         'Please use set_job_started() to set job status to RUNNING')
 
     if status.is_terminal():
-        end_at = int(time.time())
+        end_at = time.time()
         # status does not need to be set if the end_at is not null, since the
         # job must be in a terminal state already.
         _CURSOR.execute(
@@ -138,10 +138,18 @@ def get_latest_job_id() -> Optional[int]:
         return job_id
 
 
+def get_job_time(job_id: int, is_end: bool) -> Optional[int]:
+    field = 'end_at' if is_end else 'start_at'
+    rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
+                           (job_id,))
+    for (timestamp,) in rows:
+        return timestamp
+
+
 def set_job_started(job_id: int) -> None:
     _CURSOR.execute(
         'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
-        'WHERE job_id=(?)', (JobStatus.RUNNING.value, int(time.time()), job_id))
+        'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
     _CONN.commit()
 
 
@@ -471,6 +479,18 @@ class JobLibCodeGen:
             'job_status = job_lib.get_status(job_id)',
             'status_str = None if job_status is None else job_status.value',
             'print("Job", job_id, status_str, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def get_job_time(cls,
+                     job_id: Optional[int] = None,
+                     is_end: bool = False) -> str:
+        code = [
+            f'job_id = {job_id} if {job_id} is not None '
+            'else job_lib.get_latest_job_id()',
+            f'job_time = job_lib.get_job_time(job_id, {is_end})',
+            'print(job_time, flush=True)',
         ]
         return cls._build(code)
 

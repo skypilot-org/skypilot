@@ -207,15 +207,6 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def get_cluster_name_from_handle(
-        cluster_handle: 'backends.Backend.ResourceHandle') -> Optional[str]:
-    handle = pickle.dumps(cluster_handle)
-    rows = _DB.cursor.execute('SELECT name FROM clusters WHERE handle=(?)',
-                              (handle,))
-    for (name,) in rows:
-        return name
-
-
 def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
     _DB.cursor.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
         status.value,

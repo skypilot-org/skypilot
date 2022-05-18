@@ -1,5 +1,5 @@
 """User interfaces with managed spot jobs."""
-
+import collections
 import enum
 import json
 import pathlib
@@ -21,7 +21,11 @@ from sky.spot import spot_state
 logger = sky_logging.init_logger(__name__)
 
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
-JOB_STATUS_CHECK_GAP_SECONDS = 60
+# Controller checks its job's status every this many seconds.
+JOB_STATUS_CHECK_GAP_SECONDS = 20
+
+# Controller checks if its job has started every this many seconds.
+JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
 
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
@@ -33,6 +37,39 @@ class UserSignal(enum.Enum):
     CANCEL = 'CANCEL'
     # NOTE: We can have more communication signals here if needed
     # in the future.
+
+
+# ====== internal functions ======
+def get_job_status(backend: 'backends.CloudVmRayBackend',
+                   cluster_name: str) -> Optional['job_lib.JobStatus']:
+    """Check the status of the job running on the spot cluster.
+
+    It can be None, INIT, RUNNING, SUCCEEDED, FAILED or CANCELLED.
+    """
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    status = None
+    try:
+        logger.info('=== Checking the job status... ===')
+        status = backend.get_job_status(handle, stream_logs=False)
+        logger.info(f'Job status: {status}')
+    except SystemExit:
+        logger.info('Failed to connect to the cluster.')
+    logger.info('=' * 34)
+    return status
+
+
+def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
+                      get_end_time: bool) -> float:
+    """Get the started/ended time of the job."""
+    code = job_lib.JobLibCodeGen.get_job_time(job_id=None, is_end=get_end_time)
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    returncode, stdout, stderr = backend.run_on_head(handle,
+                                                     code,
+                                                     stream_logs=False,
+                                                     require_outputs=True)
+    backend_utils.handle_returncode(returncode, code, 'Failed to get job time.',
+                                    stdout + stderr)
+    return float(stdout)
 
 
 # ======== user functions ========
@@ -212,6 +249,7 @@ def show_jobs(show_all: bool) -> str:
     if show_all:
         columns += ['STARTED', 'CLUSTER', 'REGION']
     job_table = log_utils.create_table(columns)
+    status_counts = collections.defaultdict(int)
     for job in jobs:
         job_duration = log_utils.readable_time_duration(
             job['last_recovered_at'] - job['job_duration'],
@@ -238,6 +276,8 @@ def show_jobs(show_all: bool) -> str:
             job['recovery_count'],
             job['status'].value,
         ]
+        if not job['status'].is_terminal():
+            status_counts[job['status'].value] += 1
         if show_all:
             # STARTED
             started = log_utils.readable_time_duration(job['start_at'],
@@ -257,7 +297,12 @@ def show_jobs(show_all: bool) -> str:
                     handle.launched_resources.region
                 ])
         job_table.add_row(values)
-    return str(job_table)
+    status_str = ', '.join([
+        f'{count} {status}' for status, count in sorted(status_counts.items())
+    ])
+    if status_str:
+        status_str = f'In progress jobs: {status_str}\n\n'
+    return status_str + str(job_table)
 
 
 class SpotCodeGen:
