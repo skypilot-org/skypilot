@@ -85,7 +85,7 @@ class GCP(clouds.Cloud):
     # Number of CPU cores per GPU based on the AWS setting.
     # GCP A100 has its own instance type mapping.
     # Refer to sky/clouds/service_catalog/gcp_catalog.py
-    _GPU_TO_NUM_CPU_MAPPING = {
+    _NUM_ACC_TO_NUM_CPU = {
         # Based on p2 on AWS.
         'K80': {
             1: 4,
@@ -232,9 +232,9 @@ class GCP(clouds.Cloud):
             return 'n1-standard-8'
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
-        if acc not in cls._GPU_TO_NUM_CPU_MAPPING:
+        if acc not in cls._NUM_ACC_TO_NUM_CPU:
             acc = 'DEFAULT'
-        return f'n1-highmem-{cls._GPU_TO_NUM_CPU_MAPPING[acc][acc_count]}'
+        return f'n1-highmem-{cls._NUM_ACC_TO_NUM_CPU[acc][acc_count]}'
 
     @classmethod
     def get_default_region(cls) -> clouds.Region:
