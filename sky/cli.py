@@ -50,12 +50,12 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
-from sky.backends import timeline
 from sky.clouds import service_catalog
 from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.utils import timeline
 from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
@@ -2029,7 +2029,7 @@ def spot():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@timeline.event('cli.spot_launch')
+@timeline.event
 def spot_launch(
     entrypoint: str,
     name: Optional[str],

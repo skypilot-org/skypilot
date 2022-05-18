@@ -36,7 +36,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
-from sky.backends import timeline
+from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
     from sky import resources

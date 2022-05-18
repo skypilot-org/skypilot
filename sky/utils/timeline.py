@@ -1,4 +1,8 @@
-"""This module helps generating timelines of an application."""
+"""This module helps generating timelines of an application.
+
+The timeline follows the trace event format defined here:
+https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
+"""  # pylint: disable=line-too-long
 from typing import Optional, Union, Callable
 
 import atexit
@@ -24,6 +28,7 @@ class Event:
     def __init__(self, name: str, message: str = None):
         self._name = name
         self._message = message
+        # See the module doc for the event format.
         self._event = {
             'name': self._name,
             'cat': 'event',
