@@ -1,0 +1,27 @@
+name: transformers-glue
+
+resources:
+  cloud: aws
+  options: # override
+    - {instance_type: g4dn.8xlarge}
+    - {accelerators: V100}
+
+workdir: ./examples/benchmark/transformers_glue
+
+setup: |
+  pip3 install "$(echo ~/.sky/sky_wheels/sky_callback-*.whl)";
+  pip3 install -r requirements.txt
+
+run: |
+  export TASK_NAME=sst2
+  python run_glue.py \
+    --model_name_or_path bert-base-cased \
+    --task_name $TASK_NAME \
+    --do_train \
+    --do_eval \
+    --max_seq_length 128 \
+    --per_device_train_batch_size 32 \
+    --learning_rate 2e-5 \
+    --num_train_epochs 3 \
+    --output_dir ./outputs/$TASK_NAME/ \
+    --overwrite_output_dir
