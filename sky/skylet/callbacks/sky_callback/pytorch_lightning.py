@@ -1,6 +1,6 @@
 import pytorch_lightning as pl
 
-from sky.skylet.callback import base
+from sky_callback import base
 
 
 class SkyCallback(pl.Callback):

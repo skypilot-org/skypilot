@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 
-from sky.skylet.callback import base
+from sky_callback import base
 
 
 class SkyCallback(keras.callbacks.Callback):

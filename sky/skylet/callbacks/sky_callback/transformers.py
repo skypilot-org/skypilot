@@ -1,6 +1,6 @@
 import transformers
 
-from sky.skylet.callback import base
+from sky_callback import base
 
 
 class SkyCallback(transformers.TrainerCallback):
