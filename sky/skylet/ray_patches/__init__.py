@@ -51,3 +51,6 @@ def patch() -> None:
 
     from ray.autoscaler._private import autoscaler
     _run_patch(autoscaler.__file__, _to_absolute('autoscaler.py.patch'))
+
+    from ray.autoscaler._private import updater
+    _run_patch(updater.__file__, _to_absolute('updater.py.patch'))
