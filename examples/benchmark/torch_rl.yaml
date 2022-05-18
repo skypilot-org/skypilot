@@ -2,10 +2,10 @@ name: actor-critic
 
 resources:
   options: # override
-    # - {accelerators: K80}
-    # - {accelerators: M60}
+    - {accelerators: K80}
+    - {accelerators: M60}
     - {accelerators: T4}
-    # - {accelerators: V100}
+    - {accelerators: V100}
 
 workdir: ./examples/benchmark/torch_rl
 
