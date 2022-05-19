@@ -3,6 +3,7 @@ import random
 
 import numpy as np
 import sky
+from sky.clouds.service_catalog import gcp_catalog
 
 CLOUDS = {
     'AWS': sky.AWS(),
@@ -10,7 +11,7 @@ CLOUDS = {
     'Azure': sky.Azure(),
 }
 ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
-GCP_INSTANCE_TYPES = list(sky.GCP._ON_DEMAND_PRICES.keys())
+GCP_INSTANCE_TYPES = list(gcp_catalog.ON_DEMAND_PRICES.keys())
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
