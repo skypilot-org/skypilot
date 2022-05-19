@@ -8,6 +8,7 @@ from google import auth
 
 from sky import clouds
 from sky.clouds import service_catalog
+from sky.clouds.service_catalog import gcp_catalog
 
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
@@ -37,50 +38,6 @@ class GCP(clouds.Cloud):
 
     _REPR = 'GCP'
     _regions: List[clouds.Region] = []
-
-    # Pricing.  All info assumes us-central1.
-    # In general, query pricing from the cloud.
-    _ON_DEMAND_PRICES = {
-        # VMs: https://cloud.google.com/compute/all-pricing.
-        # N1 standard
-        'n1-standard-1': 0.04749975,
-        'n1-standard-2': 0.0949995,
-        'n1-standard-4': 0.189999,
-        'n1-standard-8': 0.379998,
-        'n1-standard-16': 0.759996,
-        'n1-standard-32': 1.519992,
-        'n1-standard-64': 3.039984,
-        'n1-standard-96': 4.559976,
-        # N1 highmem
-        'n1-highmem-2': 0.118303,
-        'n1-highmem-4': 0.236606,
-        'n1-highmem-8': 0.473212,
-        'n1-highmem-16': 0.946424,
-        'n1-highmem-32': 1.892848,
-        'n1-highmem-64': 3.785696,
-        'n1-highmem-96': 5.678544,
-    }
-
-    _SPOT_PRICES = {
-        # VMs: https://cloud.google.com/compute/all-pricing.
-        # N1 standard
-        'n1-standard-1': 0.01,
-        'n1-standard-2': 0.02,
-        'n1-standard-4': 0.04,
-        'n1-standard-8': 0.08,
-        'n1-standard-16': 0.16,
-        'n1-standard-32': 0.32,
-        'n1-standard-64': 0.64,
-        'n1-standard-96': 0.96,
-        # N1 highmem
-        'n1-highmem-2': 0.024906,
-        'n1-highmem-4': 0.049812,
-        'n1-highmem-8': 0.099624,
-        'n1-highmem-16': 0.199248,
-        'n1-highmem-32': 0.398496,
-        'n1-highmem-64': 0.796992,
-        'n1-highmem-96': 1.195488,
-    }
 
     # Number of CPU cores per GPU based on the AWS setting.
     # GCP A100 has its own instance type mapping.
@@ -124,7 +81,6 @@ class GCP(clouds.Cloud):
             16: 96
         },
     }
-
     #### Regions/Zones ####
 
     @classmethod
@@ -195,8 +151,8 @@ class GCP(clouds.Cloud):
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
         if use_spot:
-            return GCP._SPOT_PRICES[instance_type]
-        return GCP._ON_DEMAND_PRICES[instance_type]
+            return gcp_catalog.SPOT_PRICES[instance_type]
+        return gcp_catalog.ON_DEMAND_PRICES[instance_type]
 
     def accelerators_to_hourly_cost(self, accelerators, use_spot: bool):
         assert len(accelerators) == 1, accelerators
@@ -224,10 +180,9 @@ class GCP(clouds.Cloud):
         return isinstance(other, GCP)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  accelerators: Optional[Dict[str, int]] = None
-                                 ) -> str:
+    def get_default_instance_type(cls) -> str:
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
+        return 'n1-highmem-8'
         if accelerators is None:
             return 'n1-standard-8'
         assert len(accelerators) == 1, accelerators
@@ -296,9 +251,22 @@ class GCP(clouds.Cloud):
                     return ([], fuzzy_candidate_list)
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
+        host_vm_type = GCP.get_default_instance_type()
+        if accelerator_match is not None:
+            assert len(accelerator_match.items(
+            )) == 1, 'cannot handle more than one accelerator candidates.'
+            acc, acc_count = list(accelerator_match.items())[0]
+            if acc == 'A100':
+                # If A100 is used, host VM type must be A2.
+                # https://cloud.google.com/compute/docs/gpus#a100-gpus
+                host_vm_type = gcp_catalog.A100_INSTANCE_TYPES[acc_count]
+            elif acc not in self._NUM_ACC_TO_NUM_CPU:
+                host_vm_type =  f'n1-highmem-{self._NUM_ACC_TO_NUM_CPU["DEFAULT"][acc_count]}'
+            else:
+                host_vm_type =  f'n1-highmem-{self._NUM_ACC_TO_NUM_CPU[acc][acc_count]}'
         r = resources.copy(
             cloud=GCP(),
-            instance_type=GCP.get_default_instance_type(accelerator_match),
+            instance_type=host_vm_type,
             accelerators=accelerator_match,
         )
         return ([r], fuzzy_candidate_list)
@@ -364,7 +332,7 @@ class GCP(clouds.Cloud):
         }
 
     def instance_type_exists(self, instance_type):
-        return instance_type in self._ON_DEMAND_PRICES.keys()
+        return instance_type in gcp_catalog.ON_DEMAND_PRICES.keys()
 
     def region_exists(self, region: str) -> bool:
         return service_catalog.region_exists(region, 'gcp')
