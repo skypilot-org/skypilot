@@ -8,7 +8,6 @@ from google import auth
 
 from sky import clouds
 from sky.clouds import service_catalog
-from sky.clouds.service_catalog import gcp_catalog
 
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
@@ -39,48 +38,6 @@ class GCP(clouds.Cloud):
     _REPR = 'GCP'
     _regions: List[clouds.Region] = []
 
-    # Number of CPU cores per GPU based on the AWS setting.
-    # GCP A100 has its own instance type mapping.
-    # Refer to sky/clouds/service_catalog/gcp_catalog.py
-    _NUM_ACC_TO_NUM_CPU = {
-        # Based on p2 on AWS.
-        'K80': {
-            1: 4,
-            2: 8,
-            4: 16,
-            8: 32
-        },
-        # Based on p3 on AWS.
-        'V100': {
-            1: 8,
-            2: 16,
-            4: 32,
-            8: 64
-        },
-        # Based on g4dn on AWS, we round it down to the closest power of 2.
-        'T4': {
-            1: 4,
-            2: 8,
-            4: 32,
-            8: 96
-        },
-        # P100 is not supported on AWS, and azure has a weird CPU count.
-        # Based on Azure NCv2, We round it up to the closest power of 2
-        'P100': {
-            1: 8,
-            2: 16,
-            4: 32,
-            8: 64
-        },
-        # P4 and other GPUs/TPUs are not supported on aws and azure.
-        'DEFAULT': {
-            1: 8,
-            2: 16,
-            4: 32,
-            8: 64,
-            16: 96
-        },
-    }
     #### Regions/Zones ####
 
     @classmethod
@@ -150,9 +107,10 @@ class GCP(clouds.Cloud):
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
-        if use_spot:
-            return gcp_catalog.SPOT_PRICES[instance_type]
-        return gcp_catalog.ON_DEMAND_PRICES[instance_type]
+        return service_catalog.get_hourly_cost(instance_type,
+                                               region=None,
+                                               use_spot=use_spot,
+                                               clouds='gcp')
 
     def accelerators_to_hourly_cost(self, accelerators, use_spot: bool):
         assert len(accelerators) == 1, accelerators
@@ -183,13 +141,6 @@ class GCP(clouds.Cloud):
     def get_default_instance_type(cls) -> str:
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
         return 'n1-highmem-8'
-        if accelerators is None:
-            return 'n1-standard-8'
-        assert len(accelerators) == 1, accelerators
-        acc, acc_count = list(accelerators.items())[0]
-        if acc not in cls._NUM_ACC_TO_NUM_CPU:
-            acc = 'DEFAULT'
-        return f'n1-highmem-{cls._NUM_ACC_TO_NUM_CPU[acc][acc_count]}'
 
     @classmethod
     def get_default_region(cls) -> clouds.Region:
@@ -256,14 +207,10 @@ class GCP(clouds.Cloud):
             assert len(accelerator_match.items(
             )) == 1, 'cannot handle more than one accelerator candidates.'
             acc, acc_count = list(accelerator_match.items())[0]
-            if acc == 'A100':
-                # If A100 is used, host VM type must be A2.
-                # https://cloud.google.com/compute/docs/gpus#a100-gpus
-                host_vm_type = gcp_catalog.A100_INSTANCE_TYPES[acc_count]
-            elif acc not in self._NUM_ACC_TO_NUM_CPU:
-                host_vm_type =  f'n1-highmem-{self._NUM_ACC_TO_NUM_CPU["DEFAULT"][acc_count]}'
-            else:
-                host_vm_type =  f'n1-highmem-{self._NUM_ACC_TO_NUM_CPU[acc][acc_count]}'
+            host_vm_type_list = service_catalog.get_instance_type_for_accelerator(
+                acc, acc_count, clouds='gcp')
+            assert len(host_vm_type_list) == 1, host_vm_type_list
+            host_vm_type = host_vm_type_list[0]
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,
@@ -332,7 +279,7 @@ class GCP(clouds.Cloud):
         }
 
     def instance_type_exists(self, instance_type):
-        return instance_type in gcp_catalog.ON_DEMAND_PRICES.keys()
+        return service_catalog.instance_type_exists(instance_type, 'gcp')
 
     def region_exists(self, region: str) -> bool:
         return service_catalog.region_exists(region, 'gcp')

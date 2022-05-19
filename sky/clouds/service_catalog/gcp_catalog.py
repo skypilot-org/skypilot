@@ -4,7 +4,7 @@ For now this service catalog is manually coded. In the future it should be
 queried from GCP API.
 """
 import typing
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -96,12 +96,80 @@ SPOT_PRICES = {
     'a2-megagpu-16g': 2.675750,
 }
 
+# Number of CPU cores per GPU based on the AWS setting.
+# GCP A100 has its own instance type mapping.
+# Refer to sky/clouds/service_catalog/gcp_catalog.py
+_NUM_ACC_TO_NUM_CPU = {
+    # Based on p2 on AWS.
+    'K80': {
+        1: 4,
+        2: 8,
+        4: 16,
+        8: 32
+    },
+    # Based on p3 on AWS.
+    'V100': {
+        1: 8,
+        2: 16,
+        4: 32,
+        8: 64
+    },
+    # Based on g4dn on AWS, we round it down to the closest power of 2.
+    'T4': {
+        1: 4,
+        2: 8,
+        4: 32,
+        8: 96
+    },
+    # P100 is not supported on AWS, and azure has a weird CPU count.
+    # Based on Azure NCv2, We round it up to the closest power of 2
+    'P100': {
+        1: 8,
+        2: 16,
+        4: 32,
+        8: 64
+    },
+    # P4 and other GPUs/TPUs are not supported on aws and azure.
+    'DEFAULT': {
+        1: 8,
+        2: 16,
+        4: 32,
+        8: 64,
+        16: 96
+    },
+}
+
 
 def instance_type_exists(instance_type: str) -> bool:
     """Check the existence of the instance type."""
-    del instance_type
-    # Handled in gcp.py. We don't have a proper catalog right now.
-    assert False, 'Internal logic error: this function should not be called'
+    return instance_type in ON_DEMAND_PRICES.keys()
+
+
+def get_hourly_cost(
+    instance_type: str,
+    region: str,
+    use_spot: bool = False,
+) -> float:
+    """Returns the hourly price for a given instance type and region."""
+    del region
+    if use_spot:
+        return SPOT_PRICES[instance_type]
+    return ON_DEMAND_PRICES[instance_type]
+
+
+def get_instance_type_for_accelerator(
+        acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
+    """
+    Returns a list of a single instance type for the given accelerator that
+    matches the CPU count with other clouds.
+    """
+    if acc_name == 'A100':
+        # If A100 is used, host VM type must be A2.
+        # https://cloud.google.com/compute/docs/gpus#a100-gpus
+        return [A100_INSTANCE_TYPES[acc_count]]
+    if acc_name not in _NUM_ACC_TO_NUM_CPU:
+        acc_name = 'DEFAULT'
+    return [f'n1-highmem-{_NUM_ACC_TO_NUM_CPU[acc_name][acc_count]}']
 
 
 def region_exists(region: str) -> bool:
