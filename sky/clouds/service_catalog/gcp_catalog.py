@@ -24,7 +24,7 @@ _TPU_REGIONS = [
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
 # count -> vm type
-A100_INSTANCE_TYPES = {
+_A100_INSTANCE_TYPES = {
     1: 'a2-highgpu-1g',
     2: 'a2-highgpu-2g',
     4: 'a2-highgpu-4g',
@@ -32,7 +32,7 @@ A100_INSTANCE_TYPES = {
     16: 'a2-megagpu-16g',
 }
 # count -> host memory
-A100_HOST_MEMORY = {
+_A100_HOST_MEMORY = {
     1: 85,
     2: 170,
     4: 340,
@@ -42,7 +42,7 @@ A100_HOST_MEMORY = {
 
 # Pricing.  All info assumes us-central1.
 # In general, query pricing from the cloud.
-ON_DEMAND_PRICES = {
+_ON_DEMAND_PRICES = {
     # VMs: https://cloud.google.com/compute/all-pricing.
     # N1 standard
     'n1-standard-1': 0.04749975,
@@ -69,7 +69,7 @@ ON_DEMAND_PRICES = {
     'a2-megagpu-16g': 8.919152,
 }
 
-SPOT_PRICES = {
+_SPOT_PRICES = {
     # VMs: https://cloud.google.com/compute/all-pricing.
     # N1 standard
     'n1-standard-1': 0.01,
@@ -142,7 +142,7 @@ _NUM_ACC_TO_NUM_CPU = {
 
 def instance_type_exists(instance_type: str) -> bool:
     """Check the existence of the instance type."""
-    return instance_type in ON_DEMAND_PRICES.keys()
+    return instance_type in _ON_DEMAND_PRICES.keys()
 
 
 def get_hourly_cost(
@@ -153,8 +153,8 @@ def get_hourly_cost(
     """Returns the hourly price for a given instance type and region."""
     del region
     if use_spot:
-        return SPOT_PRICES[instance_type]
-    return ON_DEMAND_PRICES[instance_type]
+        return _SPOT_PRICES[instance_type]
+    return _ON_DEMAND_PRICES[instance_type]
 
 
 def get_instance_type_for_accelerator(
@@ -166,7 +166,7 @@ def get_instance_type_for_accelerator(
     if acc_name == 'A100':
         # If A100 is used, host VM type must be A2.
         # https://cloud.google.com/compute/docs/gpus#a100-gpus
-        return [A100_INSTANCE_TYPES[acc_count]]
+        return [_A100_INSTANCE_TYPES[acc_count]]
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
     return [f'n1-highmem-{_NUM_ACC_TO_NUM_CPU[acc_name][acc_count]}']
@@ -228,14 +228,14 @@ def list_accelerators(
         new_infos = []
         for info in a100_infos:
             assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
-            a100_host_vm_type = A100_INSTANCE_TYPES[info.accelerator_count]
+            a100_host_vm_type = _A100_INSTANCE_TYPES[info.accelerator_count]
             new_infos.append(
                 info._replace(
                     instance_type=a100_host_vm_type,
-                    memory=A100_HOST_MEMORY[info.accelerator_count],
+                    memory=_A100_HOST_MEMORY[info.accelerator_count],
                     # total cost = VM instance + GPU.
-                    price=info.price + ON_DEMAND_PRICES[a100_host_vm_type],
-                    spot_price=info.spot_price + SPOT_PRICES[a100_host_vm_type],
+                    price=info.price + _ON_DEMAND_PRICES[a100_host_vm_type],
+                    spot_price=info.spot_price + _SPOT_PRICES[a100_host_vm_type],
                 ))
         results['A100'] = new_infos
     return results
