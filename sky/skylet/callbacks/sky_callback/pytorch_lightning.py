@@ -21,6 +21,5 @@ class SkyCallback(pl.Callback):
         outputs,
         batch,
         batch_idx,
-        unused,
     ):
         self.sky_callback.save_timestamp()
