@@ -164,7 +164,7 @@ _NUM_ACC_TO_NUM_CPU = {
         1: 4,
         2: 8,  # AWS does not support 2x T4.
         4: 48,
-        8: 96 # 8x T4 is not supported by GCP.
+        8: 96  # 8x T4 is not supported by GCP.
     },
     # P100 is not supported on AWS, and Azure NCv2 has a weird CPU count.
     'P100': {
