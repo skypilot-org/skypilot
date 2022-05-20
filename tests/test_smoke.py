@@ -403,7 +403,10 @@ def test_cancel_pytorch():
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel {name} 1',
             'sleep 60',
-            f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
+            f'sky exec {name} "(nvidia-smi | grep \'No running process\') || '
+            '(nvidia-smi | grep Xorg && '
+            # Test the number of the GPU process to be only 1.
+            '[ \$(nvidia-smi | grep -A 10 Processes | grep -A 10 === | wc -l) -eq 3 ])"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
