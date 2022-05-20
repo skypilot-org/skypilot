@@ -131,10 +131,12 @@ def run_with_log(
         log_path = os.path.expanduser(log_path)
         dirname = os.path.dirname(log_path)
         os.makedirs(dirname, exist_ok=True)
-    except OSError:
+    except PermissionError:
         use_sudo = True
         os.system(f'sudo mkdir -p {dirname} && sudo touch {log_path} '
                   f'&& sudo chmod a+rwx {log_path}')
+    except OSError as e:
+        raise e
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout = stderr = None
@@ -258,6 +260,8 @@ def run_bash_command_with_log(bash_command: str,
         gpu_list = ray.get_gpu_ids()
         if len(gpu_list) > 0:
             gpu_list = [str(gpu_id) for gpu_id in gpu_list]
+            # Switching users will give Ray process access to all GPUs,
+            # instead of the GPUs allocated
             inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(
                 gpu_list) + ' ' + inner_command
         return run_with_log(

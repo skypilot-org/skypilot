@@ -1383,7 +1383,7 @@ def start(clusters: Tuple[str], yes: bool):
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
         clusters = [c for c in clusters if _error_if_local_cluster(c, \
-            local_clusters, f'Local Cluster {c} does not support `sky start`.')]
+            local_clusters, f'Local cluster {c} does not support `sky start`.')]
 
         for name in clusters:
             cluster_status, _ = backend_utils.refresh_cluster_status_handle(
@@ -1551,7 +1551,7 @@ def _terminate_or_stop_clusters(
         ]
         if not terminate:
             names = [c for c in names if _error_if_local_cluster(c, \
-                local_clusters, f'Local Cluster {c} does not support '
+                local_clusters, f'Local cluster {c} does not support '
                 '`sky stop`.')]
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters and purge is True.
@@ -2168,8 +2168,8 @@ def admin():
 
 
 @admin.command('deploy', cls=_DocumentedCodeCommand)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
-def admin_deploy(entrypoint: str):
+@click.argument('clusterspec_yaml', required=True, type=str, nargs=-1)
+def admin_deploy(clusterspec_yaml: str):
     """Launches Sky on a local cluster.
 
     Performs preflight checks (environment setup, cluster resources)
@@ -2186,11 +2186,11 @@ def admin_deploy(entrypoint: str):
         sky admin deploy examples/local/cluster-config.yaml
     """
     steps = 1
-    entrypoint = ' '.join(entrypoint)
-    assert entrypoint
-    is_yaml, yaml_config = _check_yaml(entrypoint, with_outputs=True)
+    clusterspec_yaml = ' '.join(clusterspec_yaml)
+    assert clusterspec_yaml
+    is_yaml, yaml_config = _check_yaml(clusterspec_yaml, with_outputs=True)
     if not is_yaml:
-        raise ValueError('Must specify Cluster Config')
+        raise ValueError('Must specify cluster config')
 
     auth_config = yaml_config['auth']
     ips = yaml_config['cluster']['ips']
@@ -2199,14 +2199,14 @@ def admin_deploy(entrypoint: str):
     local_cluster_name = yaml_config['cluster']['name']
 
     # Check for Ray
-    click.secho(f'[{steps}/4] Checking On-premise Environment\n',
+    click.secho(f'[{steps}/4] Checking on-premise environment\n',
                 fg='green',
                 nl=False)
     backend_utils.check_local_installation(ips, auth_config)
     steps += 1
 
     # Detect what GPUs the Cluster has (must be homogeneous)
-    click.secho(f'[{steps}/4] Auto-detecting Cluster Resources\n',
+    click.secho(f'[{steps}/4] Auto-detecting cluster resources\n',
                 fg='green',
                 nl=False)
     custom_resources = backend_utils.get_local_custom_resources(
@@ -2214,18 +2214,18 @@ def admin_deploy(entrypoint: str):
     steps += 1
 
     # Launching Ray Autoscaler service
-    click.secho(f'[{steps}/4] Launching Sky Service\n', fg='green', nl=False)
+    click.secho(f'[{steps}/4] Launching sky service\n', fg='green', nl=False)
     backend_utils.launch_local_cluster(yaml_config, custom_resources)
     steps += 1
 
     # Generate Censored YAML file to be sent to non-admin users
-    click.secho(f'[{steps}/4] Generating Censored Local YAML File\n',
+    click.secho(f'[{steps}/4] Generating sanitized local YAML file\n',
                 fg='green',
                 nl=False)
-    censored_yaml_path = backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
+    sanitized_yaml_path = backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
         local_cluster_name)
     backend_utils.save_distributable_yaml(yaml_config)
-    click.secho(f'Saved in {censored_yaml_path} \n', fg='yellow', nl=False)
+    click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
 
 
 def local_status():
@@ -2289,12 +2289,10 @@ def local_status():
             ]
             cluster_table.add_row(row)
 
-    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Local '
-               f'Clusters:{colorama.Style.RESET_ALL}')
     if clusters_status or all_local_clusters:
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Local '
+                   f'clusters:{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
-    else:
-        click.echo('No existing clusters.')
 
 
 @cli.group(cls=_NaturalOrderGroup)

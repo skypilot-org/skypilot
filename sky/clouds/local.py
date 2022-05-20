@@ -28,7 +28,7 @@ class Local(clouds.Cloud):
 
     This Cloud has the following special treatment of Cloud concepts:
 
-    - Catalog: Does not have servie catalog.
+    - Catalog: Does not have service catalog.
     - Region: Only one region ('Local' region).
     - Cost: Treats all compute/egress as free.
     - Instance types: Only one instance type ('on-prem' instance type).
@@ -127,7 +127,7 @@ class Local(clouds.Cloud):
         return False
 
     @staticmethod
-    def get_local_cluster(cluster: str):
+    def get_local_cluster(cluster: str) -> clouds.Local:
         """Gets the local cluster object."""
         if not os.path.exists(
                 os.path.expanduser(_LOCAL_YAML_PATH.format(cluster))):
@@ -136,7 +136,7 @@ class Local(clouds.Cloud):
         local_cloud.set_local_cluster_name(cluster)
         return local_cloud
 
-    def get_local_ips(self):
+    def get_local_ips(self) -> List[str]:
         """Returns IP addresses of the local cluster"""
         cluster = self._local_cluster_name
         local_cluster_path = os.path.expanduser(

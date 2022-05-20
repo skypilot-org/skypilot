@@ -15,7 +15,7 @@ _DEFAULT_DISK_SIZE_GB = 256
 def _get_cloud(cloud: str) -> clouds.Cloud:
     cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
     if cloud is not None and cloud_obj is None:
-        # Overwritten later
+        # Overwritten later in launch() in cli.py
         return clouds.Local()
     return cloud_obj
 
@@ -79,7 +79,8 @@ class Resources:
                 raise ValueError('Local/On-prem mode does not support spot '
                                  'instances.')
             if not self.local_ips:
-                raise ValueError('Local/On-prem mode needs IPs specified.')
+                raise ValueError('Local/On-prem mode needs IPs specified. '
+                                 'Please check the yaml in ~/.sky/local.')
 
         self._region: Optional[str] = None
         self._set_region(region)
