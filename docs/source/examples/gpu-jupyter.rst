@@ -1,8 +1,9 @@
 GPU-backed Jupyter Notebooks
 ============================
 
-Jupyter notebooks are a useful tool for interactive development, debugging, and visualization. Sky makes
-the process of running a GPU-backed Jupyter notebook simple.
+Jupyter notebooks are a useful tool for interactive development, debugging, and
+visualization. Sky makes the process of running a GPU-backed Jupyter notebook
+simple by automatically managing provisioning and port forwarding.
 
 To get a machine with a GPU attached, we recommend using an interactive **GPU node**.
 You can read more about interactive nodes :ref:`here <interactive-nodes>`.
@@ -10,7 +11,12 @@ You can read more about interactive nodes :ref:`here <interactive-nodes>`.
 .. code-block:: bash
 
    # Launch a VM with 1 NVIDIA GPU and forward port 8888 to localhost
-   sky gpunode -p 8888 -c jupyter-vm --gpus K80
+   sky gpunode -p 8888 -c jupyter-vm --gpus K80:1
+
+.. note::
+
+  You can view the GPUs supported with the :code:`sky show-gpus` command.
+
 
 The above command will automatically log in to the cluster once the cluster is provisioned (or re-use an existing one).
 
