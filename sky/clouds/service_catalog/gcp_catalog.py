@@ -164,7 +164,7 @@ _NUM_ACC_TO_NUM_CPU = {
         1: 4,
         2: 8,  # AWS does not support 2x T4.
         4: 48,
-        8: 96
+        8: 96 # 8x T4 is not supported by GCP.
     },
     # P100 is not supported on AWS, and Azure NCv2 has a weird CPU count.
     'P100': {
@@ -191,10 +191,10 @@ def _is_power_of_two(x: int) -> bool:
 
 
 def _closest_power_of_two(x: int) -> int:
-    """Returns the closest power of two to x."""
+    """Returns the closest power of 2 less than equal to x."""
     if _is_power_of_two(x):
         return x
-    return 1 << (x - 1).bit_length()
+    return 1 << ((x - 1).bit_length() - 1)
 
 
 def instance_type_exists(instance_type: str) -> bool:
