@@ -78,9 +78,11 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
                if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
     reason = f'\nReason: {command}' if proc.returncode else ''
-    test.echo(f'{outcome}.'
-              f'{reason}'
-              f'\nLog: less {log_file.name}\n')
+    msg = (f'{outcome}.'
+           f'{reason}'
+           f'\nLog: less {log_file.name}\n')
+    test.echo(msg)
+    log_file.write(msg)
     if proc.returncode == 0 and test.teardown is not None:
         backend_utils.run(
             test.teardown,

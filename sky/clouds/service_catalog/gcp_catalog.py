@@ -21,6 +21,10 @@ _TPU_REGIONS = [
     'asia-east1',
 ]
 
+# This can be switched between n1 and n2.
+# n2 is not allowed for launching GPUs.
+_DEFAULT_HOST_VM_FAMILY = 'n1'
+
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
 # count -> vm type
@@ -61,6 +65,26 @@ _ON_DEMAND_PRICES = {
     'n1-highmem-32': 1.892848,
     'n1-highmem-64': 3.785696,
     'n1-highmem-96': 5.678544,
+    # n2 standard
+    'n2-standard-2': 0.097118,
+    'n2-standard-4': 0.194236,
+    'n2-standard-8': 0.388472,
+    'n2-standard-16': 0.776944,
+    'n2-standard-32': 1.553888,
+    'n2-standard-48': 2.330832,
+    'n2-standard-64': 3.107776,
+    'n2-standard-80': 3.88472,
+    'n2-standard-96': 4.661664,
+    'n2-standard-128': 6.215552,
+    # n2 highmem
+    'n2-highmem-2': 0.147546,
+    'n2-highmem-4': 0.295092,
+    'n2-highmem-8': 0.590184,
+    'n2-highmem-16': 1.180368,
+    'n2-highmem-32': 2.360736,
+    'n2-highmem-48': 3.541104,
+    'n2-highmem-64': 4.721472,
+    'n2-highmem-80': 5.90184,
     # A2 highgpu for A100
     'a2-highgpu-1g': 0.749750,
     'a2-highgpu-2g': 1.499500,
@@ -88,6 +112,26 @@ _SPOT_PRICES = {
     'n1-highmem-32': 0.398496,
     'n1-highmem-64': 0.796992,
     'n1-highmem-96': 1.195488,
+    # n2 standard
+    'n2-standard-2': 0.02354,
+    'n2-standard-4': 0.04708,
+    'n2-standard-8': 0.09416,
+    'n2-standard-16': 0.18832,
+    'n2-standard-32': 0.37664,
+    'n2-standard-48': 0.56496,
+    'n2-standard-64': 0.75328,
+    'n2-standard-80': 0.9416,
+    'n2-standard-96': 1.12992,
+    'n2-standard-128': 1.50656,
+    # n2 highmem
+    'n2-highmem-2': 0.03392,
+    'n2-highmem-4': 0.06784,
+    'n2-highmem-8': 0.13568,
+    'n2-highmem-16': 0.27136,
+    'n2-highmem-32': 0.54272,
+    'n2-highmem-48': 0.81408,
+    'n2-highmem-64': 1.08544,
+    'n2-highmem-80': 1.3568,
     # A2 highgpu for A100
     'a2-highgpu-1g': 0.224930,
     'a2-highgpu-2g': 0.449847,
@@ -105,7 +149,8 @@ _NUM_ACC_TO_NUM_CPU = {
         1: 4,
         2: 8,
         4: 16,
-        8: 32
+        8: 32,
+        16: 64,
     },
     # Based on p3 on AWS.
     'V100': {
@@ -114,15 +159,14 @@ _NUM_ACC_TO_NUM_CPU = {
         4: 32,
         8: 64
     },
-    # Based on g4dn on AWS, we round it down to the closest power of 2.
+    # Based on g4dn on AWS.
     'T4': {
         1: 4,
-        2: 8,
-        4: 32,
+        2: 8,  # AWS does not support 2x T4.
+        4: 48,
         8: 96
     },
-    # P100 is not supported on AWS, and azure has a weird CPU count.
-    # Based on Azure NCv2, We round it up to the closest power of 2
+    # P100 is not supported on AWS, and Azure NCv2 has a weird CPU count.
     'P100': {
         1: 8,
         2: 16,
@@ -135,9 +179,22 @@ _NUM_ACC_TO_NUM_CPU = {
         2: 16,
         4: 32,
         8: 64,
-        16: 96
+        16: 128
     },
 }
+
+
+def _is_power_of_two(x: int) -> bool:
+    """Returns true if x is a power of two."""
+    # https://stackoverflow.com/questions/600293/how-to-check-if-a-number-is-a-power-of-2
+    return x and not x & (x - 1)
+
+
+def _closest_power_of_two(x: int) -> int:
+    """Returns the closest power of two to x."""
+    if _is_power_of_two(x):
+        return x
+    return 1 << (x - 1).bit_length()
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -169,7 +226,21 @@ def get_instance_type_for_accelerator(
         return [_A100_INSTANCE_TYPES[acc_count]]
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
-    return [f'n1-highmem-{_NUM_ACC_TO_NUM_CPU[acc_name][acc_count]}']
+
+    num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name][acc_count]
+    mem_type = 'highmem'
+    # patches for the number of cores per GPU, as some of the combinations
+    # are not supported by GCP.
+    if _DEFAULT_HOST_VM_FAMILY == 'n1':
+        if num_cpus < 96:
+            num_cpus = _closest_power_of_two(num_cpus)
+        else:
+            num_cpus = 96
+    else:
+        if num_cpus > 80:
+            mem_type = 'standard'
+
+    return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}']
 
 
 def region_exists(region: str) -> bool:
