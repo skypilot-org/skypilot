@@ -994,7 +994,7 @@ def benchmark_launch(
     """Benchmark a task on different resources."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
-        raise click.BadParameter(f'Benchmark {benchmark} already exists.')
+        raise click.BadParameter(f'Benchmark {benchmark} already exists. To delete the previous benchmark result, run `sky bench delete {benchmark}`.')
 
     entrypoint = ' '.join(entrypoint)
     if entrypoint:
