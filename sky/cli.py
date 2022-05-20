@@ -880,14 +880,20 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
 
     The following metadata for each cluster is stored: cluster name, time since
-    last launch, resources, region, status, duration, command, hourly price.
+    last launch, resources, region, status, duration, autostop, command, hourly
+    price.
+
+    Without --all (-a) flag, the following metadata is displayed: cluster name,
+    time since last launch, resources, status, autostop, command. Otherwise, all
+    metadata is displayed.
 
     \b
     Each cluster can have one of the following statuses:
     \b
-    - INIT: Undergoing setup, may have failed setup, and may be live or down.
-    - UP: Both provisioning and setup have succeeded and the cluster is live.
-    - STOPPED: Successfully stopped by :code:`sky stop`.
+    - INIT: Undergoing provisioning or runtime setup and may be live or down.
+    - UP: Provisioning and runtime setup have succeeded and the cluster is live.
+    - STOPPED: The cluster is stopped and the storage is persisted. Use
+        :code:`sky start`. to restart the cluster.
     """
     status_utils.show_status_table(all, refresh)
 
