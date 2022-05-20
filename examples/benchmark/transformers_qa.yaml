@@ -1,11 +1,9 @@
 name: bert-large-squad
 
 resources:
-  accelerators: V100:8
   options:
-    - {cloud: aws}
-    - {cloud: gcp}
-    - {cloud: azure, accelerators: V100-32GB:8}
+    - {accelerators: V100:8}
+    - {accelerators: T4:8}
 
 workdir: ./examples/benchmark/transformers_qa
 
