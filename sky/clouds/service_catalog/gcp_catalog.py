@@ -235,7 +235,8 @@ def list_accelerators(
                     memory=_A100_HOST_MEMORY[info.accelerator_count],
                     # total cost = VM instance + GPU.
                     price=info.price + _ON_DEMAND_PRICES[a100_host_vm_type],
-                    spot_price=info.spot_price + _SPOT_PRICES[a100_host_vm_type],
+                    spot_price=info.spot_price +
+                    _SPOT_PRICES[a100_host_vm_type],
                 ))
         results['A100'] = new_infos
     return results

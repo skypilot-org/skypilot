@@ -207,10 +207,10 @@ class GCP(clouds.Cloud):
             assert len(accelerator_match.items(
             )) == 1, 'cannot handle more than one accelerator candidates.'
             acc, acc_count = list(accelerator_match.items())[0]
-            host_vm_type_list = service_catalog.get_instance_type_for_accelerator(
+            host_list = service_catalog.get_instance_type_for_accelerator(
                 acc, acc_count, clouds='gcp')
-            assert len(host_vm_type_list) == 1, host_vm_type_list
-            host_vm_type = host_vm_type_list[0]
+            assert len(host_list) == 1, host_list
+            host_vm_type = host_list[0]
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,
