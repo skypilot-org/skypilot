@@ -15,7 +15,7 @@ You can read more about interactive nodes :ref:`here <interactive-nodes>`.
 
 .. note::
 
-  You can view the GPUs supported with the :code:`sky show-gpus` command.
+  View the supported GPUs with the :code:`sky show-gpus` command.
 
 
 The above command will automatically log in to the cluster once the cluster is provisioned (or re-use an existing one).
@@ -44,3 +44,47 @@ You can verify that this notebook is running on the GPU-backed instance using :c
 .. image:: ../images/jupyter-gpu.png
   :width: 100%
   :alt: nvidia-smi in notebook
+
+Notebooks in Sky tasks
+-----------------------
+Jupyter notebooks can also be used in Sky tasks, allowing access to the full
+range of Sky's features including mounted storage and autostop.
+
+The following :code:`jupyter.yaml` is an example of a task specification that can launch notebooks with Sky.
+
+.. code:: yaml
+
+  # jupyter.yaml
+
+  name: jupyter
+
+  resources:
+    cloud: aws
+
+  file_mounts:
+    /covid:
+      source: s3://fah-public-data-covid19-cryptic-pockets
+      mode: MOUNT
+
+  setup: |
+    pip install --upgrade pip
+    conda init bash
+    conda activate jupyter
+    conda create -n jupyter python=3.9 -y
+    conda activate jupyter
+    pip install jupyter
+  run: |
+    conda activate jupyter
+    jupyter notebook --port 8888
+
+Launch the task:
+
+.. code:: bash
+
+  sky launch -c jupyter jupyter.yaml
+
+To access the notebook locally, use SSH port forwarding.
+
+.. code:: bash
+
+  ssh -L 8888:localhost:8888 jupyter
