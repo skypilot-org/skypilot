@@ -1,7 +1,7 @@
 name: actor-critic
 
 resources:
-  options: # override
+  options:
     - {accelerators: K80}
     - {accelerators: M60}
     - {accelerators: T4}

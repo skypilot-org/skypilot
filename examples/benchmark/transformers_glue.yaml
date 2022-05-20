@@ -2,7 +2,7 @@ name: transformers-glue
 
 resources:
   cloud: aws
-  options: # override
+  options:
     - {instance_type: g4dn.8xlarge}
     - {accelerators: V100}
 
