@@ -582,6 +582,25 @@ def _check_cluster_config(yaml_config: dict):
             f'{backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
 
 
+def _check_local_cloud(cloud: Optional[str] = None,
+                       yaml_cloud: Optional[str] = None,
+                       cluster: Optional[str] = None) -> bool:
+    if cloud is None:
+        # Check if yaml file specifies local cloud
+        if yaml_cloud == 'local':
+            return True
+
+    if cluster in _list_local_clusters():
+        if (yaml_cloud and yaml_cloud != 'local') or (cloud and
+                                                      cloud != 'local'):
+            raise ValueError(f'Detected Local cluster {cluster}. Must specify '
+                             '`cloud: local` or no cloud.')
+        else:
+            return True
+
+    return False
+
+
 def _list_local_clusters():
     local_dir = os.path.expanduser(
         os.path.dirname(backend_utils.SKY_USER_LOCAL_CONFIG_PATH))
@@ -731,31 +750,14 @@ def launch(
         is_yaml = False
         yaml_config = None
 
-    # TODO: Move validation logic elsewhere
     yaml_cloud = None
     if yaml_config:
         if yaml_config.get('resources'):
             if yaml_config['resources'].get('cloud'):
                 yaml_cloud = yaml_config['resources']['cloud']
 
-    if cloud is None:
-        # Check if yaml file specifies local cloud
-        if yaml_cloud == 'local':
-            cloud = 'local'
-
-    if cluster in _list_local_clusters():
-        if (yaml_cloud and yaml_cloud != 'local') or (cloud and
-                                                      cloud != 'local'):
-            raise ValueError(f'Detected Local cluster {cluster}. Must specify '
-                             '`cloud: local` or no cloud.')
-        else:
-            cloud = 'local'
-
-    # Disallow command entrypoints for local clusters
-    if not is_yaml and cloud == 'local':
-        raise click.UsageError('Local clusters cannot run commands directly '
-                               'from cli. Please specify a YAML file with auth '
-                               'credentials set.')
+    if _check_local_cloud(cloud, yaml_cloud, cluster):
+        cloud = 'local'
 
     if not yes:
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
@@ -2218,8 +2220,8 @@ def admin_deploy(clusterspec_yaml: str):
     backend_utils.launch_local_cluster(yaml_config, custom_resources)
     steps += 1
 
-    # Generate Censored YAML file to be sent to non-admin users
-    click.secho(f'[{steps}/4] Generating sanitized local YAML file\n',
+    # Generate sanitized yaml file to be sent to non-admin users
+    click.secho(f'[{steps}/4] Generating sanitized local yaml file\n',
                 fg='green',
                 nl=False)
     sanitized_yaml_path = backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(

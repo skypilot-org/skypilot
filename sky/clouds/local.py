@@ -127,7 +127,7 @@ class Local(clouds.Cloud):
         return False
 
     @staticmethod
-    def get_local_cluster(cluster: str) -> clouds.Local:
+    def get_local_cluster(cluster: str) -> 'Local':
         """Gets the local cluster object."""
         if not os.path.exists(
                 os.path.expanduser(_LOCAL_YAML_PATH.format(cluster))):
