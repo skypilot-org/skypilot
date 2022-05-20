@@ -3,7 +3,7 @@ name: transformers-glue
 resources:
   cloud: aws
   options:
-    - {instance_type: g4dn.8xlarge}
+    - {instance_type: g4dn.2xlarge}
     - {accelerators: V100}
 
 workdir: ./examples/benchmark/transformers_glue
