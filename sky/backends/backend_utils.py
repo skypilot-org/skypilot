@@ -48,6 +48,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
 
+AUTH_PLACEHOLDER = 'PLACEHOLDER'
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
@@ -57,7 +58,7 @@ SKY_REMOTE_RAY_VERSION = '1.10.0'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
 SKY_USER_LOCAL_FILE_PATH = '~/.sky/generated/local'
-SKY_USER_LOCAL_CONFIG_PATH = '~/.sky/local'
+SKY_USER_LOCAL_CONFIG_PATH = '~/.sky/local/{}.yml'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
@@ -897,12 +898,13 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
 
 def save_distributable_yaml(yaml_config: Dict[str, Dict[str, object]]):
     """Generates a distributable yaml for the system admin to send to users."""
-    yaml_config['auth']['ssh_user'] = 'PLACEHOLDER'
-    yaml_config['auth']['ssh_private_key'] = 'PLACEHOLDER'
+    yaml_config['auth']['ssh_user'] = AUTH_PLACEHOLDER
+    yaml_config['auth']['ssh_private_key'] = AUTH_PLACEHOLDER
     cluster_name = yaml_config['cluster']['name']
-    abs_yaml_path = os.path.expanduser(SKY_USER_LOCAL_CONFIG_PATH)
-    os.makedirs(abs_yaml_path, exist_ok=True)
-    with open(f'{abs_yaml_path}/{cluster_name}.yml', 'w') as f:
+    yaml_path = SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)
+    abs_yaml_path = os.path.expanduser(yaml_path)
+    os.makedirs(os.path.dirname(abs_yaml_path), exist_ok=True)
+    with open(abs_yaml_path, 'w') as f:
         yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False)
 
 

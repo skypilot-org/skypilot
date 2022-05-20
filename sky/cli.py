@@ -82,7 +82,6 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              accelerator_args={'tf_version': '2.5.0'},
                              use_spot=False),
 }
-_LOCAL_YAML_PATH = '~/.sky/local/{}.yml'
 
 
 def _truncate_long_string(s: str, max_length: int = 35) -> str:
@@ -109,8 +108,8 @@ def _get_cloud(cloud: Optional[str],
         if cloud is None:
             cloud = 'local'
         if cloud != 'local':
-            raise click.UsageError(f'Local Cluster {cluster_name} is '
-                                   f'not part of Cloud {cloud}.')
+            raise click.UsageError(f'Local cluster {cluster_name} is '
+                                   f'not part of cloud: {cloud}.')
     elif cluster_name is None and cloud.lower == 'local':
         raise click.UsageError('Cloud is local. Must specify a cluster name.')
 
@@ -574,16 +573,18 @@ def _check_cluster_config(yaml_config: dict):
     auth = yaml_config['auth']
     cluster = yaml_config['cluster']['name']
 
-    if (auth['ssh_user'] == 'PLACEHOLDER' or
-            auth['ssh_private_key'] == 'PLACEHOLDER'):
+    if (auth['ssh_user'] == backend_utils.AUTH_PLACEHOLDER or
+            auth['ssh_private_key'] == backend_utils.AUTH_PLACEHOLDER):
         raise ValueError(
             'Authentication into local cluster requires specifying '
             'username and private key. '
-            f'Please enter credentials in {_LOCAL_YAML_PATH.format(cluster)}.')
+            'Please enter credentials in '
+            f'{backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
 
 
 def _list_local_clusters():
-    local_dir = os.path.expanduser('~/.sky/local')
+    local_dir = os.path.expanduser(
+        os.path.dirname(backend_utils.SKY_USER_LOCAL_CONFIG_PATH))
     os.makedirs(local_dir, exist_ok=True)
     local_cluster_paths = [os.path.join(local_dir, f) for f in \
     os.listdir(local_dir) if os.path.isfile(os.path.join(local_dir, f))]
@@ -809,7 +810,7 @@ def launch(
         if 'cloud' in override_params and isinstance(override_params['cloud'],
                                                      clouds.Local):
             local_cluster_path = os.path.expanduser(
-                _LOCAL_YAML_PATH.format(cluster))
+                backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster))
             _, cluster_config = _check_yaml(local_cluster_path,
                                             with_outputs=True)
             _check_cluster_config(cluster_config)
@@ -2221,7 +2222,8 @@ def admin_deploy(entrypoint: str):
     click.secho(f'[{steps}/4] Generating Censored Local YAML File\n',
                 fg='green',
                 nl=False)
-    censored_yaml_path = f'~/.sky/local/{local_cluster_name}.yml'
+    censored_yaml_path = backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
+        local_cluster_name)
     backend_utils.save_distributable_yaml(yaml_config)
     click.secho(f'Saved in {censored_yaml_path} \n', fg='yellow', nl=False)
 

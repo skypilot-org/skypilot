@@ -158,6 +158,7 @@ class RayCodeGen:
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
+            # Connects to Ray cluster via Ray Client, requires redis password if an external user needs to access Ray cluster
             ray.init(address = 'ray://localhost:10001', _redis_password='5241590000000000', namespace='__sky__{job_id}__', log_to_driver=True)
 
             job_id = {job_id!r}
@@ -820,6 +821,7 @@ class RetryingVmProvisioner(object):
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
+
             # Record early, so if anything goes wrong, 'sky status' will show
             # the cluster name and users can appropriately 'sky down'.  It also
             # means a second 'sky launch -c <name>' will attempt to reuse.
@@ -986,6 +988,7 @@ class RetryingVmProvisioner(object):
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
         def local_cloud_ray_up():
+            """Launches Ray autoscaler on worker nodes for a local cluster."""
             with open(cluster_config_file, 'r') as f:
                 config = yaml.safe_load(f)
 
@@ -2067,7 +2070,8 @@ class CloudVmRayBackend(backends.Backend):
 
         # Ray Multitenancy is unsupported
         # (Git Issue) https://github.com/ray-project/ray/issues/6800
-        # Temporary workaround
+        # Temporary workaround - wrap the run command in a script, upload it
+        # to user's $HOME/sky_logs/, and execute it as the specified user.
         ray_command = (f'{cd} && {executable} -u {script_path} '
                        f'> {remote_log_path} 2>&1')
 
@@ -2092,7 +2096,6 @@ class CloudVmRayBackend(backends.Backend):
             require_outputs=True)
 
         head_home_path = stdout.strip()
-        remote_log_path = remote_log_path.replace('~', head_home_path)
         remote_run_file = remote_run_file.replace('~', head_home_path)
 
         cluster_name = handle.cluster_name
@@ -2138,7 +2141,7 @@ class CloudVmRayBackend(backends.Backend):
     def tail_logs(self,
                   handle: ResourceHandle,
                   job_id: Optional[int],
-                  spot_job_id: Optional[int] = None) -> None:
+                  spot_job_id: Optional[int] = None) -> int:
         # Get user name
         cluster_yaml = handle.cluster_yaml
         with open(os.path.expanduser(cluster_yaml), 'r') as f:
