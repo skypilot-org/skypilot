@@ -1101,7 +1101,7 @@ def benchmark_launch(
     logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
                 f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
                 '\nTo check the bench results (on the fly): '
-                f'{backend_utils.BOLD}sky benchmark show '
+                f'{backend_utils.BOLD}sky bench show '
                 f'{benchmark}{backend_utils.RESET_BOLD}'
                 '\nTo stop the clusters: '
                 f'{backend_utils.BOLD}sky bench stop '
