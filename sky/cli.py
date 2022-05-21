@@ -883,10 +883,6 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     last launch, resources, region, status, duration, autostop, command, hourly
     price.
 
-    Without --all (-a) flag, the following metadata is displayed: cluster name,
-    time since last launch, resources, status, autostop, command. Otherwise, all
-    metadata is displayed.
-
     \b
     Each cluster can have one of the following statuses:
     \b
