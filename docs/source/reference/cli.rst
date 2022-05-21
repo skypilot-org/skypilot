@@ -80,7 +80,7 @@ Storage
    :nested: full
 
 Managed Spot Jobs
----------
+------------------
 
 .. click:: sky.cli:spot_launch
    :prog: sky spot launch
