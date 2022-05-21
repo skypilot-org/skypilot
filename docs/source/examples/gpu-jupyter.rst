@@ -59,7 +59,7 @@ The following :code:`jupyter.yaml` is an example of a task specification that ca
   name: jupyter
 
   resources:
-    cloud: aws
+    accelerators: K80:1
 
   file_mounts:
     /covid:
@@ -74,10 +74,11 @@ The following :code:`jupyter.yaml` is an example of a task specification that ca
     conda activate jupyter
     pip install jupyter
   run: |
+    cd ~/sky_workdir
     conda activate jupyter
     jupyter notebook --port 8888
 
-Launch the task:
+Launch the GPU-backed Jupyter notebook:
 
 .. code:: bash
 
