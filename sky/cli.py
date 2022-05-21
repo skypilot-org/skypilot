@@ -881,7 +881,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
 
     The following metadata for each cluster is stored: cluster name, time since
     last launch, resources, region, status, duration, autostop, command, hourly
-    price.
+    price. Display all metadata using :code:`sky status -a`.
 
     \b
     Each cluster can have one of the following statuses:
