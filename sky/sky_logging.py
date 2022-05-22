@@ -2,7 +2,7 @@
 import logging
 import sys
 
-MINIMIZE_LOGGING = True
+MINIMIZE_LOGGING = False
 FORMAT = (None if MINIMIZE_LOGGING else
           '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s')
 DATE_FORMAT = '%m-%d %H:%M:%S'
