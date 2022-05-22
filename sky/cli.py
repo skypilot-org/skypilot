@@ -344,6 +344,20 @@ def _check_interactive_node_resources_match(
         assert launched_resources.cloud is not None, launched_resources
         resources = resources.copy(cloud=launched_resources.cloud)
 
+    # If the clouds match and the user does not specify instance type or region,
+    # automatically infer the instance type and region to ensure the resource
+    # check will pass.
+    same_cloud = resources.cloud.is_same_cloud(launched_resources.cloud)
+    user_request_and_same_cloud = user_requested_resources and same_cloud
+    if user_request_and_same_cloud and resources.instance_type is None:
+        assert launched_resources.instance_type is not None, launched_resources
+        resources = resources.copy(
+            instance_type=launched_resources.instance_type)
+
+    if user_request_and_same_cloud and resources.region is None:
+        assert launched_resources.region is not None, launched_resources
+        resources = resources.copy(region=launched_resources.region)
+
     # TODO: Check for same number of launched_nodes if multi-node support is
     # added for gpu/cpu/tpunode.
     inferred_node_type = _infer_interactive_node_type(launched_resources)
