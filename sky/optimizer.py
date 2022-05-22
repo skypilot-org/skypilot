@@ -2,7 +2,6 @@
 import collections
 import colorama
 import enum
-import pprint
 import sys
 import typing
 from typing import Dict, List, Optional, Tuple
@@ -17,6 +16,7 @@ from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.skylet.utils import log_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
@@ -601,10 +601,9 @@ class Optimizer:
         }
         is_trivial = all(len(v) == 1 for v in node_to_cost_map.values())
         if not is_trivial:
-            if minimize_cost:
-                logger.info('Optimizer - plan minimizing cost')
-            else:
-                logger.info('Optimizer - plan minimizing run time')
+            metric_str = 'cost' if minimize_cost else 'run time'
+            logger.info(f'{colorama.Fore.YELLOW}Optimizer - minimizing '
+                        f'{metric_str}{colorama.Style.RESET_ALL}')
 
         print_hourly_cost = False
         if len(node_to_cost_map) == 1:
@@ -613,45 +612,66 @@ class Optimizer:
                     node.get_inputs() is None and node.get_outputs() is None):
                 print_hourly_cost = True
 
+        logger.info(
+            f'{colorama.Style.BRIGHT}Estimation:{colorama.Style.RESET_ALL}')
         if print_hourly_cost:
-            logger.info(f'Estimated cost: ~${total_cost:.1f}/hr')
+            logger.info(f'Cost: ~${total_cost:.1f}/hr\n')
         else:
-            logger.info(
-                f'Estimated total run time: ~{total_time / 3600:.1f} hr, '
-                f'total cost: ~${total_cost:.1f}')
+            logger.info(f'Total run time: ~{total_time / 3600:.1f} hr\n'
+                        f'Total cost: ~${total_cost:.1f}\n')
 
         # Do not print Source or Sink.
-        message_data = [
+        best_plan_rows = [
             (t, f'{t.num_nodes}x {repr(r)}' if t.num_nodes > 1 else repr(r))
             for t, r in best_plan.items()
             if t.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
         ]
-        message = tabulate.tabulate(reversed(message_data),
-                                    headers=['TASK', 'BEST_RESOURCE'],
-                                    tablefmt='plain')
-        logger.info(f'\n{message}\n')
+        if len(best_plan_rows) > 1:
+            logger.info(
+                f'{colorama.Style.BRIGHT}Best plan: {colorama.Style.RESET_ALL}')
+            best_plan_table = log_utils.create_table(['TASK', 'BEST RESOURCES'])
+            best_plan_table.add_rows(best_plan_rows)
+            logger.info(f'{best_plan_table}\n')
 
         # Print the egress plan if any data egress is scheduled.
         Optimizer._print_egress_plan(graph, best_plan, minimize_cost)
 
         # Print the list of resouces that the optimizer considered.
-        if not is_trivial:
-            metric = 'cost ($)' if minimize_cost else 'time (hr)'
-            for k, v in node_to_cost_map.items():
-                node_to_cost_map[k] = {
-                    resources: round(cost, 2) if minimize_cost \
-                        else round(cost / 3600, 2)
-                    for resources, cost in v.items()
-                }
+        metric = 'COST ($)' if minimize_cost else 'TIME (hr)'
+        field_names = [
+            'CLOUD', 'INSTANCE TYPE', 'ACCELERATORS', metric, 'CHOSEN'
+        ]
 
-            num_tasks = len(node_to_cost_map)
-            if num_tasks > 1:
-                logger.info(f'Details: task -> {{resources -> {metric}}}')
-                logger.info('%s\n', pprint.pformat(node_to_cost_map))
-            elif num_tasks == 1:
-                logger.info(f'Considered resources -> {metric}')
-                logger.info('%s\n',
-                            pprint.pformat(list(node_to_cost_map.values())[0]))
+        def _get_resources_element_list(
+                resources: 'resources_lib.Resources') -> List[str]:
+            return [
+                str(resources.cloud), resources.instance_type,
+                str(resources.accelerators)
+            ]
+
+        for task, v in node_to_cost_map.items():
+            plural = 's' if task.num_nodes > 1 else ''
+            logger.info(f'{colorama.Style.BRIGHT}Considered resources for Task '
+                        f'{repr(task)!r} ({task.num_nodes} node{plural}):'
+                        f'{colorama.Style.RESET_ALL}')
+            rows = []
+            for resources, cost in v.items():
+                if minimize_cost:
+                    cost = round(cost, 2)
+                else:
+                    cost = round(cost / 3600, 2)
+
+                chosen_str = '*' if resources == best_plan[task] else ''
+
+                row = [
+                    *_get_resources_element_list(resources), cost, chosen_str
+                ]
+                rows.append(row)
+
+            rows = sorted(rows, key=lambda x: x[-2])
+            table = log_utils.create_table(field_names)
+            table.add_rows(rows)
+            logger.info(f'{table}\n')
 
     @staticmethod
     def _print_candidates(node_to_candidate_map: _TaskToPerCloudCandidates):
