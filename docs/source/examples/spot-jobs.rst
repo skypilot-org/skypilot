@@ -29,7 +29,7 @@ The below YAML example shows how to upload your codebase/dataset to the spot ins
 
 .. note::
 
-  Currently :ref:`Workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
+  Currently :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
   supported for spot jobs.
 
 To allow spot recovery, another storage bucket is typically needed for storing states of the job (e.g., model checkpoints).
@@ -124,7 +124,8 @@ As HuggingFace has built-in support for periodically checkpointing, we only need
     --save_total_limit 10 \
     --save_steps 1000
 
-After launching the job, you can check the job status or cancel it with ``sky spot status`` and ``sky spot cancel``:
+After launching the job, you can access its log by `sky spot logs`.
+Also, you can check the job status or cancel it by ``sky spot status`` and ``sky spot cancel``:
 
 .. code-block:: console
 
