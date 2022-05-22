@@ -124,7 +124,7 @@ As HuggingFace has built-in support for periodically checkpointing, we only need
     --save_total_limit 10 \
     --save_steps 1000
 
-After launching the job, you can access its log by `sky spot logs`.
+After launching the job, you can access its log by ``sky spot logs``.
 Also, you can check the job status or cancel it by ``sky spot status`` and ``sky spot cancel``:
 
 .. code-block:: console
