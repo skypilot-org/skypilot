@@ -1,6 +1,6 @@
 """Sky logging utils."""
 import enum
-from typing import Optional
+from typing import List, Optional
 
 import colorama
 import pendulum
@@ -54,14 +54,16 @@ class RayUpLineProcessor(LineProcessor):
         self.status_display.stop()
 
 
-def create_table(field_names):
+def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
     """Creates table with default style."""
-    table = prettytable.PrettyTable()
-    table.field_names = field_names
-    table.border = False
+    border = kwargs.pop('border', False)
+    align = kwargs.pop('align', 'l')
+    table = prettytable.PrettyTable(align=align,
+                                    border=border,
+                                    field_names=field_names,
+                                    **kwargs)
     table.left_padding_width = 0
-    table.right_padding_width = 2
-    table.align = 'l'
+    # table.right_padding_width = 2
     return table
 
 
