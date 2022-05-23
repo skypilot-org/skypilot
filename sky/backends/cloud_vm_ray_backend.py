@@ -68,10 +68,9 @@ _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
 
 # Time gap between retries after provisioning on all possible place failed.
 _RETRY_UNTIL_UP_GAP_SECONDS = 60
-_RETRY_UNTIL_UP_MESSAGE = ('=== Retry until up ===\n'
-                           f'{colorama.Style.BRIGHT}Retry until up is set, '
-                           'retry the provisioning after '
-                           f'{_RETRY_UNTIL_UP_GAP_SECONDS}s...'
+_RETRY_UNTIL_UP_MESSAGE = (f'{colorama.Style.BRIGHT}=== Retry until up ===\n'
+                           'Retry until up is set, retry the provisioning '
+                           f'after {_RETRY_UNTIL_UP_GAP_SECONDS}s...'
                            f'{colorama.Style.RESET_ALL}')
 
 
