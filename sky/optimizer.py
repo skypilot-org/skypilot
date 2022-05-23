@@ -579,21 +579,26 @@ class Optimizer:
 
             if cost_or_time > 0:
                 if parent.name == _DUMMY_SOURCE_NAME:
-                    egress = (f'{child.get_inputs()} ({src_cloud}) -> '
-                              f'{child} ({dst_cloud})')
+                    egress = [
+                        f'{child.get_inputs()} ({src_cloud})',
+                        f'{child} ({dst_cloud})'
+                    ]
                 else:
-                    egress = f'{parent} ({src_cloud}) -> {child} ({dst_cloud})'
-                message_data.append((egress, nbytes, cost_or_time))
+                    egress = [
+                        f'{parent} ({src_cloud})', f'{child} ({dst_cloud})'
+                    ]
+                message_data.append((*egress, nbytes, cost_or_time))
 
         if message_data:
             metric = 'COST ($)' if minimize_cost else 'TIME (s)'
-            table = _create_table(['EGRESS', 'SIZE (GB)', metric])
+            table = _create_table(['SOURCE', 'TARGET', 'SIZE (GB)', metric])
             table.add_rows(reversed(message_data))
-            logger.info(f'{table}\n')
+            logger.info(f'Egress plan:\n{table}\n')
 
     @staticmethod
     def print_optimized_plan(
         graph,
+        topo_order: List[Task],
         best_plan: Dict[Task, resources_lib.Resources],
         total_time: float,
         total_cost: float,
@@ -601,11 +606,13 @@ class Optimizer:
         minimize_cost: bool,
     ):
         logger.info('== Optimizer ==')
-        node_to_cost_map = {
-            k: v
-            for k, v in node_to_cost_map.items()
-            if k.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME)
-        }
+        ordered_node_to_cost_map = collections.OrderedDict()
+        ordered_best_plan = collections.OrderedDict()
+        for node in topo_order:
+            if node.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME):
+                ordered_node_to_cost_map[node] = node_to_cost_map[node]
+                ordered_best_plan[node] = best_plan[node]
+
         is_trivial = all(len(v) == 1 for v in node_to_cost_map.values())
         if not is_trivial and not sky_logging.MINIMIZE_LOGGING:
             metric_str = 'cost' if minimize_cost else 'run time'
@@ -614,8 +621,8 @@ class Optimizer:
                 f' minimizing {metric_str}')
 
         print_hourly_cost = False
-        if len(node_to_cost_map) == 1:
-            node = list(node_to_cost_map.keys())[0]
+        if len(ordered_node_to_cost_map) == 1:
+            node = list(ordered_node_to_cost_map.keys())[0]
             if (node.time_estimator_func is None and
                     node.get_inputs() is None and node.get_outputs() is None):
                 print_hourly_cost = True
@@ -648,9 +655,7 @@ class Optimizer:
         resource_fields = ['CLOUD', 'INSTANCE', 'ACCELERATORS']
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
-                          for t, r in best_plan.items()
-                          if t.name not in (_DUMMY_SOURCE_NAME,
-                                            _DUMMY_SINK_NAME)]
+                          for t, r in ordered_best_plan.items()]
         if len(best_plan_rows) > 1:
             logger.info(
                 f'{colorama.Style.BRIGHT}Best plan: {colorama.Style.RESET_ALL}')
@@ -665,8 +670,8 @@ class Optimizer:
         metric = 'COST ($)' if minimize_cost else 'TIME (hr)'
         field_names = resource_fields + [metric, 'CHOSEN']
 
-        num_tasks = len(node_to_cost_map)
-        for task, v in node_to_cost_map.items():
+        num_tasks = len(ordered_node_to_cost_map)
+        for task, v in ordered_node_to_cost_map.items():
             task_str = f'for Task {repr(task)!r}' if num_tasks > 1 else ''
             plural = 's' if task.num_nodes > 1 else ''
             logger.info(
@@ -765,8 +770,9 @@ class Optimizer:
             total_cost = Optimizer._compute_total_cost(graph, topo_order,
                                                        best_plan)
 
-        Optimizer.print_optimized_plan(graph, best_plan, total_time, total_cost,
-                                       node_to_cost_map, minimize_cost)
+        Optimizer.print_optimized_plan(graph, topo_order, best_plan, total_time,
+                                       total_cost, node_to_cost_map,
+                                       minimize_cost)
         if not sky_logging.MINIMIZE_LOGGING:
             Optimizer._print_candidates(node_to_candidate_map)
         return best_plan
