@@ -621,13 +621,14 @@ class Optimizer:
                 print_hourly_cost = True
 
         if print_hourly_cost:
-            logger.info(f'{colorama.Style.BRIGHT}Estimated Cost: '
+            logger.info(f'{colorama.Style.BRIGHT}Estimated cost: '
                         f'{colorama.Style.RESET_ALL}${total_cost:.1f} / hour\n')
         else:
-            logger.info(f'{colorama.Style.BRIGHT}Estimation:'
-                        f'{colorama.Style.RESET_ALL}\n'
-                        f'Total run time: ~{total_time / 3600:.1f} hr\n'
-                        f'Total cost: ~${total_cost:.1f}\n')
+            logger.info(f'{colorama.Style.BRIGHT}Estimated total runtime: '
+                        f'{colorama.Style.RESET_ALL}{total_time / 3600:.1f} '
+                        'hours\n'
+                        f'{colorama.Style.BRIGHT}Estimated total cost: '
+                        f'{colorama.Style.RESET_ALL}${total_cost:.1f}\n')
 
         def _get_resources_element_list(
                 resources: 'resources_lib.Resources') -> List[str]:
