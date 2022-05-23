@@ -73,6 +73,7 @@ The following :code:`jupyter.yaml` is an example of a task specification that ca
     conda create -n jupyter python=3.9 -y
     conda activate jupyter
     pip install jupyter
+
   run: |
     cd ~/sky_workdir
     conda activate jupyter
@@ -89,3 +90,9 @@ To access the notebook locally, use SSH port forwarding.
 .. code:: bash
 
   ssh -L 8888:localhost:8888 jupyter
+
+You can verify that this notebook has access to the mounted storage bucket.
+
+.. image:: ../images/jupyter-covid.png
+  :width: 100%
+  :alt: accessing covid data from notebook
