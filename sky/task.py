@@ -68,17 +68,19 @@ def _get_similar_keys(name: str, keys: List[str]) -> List[str]:
     Original source:
     https://github.com/tensorflow/lingvo/blob/master/lingvo/core/hyperparams.py
     """
+
     def overlaps(name: str, key: str) -> float:
-      """The fraction of 3-char substrings in <name> that appear in key."""
-      matches = 0
-      trials = 0
-      for i in range(len(name) - 3):
-        trials += 1
-        if name[i:i + 3] in key:
-          matches += 1
-      if trials:
-        return float(matches) / trials
-      return 0
+        """The fraction of 3-char substrings in <name> that appear in key."""
+        matches = 0
+        trials = 0
+        for i in range(len(name) - 3):
+            trials += 1
+            if name[i:i + 3] in key:
+                matches += 1
+        if trials:
+            return float(matches) / trials
+        return 0
+
     return [key for key in keys if overlaps(name, key) > 0.5]
 
 
