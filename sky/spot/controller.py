@@ -101,7 +101,7 @@ class SpotController:
                                                             get_end_time=True)
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
-                        '== Logs of the user job ==\n')
+                        f'== Logs of the user job (ID: {self._job_id}) ==\n')
                     self.backend.tail_logs(handle,
                                            None,
                                            spot_job_id=self._job_id)
