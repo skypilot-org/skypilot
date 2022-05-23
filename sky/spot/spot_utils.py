@@ -183,7 +183,7 @@ def stream_logs_by_id(job_id: int) -> str:
 
     if job_status.is_terminal():
         job_msg = ''
-        if job_status == job_lib.JobStatus.FAILED:
+        if job_status == spot_state.SpotStatus.FAILED:
             job_msg = ('\nFor detailed error message, please check '
                        f'sky logs {constants.SPOT_CONTROLLER_NAME} {job_id}')
         return (
