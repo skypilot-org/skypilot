@@ -63,7 +63,7 @@ def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
                                     field_names=field_names,
                                     **kwargs)
     table.left_padding_width = 0
-    # table.right_padding_width = 2
+    table.right_padding_width = 2
     return table
 
 

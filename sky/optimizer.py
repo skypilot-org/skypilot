@@ -620,18 +620,21 @@ class Optimizer:
                     node.get_inputs() is None and node.get_outputs() is None):
                 print_hourly_cost = True
 
-        logger.info(
-            f'{colorama.Style.BRIGHT}Estimation:{colorama.Style.RESET_ALL}')
         if print_hourly_cost:
-            logger.info(f'Cost: ~${total_cost:.1f}/hr\n')
+            logger.info(f'{colorama.Style.BRIGHT}Estimated Cost: '
+                        f'{colorama.Style.RESET_ALL}${total_cost:.1f} / hour\n')
         else:
-            logger.info(f'Total run time: ~{total_time / 3600:.1f} hr\n'
+            logger.info(f'{colorama.Style.BRIGHT}Estimation:'
+                        f'{colorama.Style.RESET_ALL}\n'
+                        f'Total run time: ~{total_time / 3600:.1f} hr\n'
                         f'Total cost: ~${total_cost:.1f}\n')
 
         def _get_resources_element_list(
                 resources: 'resources_lib.Resources') -> List[str]:
             accelerators = resources.accelerators
-            if isinstance(accelerators, dict) and len(accelerators) == 1:
+            if accelerators is None:
+                accelerators = '-'
+            elif isinstance(accelerators, dict) and len(accelerators) == 1:
                 accelerators, count = list(accelerators.items())[0]
                 accelerators = f'{accelerators}:{count}'
 
