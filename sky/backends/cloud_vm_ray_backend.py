@@ -68,6 +68,11 @@ _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
 
 # Time gap between retries after provisioning on all possible place failed.
 _RETRY_UNTIL_UP_GAP_SECONDS = 60
+_RETRY_UNTIL_UP_MESSAGE = ('=== Retry until up ===\n'
+                           f'{colorama.Style.BRIGHT}Retry until up is set, '
+                           'retry the provisioning after '
+                           f'{_RETRY_UNTIL_UP_GAP_SECONDS}s...'
+                           f'{colorama.Style.RESET_ALL}')
 
 
 def _get_cluster_config_template(cloud):
@@ -1322,9 +1327,7 @@ class CloudVmRayBackend(backends.Backend):
                     if e.no_retry:
                         logger.error(e)
                         if retry_until_up:
-                            logger.info(
-                                'Wait until up is set, retry the provisioning '
-                                f'after {_RETRY_UNTIL_UP_GAP_SECONDS}s...')
+                            logger.info(_RETRY_UNTIL_UP_MESSAGE)
                             continue
                         sys.exit(1)
                     # Clean up the cluster's entry in `sky status`.
@@ -1335,9 +1338,7 @@ class CloudVmRayBackend(backends.Backend):
                         f' Relax the task\'s resource requirements:\n '
                         f'{task.num_nodes}x {task.resources}')
                     if retry_until_up:
-                        logger.info(
-                            'Wait until up is set, retry the provisioning '
-                            f'after {_RETRY_UNTIL_UP_GAP_SECONDS}s...')
+                        logger.info(_RETRY_UNTIL_UP_MESSAGE)
                         continue
                     sys.exit(1)
             if dryrun:
