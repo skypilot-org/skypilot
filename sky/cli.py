@@ -512,7 +512,8 @@ def _check_yaml(entrypoint: str) -> bool:
 
 
 def _start_cluster(cluster_name: str,
-                   idle_minutes_to_autostop: Optional[int] = None):
+                   idle_minutes_to_autostop: Optional[int] = None,
+                   retry_until_up: bool = False):
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -523,7 +524,8 @@ def _start_cluster(cluster_name: str,
                                to_provision=handle.launched_resources,
                                dryrun=False,
                                stream_logs=True,
-                               cluster_name=cluster_name)
+                               cluster_name=cluster_name,
+                               retry_until_up=retry_until_up)
     if idle_minutes_to_autostop is not None:
         backend.set_autostop(handle, idle_minutes_to_autostop)
     return handle
@@ -593,6 +595,14 @@ def cli():
           'of idleness after setup/file_mounts. This is equivalent to '
           'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
           'If not set, the cluster will not be auto-stopped.'))
+@click.option(
+    '--retry-until-up',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('If True, retry until the cluster is up even after sky fails to '
+          'launch cluster on any possible region/cloud.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -615,6 +625,7 @@ def launch(
     env: List[Dict[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
+    retry_until_up: bool,
     yes: bool,
 ):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
@@ -715,7 +726,8 @@ def launch(
                cluster_name=cluster,
                detach_run=detach_run,
                backend=backend,
-               idle_minutes_to_autostop=idle_minutes_to_autostop)
+               idle_minutes_to_autostop=idle_minutes_to_autostop,
+               retry_until_up=retry_until_up)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1223,7 +1235,13 @@ def autostop(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-def start(clusters: Tuple[str], yes: bool):
+@click.option('--retry-until-up',
+              '-r',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Retry until cluster is up.')
+def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status == STOPPED) or failed in
@@ -1312,7 +1330,7 @@ def start(clusters: Tuple[str], yes: bool):
             show_default=True)
 
     for name in to_start:
-        _start_cluster(name)
+        _start_cluster(name, retry_until_up=retry_until_up)
         click.secho(f'Cluster {name} started.', fg='green')
 
 

@@ -44,17 +44,20 @@ class Stage(enum.Enum):
     TEARDOWN = enum.auto()
 
 
-def _execute(dag: sky.Dag,
-             dryrun: bool = False,
-             teardown: bool = False,
-             stream_logs: bool = True,
-             handle: Any = None,
-             backend: Optional[backends.Backend] = None,
-             optimize_target: OptimizeTarget = OptimizeTarget.COST,
-             stages: Optional[List[Stage]] = None,
-             cluster_name: Optional[str] = None,
-             detach_run: bool = False,
-             idle_minutes_to_autostop: Optional[int] = None) -> None:
+def _execute(
+    dag: sky.Dag,
+    dryrun: bool = False,
+    teardown: bool = False,
+    stream_logs: bool = True,
+    handle: Any = None,
+    backend: Optional[backends.Backend] = None,
+    retry_until_up: bool = False,
+    optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    stages: Optional[List[Stage]] = None,
+    cluster_name: Optional[str] = None,
+    detach_run: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
+) -> None:
     """Runs a DAG.
 
     If the DAG has not been optimized yet, this will call sky.optimize() for
@@ -71,6 +74,8 @@ def _execute(dag: sky.Dag,
         handle instead of provisioning a new one.
       backend: Backend; backend to use for executing the tasks. Defaults to
         CloudVmRayBackend()
+      retry_until_up: bool; whether to retry the provisioning until the cluster
+        is up.
       optimize_target: OptimizeTarget; the dag optimization metric, e.g.
         OptimizeTarget.COST.
       stages: List of stages to run.  If None, run the whole life cycle of
@@ -131,7 +136,8 @@ def _execute(dag: sky.Dag,
                                            task.best_resources,
                                            dryrun=dryrun,
                                            stream_logs=stream_logs,
-                                           cluster_name=cluster_name)
+                                           cluster_name=cluster_name,
+                                           retry_until_up=retry_until_up)
 
         if dryrun:
             logger.info('Dry run finished.')
@@ -192,29 +198,35 @@ def _execute(dag: sky.Dag,
             print('\x1b[?25h', end='')  # Show cursor.
 
 
-def launch(dag: sky.Dag,
-           dryrun: bool = False,
-           teardown: bool = False,
-           stream_logs: bool = True,
-           backend: Optional[backends.Backend] = None,
-           optimize_target: OptimizeTarget = OptimizeTarget.COST,
-           cluster_name: Optional[str] = None,
-           detach_run: bool = False,
-           idle_minutes_to_autostop: Optional[int] = None,
-           is_spot_controller_task: bool = False) -> None:
+def launch(
+    dag: sky.Dag,
+    dryrun: bool = False,
+    teardown: bool = False,
+    stream_logs: bool = True,
+    backend: Optional[backends.Backend] = None,
+    retry_until_up: bool = False,
+    optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    cluster_name: Optional[str] = None,
+    detach_run: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
+    is_spot_controller_task: bool = False,
+) -> None:
     if not is_spot_controller_task:
         backend_utils.check_cluster_name_not_reserved(
             cluster_name, operation_str='sky.launch')
-    _execute(dag=dag,
-             dryrun=dryrun,
-             teardown=teardown,
-             stream_logs=stream_logs,
-             handle=None,
-             backend=backend,
-             optimize_target=optimize_target,
-             cluster_name=cluster_name,
-             detach_run=detach_run,
-             idle_minutes_to_autostop=idle_minutes_to_autostop)
+    _execute(
+        dag=dag,
+        dryrun=dryrun,
+        teardown=teardown,
+        stream_logs=stream_logs,
+        handle=None,
+        backend=backend,
+        retry_until_up=retry_until_up,
+        optimize_target=optimize_target,
+        cluster_name=cluster_name,
+        detach_run=detach_run,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+    )
 
 
 def exec(  # pylint: disable=redefined-builtin

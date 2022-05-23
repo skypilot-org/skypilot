@@ -66,6 +66,9 @@ _RSYNC_DISPLAY_OPTION = '-Pavz'
 _RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
 _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
 
+# Time gap between retries after provisioning on all possible place failed.
+_RETRY_UNTIL_UP_GAP_SECONDS = 60
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -1277,7 +1280,8 @@ class CloudVmRayBackend(backends.Backend):
                   to_provision: Optional['resources_lib.Resources'],
                   dryrun: bool,
                   stream_logs: bool,
-                  cluster_name: Optional[str] = None) -> ResourceHandle:
+                  cluster_name: Optional[str] = None,
+                  retry_until_up: bool = False) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # Try to launch the exiting cluster first
         if cluster_name is None:
@@ -1304,25 +1308,38 @@ class CloudVmRayBackend(backends.Backend):
             # TODO(suquark): once we have sky on PYPI, we should directly
             # install sky from PYPI.
             local_wheel_path = wheel_utils.build_sky_wheel()
-            try:
-                provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
-                                                    self._optimize_target,
-                                                    local_wheel_path)
-                config_dict = provisioner.provision_with_retries(
-                    task, to_provision_config, dryrun, stream_logs)
-            except exceptions.ResourcesUnavailableError as e:
-                # Do not remove the stopped cluster from the global state
-                # if failed to start.
-                if e.no_retry:
-                    logger.error(e)
+            while True:
+                try:
+                    provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
+                                                        self._optimize_target,
+                                                        local_wheel_path)
+                    config_dict = provisioner.provision_with_retries(
+                        task, to_provision_config, dryrun, stream_logs)
+                    break
+                except exceptions.ResourcesUnavailableError as e:
+                    # Do not remove the stopped cluster from the global state
+                    # if failed to start.
+                    if e.no_retry:
+                        logger.error(e)
+                        if retry_until_up:
+                            logger.info(
+                                'Wait until up is set, retry the provisioning '
+                                f'after {_RETRY_UNTIL_UP_GAP_SECONDS}s...')
+                            continue
+                        sys.exit(1)
+                    # Clean up the cluster's entry in `sky status`.
+                    global_user_state.remove_cluster(cluster_name,
+                                                     terminate=True)
+                    logger.error(
+                        'Failed to provision all possible launchable resources.'
+                        f' Relax the task\'s resource requirements:\n '
+                        f'{task.num_nodes}x {task.resources}')
+                    if retry_until_up:
+                        logger.info(
+                            'Wait until up is set, retry the provisioning '
+                            f'after {_RETRY_UNTIL_UP_GAP_SECONDS}s...')
+                        continue
                     sys.exit(1)
-                # Clean up the cluster's entry in `sky status`.
-                global_user_state.remove_cluster(cluster_name, terminate=True)
-                logger.error(
-                    'Failed to provision all possible launchable resources. '
-                    f'Relax the task\'s resource requirements:\n '
-                    f'{task.num_nodes}x {task.resources}')
-                sys.exit(1)
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
