@@ -130,14 +130,14 @@ def set_succeeded(job_id: int, end_time: float):
 
 def set_failed(job_id: int,
                end_time: Optional[float] = None,
-               controller_failed: bool = False):
+               cluster_failed: bool = False):
     end_time = time.time() if end_time is None else end_time
     fields_to_set = {
         'end_at': end_time,
         'status': SpotStatus.FAILED.value,
     }
-    if controller_failed:
-        fields_to_set['status'] = SpotStatus.CONTROLLER_FAILED.value
+    if cluster_failed:
+        fields_to_set['status'] = SpotStatus.CLUSTER_FAILED.value
     previsou_status = _CURSOR.execute(
         'SELECT status FROM spot WHERE job_id=(?)', (job_id,)).fetchone()
     previsou_status = SpotStatus(previsou_status[0])
@@ -155,7 +155,10 @@ def set_failed(job_id: int,
         WHERE job_id=(?) AND end_at IS null""",
         (*list(fields_to_set.values()), job_id))
     _CONN.commit()
-    logger.info('Job failed.')
+    if cluster_failed:
+        logger.info('Job failed due to cluster failure.')
+    else:
+        logger.info('Job failed due to user code.')
 
 
 def set_cancelled(job_id: int):

@@ -131,7 +131,7 @@ class SpotController:
             # The job can be non-terminal if the controller exited abnormally,
             # e.g. failed to launch cluster after reaching the MAX_RETRY.
             if not job_status.is_terminal():
-                spot_state.set_failed(self._job_id, controller_failed=True)
+                spot_state.set_failed(self._job_id, cluster_failed=True)
 
             # Clean up Storages with persistent=False.
             self.backend.teardown_ephemeral_storage(self._task)
