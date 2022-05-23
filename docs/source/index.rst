@@ -51,14 +51,6 @@ Key features:
    reference/storage
    reference/quota
    reference/faq
-   .. reference/production-workflow
-
-   .. reference/tasks
-   .. reference/backends
-   .. reference/provisioner
-   .. reference/optimizer
-   .. reference/service-catalog
-
 
 .. toctree::
    :maxdepth: 1
