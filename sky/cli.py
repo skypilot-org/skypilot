@@ -800,6 +800,7 @@ def exec(
         sky exec mycluster --gpus=V100:1 python train_gpu.py
 
     .. code-block:: bash
+
         # Pass environment variables to the task
         sky exec mycluster --env WANDB_API_KEY python train_gpu.py
     """
