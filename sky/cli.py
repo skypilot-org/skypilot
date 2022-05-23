@@ -323,7 +323,7 @@ def _check_interactive_node_resources_match(
         node_type: str,
         resources: sky.Resources,
         launched_resources: sky.Resources,
-        user_requested_resources: Optional[bool] = False) -> None:
+        user_requested_resources: Optional[Dict[str, bool]] = None) -> None:
     """Check matching resources when reusing an existing cluster.
 
     The only exception is when [cpu|tpu|gpu]node -c cluster_name is used with no
@@ -333,7 +333,7 @@ def _check_interactive_node_resources_match(
         node_type: Type of interactive node.
         resources: Resources to attach to VM.
         launched_resources: Existing launched resources associated with cluster.
-        user_requested_resources: If true, user requested resources explicitly.
+        user_requested_resources: Resource attributes user requested.
     """
     # In the case where the user specifies no cloud, we infer the cloud from
     # the launched resources before performing the check.
@@ -344,17 +344,28 @@ def _check_interactive_node_resources_match(
         assert launched_resources.cloud is not None, launched_resources
         resources = resources.copy(cloud=launched_resources.cloud)
 
-    # If the clouds match and the user does not specify instance type or region,
-    # automatically infer the instance type and region to ensure the resource
-    # check will pass.
+    # If the clouds and accelerators match and the user does not specify
+    # instance type or region, automatically infer the instance type and region
+    # to ensure the resource check will pass.
+    any_user_request = user_requested_resources is not None and any(
+        user_requested_resources)
+
+    if any_user_request and not user_requested_resources['accelerators']:
+        resources = resources.copy(accelerators=launched_resources.accelerators)
+
+    if any_user_request and not user_requested_resources['use_spot']:
+        resources = resources.copy(use_spot=launched_resources.use_spot)
+
     same_cloud = resources.cloud.is_same_cloud(launched_resources.cloud)
-    user_request_and_same_cloud = user_requested_resources and same_cloud
-    if user_request_and_same_cloud and resources.instance_type is None:
+    same_acc = resources.accelerators == launched_resources.accelerators
+    same_cloud_request = any_user_request and same_cloud
+    if same_cloud_request and same_acc and not user_requested_resources[
+            'instance_type']:
         assert launched_resources.instance_type is not None, launched_resources
         resources = resources.copy(
             instance_type=launched_resources.instance_type)
 
-    if user_request_and_same_cloud and resources.region is None:
+    if same_cloud_request and resources.region is None:
         assert launched_resources.region is not None, launched_resources
         resources = resources.copy(region=launched_resources.region)
 
@@ -363,7 +374,7 @@ def _check_interactive_node_resources_match(
     inferred_node_type = _infer_interactive_node_type(launched_resources)
     node_type_match = inferred_node_type == node_type
     launched_resources_match = resources.is_same_resources(launched_resources)
-    no_resource_requests = not user_requested_resources  # e.g. sky gpunode
+    no_resource_requests = not any_user_request  # e.g. sky gpunode
     if not (node_type_match and
             (no_resource_requests or launched_resources_match)):
         raise click.UsageError(
@@ -380,7 +391,7 @@ def _create_and_ssh_into_node(
     backend: Optional['backend_lib.Backend'] = None,
     port_forward: Optional[List[int]] = None,
     session_manager: Optional[str] = None,
-    user_requested_resources: Optional[bool] = False,
+    user_requested_resources: Optional[Dict[str, bool]] = None,
     no_confirm: bool = False,
 ):
     """Creates and attaches to an interactive node.
@@ -392,7 +403,7 @@ def _create_and_ssh_into_node(
         backend: the Backend to use (currently only CloudVmRayBackend).
         port_forward: List of ports to forward.
         session_manager: Attach session manager: { 'screen', 'tmux' }.
-        user_requested_resources: If true, user requested resources explicitly.
+        user_requested_resources: Resource attributes user requested.
         no_confirm: If true, skips confirmation prompt presented to user.
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
@@ -1625,8 +1636,12 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
-    user_requested_resources = not (cloud is None and instance_type is None and
-                                    gpus is None and use_spot is None)
+    user_requested_resources = {
+        'cloud': cloud is not None,
+        'instance_type': instance_type is not None,
+        'accelerators': gpus is not None,
+        'use_spot': use_spot is not None,
+    }
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = _get_cloud(cloud)
     if gpus is None and instance_type is None:
@@ -1701,8 +1716,12 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('cpunode')
 
-    user_requested_resources = not (cloud is None and instance_type is None and
-                                    use_spot is None)
+    user_requested_resources = {
+        'cloud': cloud is not None,
+        'instance_type': instance_type is not None,
+        'accelerators': False,
+        'use_spot': use_spot is not None,
+    }
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = _get_cloud(cloud)
     if instance_type is None:
@@ -1774,8 +1793,12 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('tpunode')
 
-    user_requested_resources = not (instance_type is None and tpus is None and
-                                    use_spot is None)
+    user_requested_resources = {
+        'cloud': False,
+        'instance_type': instance_type is not None,
+        'accelerators': tpus is not None,
+        'use_spot': use_spot is not None,
+    }
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     if instance_type is None:
         instance_type = default_resources.instance_type

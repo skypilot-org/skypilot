@@ -49,53 +49,80 @@ def test_default_resources_check():
                               instance_type=default_resources.instance_type,
                               accelerators='V100',
                               use_spot=default_resources.use_spot)
+    user_requested = {
+        'cloud': True,
+        'accelerators': True,
+        'instance_type': False,
+        'use_spot': False
+    }
     launched_resources = sky.Resources(cloud=sky.AWS(),
-                                       instance_type='p3.2xlarge')
-    cli._check_interactive_node_resources_match('gpunode',
-                                                resources,
-                                                launched_resources,
-                                                user_requested_resources=True)
+                                       instance_type='p3.2xlarge',
+                                       region='us-east-1')
+    cli._check_interactive_node_resources_match(
+        'gpunode',
+        resources,
+        launched_resources,
+        user_requested_resources=user_requested)
     # sky gpunode
     cli._check_interactive_node_resources_match('gpunode',
                                                 default_resources,
                                                 launched_resources,
-                                                user_requested_resources=False)
+                                                user_requested_resources=None)
 
     # sky gpunode --cloud aws -t p3.2xlarge
     requested_resources = sky.Resources(cloud=sky.AWS(),
                                         instance_type='p3.2xlarge')
-    cli._check_interactive_node_resources_match('gpunode',
-                                                requested_resources,
-                                                launched_resources,
-                                                user_requested_resources=True)
+    user_requested = {
+        'cloud': True,
+        'accelerators': False,
+        'instance_type': True,
+        'use_spot': False
+    }
+    cli._check_interactive_node_resources_match(
+        'gpunode',
+        requested_resources,
+        launched_resources,
+        user_requested_resources=user_requested)
 
 
 def test_resource_mismatch_check():
     default_resources = cli._INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     # Launched resources from running: sky gpunode --cloud aws --gpus V100
     launched_resources = sky.Resources(cloud=sky.AWS(),
-                                       instance_type='p3.2xlarge')
+                                       instance_type='p3.2xlarge',
+                                       accelerators='V100',
+                                       region='us-east-1')
 
     requested_resources = [
         # sky gpunode --cloud gcp
-        sky.Resources(cloud=sky.GCP(),
-                      instance_type=default_resources.instance_type,
-                      accelerators=default_resources.accelerators,
-                      use_spot=default_resources.use_spot),
+        (sky.Resources(cloud=sky.GCP(),
+                       instance_type=default_resources.instance_type,
+                       accelerators=default_resources.accelerators,
+                       use_spot=default_resources.use_spot), {
+                           'cloud': True,
+                           'accelerators': False,
+                           'instance_type': False,
+                           'use_spot': False
+                       }),
 
         # sky gpunode --gpus K80
-        sky.Resources(cloud=default_resources.cloud,
-                      instance_type=default_resources.instance_type,
-                      accelerators='K80',
-                      use_spot=default_resources.use_spot)
+        (sky.Resources(cloud=default_resources.cloud,
+                       instance_type=default_resources.instance_type,
+                       accelerators='K80',
+                       use_spot=default_resources.use_spot), {
+                           'cloud': False,
+                           'accelerators': True,
+                           'instance_type': False,
+                           'use_spot': False
+                       }),
     ]
-    for spec in requested_resources:
+    for (spec, user_request) in requested_resources:
         with pytest.raises(click.UsageError) as e:
             cli._check_interactive_node_resources_match(
                 'gpunode',
                 spec,
                 launched_resources,
-                user_requested_resources=True)
+                user_requested_resources=user_request)
         assert 'Resources cannot change for an existing cluster' in str(e.value)
 
 
@@ -126,7 +153,7 @@ def test_node_type_check():
                 requested_node_type,
                 spec,
                 launched_resources,
-                user_requested_resources=False)
+                user_requested_resources=None)
         assert 'Resources cannot change for an existing cluster' in str(e.value)
 
 
@@ -134,11 +161,19 @@ def test_infer_cloud_resource_check():
     # sky gpunode --gpus V100
     resources = sky.Resources(cloud=None, accelerators='V100')
     launched_resources = sky.Resources(cloud=sky.AWS(),
-                                       instance_type='p3.2xlarge')
-    cli._check_interactive_node_resources_match('gpunode',
-                                                resources,
-                                                launched_resources,
-                                                user_requested_resources=True)
+                                       instance_type='p3.2xlarge',
+                                       region='us-east-1')
+    user_request = {
+        'cloud': False,
+        'accelerators': True,
+        'instance_type': False,
+        'use_spot': False
+    }
+    cli._check_interactive_node_resources_match(
+        'gpunode',
+        resources,
+        launched_resources,
+        user_requested_resources=user_request)
 
 
 def test_accelerator_mismatch():
