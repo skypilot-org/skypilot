@@ -184,8 +184,10 @@ def stream_logs_by_id(job_id: int) -> str:
     if job_status.is_terminal():
         job_msg = ''
         if job_status == spot_state.SpotStatus.FAILED:
-            job_msg = ('\nFor detailed error message, please check '
-                       f'sky logs {constants.SPOT_CONTROLLER_NAME} {job_id}')
+            job_msg = ('\nFor detailed error message, please check: '
+                       f'{colorama.Style.BRIGHT}sky logs '
+                       f'{constants.SPOT_CONTROLLER_NAME} {job_id}'
+                       f'{colorama.Style.RESET_ALL}')
         return (
             f'Job {job_id} is already in terminal state {job_status.value}. '
             f'Logs will not be shown.{job_msg}')
