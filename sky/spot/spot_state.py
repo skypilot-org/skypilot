@@ -54,7 +54,7 @@ class SpotStatus(enum.Enum):
     RECOVERING = 'RECOVERING'
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
-    CONTROLLER_FAILED = 'CONTROLLER_FAILED'
+    CLUSTER_FAILED = 'CLUSTER_FAILED'
     CANCELLED = 'CANCELLED'
 
     def is_terminal(self) -> bool:
