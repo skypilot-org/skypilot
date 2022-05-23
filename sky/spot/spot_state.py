@@ -54,6 +54,7 @@ class SpotStatus(enum.Enum):
     RECOVERING = 'RECOVERING'
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
+    CONTROLLER_FAILED = 'CONTROLLER_FAILED'
     CANCELLED = 'CANCELLED'
 
     def is_terminal(self) -> bool:
@@ -127,12 +128,16 @@ def set_succeeded(job_id: int, end_time: float):
     logger.info('Job succeeded.')
 
 
-def set_failed(job_id: int, end_time: Optional[float] = None):
+def set_failed(job_id: int,
+               end_time: Optional[float] = None,
+               controller_failed: bool = False):
     end_time = time.time() if end_time is None else end_time
     fields_to_set = {
         'end_at': end_time,
         'status': SpotStatus.FAILED.value,
     }
+    if controller_failed:
+        fields_to_set['status'] = SpotStatus.CONTROLLER_FAILED.value
     previsou_status = _CURSOR.execute(
         'SELECT status FROM spot WHERE job_id=(?)', (job_id,)).fetchone()
     previsou_status = SpotStatus(previsou_status[0])
