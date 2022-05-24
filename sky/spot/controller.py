@@ -91,13 +91,21 @@ class SpotController:
             if job_status == job_lib.JobStatus.FAILED:
                 # Check the status of the spot cluster. It can be STOPPED or UP,
                 # where STOPPED means partially down.
-                cluster_status = backend_utils.refresh_cluster_status_handle(
-                    self._cluster_name, force_refresh=True)[0]
+                (cluster_status,
+                 handle) = backend_utils.refresh_cluster_status_handle(
+                     self._cluster_name, force_refresh=True)
                 if cluster_status == global_user_state.ClusterStatus.UP:
                     # The user code has probably crashed.
                     end_time = spot_utils.get_job_timestamp(self.backend,
                                                             self._cluster_name,
                                                             get_end_time=True)
+                    logger.info(
+                        'The user job failed. Please check the logs below.\n'
+                        f'== Logs of the user job (ID: {self._job_id}) ==\n')
+                    self.backend.tail_logs(handle,
+                                           None,
+                                           spot_job_id=self._job_id)
+                    logger.info('\n== End of logs ==')
                     spot_state.set_failed(self._job_id, end_time=end_time)
                     break
                 assert (cluster_status == global_user_state.ClusterStatus.
@@ -123,7 +131,7 @@ class SpotController:
             # The job can be non-terminal if the controller exited abnormally,
             # e.g. failed to launch cluster after reaching the MAX_RETRY.
             if not job_status.is_terminal():
-                spot_state.set_failed(self._job_id)
+                spot_state.set_failed(self._job_id, cluster_failed=True)
 
             # Clean up Storages with persistent=False.
             self.backend.teardown_ephemeral_storage(self._task)
