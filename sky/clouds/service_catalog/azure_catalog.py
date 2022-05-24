@@ -12,7 +12,6 @@ from sky.clouds.service_catalog import common
 _df = common.read_catalog('azure.csv')
 
 
-
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
