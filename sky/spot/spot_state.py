@@ -72,9 +72,9 @@ def set_pending(job_id: int):
         """\
         UPDATE spot SET
         status=(?)
-        WHERE job_id=(?)""",
-        (SpotStatus.PENDING.value, job_id))
+        WHERE job_id=(?)""", (SpotStatus.PENDING.value, job_id))
     _CONN.commit()
+
 
 def init(job_id: int, name: str, run_timestamp: str, resources_str: str):
     """Insert a new spot job, returns the success."""
