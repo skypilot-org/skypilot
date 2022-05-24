@@ -2,6 +2,8 @@ from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 import time
 import functools
 import uuid
+import sys
+from sky.utils import base_utils
 
 PROM_PUSHGATEWAY_URL = '3.216.190.117:9091'
 
@@ -35,7 +37,7 @@ class Metric:
         self.prom_metric.labels(*labels).set(self.val)
 
 class MetricLogger:
-    def __init__(self, func_name, labels = None, metrics = None, with_runtime = False):
+    def __init__(self, func_name, labels = None, metrics = None, with_runtime = False, with_cmd = False):
         if not labels:
             labels = []
         if not metrics:
@@ -45,6 +47,7 @@ class MetricLogger:
         self.labels = labels
         self.metrics = metrics
         self.with_runtime = with_runtime
+        self.with_cmd = with_cmd
 
         self.labels.append(Label('func_name'))
         self.labels.append(Label('timestamp'))
@@ -56,6 +59,10 @@ class MetricLogger:
         if with_runtime:
             self.runtime_metric = self.func_name + '_runtime'
             self.metrics.append(Metric(self.runtime_metric, f'Runtime for {self.func_name}'))
+
+        if with_cmd:
+            self.cmd_metric = self.func_name + '_cmd'
+            self.metrics.append(Metric(self.cmd_metric, f'CLI comamnd for {self.func_name}'))
 
         self.label_dict = {e.name: e for e in self.labels}
         self.metric_dict = {e.name: e for e in self.metrics}
@@ -72,7 +79,9 @@ class MetricLogger:
             def wrapper_logging(*args, **kwargs):
                 self.set_labels({'func_name': self.func_name, 'timestamp': time.time(), 'user': get_user()})
                 saved_ex = None
-
+                if self.with_cmd:
+                    cmd = base_utils.get_pretty_entry_point()
+                    self.set_metrics({self.cmd_metric: cmd})
                 try:
                     start = time.time()
                     func(*args, **kwargs)

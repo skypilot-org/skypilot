@@ -1,0 +1,19 @@
+resources:
+  cloud: aws
+  instance_type: t2.small
+
+file_mounts:
+  /config : /config
+
+setup: |
+  sudo yum update -y
+  sudo amazon-linux-extras install docker
+  sudo service docker start
+  sudo systemctl enable docker
+  sudo usermod -a -G docker ec2-user
+  docker pull prom/pushgateway
+
+run: |
+  sudo service docker start
+  sudo docker run -d -p 9091:9091 prom/pushgateway
+  sudo docker run -d -p 9090:9090 -v /home/ec2-user/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus

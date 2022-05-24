@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  external_labels:
+    origin_prometheus: prometheus01
+
+remote_write:
+  - url: https://prometheus-prod-10-prod-us-central-0.grafana.net/api/prom/push
+    basic_auth:
+      username: 359584
+      password: eyJrIjoiZjRhNmIyYjE4MGNkZjJiMGFiMjFjOGI3MzQyYWU1YTE3NGUyYzEwNyIsIm4iOiJkc2ZsYWpsa2Zhc2RqZCIsImlkIjo2MTUwNDZ9
+
+scrape_configs:
+  - job_name: "prometheus"
+
+    static_configs:
+      - targets: ["http://[INSTANCE IP]:9091"]

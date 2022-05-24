@@ -742,14 +742,13 @@ def launch(
         'resources': str(new_resources),
         'yaml_info': str(yaml_info)
     })
-    # sky.launch(dag,
-    #            dryrun=dryrun,
-    #            stream_logs=True,
-    #            cluster_name=cluster,
-    #            detach_run=detach_run,
-    #            backend=backend,
-    #            idle_minutes_to_autostop=idle_minutes_to_autostop)
-    raise Exception
+    sky.launch(dag,
+               dryrun=dryrun,
+               stream_logs=True,
+               cluster_name=cluster,
+               detach_run=detach_run,
+               backend=backend,
+               idle_minutes_to_autostop=idle_minutes_to_autostop)
     launch_logger.set_return_code(0)
     return 0
 
