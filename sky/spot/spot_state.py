@@ -48,6 +48,7 @@ columns = [
 
 class SpotStatus(enum.Enum):
     """Spot job status, designed to be in serverless style"""
+    PENDING = 'PENDING'
     SUBMITTED = 'SUBMITTED'
     STARTING = 'STARTING'
     RUNNING = 'RUNNING'
@@ -65,6 +66,15 @@ class SpotStatus(enum.Enum):
 
 
 # === Status transition functions ===
+def set_pending(job_id: int):
+    _CURSOR.execute(
+        """\
+        UPDATE spot SET
+        status=(?)
+        WHERE job_id=(?)""",
+        (SpotStatus.PENDING.value, job_id))
+    _CONN.commit()
+
 def init(job_id: int, name: str, run_timestamp: str, resources_str: str):
     """Insert a new spot job, returns the success."""
     _CURSOR.execute(

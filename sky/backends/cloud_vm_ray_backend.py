@@ -128,7 +128,7 @@ class RayCodeGen:
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
-    def add_prologue(self, job_id: int) -> None:
+    def add_prologue(self, job_id: int, is_spot_controller: bool = False) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
@@ -167,6 +167,10 @@ class RayCodeGen:
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
+        if is_spot_controller:
+            # Add the spot job to spot status table.
+            self._code.append(f'from sky.spot import spot_state; '
+            'spot_state.set_pending({job_id})')
 
     def add_gang_scheduling_placement_group(
         self,
@@ -2053,7 +2057,8 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
+        is_spot_controller = handle.cluster_name == spot_lib.SPOT_CONTROLLER_NAME
+        codegen.add_prologue(job_id, is_spot_controller=is_spot_controller)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         if callable(task.run):
@@ -2088,7 +2093,8 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
+        is_spot_controller = handle.cluster_name == spot_lib.SPOT_CONTROLLER_NAME
+        codegen.add_prologue(job_id, is_spot_controller=is_spot_controller)
         codegen.add_gang_scheduling_placement_group(task.num_nodes,
                                                     accelerator_dict)
 

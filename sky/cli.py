@@ -2273,7 +2273,7 @@ def spot_status(all: bool, refresh: bool):
         handle, code, require_outputs=True, stream_logs=False)
     backend_utils.handle_returncode(returncode, code,
                                     'Failed to fetch managed job statuses',
-                                    stderr)
+                                    job_table_str + stderr)
 
     spot_lib.dump_job_table_cache(job_table_str)
     click.echo(f'Managed spot jobs:\n{job_table_str}')
