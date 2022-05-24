@@ -1,4 +1,5 @@
 """Task: a coarse-grained stage in an application."""
+import difflib
 import inspect
 import os
 import re
@@ -60,28 +61,6 @@ def _is_valid_name(name: str) -> bool:
 def _is_valid_env_var(name: str) -> bool:
     """Checks if the task environment variable name is valid."""
     return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
-
-
-def _get_similar_keys(name: str, keys: List[str]) -> List[str]:
-    """Return a list of keys that are similar to name.
-
-    Original source:
-    https://github.com/tensorflow/lingvo/blob/master/lingvo/core/hyperparams.py
-    """
-
-    def overlaps(name: str, key: str) -> float:
-        """The fraction of 3-char substrings in <name> that appear in key."""
-        matches = 0
-        trials = 0
-        for i in range(len(name) - 3):
-            trials += 1
-            if name[i:i + 3] in key:
-                matches += 1
-        if trials:
-            return float(matches) / trials
-        return 0
-
-    return [key for key in keys if overlaps(name, key) > 0.5]
 
 
 class Task:
@@ -286,7 +265,19 @@ class Task:
                 raise ValueError('Multi-node TPU cluster not supported. '
                                  f'Got num_nodes={task.num_nodes}')
         if len(config) > 0:
-            raise ValueError(f'Unknown fields in in YAML: {config.keys()}')
+            invalid_keys = 'The following fields in YAML are invalid:\n'
+            keys = [
+                'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs',
+                'file_mounts', 'inputs', 'outputs', 'resources'
+            ]
+            for unknown_key in config.keys():
+                similar_keys = difflib.get_close_matches(unknown_key, keys)
+                key_invalid = f'    Unknown field {unknown_key}.'
+                if len(similar_keys) > 0:
+                    key_invalid += f' Did you mean one of {similar_keys}?'
+                key_invalid += '\n'
+                invalid_keys += key_invalid
+            raise ValueError(invalid_keys)
         task.set_resources({resources})
         assert config == {}, f'Invalid task args: {config.keys()}'
         return task
