@@ -101,13 +101,11 @@ exec_logger = metrics.MetricLogger(
 start_logger = metrics.MetricLogger('start',
                                     labels=[metrics.Label('cluster_name')])
 
-stop_logger = metrics.MetricLogger('stop',
-                                   labels=[metrics.Label('clusters')])
+stop_logger = metrics.MetricLogger('stop', labels=[metrics.Label('clusters')])
 
-down_logger = metrics.MetricLogger('down',
-                                   labels=[metrics.Label('clusters')])
+down_logger = metrics.MetricLogger('down', labels=[metrics.Label('clusters')])
 
-status_logger = metrics.MetricLogger('status')
+status_logger = metrics.MetricLogger('status', with_cmd=True)
 
 
 def _get_cloud(cloud: Optional[str]) -> Optional[clouds.Cloud]:
@@ -899,7 +897,7 @@ def exec(
         yaml_info = f.readlines()
     exec_logger.set_labels({'cluster_name': cluster, 'yaml_info': yaml_info})
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
-    #sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
+    sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
     return 0
 
 

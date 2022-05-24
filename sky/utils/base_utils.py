@@ -1,6 +1,7 @@
 import sys
 import os
 
+
 def get_pretty_entry_point() -> str:
     """Returns the prettified entry point of this process (sys.argv).
 

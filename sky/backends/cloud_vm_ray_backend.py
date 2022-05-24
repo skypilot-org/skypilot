@@ -67,11 +67,19 @@ _RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
 _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
 
 #### Metrics ####
-teardown_logger = metrics.MetricLogger(
-    'teardown',
-    labels = [metrics.Label('cluster_name')],
-    with_runtime=True
-)
+teardown_logger = metrics.MetricLogger('teardown',
+                                       labels=[metrics.Label('cluster_name')],
+                                       with_runtime=True)
+
+provision_logger = metrics.MetricLogger('provision',
+                                        labels=[metrics.Label('cluster_name')],
+                                        with_runtime=True)
+
+log_logger = metrics.MetricLogger(
+    'log',
+    labels=[metrics.Label('resources'),
+            metrics.Label('job_id')],
+    with_runtime=True)
 
 
 def _get_cluster_config_template(cloud):
@@ -1274,6 +1282,7 @@ class CloudVmRayBackend(backends.Backend):
             backend_utils.handle_returncode(returncode, cmd,
                                             'Failed to set TPU_NAME on node.')
 
+    @provision_logger.decorator
     def provision(self,
                   task: task_lib.Task,
                   to_provision: Optional['resources_lib.Resources'],
@@ -1288,6 +1297,8 @@ class CloudVmRayBackend(backends.Backend):
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
+
+        provision_logger.set_labels({'cluster_name': cluster_name})
 
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
         # TODO(mraheja): remove pylint disabling when filelock version updated
@@ -1939,6 +1950,7 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
+    @log_logger.decorator
     def tail_logs(self,
                   handle: ResourceHandle,
                   job_id: Optional[int],
@@ -1947,6 +1959,8 @@ class CloudVmRayBackend(backends.Backend):
         if job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
+
+        log_logger.set_labels({'resources': str(handle), 'job_id': job_id})
 
         # With interactive mode, the ctrl-c will send directly to the running
         # program on the remote instance, and the ssh will be disconnected by
