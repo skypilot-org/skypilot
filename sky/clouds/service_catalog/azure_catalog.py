@@ -11,7 +11,6 @@ from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('azure.csv')
 
-_DEFAULT_REGION = 'southcentralus'
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -27,8 +26,6 @@ def get_hourly_cost(instance_type: str,
                     use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
-    if region is None:
-        region = _DEFAULT_REGION
     assert not use_spot, 'Current Azure subscription does not support spot.'
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 

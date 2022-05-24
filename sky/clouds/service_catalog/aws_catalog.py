@@ -10,8 +10,6 @@ from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('aws.csv')
 
-_DEFAULT_REGION = 'us-west-2'
-
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
@@ -25,8 +23,6 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    if region is None:
-        region = _DEFAULT_REGION
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
 

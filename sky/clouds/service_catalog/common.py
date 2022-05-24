@@ -63,24 +63,23 @@ def region_exists_impl(df: pd.DataFrame, region: str) -> bool:
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,
-    region: str,
+    region: Optional[str],
     use_spot: bool = False,
 ) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     df = _get_instance_type(df, instance_type, region)
-    assert len(set(df['Price'])) == 1, df
     assert pd.isnull(
         df['Price'].iloc[0]) is False, (f'Missing price for "{instance_type}, '
                                         f'Spot: {use_spot}" in the catalog.')
-    if not use_spot:
-        return df['Price'].iloc[0]
+    # TODO(zhwu): We should handle the price difference among different regions.
+    price_str = 'SpotPrice' if use_spot else 'Price'
 
-    cheapest_idx = df['SpotPrice'].idxmin()
+    cheapest_idx = df[price_str].idxmin()
     if pd.isnull(cheapest_idx):
         return df['Price'].iloc[0]
 
     cheapest = df.loc[cheapest_idx]
-    return cheapest['SpotPrice']
+    return cheapest[price_str]
 
 
 def get_accelerators_from_instance_type_impl(
