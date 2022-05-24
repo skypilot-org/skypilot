@@ -170,7 +170,7 @@ class RayCodeGen:
         if is_spot_controller:
             # Add the spot job to spot status table.
             self._code.append(f'from sky.spot import spot_state; '
-            'spot_state.set_pending({job_id})')
+            f'spot_state.set_pending({job_id})')
 
     def add_gang_scheduling_placement_group(
         self,

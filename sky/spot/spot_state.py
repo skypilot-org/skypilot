@@ -80,7 +80,7 @@ def init(job_id: int, name: str, run_timestamp: str, resources_str: str):
     """Insert a new spot job, returns the success."""
     _CURSOR.execute(
         """\
-        INSERT INTO spot
+        INSERT OR REPLACE INTO spot
         (job_id, job_name, resources, submitted_at, status, run_timestamp)
         VALUES (?, ?, ?, ?, ?, ?)""",
         (job_id, name, resources_str, time.time(), SpotStatus.SUBMITTED.value,
