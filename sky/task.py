@@ -1,5 +1,4 @@
 """Task: a coarse-grained stage in an application."""
-import difflib
 import inspect
 import os
 import re
@@ -9,6 +8,7 @@ import yaml
 
 import sky
 from sky import clouds
+from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_transfer as data_transfer_lib
 from sky.data import data_utils
@@ -265,21 +265,13 @@ class Task:
                 raise ValueError('Multi-node TPU cluster not supported. '
                                  f'Got num_nodes={task.num_nodes}')
         if len(config) > 0:
-            invalid_keys = 'The following fields in YAML are invalid:\n'
             keys = [
                 'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs',
                 'file_mounts', 'inputs', 'outputs', 'resources'
             ]
-            for unknown_key in config.keys():
-                similar_keys = difflib.get_close_matches(unknown_key, keys)
-                key_invalid = f'    Unknown field {unknown_key}.'
-                if len(similar_keys) > 0:
-                    key_invalid += f' Did you mean one of {similar_keys}?'
-                key_invalid += '\n'
-                invalid_keys += key_invalid
-            raise ValueError(invalid_keys)
+            backend_utils.raise_unknown_field_error(config.keys(), keys)
         task.set_resources({resources})
-        assert config == {}, f'Invalid task args: {config.keys()}'
+        assert not config, f'Invalid task args: {config.keys()}'
         return task
 
     def to_yaml_config(self) -> Dict[str, Any]:
