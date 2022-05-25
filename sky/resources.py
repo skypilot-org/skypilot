@@ -5,6 +5,7 @@ from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
+from sky.backends import backend_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -459,7 +460,11 @@ class Resources:
             resources_fields['region'] = config.pop('region')
 
         if len(config) > 0:
-            raise ValueError(f'Unknown fields in resources config: {config}')
+            keys = [
+                'cloud', 'instance_type', 'accelerators', 'accelerator_args',
+                'use_spot', 'spot_recovery', 'disk_size', 'region'
+            ]
+            backend_utils.raise_unknown_field_error(config.keys(), keys)
         return Resources(**resources_fields)
 
     def to_yaml_config(self) -> Dict[str, Union[str, int]]:
