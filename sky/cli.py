@@ -725,13 +725,14 @@ def launch(
         if prompt is not None:
             confirm_shown = True
             click.confirm(prompt, default=True, abort=True, show_default=True)
-            backend.provision(task,
-                              to_provision=to_provision,
-                              dryrun=False,
-                              stream_logs=True,
-                              cluster_name=cluster)
+            handle = backend.provision(task,
+                                       to_provision=to_provision,
+                                       dryrun=dryrun,
+                                       stream_logs=True,
+                                       cluster_name=cluster)
+            cluster = handle.cluster_name
 
-    if cluster is not None:
+    if cluster is not None and not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
     sky.launch(dag,
