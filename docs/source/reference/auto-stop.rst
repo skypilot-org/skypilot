@@ -1,3 +1,5 @@
+.. _auto-stop:
+
 Auto-stopping
 ==============
 

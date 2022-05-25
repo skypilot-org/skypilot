@@ -48,7 +48,8 @@ You can verify that this notebook is running on the GPU-backed instance using :c
 Notebooks in Sky tasks
 -----------------------
 Jupyter notebooks can also be used in Sky tasks, allowing access to the full
-range of Sky's features including mounted storage and autostop.
+range of Sky's features including :ref:`mounted storage <sky-storage>` and
+:ref:`autostop <auto-stop>`.
 
 The following :code:`jupyter.yaml` is an example of a task specification that can launch notebooks with Sky.
 
@@ -69,7 +70,6 @@ The following :code:`jupyter.yaml` is an example of a task specification that ca
   setup: |
     pip install --upgrade pip
     conda init bash
-    conda activate jupyter
     conda create -n jupyter python=3.9 -y
     conda activate jupyter
     pip install jupyter
