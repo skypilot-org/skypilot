@@ -611,6 +611,7 @@ class Storage(object):
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
+
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
             mode = StorageMode(mode_str.upper())
@@ -618,6 +619,11 @@ class Storage(object):
             # Make sure this keeps the same as the default mode in __init__
             mode = StorageMode.MOUNT
         persistent = config.pop('persistent', True)
+
+        if len(config) > 0:
+            keys = ['name', 'source', 'store', 'mode', 'persistent']
+            backend_utils.raise_unknown_field_error(config.keys(), keys)
+
         # Validation of the config object happens on instantiation.
         storage_obj = cls(name=name,
                           source=source,
@@ -625,9 +631,6 @@ class Storage(object):
                           mode=mode)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
-        if config:
-            raise exceptions.StorageSpecError(
-                f'Invalid storage spec. Unknown fields: {config.keys()}')
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:

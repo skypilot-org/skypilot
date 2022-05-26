@@ -1483,8 +1483,10 @@ def raise_unknown_field_error(provided_fields, known_fields):
     invalid_keys = 'The following fields are invalid:\n'
     for unknown_key in provided_fields:
         similar_keys = difflib.get_close_matches(unknown_key, known_fields)
-        key_invalid = f'    Unknown field {unknown_key}.'
-        if len(similar_keys) > 0:
+        key_invalid = f'    Unknown field \'{unknown_key}\'.'
+        if len(similar_keys) == 1:
+            key_invalid += f' Did you mean \'{similar_keys[0]}\'?'
+        if len(similar_keys) > 1:
             key_invalid += f' Did you mean one of {similar_keys}?'
         key_invalid += '\n'
         invalid_keys += key_invalid
