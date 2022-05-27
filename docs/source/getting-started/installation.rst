@@ -45,10 +45,16 @@ and storage resources you may have created!
 
 .. code-block:: console
 
+  # Run inside the container
+
   $ sky down -a -y
   $ sky storage delete -a -y
 
-Finally, you can stop the container with :code:`docker stop sky`.
+Finally, you can stop the container with:
+
+.. code-block:: console
+
+  $ docker stop sky
 
 Cloud account setup
 -------------------
