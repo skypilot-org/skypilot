@@ -28,6 +28,22 @@ pip install -r requirements-dev.txt
 - For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
 - Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
 
+### Updating the sky docker image
+1. Authenticate with sky ECR repository. Contact romil.bhardwaj@berkeley.edu for access:
+   ```
+   aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/a9w6z7w5
+   ```
+
+2. Build and tag the docker image:
+   ```
+   docker build -t public.ecr.aws/a9w6z7w5/sky:latest .
+   ```
+
+3. Push the image to ECR:
+   ```
+   docker push public.ecr.aws/a9w6z7w5/sky:latest
+   ```
+
 ### Some general engineering practice suggestions
 
 These are suggestions, not strict rules to follow. When in doubt, follow the [style guide](https://google.github.io/styleguide/pyguide.html).

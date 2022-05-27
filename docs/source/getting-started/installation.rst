@@ -26,6 +26,30 @@ dependencies installed.
 
     For Macs, macOS >= 10.15 is required to install Sky. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio` prior to installing Sky.
 
+Docker image
+------------
+
+If you are looking to try out sky, we also provide a Docker image with sky and
+its dependencies installed. You can simply run
+
+.. code-block:: console
+
+  $ docker run -td --name sky --rm public.ecr.aws/a9w6z7w5/sky:latest
+  $ docker exec -it sky /bin/bash
+
+If you exit from the shell in the container, the container will keep running
+in the background. You can start a new shell with :code:`docker exec -it sky /bin/bash`.
+
+Once you are done with experimenting with sky, remember to delete any clusters
+and storage resources you may have created!
+
+.. code-block:: console
+
+  $ sky down -a -y
+  $ sky storage delete -a -y
+
+Finally, you can stop the container with :code:`docker stop sky`.
+
 Cloud account setup
 -------------------
 
