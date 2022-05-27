@@ -11,7 +11,7 @@ This guide will walk you through:
 Be sure to complete the :ref:`installation instructions <installation>` first before continuing with this guide.
 
 Hello, Sky!
-------
+-----------
 
 Let's define our very first task, a simple Hello, Sky! program.
 
@@ -84,7 +84,7 @@ In a few minutes, the cluster will finish provisioning and the task will be exec
 The outputs will show ``Hello, Sky!`` and the list of installed Conda environments.
 
 Execute a task on an existing cluster
-=====
+=====================================
 
 Once you have an existing cluster, use :code:`sky exec` to execute a task on it:
 
@@ -110,7 +110,7 @@ For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``s
 
 
 View all clusters
-=====
+=================
 ..
    **To view existing clusters**, use :code:`sky status`:
 
@@ -135,7 +135,7 @@ To log into the a cluster, Sky provides convenient SSH access via :code:`ssh <cl
   $ ssh mycluster
 
 Transfer files
-=====
+===============
 
 After a task's execution,  use :code:`rsync` (or :code:`scp`) to download files (e.g., checkpoints):
 
@@ -146,14 +146,14 @@ After a task's execution,  use :code:`rsync` (or :code:`scp`) to download files 
 For uploading files to the cluster, see :ref:`Syncing Code and Artifacts`.
 
 Stop/terminate a cluster
-=====
+=========================
 
 When you are done, run :code:`sky stop mycluster` to stop the cluster. To
 terminate a cluster instead, run :code:`sky down mycluster`.  Find more commands that
 manage the lifecycle of clusters :ref:`here <interactive-nodes>`.
 
 Next steps
-------
+-----------
 
 Congratulations!  In this quickstart, you have launched a cluster, run a task, and interacted with Sky's CLI.
 

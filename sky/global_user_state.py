@@ -49,7 +49,8 @@ class _SQLiteConn(threading.local):
             launched_at INTEGER,
             handle BLOB,
             last_use TEXT,
-            status TEXT)""")
+            status TEXT,
+            autostop INTEGER DEFAULT -1)""")
         # Table for Sky Config (e.g. enabled clouds)
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS config (

@@ -1,6 +1,7 @@
-.. _job-queue:
+.. _auto-stop:
+
 Auto-stopping
-=========
+==============
 
 Sky's **auto-stopping** automatically stops a cluster after it becomes idle.
 

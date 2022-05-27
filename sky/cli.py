@@ -928,6 +928,7 @@ def exec(
         sky exec mycluster --gpus=V100:1 python train_gpu.py
 
     .. code-block:: bash
+
         # Pass environment variables to the task
         sky exec mycluster --env WANDB_API_KEY python train_gpu.py
     """
@@ -1009,7 +1010,20 @@ def exec(
               required=False,
               help='Query remote clusters for their latest autostop settings.')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
-    """Show clusters."""
+    """Show clusters.
+
+    The following metadata for each cluster is stored: cluster name, time since
+    last launch, resources, region, status, duration, autostop, command, hourly
+    price. Display all metadata using :code:`sky status -a`.
+
+    \b
+    Each cluster can have one of the following statuses:
+    \b
+    - INIT: Undergoing provisioning or runtime setup and may be live or down.
+    - UP: Provisioning and runtime setup have succeeded and the cluster is live.
+    - STOPPED: The cluster is stopped and the storage is persisted. Use
+        :code:`sky start`. to restart the cluster.
+    """
     status_utils.show_status_table(all, refresh)
     local_status()
 

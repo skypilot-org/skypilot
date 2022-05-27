@@ -1,5 +1,6 @@
 .. _yaml-spec:
-Task YAML Configuration
+
+YAML Configuration
 ==================
 
 Sky provides the ability to specify a task, its resource requirements, and take
@@ -31,7 +32,7 @@ describe all fields available.
 
       # The region to use (optional). The Auto-failover will be disabled
       # if this is specified.
-      region: us-east-1 
+      region: us-east-1
 
       # Accelerator name and count per node (optional).
       #
