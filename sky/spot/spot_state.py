@@ -70,9 +70,9 @@ class SpotStatus(enum.Enum):
 def set_pending(job_id: int):
     _CURSOR.execute(
         """\
-        UPDATE spot SET
-        status=(?)
-        WHERE job_id=(?)""", (SpotStatus.PENDING.value, job_id))
+        INSERT OR REPLACE INTO spot
+        (job_id, status) VALUES (?, ?)""",
+        (job_id, SpotStatus.PENDING.value))
     _CONN.commit()
 
 
@@ -215,7 +215,7 @@ def get_status(job_id: int) -> Optional[SpotStatus]:
 def get_spot_jobs() -> List[Dict[str, Any]]:
     """Get spot clusters' status."""
     rows = _CURSOR.execute("""\
-        SELECT * FROM spot ORDER BY submitted_at DESC""")
+        SELECT * FROM spot ORDER BY job_id DESC""")
     jobs = []
     for row in rows:
         job_dict = dict(zip(columns, row))
