@@ -2216,7 +2216,7 @@ def spot_launch(
         backend = backends.CloudVmRayBackend()
         backend.register_info(
             spot_user_yaml=os.path.join(spot_lib.SPOT_TASK_YAML_PREFIX, name +
-                                   '.yaml'))
+                                        '.yaml'))
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,

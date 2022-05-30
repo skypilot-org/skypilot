@@ -1208,7 +1208,8 @@ class CloudVmRayBackend(backends.Backend):
         self._dag = kwargs.pop('dag', self._dag)
         self._optimize_target = kwargs.pop(
             'optimize_target', self._optimize_target) or OptimizeTarget.COST
-        self._spot_user_yaml = kwargs.pop('spot_user_yaml', self._spot_user_yaml)
+        self._spot_user_yaml = kwargs.pop('spot_user_yaml',
+                                          self._spot_user_yaml)
 
     def _check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
                                                    task: task_lib.Task):

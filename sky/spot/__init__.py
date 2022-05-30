@@ -15,8 +15,8 @@ from sky.spot.spot_utils import SpotCodeGen
 from sky.spot.spot_utils import dump_job_table_cache
 from sky.spot.spot_utils import load_job_table_cache
 
-pathlib.Path(SPOT_TASK_YAML_PATH).expanduser().parent.mkdir(parents=True,
-                                                            exist_ok=True)
+pathlib.Path(SPOT_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
+                                                              exist_ok=True)
 
 __all__ = [
     'SpotController',
