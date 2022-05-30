@@ -2239,7 +2239,25 @@ def spot_launch(
 )
 # pylint: disable=redefined-builtin
 def spot_status(all: bool, refresh: bool):
-    """Show statuses of managed spot jobs."""
+    """Show statuses of managed spot jobs.
+
+    \b
+    Each spot job can have one of the following statuses:
+    \b
+    - SUBMITTED: The job is submitted to the spot controller.
+    - STARTING: The job is starting (starting the resources).
+    - RUNNING: The job is running.
+    - RECOVERING: The spot cluster is recovering from a preemption.
+    - SUCCEEDED: The job was succeeded.
+    - FAILED: The job was failed due to the user code.
+    - CLUSTER_FAILED: The job was failed due to the unexpected error in the spot
+    cluster / controller (mostly due to requested resources not available after
+    maximum retrying).
+    - CANCELLED: The job was cancelled by the user.
+
+    If the job was failed (either user code or spot cluster), the error message
+    can be found with `sky logs sky-spot-controller job_id`.
+    """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     cache = spot_lib.load_job_table_cache()
     stop_msg = ''
