@@ -31,6 +31,7 @@ Key features:
    examples/auto-failover
    examples/grid-search
    examples/distributed-jobs
+   examples/gpu-jupyter
 
 
 .. toctree::
@@ -40,6 +41,8 @@ Key features:
    reference/job-queue
    reference/auto-stop
    examples/spot-jobs
+
+.. Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
 
 
 .. toctree::

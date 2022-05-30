@@ -29,6 +29,8 @@ def rename_column(
     new_name: str,
 ):
     """Rename a column in a table."""
+    # NOTE: This only works for sqlite3 >= 3.25.0. Be careful to use this.
+
     for row in cursor.execute(f'PRAGMA table_info({table_name})'):
         if row[1] == old_name:
             cursor.execute(f'ALTER TABLE {table_name} '
