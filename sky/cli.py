@@ -48,6 +48,7 @@ from sky import clouds
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
+from sky import cloud_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
@@ -82,6 +83,8 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              accelerator_args={'tf_version': '2.5.0'},
                              use_spot=False),
 }
+
+cloud_logging.send_cli_cmd()
 
 
 def _get_cloud(cloud: Optional[str]) -> Optional[clouds.Cloud]:
@@ -636,6 +639,7 @@ def launch(
         if is_yaml:
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+            cloud_logging.send_yaml(entrypoint)
         else:
             # Treat entrypoint as a bash command.
             click.secho('Task from command: ', fg='yellow', nl=False)
