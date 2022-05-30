@@ -9,6 +9,7 @@ from multiprocessing import pool
 import os
 import pathlib
 import psutil
+import random
 import re
 import shlex
 import socket
@@ -1441,3 +1442,30 @@ def stop_handler(signum, frame):
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
     sys.exit(exceptions.SIGTSTP_CODE)
+
+
+class Backoff:
+    """Exponential backoff with jittering."""
+    MULTIPLIER = 1.6
+    JITTER = 0.4
+
+    def __init__(self, initial_backoff: int = 5, max_backoff: int = 300):
+        self._initial = True
+        self._backoff = None
+        self._inital_backoff = initial_backoff
+        self._max_backoff = max_backoff
+
+    # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
+    # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc
+
+    def current_backoff(self) -> float:
+        """Backs off once and returns the current backoff in seconds."""
+        if self._initial:
+            self._initial = False
+            self._backoff = min(self._inital_backoff, self._max_backoff)
+        else:
+            self._backoff = min(self._backoff * self.MULTIPLIER,
+                                self._max_backoff)
+        self._backoff += random.uniform(-self.JITTER * self._backoff,
+                                        self.JITTER * self._backoff)
+        return self._backoff
