@@ -67,17 +67,18 @@ class SpotStatus(enum.Enum):
 
 
 # === Status transition functions ===
-def set_pending(job_id: int):
+def set_pending(job_id: int, name: str, resources_str: str):
+    """Set the job to pending state."""
     _CURSOR.execute(
         """\
         INSERT OR REPLACE INTO spot
-        (job_id, status) VALUES (?, ?)""",
-        (job_id, SpotStatus.PENDING.value))
+        (job_id, job_name, resources, status) VALUES (?, ?, ?, ?)""",
+        (job_id, name, resources_str, SpotStatus.PENDING.value))
     _CONN.commit()
 
 
-def init(job_id: int, name: str, run_timestamp: str, resources_str: str):
-    """Insert a new spot job, returns the success."""
+def set_submit(job_id: int, name: str, run_timestamp: str, resources_str: str):
+    """Set the job to submitted."""
     _CURSOR.execute(
         """\
         INSERT OR REPLACE INTO spot

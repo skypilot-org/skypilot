@@ -2200,6 +2200,7 @@ def spot_launch(
         controller_name = spot_lib.SPOT_CONTROLLER_NAME
         yaml_path = backend_utils.fill_template(
             spot_lib.SPOT_CONTROLLER_TEMPLATE, {
+                'remote_user_yaml_prefix': spot_lib.SPOT_TASK_YAML_PREFIX,
                 'user_yaml_path': f.name,
                 'spot_controller': controller_name,
                 'cluster_name': name,
@@ -2213,6 +2214,9 @@ def spot_launch(
             f'Launching managed spot job {name} from spot controller...',
             fg='yellow')
         backend = backends.CloudVmRayBackend()
+        backend.register_info(
+            spot_user_yaml=os.path.join(spot_lib.SPOT_TASK_YAML_PREFIX, name +
+                                   '.yaml'))
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,

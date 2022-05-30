@@ -31,11 +31,11 @@ class SpotController:
         # TODO(zhwu): this assumes the specific backend.
         self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
-        spot_state.init(self._job_id,
-                        self._task_name,
-                        self.backend.run_timestamp,
-                        resources_str=backend_utils.get_task_resources_str(
-                            self._task))
+        spot_state.set_submit(
+            self._job_id,
+            self._task_name,
+            self.backend.run_timestamp,
+            resources_str=backend_utils.get_task_resources_str(self._task))
         self._cluster_name = spot_utils.generate_spot_cluster_name(
             self._task_name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(

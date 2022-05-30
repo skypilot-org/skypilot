@@ -130,7 +130,7 @@ class RayCodeGen:
 
     def add_prologue(self,
                      job_id: int,
-                     is_spot_controller: bool = False) -> None:
+                     spot_yaml: Optional[str] = None) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
@@ -169,10 +169,11 @@ class RayCodeGen:
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
-        if is_spot_controller:
+        if spot_yaml is not None:
             # Add the spot job to spot status table.
-            self._code.append(f'from sky.spot import spot_state; '
-                              f'spot_state.set_pending({job_id})')
+            self._code.append(
+                f'from sky.spot import spot_utils; '
+                f'spot_utils.set_spot_job_pending({job_id}, {spot_yaml!r})')
 
     def add_gang_scheduling_placement_group(
         self,
@@ -1201,11 +1202,13 @@ class CloudVmRayBackend(backends.Backend):
 
         self._dag = None
         self._optimize_target = None
+        self._spot_user_yaml = None
 
     def register_info(self, **kwargs) -> None:
-        self._dag = kwargs['dag']
-        self._optimize_target = kwargs.pop('optimize_target',
-                                           OptimizeTarget.COST)
+        self._dag = kwargs.pop('dag', self._dag)
+        self._optimize_target = kwargs.pop(
+            'optimize_target', self._optimize_target) or OptimizeTarget.COST
+        self._spot_user_yaml = kwargs.pop('spot_user_yaml', self._spot_user_yaml)
 
     def _check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
                                                    task: task_lib.Task):
@@ -2059,9 +2062,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        is_spot_controller = (
-            handle.cluster_name == spot_lib.SPOT_CONTROLLER_NAME)
-        codegen.add_prologue(job_id, is_spot_controller=is_spot_controller)
+        codegen.add_prologue(job_id, spot_yaml=self._spot_user_yaml)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         if callable(task.run):
@@ -2096,9 +2097,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        is_spot_controller = (
-            handle.cluster_name == spot_lib.SPOT_CONTROLLER_NAME)
-        codegen.add_prologue(job_id, is_spot_controller=is_spot_controller)
+        codegen.add_prologue(job_id, spot_yaml=self._spot_user_yaml)
         codegen.add_gang_scheduling_placement_group(task.num_nodes,
                                                     accelerator_dict)
 
