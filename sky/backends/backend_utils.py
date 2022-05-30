@@ -1449,11 +1449,11 @@ class Backoff:
     MULTIPLIER = 1.6
     JITTER = 0.4
 
-    def __init__(self, initial_backoff: int = 5, max_backoff: int = 300):
+    def __init__(self, initial_backoff: int = 5, max_backoff_ratio: int = 20):
         self._initial = True
         self._backoff = None
         self._inital_backoff = initial_backoff
-        self._max_backoff = max_backoff
+        self._max_backoff = max_backoff_ratio * self._inital_backoff
 
     # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
     # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc

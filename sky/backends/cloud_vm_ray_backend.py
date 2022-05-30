@@ -68,7 +68,6 @@ _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
 
 # Time gap between retries after provisioning on all possible place failed.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
-_RETRY_UNTIL_UP_MAX_GAP_SECONDS = 600
 _RETRY_UNTIL_UP_MESSAGE = (f'{colorama.Style.BRIGHT}=== Retry until up ==='
                            f'{colorama.Style.RESET_ALL}\n'
                            'Retry until up is set, retry the provisioning '
@@ -1313,9 +1312,7 @@ class CloudVmRayBackend(backends.Backend):
             # TODO(suquark): once we have sky on PYPI, we should directly
             # install sky from PYPI.
             local_wheel_path = wheel_utils.build_sky_wheel()
-            backoff = backend_utils.Backoff(
-                initial_backoff=_RETRY_UNTIL_UP_INIT_GAP_SECONDS,
-                max_backoff=_RETRY_UNTIL_UP_MAX_GAP_SECONDS)
+            backoff = backend_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             while True:
                 try:
                     provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
