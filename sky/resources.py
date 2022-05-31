@@ -72,6 +72,7 @@ class Resources:
                 isinstance(self._cloud, clouds.Local) and
                 str(self._cloud) != 'Local'):
             self.local_ips = self._cloud.get_local_ips()
+            self.set_local_resources()
             if instance_type is not None:
                 raise ValueError('Local/On-prem mode does not support instance '
                                  f'type {instance_type}')
@@ -112,7 +113,7 @@ class Resources:
 
     def __repr__(self) -> str:
         if isinstance(self.cloud, clouds.Local):
-            return f'(Local) {self.cloud}'
+            return f'Local({self.cloud}, {self.local_resources})'
         accelerators = ''
         accelerator_args = ''
         if self.accelerators is not None:
@@ -336,10 +337,23 @@ class Resources:
                 self.accelerators, self.use_spot)
         return hourly_cost * hours
 
-    def set_local_resources(self, auth_config):
+    def set_local_resources(self, auth_config: dict = None):
         assert isinstance(self.cloud, clouds.Local), 'Must be local cloud.'
-        custom_resources = backend_utils.get_local_custom_resources(
-            self.local_ips, auth_config)
+        cluster_name = str(self.cloud)
+        custom_resources = None
+        if auth_config is None:
+            # Attempt to fetch from global state, elsewise do nothing
+            records = global_user_state.get_clusters(
+                include_cloud_clusters=False, include_local_clusters=True)
+            for record in records:
+                resources = record['handle'].launched_resources
+                record_name = str(resources.cloud)
+                if cluster_name == record_name:
+                    custom_resources = resources.local_resources
+                    break
+        else:
+            custom_resources = backend_utils.get_local_custom_resources(
+                self.local_ips, auth_config)
         self.local_resources = custom_resources
 
     def is_same_resources(self, other: 'Resources') -> bool:
@@ -386,12 +400,6 @@ class Resources:
 
     def less_demanding_than(self, other: 'Resources') -> bool:
         """Returns whether this resources is less demanding than the other."""
-
-        # Local case, assume true
-        if isinstance(self.cloud, clouds.Local) or isinstance(
-                other.cloud, clouds.Local):
-            return True
-
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud
@@ -408,7 +416,14 @@ class Resources:
         # For case insensitive comparison.
         # TODO(wei-lin): This is a hack. We may need to use our catalog to
         # handle this.
-        other_accelerators = other.accelerators
+        if isinstance(other.cloud, clouds.Local):
+            list_resources = other.local_resources
+            other_accelerators = {}
+            for d in list_resources:
+                for k in d.keys():
+                    other_accelerators[k] = other_accelerators.get(k, 0) + d[k]
+        else:
+            other_accelerators = other.accelerators
         if other_accelerators is not None:
             other_accelerators = {
                 acc.upper(): num_acc
