@@ -26,35 +26,11 @@ dependencies installed.
 
     For Macs, macOS >= 10.15 is required to install Sky. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio` prior to installing Sky.
 
-Docker image
-------------
+.. note::
 
-If you are looking to try out sky, we also provide a Docker image with sky and
-its dependencies installed. You can simply run
+    As an alternative to installing Sky on your laptop, we also provide a Docker image as a quick way to try out Sky. See instructions below on running sky :ref:`in a container <docker-image>`.
 
-.. code-block:: console
-
-  $ docker run -td --name sky --rm public.ecr.aws/a9w6z7w5/sky:latest
-  $ docker exec -it sky /bin/bash
-
-If you exit from the shell in the container, the container will keep running
-in the background. You can start a new shell with :code:`docker exec -it sky /bin/bash`.
-
-Once you are done with experimenting with sky, remember to delete any clusters
-and storage resources you may have created!
-
-.. code-block:: console
-
-  # Run inside the container
-
-  $ sky down -a -y
-  $ sky storage delete -a -y
-
-Finally, you can stop the container with:
-
-.. code-block:: console
-
-  $ docker stop sky
+.. _cloud-account-setup:
 
 Cloud account setup
 -------------------
@@ -129,3 +105,40 @@ true for GPU instances.
 
 Please follow :ref:`Requesting Quota Increase` to check quotas and request quota
 increases before proceeding.
+
+.. _docker-image:
+
+Docker image
+------------
+
+If you are looking to try out sky, we also provide a Docker image with sky and
+its dependencies installed. You can simply run:
+
+.. code-block:: console
+
+  $ docker run -td --name sky --rm -v "~/.aws:/root/.aws:rw" -v "~/.config/gcloud:/root/.config/gcloud:rw" -v "~/.azure:/root/.azure:rw" public.ecr.aws/a9w6z7w5/sky:latest
+  $ docker exec -it sky /bin/bash
+
+If your cloud CLIs are already setup, your credentials will be mounted to the
+container and you can proceed to :ref:`quickstart <Quickstart>`. Else you can
+follow the instructions in :ref:`cloud account setup <cloud-account-setup>`
+inside the container to setup your cloud accounts.
+
+If you exit from the shell in the container, the container will keep running
+in the background. You can start a new shell with :code:`docker exec -it sky /bin/bash`.
+
+Once you are done with experimenting with sky, remember to delete any clusters
+and storage resources you may have created using the following commands:
+
+.. code-block:: console
+
+  # Run inside the container
+
+  $ sky down -a -y
+  $ sky storage delete -a -y
+
+Finally, you can stop the container with:
+
+.. code-block:: console
+
+  $ docker stop sky
