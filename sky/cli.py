@@ -49,6 +49,7 @@ from sky import data
 from sky import global_user_state
 from sky import sky_logging
 from sky import cloud_logging
+from sky import metrics
 from sky import spot as spot_lib
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
@@ -602,6 +603,7 @@ def cli():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@metrics.ReturnCodeLogger('launch')
 def launch(
     entrypoint: str,
     cluster: Optional[str],
@@ -732,6 +734,7 @@ def launch(
               help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
 @_add_click_options(_TASK_OPTIONS)
+@metrics.ReturnCodeLogger('exec')
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
@@ -881,6 +884,7 @@ def exec(
               is_flag=True,
               required=False,
               help='Query remote clusters for their latest autostop settings.')
+@metrics.ReturnCodeLogger('status')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
 
@@ -1104,6 +1108,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@metrics.ReturnCodeLogger('stop')
 def stop(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1228,6 +1233,7 @@ def autostop(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@metrics.ReturnCodeLogger('start')
 def start(clusters: Tuple[str], yes: bool):
     """Restart cluster(s).
 
@@ -1341,6 +1347,7 @@ def start(clusters: Tuple[str], yes: bool):
               required=False,
               help='Ignore cloud provider errors (if any); '
               'useful for cleaning up manually deleted cluster(s).')
+@metrics.ReturnCodeLogger('down')
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin

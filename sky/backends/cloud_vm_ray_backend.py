@@ -31,6 +31,7 @@ from sky import sky_logging
 from sky import optimizer
 from sky import spot as spot_lib
 from sky import task as task_lib
+from sky import metrics
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
@@ -1272,6 +1273,7 @@ class CloudVmRayBackend(backends.Backend):
             backend_utils.handle_returncode(returncode, cmd,
                                             'Failed to set TPU_NAME on node.')
 
+    @metrics.TimerLogger('provision')
     def provision(self,
                   task: task_lib.Task,
                   to_provision: Optional['resources_lib.Resources'],
@@ -1282,6 +1284,7 @@ class CloudVmRayBackend(backends.Backend):
         # Try to launch the exiting cluster first
         if cluster_name is None:
             cluster_name = backend_utils.generate_cluster_name()
+        metrics.CURRENT_CLUSTER_NAME = cluster_name
         backend_utils.check_cluster_name_is_valid(cluster_name)
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
@@ -1457,6 +1460,7 @@ class CloudVmRayBackend(backends.Backend):
         with backend_utils.safe_console_status('[bold cyan]Syncing[/]'):
             backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
 
+    @metrics.TimerLogger('mounting')
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
@@ -1464,6 +1468,7 @@ class CloudVmRayBackend(backends.Backend):
         storage_mounts: Dict[Path, storage_lib.Storage],
     ) -> None:
         """Mounts all user files to the remote nodes."""
+        metrics.CURRENT_CLUSTER_NAME = handle.cluster_name
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
 
@@ -2160,11 +2165,13 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
+    @metrics.TimerLogger('teardown')
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
                  purge: bool = False) -> bool:
         cluster_name = handle.cluster_name
+        metrics.CURRENT_CLUSTER_NAME = cluster_name
         lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
 
         try:

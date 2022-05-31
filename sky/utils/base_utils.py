@@ -4,6 +4,7 @@ import sys
 import os
 import uuid
 
+
 def get_pretty_entry_point() -> str:
     """Returns the prettified entry point of this process (sys.argv).
     Example return values:
@@ -19,6 +20,6 @@ def get_pretty_entry_point() -> str:
         argv[0] = basename
     return ' '.join(argv)
 
+
 def get_user():
     return str(uuid.getnode())
-    
