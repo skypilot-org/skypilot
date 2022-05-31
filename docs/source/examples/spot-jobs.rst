@@ -17,8 +17,8 @@ Below are requirements of using managed spot:
 We explain them in details below.
 
 
-To launch a spot job, users should upload their codebase and data to cloud buckets through :ref:`Sky Storage <sky-storage>`.
-Note that the bucket will be available across regions and clouds and enables transparent job relaunching without user's intervention.
+To launch a spot job, users should upload their codebase and data through :ref:`Sky Storage <sky-storage>`.
+Note that the sky storage bucket will be available across regions and clouds and enables transparent job relaunching without user's intervention.
 The YAML below shows an example.
 
 .. code-block:: yaml
@@ -38,15 +38,15 @@ The YAML below shows an example.
       mode: COPY
 
     # If data is already on S3
-    /data: s3://your-s3-bucket-name
+    /data2: s3://your-s3-bucket-name
 
 .. note::
 
   Currently :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
   supported for spot jobs.
 
-To allow spot recovery, another storage bucket is typically needed for storing states of the job (e.g., model checkpoints).
-Below is an example of mounting a storage bucket to :code:`/checkpoint`.
+To allow spot recovery, another sky storage bucket is typically needed for storing states of the job (e.g., model checkpoints).
+Below is an example of mounting a bucket to :code:`/checkpoint`.
 
 .. code-block:: yaml
 
@@ -55,7 +55,7 @@ Below is an example of mounting a storage bucket to :code:`/checkpoint`.
       name: # NOTE: Fill in your bucket name
       mode: MOUNT
 
-The :code:`MOUNT` mode in :ref:`Sky Storage <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent storage bucket.
+The :code:`MOUNT` mode in :ref:`Sky Storage <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent sky storage bucket.
 Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
 
@@ -72,14 +72,12 @@ search for resources across regions and clouds to re-launch the job.
 Below is a complete `example <https://github.com/sky-proj/sky/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
 As HuggingFace has built-in support for periodically checkpointing, we only need to pass the below arguments for setting up the output directory and frequency of checkpointing 
 (see more on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
+You may also refer to another example `here <https://github.com/sky-proj/sky/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
 
 .. code-block:: console
 
     $ python run_qa.py ... --output_dir /checkpoint/bert_qa/ --save_total_limit 10 --save_steps 1000
 
-.. note::
-
-  You may need to implement your own checkpointing logic to load the latest state if it's not supported by your framework. Refer to a PyTorch example `here <https://github.com/sky-proj/sky/tree/master/examples/spot/resnet_ddp>`_.
 
 .. code-block:: yaml
 
@@ -137,8 +135,7 @@ As HuggingFace has built-in support for periodically checkpointing, we only need
     --save_total_limit 10 \
     --save_steps 1000
 
-After launching the job, you can access its log by ``sky spot logs``.
-Also, you can check the job status or cancel it by ``sky spot status`` and ``sky spot cancel``:
+Below are some commands for managed spot jobs. Check :code:`sky spot --help` for more details.
 
 .. code-block:: console
 
