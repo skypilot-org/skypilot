@@ -116,7 +116,7 @@ its dependencies installed. You can simply run:
 
 .. code-block:: console
 
-  $ docker run -td --name sky --rm -v "~/.aws:/root/.aws:rw" -v "~/.config/gcloud:/root/.config/gcloud:rw" -v "~/.azure:/root/.azure:rw" public.ecr.aws/a9w6z7w5/sky:latest
+  $ docker run -td --name sky --rm -v "~/.sky:/root/.sky:rw" -v "~/.aws:/root/.aws:rw" -v "~/.config/gcloud:/root/.config/gcloud:rw" -v "~/.azure:/root/.azure:rw" public.ecr.aws/a9w6z7w5/sky:latest
   $ docker exec -it sky /bin/bash
 
 If your cloud CLIs are already setup, your credentials will be mounted to the
