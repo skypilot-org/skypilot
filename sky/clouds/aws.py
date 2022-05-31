@@ -160,8 +160,8 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls) -> str:
-        # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
-        return 'm4.2xlarge'
+        # 8 vCpus, 32 GB RAM. 3rd generation Intel Xeon. General Purpose.
+        return 'm6i.2xlarge'
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
