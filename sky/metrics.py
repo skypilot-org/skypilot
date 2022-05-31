@@ -1,6 +1,7 @@
 """Prometheus Metric Collection Module"""
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 import time
+import os
 import functools
 from sky import cloud_logging
 from sky.utils import base_utils
@@ -117,6 +118,8 @@ class MetricLogger:
                 labels = [e.val for e in self.labels]
                 for metric in metrics:
                     metric.update_prom_metric(labels)
+                if os.environ.get('SKY_USAGE_COLLECTION') == '1':
+                    return
                 push_to_gateway(PROM_PUSHGATEWAY_URL,
                                 job=f'{base_utils.get_user()} {self.func_name}',
                                 registry=self.registry)

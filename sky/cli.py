@@ -59,6 +59,15 @@ from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.utils.cli_utils import status_utils
 
+PRIVACY_POLICY_PATH = os.path.expanduser('~/.sky/privacy_policy')
+if not os.path.exists(PRIVACY_POLICY_PATH ):
+    f = open(PRIVACY_POLICY_PATH,'x')
+    click.secho('Sky collects usage data to improve our services. '
+          'User-input setup and run commands are omit from '
+          'usage to ensure privacy. '
+          'Usage logging can also be disabled by setting '
+          'environment variable SKY_USAGE_COLLECTION=1.', fg='yellow')
+
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 

@@ -1,6 +1,7 @@
 """Loki logging"""
 import requests
 import json
+import os
 import datetime
 import pytz
 from sky.utils import base_utils
@@ -19,6 +20,8 @@ def _make_labels_str(d):
 
 
 def _send_message(labels, msg):
+    if os.environ.get('SKY_USAGE_COLLECTION') == '1':
+        return
     curr_datetime = datetime.datetime.now(pytz.timezone('US/Eastern'))
     curr_datetime = curr_datetime.isoformat('T')
 
