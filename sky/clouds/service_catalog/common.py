@@ -73,10 +73,9 @@ def get_hourly_cost_impl(
                                         f'Spot: {use_spot}" in the catalog.')
     # TODO(zhwu): We should handle the price difference among different regions.
     price_str = 'SpotPrice' if use_spot else 'Price'
+    assert region is None or len(set(df[price_str])) == 1, df
 
     cheapest_idx = df[price_str].idxmin()
-    if pd.isnull(cheapest_idx):
-        return df['Price'].iloc[0]
 
     cheapest = df.loc[cheapest_idx]
     return cheapest[price_str]
