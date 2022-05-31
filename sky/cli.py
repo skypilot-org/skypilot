@@ -711,7 +711,6 @@ def launch(
         dag = sky.optimize(dag)
         task = dag.tasks[0]
         backend.register_info(dag=dag)
-        to_provision = task.best_resources
 
         # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
         # it exists but is STOPPED.
@@ -725,12 +724,6 @@ def launch(
         if prompt is not None:
             confirm_shown = True
             click.confirm(prompt, default=True, abort=True, show_default=True)
-            handle = backend.provision(task,
-                                       to_provision=to_provision,
-                                       dryrun=dryrun,
-                                       stream_logs=True,
-                                       cluster_name=cluster)
-            cluster = handle.cluster_name
 
     if cluster is not None and not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
