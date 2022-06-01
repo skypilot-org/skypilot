@@ -1337,7 +1337,7 @@ class CloudVmRayBackend(backends.Backend):
                         logger.error(
                             'Failed to provision all possible launchable '
                             'resources.'
-                            f' Relax the task\'s resource requirements:\n '
+                            f' Relax the task\'s resource requirements: '
                             f'{task.num_nodes}x {task.resources}')
                     if retry_until_up:
                         # Sleep and retry.
@@ -1345,10 +1345,10 @@ class CloudVmRayBackend(backends.Backend):
                         plural = 's' if attempt_cnt > 1 else ''
                         logger.info(
                             f'{colorama.Style.BRIGHT}=== Retry until up ==='
-                           f'{colorama.Style.RESET_ALL}\n'
-                           f'Retrying provisioning after {gap_seconds:.0f}s '
-                           '(exponential backoff with random jittering). '
-                           f'Already tried {attempt_cnt} attempt{plural}.')
+                            f'{colorama.Style.RESET_ALL}\n'
+                            f'Retrying provisioning after {gap_seconds:.0f}s '
+                            '(exponential backoff with random jittering). '
+                            f'Already tried {attempt_cnt} attempt{plural}.')
                         attempt_cnt += 1
                         time.sleep(gap_seconds)
                         continue
