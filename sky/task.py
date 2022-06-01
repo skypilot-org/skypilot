@@ -67,7 +67,7 @@ class Task:
     """Task: a coarse-grained stage in an application."""
 
     # Update the key list when a new field is added.
-    yaml_keys = [
+    _YAML_KEYS = [
         'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs', 'file_mounts',
         'inputs', 'outputs', 'resources'
     ]
@@ -209,7 +209,7 @@ class Task:
         if config is None:
             config = {}
 
-        backend_utils.check_fields(config.keys(), Task.yaml_keys)
+        backend_utils.check_fields(config.keys(), Task._YAML_KEYS)
 
         task = Task(
             config.pop('name', None),

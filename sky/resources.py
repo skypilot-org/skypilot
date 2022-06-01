@@ -44,7 +44,7 @@ class Resources:
     _VERSION = 3
 
     # Update the key list when a new field is added.
-    yaml_keys = [
+    _YAML_KEYS = [
         'cloud', 'instance_type', 'accelerators', 'accelerator_args',
         'use_spot', 'spot_recovery', 'disk_size', 'region'
     ]
@@ -446,7 +446,7 @@ class Resources:
         if config is None:
             return Resources()
 
-        backend_utils.check_fields(config.keys(), cls.yaml_keys)
+        backend_utils.check_fields(config.keys(), cls._YAML_KEYS)
 
         resources_fields = dict()
         if config.get('cloud') is not None:

@@ -237,7 +237,7 @@ class Storage(object):
     """
 
     # Update the key list when a new field is added.
-    yaml_keys = ['name', 'source', 'store', 'mode', 'persistent']
+    _YAML_KEYS = ['name', 'source', 'store', 'mode', 'persistent']
 
     class StorageMetadata(object):
         """A pickle-able tuple of:
@@ -610,7 +610,7 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
-        backend_utils.check_fields(config.keys(), cls.yaml_keys)
+        backend_utils.check_fields(config.keys(), cls._YAML_KEYS)
 
         name = config.pop('name', None)
         source = config.pop('source', None)
