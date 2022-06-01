@@ -601,10 +601,9 @@ def cli():
     default=False,
     is_flag=True,
     required=False,
-    help=(
-        'Whether to retry provisioning infinitely until the cluster is up, '
-        'if sky fails to launch the cluster on any possible region/cloud due '
-        'to unavailability errors.'))
+    help=('Whether to retry provisioning infinitely until the cluster is up, '
+          'if sky fails to launch the cluster on any possible region/cloud due '
+          'to unavailability errors.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
