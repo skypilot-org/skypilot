@@ -1,6 +1,7 @@
 """Util constants/functions for the backends."""
 import colorama
 import datetime
+import difflib
 import enum
 import hashlib
 import http.client as httplib
@@ -1476,3 +1477,24 @@ class Backoff:
         self._backoff += random.uniform(-self.JITTER * self._backoff,
                                         self.JITTER * self._backoff)
         return self._backoff
+
+
+def check_fields(provided_fields, known_fields):
+    known_fields = set(known_fields)
+    unknown_fields = []
+    for field in provided_fields:
+        if field not in known_fields:
+            unknown_fields.append(field)
+
+    if len(unknown_fields) > 0:
+        invalid_keys = 'The following fields are invalid:\n'
+        for unknown_key in unknown_fields:
+            similar_keys = difflib.get_close_matches(unknown_key, known_fields)
+            key_invalid = f'    Unknown field \'{unknown_key}\'.'
+            if len(similar_keys) == 1:
+                key_invalid += f' Did you mean \'{similar_keys[0]}\'?'
+            if len(similar_keys) > 1:
+                key_invalid += f' Did you mean one of {similar_keys}?'
+            key_invalid += '\n'
+            invalid_keys += key_invalid
+        raise ValueError(invalid_keys)
