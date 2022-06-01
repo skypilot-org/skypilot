@@ -8,6 +8,7 @@ import yaml
 
 import sky
 from sky import clouds
+from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_transfer as data_transfer_lib
 from sky.data import data_utils
@@ -64,6 +65,12 @@ def _is_valid_env_var(name: str) -> bool:
 
 class Task:
     """Task: a coarse-grained stage in an application."""
+
+    # Update the key list when a new field is added.
+    _YAML_KEYS = [
+        'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs', 'file_mounts',
+        'inputs', 'outputs', 'resources'
+    ]
 
     def __init__(
         self,
@@ -202,6 +209,8 @@ class Task:
         if config is None:
             config = {}
 
+        backend_utils.check_fields(config.keys(), Task._YAML_KEYS)
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -263,9 +272,8 @@ class Task:
             if acc.startswith('tpu-') and task.num_nodes > 1:
                 raise ValueError('Multi-node TPU cluster not supported. '
                                  f'Got num_nodes={task.num_nodes}')
-        if len(config) > 0:
-            raise ValueError(f'Unknown fields in in YAML: {config.keys()}')
         task.set_resources({resources})
+        assert not config, f'Invalid task args: {config.keys()}'
         return task
 
     def to_yaml_config(self) -> Dict[str, Any]:

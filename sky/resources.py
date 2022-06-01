@@ -5,6 +5,7 @@ from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
+from sky.backends import backend_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -41,6 +42,12 @@ class Resources:
     # 2. Change the __setstate__ method to handle the new fields.
     # 3. Modify the to_config method to handle the new fields.
     _VERSION = 3
+
+    # Update the key list when a new field is added.
+    _YAML_KEYS = [
+        'cloud', 'instance_type', 'accelerators', 'accelerator_args',
+        'use_spot', 'spot_recovery', 'disk_size', 'region'
+    ]
 
     def __init__(
         self,
@@ -438,6 +445,9 @@ class Resources:
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
         if config is None:
             return Resources()
+
+        backend_utils.check_fields(config.keys(), cls._YAML_KEYS)
+
         resources_fields = dict()
         if config.get('cloud') is not None:
             resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
@@ -458,8 +468,7 @@ class Resources:
         if config.get('region') is not None:
             resources_fields['region'] = config.pop('region')
 
-        if len(config) > 0:
-            raise ValueError(f'Unknown fields in resources config: {config}')
+        assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
 
     def to_yaml_config(self) -> Dict[str, Union[str, int]]:
