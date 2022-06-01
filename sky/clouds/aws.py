@@ -12,6 +12,10 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
+_CREDENTIAL_FILES = [
+    'credentials',
+]
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -278,7 +282,10 @@ class AWS(clouds.Cloud):
         return False, 'AWS credentials is not set.' + help_str
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {'~/.aws': '~/.aws'}
+        return {
+            f'~/.aws/{filename}': f'~/.aws/{filename}'
+            for filename in _CREDENTIAL_FILES
+        }
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
