@@ -60,10 +60,10 @@ class SpotStatus(enum.Enum):
     CANCELLED = 'CANCELLED'
 
     def is_terminal(self) -> bool:
-        return self in self.terminal_status()
+        return self in self.terminal_statuses()
 
     def is_failed(self) -> bool:
-        return self in self.failure_status()
+        return self in self.failure_statuses()
 
     @classmethod
     def terminal_statuses(cls) -> List['SpotStatus']:
@@ -202,10 +202,10 @@ def set_cancelled(job_id: int):
 def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get non-terminal job ids by name."""
     name_filter = 'AND job_name=(?)' if name is not None else ''
-    field_values = [status.value for status in SpotStatus.terminal_status()]
+    field_values = [status.value for status in SpotStatus.terminal_statuses()]
     if name is not None:
         field_values.append(name)
-    statuses = ', '.join(['?'] * len(SpotStatus.terminal_status()))
+    statuses = ', '.join(['?'] * len(SpotStatus.terminal_statuses()))
     rows = _CURSOR.execute(
         f"""\
         SELECT job_id FROM spot
