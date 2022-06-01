@@ -164,7 +164,7 @@ _NUM_ACC_TO_NUM_CPU = {
         1: 4,
         2: 8,  # AWS does not support 2x T4.
         4: 48,
-        8: 96  # 8x T4 is not supported by GCP.
+        # 8x T4 is not supported by GCP.
     },
     # P100 is not supported on AWS, and Azure NCv2 has a weird CPU count.
     'P100': {
@@ -191,7 +191,7 @@ def _is_power_of_two(x: int) -> bool:
 
 
 def _closest_power_of_two(x: int) -> int:
-    """Returns the closest power of 2 less than equal to x."""
+    """Returns the closest power of 2 less than or equal to x."""
     if _is_power_of_two(x):
         return x
     return 1 << ((x - 1).bit_length() - 1)
@@ -199,7 +199,7 @@ def _closest_power_of_two(x: int) -> int:
 
 def instance_type_exists(instance_type: str) -> bool:
     """Check the existence of the instance type."""
-    return instance_type in _ON_DEMAND_PRICES.keys()
+    return instance_type in _ON_DEMAND_PRICES
 
 
 def get_hourly_cost(
@@ -208,7 +208,7 @@ def get_hourly_cost(
     use_spot: bool = False,
 ) -> float:
     """Returns the hourly price for a given instance type and region."""
-    del region
+    del region # unused
     if use_spot:
         return _SPOT_PRICES[instance_type]
     return _ON_DEMAND_PRICES[instance_type]
@@ -216,9 +216,11 @@ def get_hourly_cost(
 
 def get_instance_type_for_accelerator(
         acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
-    """
-    Returns a list of a single instance type for the given accelerator that
-    matches the CPU count with other clouds.
+    """Fetch instance types with similar CPU count for given accelerator.
+
+    Return: a list with a single matched instance types and a list of candidates
+    with fuzzy search (should be empty as it must have already been generated in
+    caller).
     """
     if acc_name == 'A100':
         # If A100 is used, host VM type must be A2.
@@ -227,7 +229,9 @@ def get_instance_type_for_accelerator(
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
-    num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name][acc_count]
+    num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
+    # The (acc_name, acc_count) should be validated in the caller.
+    assert num_cpus is not None, (acc_name, acc_count)
     mem_type = 'highmem'
     # patches for the number of cores per GPU, as some of the combinations
     # are not supported by GCP.
@@ -239,8 +243,8 @@ def get_instance_type_for_accelerator(
     else:
         if num_cpus > 80:
             mem_type = 'standard'
-
-    return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}']
+    # The fuzzy candidate should have already been fetched in the caller.
+    return ([f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], [])
 
 
 def region_exists(region: str) -> bool:

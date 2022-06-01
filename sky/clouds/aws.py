@@ -12,6 +12,7 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
+# Minimum set of files under ~/.aws that grant AWS access.
 _CREDENTIAL_FILES = [
     'credentials',
 ]
