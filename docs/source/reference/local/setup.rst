@@ -10,7 +10,7 @@ For the head node, Sky requires port :code:`6379` for the GCS server on Ray.
 
 For further reference, `here <https://docs.ray.io/en/latest/ray-core/configure.html#ports-configurations>`_ are the required ports from the Ray docs.
 
-Installing Sky Dependencies
+Installing Sky dependencies
 ---------------------------
 
 Sky On-prem requires :code:`python3`, :code:`ray==1.10.0`, and `sky` to be setup on all local nodes and globally available to all users.
@@ -27,7 +27,7 @@ To install Ray and Sky for all users, run the following commands on all local no
    $ sudo -H pip3 install -e .
 
 
-Launching Sky Services
+Launching Sky services
 -------------------
 
 For Sky to automatically launch the cluster manager, the system administrator needs to fill out a **private** :ref:`cluster YAML <cluster-config>` file. An example of such is provided below:
@@ -88,7 +88,7 @@ Finally, to check if Sky services have been installed correctly, run the followi
 
 The console should display a list of healthy nodes the size of the local cluster.
 
-Publishing Cluster YAML
+Publishing cluster YAML
 -------------------
 
 Under the hood, :code:`sky admin deploy` automatically stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows the same structure as that of the private cluster YAML, with admin authentication replaced with a placeholder value (for regular users to fill in):

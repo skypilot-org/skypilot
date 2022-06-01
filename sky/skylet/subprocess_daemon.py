@@ -5,8 +5,8 @@ processes of proc_pid.
 """
 
 import argparse
-from ray.dashboard.modules.job.common import JobStatus
-from ray.dashboard.modules.job.sdk import JobSubmissionClient
+from ray.dashboard.modules.job import common as job_common
+from ray.dashboard.modules.job import sdk as job_sdk
 import requests
 import sys
 import time
@@ -39,12 +39,14 @@ if __name__ == '__main__':
         wait_for_process = True
     else:
         try:
-            client = JobSubmissionClient('http://127.0.0.1:8265')
+            client = job_sdk.JobSubmissionClient('http://127.0.0.1:8265')
             while True:
                 status_info = client.get_job_status(job_id)
                 status = status_info.status
                 if status in {
-                        JobStatus.SUCCEEDED, JobStatus.STOPPED, JobStatus.FAILED
+                        job_common.JobStatus.SUCCEEDED,
+                        job_common.JobStatus.STOPPED,
+                        job_common.JobStatus.FAILED
                 }:
                     break
                 time.sleep(1)

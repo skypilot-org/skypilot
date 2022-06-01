@@ -407,7 +407,7 @@ class Task:
             # if the local cluster resources has not been populated
             if (isinstance(resource.cloud, clouds.Local) and
                     not resource.local_resources and
-                    str(resource.cloud) != 'Local'):
+                    str(resource.cloud) != 'default-local-name'):
                 resource.set_local_resources(self.auth_config)
 
         self.resources = resources

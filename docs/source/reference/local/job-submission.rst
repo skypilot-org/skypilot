@@ -2,14 +2,14 @@
 Submitting On-prem Jobs
 ======================
 
-Registering Local Clusters
+Registering local clusters
 -------------------
 
 To register a local cluster in Sky, regulars users should obtain a **distributable** cluster YAML from the system administrator or follow the steps in the :ref:`prior section <local-setup>`.
 
 The cluster YAML must have user credentials filled out and should be stored in :code:`~/.sky/local/`. An example is shown in the :ref:`cluster config docs <cluster-config>`.
 
-Listing Registered Clusters
+Listing registered clusters
 -------------------
 
 To list all registered local clusters, run:
@@ -31,7 +31,7 @@ This may show multiple local clusters, if you have created several:
 Local clusters that have ben ran with ``sky launch`` have all table columns populated.
 
 
-Launching Task YAML
+Launching task YAML
 -------------------
 
 Let's define a simple task to be submitted to the local cluster :code:`my-local-cluster`.
@@ -72,7 +72,7 @@ To connect to the local cluster ``my-local-cluster`` and run a task, use :code:`
 Here, the name of the cluster **must match** the name of the local cluster. The cloud field is optional. Sky will automatically detect if the cloud is local when the user specifies the name of the local cluster in `sky launch`.
 
 
-Executing Multiple Jobs
+Executing multiple jobs
 -------------------
 
 Tasks can be quickly submitted via :code:`sky exec`. Each task submitted by :code:`sky exec` is automatically managed by Sky's cluster manager.

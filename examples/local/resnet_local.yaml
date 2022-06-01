@@ -1,24 +1,17 @@
-# Resnet Training Example of On-premise Task YAML
+# Resnet training example of on-premise task yaml
 # 
 # To register a local cluster into Sky:
-#   System Admins:
+#   System admins:
 #       - Create cluster config file (see examples/local/cluster-config.yaml)
-#       - Run `sky admin deploy cluster-config.yaml`.
+#       - Run `sky admin deploy cluster-config.yaml`
 #       - Send generated config (in ~/.sky/local/cluster-config.yaml) to users
-#   Normal Users:
+#   Normal users:
 #       - Receive generated cluster config from system admins
 #       - Move cluster config to ~/.sky/local/
 #       - Add user credentials to cluster config
-#
-# Multi-tenancy Example:
-# 1) Admin registers Sky services on the local cluster `dev-production` 
-#    (sky admin deploy dev-production.yaml)
-# 2) Admin sends generated cluster config to Alice and Bob
-# 3) Both users use Sky and store cluster config in ~/.sky/local/dev-production.yaml amd
-#    and add their user credentials accordingly
-# 4) Alice and Bob both run `sky launch -c dev-production resnet_local.yaml` on their laptops.
+#       - Run `sky launch -c my-local-cluster resnet_local.yaml` on laptop
 
-name: user1-workload
+name: user1-job
 workdir: ~/Downloads/tpu
 
 # Accelerators here mean task resource specs, not total cluster resources

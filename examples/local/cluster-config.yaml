@@ -1,4 +1,4 @@
-# Local/On-premise Cluster Config.
+# Local/On-premise cluster config.
 #
 # Created by the system administrator to launch Ray cluster over on-premise machines.
 # The system administrator must have `sudo` access to the local nodes.
@@ -11,7 +11,7 @@
 
 cluster:
   ips: [3.142.141.133, 3.144.206.91]
-  name: dev-production 
+  name: my-local-cluster 
 
 # Authentication into Local cluster nodes
 auth:

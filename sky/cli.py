@@ -107,7 +107,7 @@ def _get_cloud(cloud: Optional[str],
     if cluster_name in _list_local_clusters():
         if cloud is None:
             cloud = 'local'
-        if cloud != 'local':
+        elif cloud != 'local':
             raise click.UsageError(f'Local cluster {cluster_name} is '
                                    f'not part of cloud: {cloud}.')
     elif cluster_name is None and cloud.lower == 'local':
@@ -117,8 +117,8 @@ def _get_cloud(cloud: Optional[str],
     if (cloud is None and cluster_name is not None) or \
         (cloud is not None and cloud_obj is None):
         if cloud.lower() == 'local':
-            local_cloud = clouds.Local.get_local_cluster(cluster_name)
-            if local_cloud:
+            local_cloud = clouds.Local.get(cluster_name)
+            if local_cloud is not None:
                 return local_cloud
             if cluster_name is None:
                 raise ValueError(
