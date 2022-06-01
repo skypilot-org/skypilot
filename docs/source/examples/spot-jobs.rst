@@ -5,26 +5,26 @@ Managed Spot Jobs
 Sky supports managed spot jobs that can **automatically recover from preemptions**.
 This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances practical for long-running jobs.
 To maximize availability, Sky automatically finds available spot resources across regions and clouds.
-Here is a example of BERT training job failing over different regions across AWS and GCP.
+Here is an example of BERT training job failing over different regions across AWS and GCP.
 
 .. image:: ../imgs/spot-training.png
   :width: 600
   :alt: BERT training on Spot V100
 
-Below are requirements of using managed spot jobs:
+Below are requirements for using managed spot jobs:
 
-(1) Use cloud buckets to hold code and datasets, which can be satisfied by using :ref:`Sky Storage <sky-storage>`.
+(1) Local file mounts/workdir are not supported. Cloud buckets should be used to hold code and datasets, which can be satisfied by using :ref:`Sky Storage <sky-storage>`.
 
 (2) (For ML jobs) Application code should save checkpoints periodically to a :ref:`Sky Storage <sky-storage>`-mounted cloud bucket. For job recovery,  the program should try to reload a latest checkpoint from that path when it starts.
 
-We explain them in details below.
+We explain them in detail below.
 
 
 Mounting code and datasets
 --------------------------------
 
 To launch a spot job, users should upload their codebase and data to cloud buckets through :ref:`Sky Storage <sky-storage>`.
-Note that the bucket will be available across regions and clouds and enables transparent job relaunching without user's intervention.
+Note that the cloud buckets can be mounted to VMs in different regions/clouds and thus enable enables transparent job relaunching without user's intervention.
 The YAML below shows an example.
 
 .. code-block:: yaml
@@ -49,9 +49,9 @@ The YAML below shows an example.
 .. note::
 
   Currently :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
-  supported for spot jobs.
+  supported for spot jobs. You can convert them to :ref:`Sky Storage <sky-storage>`.
 
-Mounting checkpoints
+Saving and loading checkpoints
 --------------------------------
 
 To allow spot recovery, another cloud bucket is typically needed for storing states of the job (e.g., model checkpoints).
