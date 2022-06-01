@@ -218,14 +218,14 @@ def get_instance_type_for_accelerator(
         acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
     """Fetch instance types with similar CPU count for given accelerator.
 
-    Return: a list with a single matched instance types and a list of candidates
+    Return: a list with a single matched instance type and a list of candidates
     with fuzzy search (should be empty as it must have already been generated in
     caller).
     """
     if acc_name == 'A100':
         # If A100 is used, host VM type must be A2.
         # https://cloud.google.com/compute/docs/gpus#a100-gpus
-        return [_A100_INSTANCE_TYPES[acc_count]]
+        return [_A100_INSTANCE_TYPES[acc_count]], []
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
@@ -244,7 +244,7 @@ def get_instance_type_for_accelerator(
         if num_cpus > 80:
             mem_type = 'standard'
     # The fuzzy candidate should have already been fetched in the caller.
-    return ([f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], [])
+    return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], []
 
 
 def region_exists(region: str) -> bool:
