@@ -70,11 +70,6 @@ _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
-_RETRY_UNTIL_UP_MESSAGE = (f'{colorama.Style.BRIGHT}=== Retry until up ==='
-                           f'{colorama.Style.RESET_ALL}\n'
-                           'Retrying provisioning after {gap_seconds:.0f}s '
-                           '(exponential backoff with random jittering). '
-                           'Already tried {num_attempts} attempts.')
 
 
 def _get_cluster_config_template(cloud):
@@ -1321,7 +1316,7 @@ class CloudVmRayBackend(backends.Backend):
                 # install sky from PYPI.
                 local_wheel_path = wheel_utils.build_sky_wheel()
             backoff = backend_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
-            attempt_cnt = 0
+            attempt_cnt = 1
             while True:
                 try:
                     provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
@@ -1347,10 +1342,14 @@ class CloudVmRayBackend(backends.Backend):
                     if retry_until_up:
                         # Sleep and retry.
                         gap_seconds = backoff.current_backoff()
+                        plural = 's' if attempt_cnt > 1 else ''
                         logger.info(
-                            _RETRY_UNTIL_UP_MESSAGE.format(
-                                gap_seconds=gap_seconds,
-                                num_attempts=attempt_cnt))
+                            f'{colorama.Style.BRIGHT}=== Retry until up ==='
+                           f'{colorama.Style.RESET_ALL}\n'
+                           f'Retrying provisioning after {gap_seconds:.0f}s '
+                           '(exponential backoff with random jittering). '
+                           f'Already tried {attempt_cnt} attempt{plural}.')
+                        attempt_cnt += 1
                         time.sleep(gap_seconds)
                         continue
                     logger.info(
