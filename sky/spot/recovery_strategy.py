@@ -56,7 +56,7 @@ class StrategyExecutor:
 
     def launch(self,
                max_retry=3,
-               retry_gap_seconds=60,
+               retry_init_gap_seconds=60,
                raise_on_failure=True) -> Optional[float]:
         """Launch the spot cluster for the first time.
 
@@ -67,6 +67,7 @@ class StrategyExecutor:
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
+        backoff = backend_utils.Backoff(retry_init_gap_seconds)
         while True:
             retry_cnt += 1
             try:
@@ -102,10 +103,11 @@ class StrategyExecutor:
                         'retries.')
                 else:
                     return None
+            gap_seconds = backoff.current_backoff()
             logger.info(
-                f'Retrying to launch the spot cluster in {retry_gap_seconds} '
+                f'Retrying to launch the spot cluster in {gap_seconds:.1f} '
                 'seconds.')
-            time.sleep(retry_gap_seconds)
+            time.sleep(gap_seconds)
 
     def recover(self) -> float:
         """Relaunch the spot cluster after failure and wait until job starts.
@@ -129,7 +131,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
     """Failover strategy: wait in same region and failover after timout."""
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
-    _RETRY_GAP_SECONDS = 60
+    _RETRY_INIT_GAP_SECONDS = 60
 
     def recover(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
@@ -159,12 +161,12 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         self.terminate_cluster()
 
         # Step 3
-        launched_time = self.launch(max_retry=self._MAX_RETRY_CNT,
-                                    retry_gap_seconds=self._RETRY_GAP_SECONDS,
-                                    raise_on_failure=False)
+        launched_time = self.launch(
+            max_retry=self._MAX_RETRY_CNT,
+            retry_init_gap_seconds=self._RETRY_INIT_GAP_SECONDS,
+            raise_on_failure=False)
         if launched_time is None:
             logger.error(f'Failed to recover the spot cluster after retrying '
-                         f'{self._MAX_RETRY_CNT} times every '
-                         f'{self._RETRY_GAP_SECONDS} seconds.')
+                         f'{self._MAX_RETRY_CNT} times.')
             raise RuntimeError('Failed to recover the spot cluster.')
         return launched_time
