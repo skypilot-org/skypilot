@@ -4,21 +4,27 @@ Managed Spot Jobs
 
 Sky supports managed spot jobs that can **automatically recover from preemptions**.
 This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances practical for long-running jobs.
+To maximize availability, Sky automatically finds available spot resources across regions and clouds.
+Here is a example of BERT training job failing over different regions across AWS and GCP.
 
-Below are requirements of using managed spot:
+.. image:: ../imgs/spot-training.png
+  :width: 600
+  :alt: BERT training on Spot V100
 
-* Use cloud buckets to hold code and datasets, which can be satisfied by using :ref:`Sky Storage <sky-storage>`.  
+Below are requirements of using managed spot jobs:
 
-* ``workdir`` and ``file_mounts`` with local source paths are not supported.
+(1) Use cloud buckets to hold code and datasets, which can be satisfied by using :ref:`Sky Storage <sky-storage>`.
 
-* (For ML jobs) Application code should save checkpoints periodically to a :ref:`Sky Storage <sky-storage>`-mounted cloud bucket.
-  For job recovery,  the program should try to reload a latest checkpoint from that path when it starts.
+(2) (For ML jobs) Application code should save checkpoints periodically to a :ref:`Sky Storage <sky-storage>`-mounted cloud bucket. For job recovery,  the program should try to reload a latest checkpoint from that path when it starts.
 
 We explain them in details below.
 
 
-To launch a spot job, users should upload their codebase and data through :ref:`Sky Storage <sky-storage>`.
-Note that the sky storage bucket will be available across regions and clouds and enables transparent job relaunching without user's intervention.
+Mounting code and datasets
+--------------------------------
+
+To launch a spot job, users should upload their codebase and data to cloud buckets through :ref:`Sky Storage <sky-storage>`.
+Note that the bucket will be available across regions and clouds and enables transparent job relaunching without user's intervention.
 The YAML below shows an example.
 
 .. code-block:: yaml
@@ -45,7 +51,10 @@ The YAML below shows an example.
   Currently :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
   supported for spot jobs.
 
-To allow spot recovery, another sky storage bucket is typically needed for storing states of the job (e.g., model checkpoints).
+Mounting checkpoints
+--------------------------------
+
+To allow spot recovery, another cloud bucket is typically needed for storing states of the job (e.g., model checkpoints).
 Below is an example of mounting a bucket to :code:`/checkpoint`.
 
 .. code-block:: yaml
@@ -55,9 +64,12 @@ Below is an example of mounting a bucket to :code:`/checkpoint`.
       name: # NOTE: Fill in your bucket name
       mode: MOUNT
 
-The :code:`MOUNT` mode in :ref:`Sky Storage <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent sky storage bucket.
+The :code:`MOUNT` mode in :ref:`Sky Storage <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
 Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
+
+An end-to-end example
+--------------------------------
 
 Below we show an `example <https://github.com/sky-proj/sky/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
 
@@ -136,7 +148,7 @@ Sky will launch and start monitoring the spot job. When a preemption happens, Sk
 search for resources across regions and clouds to re-launch the job.
 
 
-Below are some commands for managed spot jobs. Check :code:`sky spot --help` for more details.
+Here are some commands for managed spot jobs. Check :code:`sky spot --help` for more details.
 
 .. code-block:: console
 
