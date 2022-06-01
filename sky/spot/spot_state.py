@@ -66,12 +66,12 @@ class SpotStatus(enum.Enum):
         return self in self.failure_status()
 
     @classmethod
-    def terminal_status(cls) -> List['SpotStatus']:
+    def terminal_statuses(cls) -> List['SpotStatus']:
         return (cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
                 cls.FAILED_CONTROLLER, cls.CANCELLED)
 
     @classmethod
-    def failure_status(cls) -> List['SpotStatus']:
+    def failure_statuses(cls) -> List['SpotStatus']:
         return (cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER)
 
 
@@ -80,7 +80,7 @@ def set_pending(job_id: int, name: str, resources_str: str):
     """Set the job to pending state."""
     _CURSOR.execute(
         """\
-        INSERT OR REPLACE INTO spot
+        INSERT INTO spot
         (job_id, job_name, resources, status) VALUES (?, ?, ?, ?)""",
         (job_id, name, resources_str, SpotStatus.PENDING.value))
     _CONN.commit()
