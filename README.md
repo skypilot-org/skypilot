@@ -28,6 +28,40 @@ pip install -r requirements-dev.txt
 - For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
 - Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
 
+### Dump timeline
+
+Timeline is useful for performance analysis and debugging in Sky.
+
+Here are the APIs:
+
+```python
+
+from utils import timeline
+
+
+# record a function in the timeline with the function path name
+@timeline.event
+def f(): ...
+
+
+# record a function in the timeline using name='my_name'
+@timeline.event(name='event_name')
+def f(): ...
+
+
+# record an event over a code block in the timeline:
+with timeline.Event(name='event_name'):
+  ...
+
+# use a file lock with event:
+with timeline.FileLockEvent(lockpath):
+  pass
+```
+
+To dump the timeline, set environment variable `SKY_TIMELINE_FILE_PATH` to a file path.
+
+View the dumped timeline file using `Chrome` (chrome://tracing) or [Perfetto](https://ui.perfetto.dev/).
+
 ### Some general engineering practice suggestions
 
 These are suggestions, not strict rules to follow. When in doubt, follow the [style guide](https://google.github.io/styleguide/pyguide.html).

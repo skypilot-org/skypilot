@@ -36,6 +36,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
+from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -518,6 +519,7 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
+@timeline.event
 def write_cluster_config(to_provision: 'resources.Resources',
                          num_nodes: int,
                          cluster_config_template: str,
@@ -686,6 +688,7 @@ def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
+@timeline.event
 def wait_until_ray_cluster_ready(
         cluster_config_file: str,
         num_nodes: int,
@@ -1044,6 +1047,7 @@ def run_in_parallel(func: Callable, args: List[Any]):
             sys.exit(1)
 
 
+@timeline.event
 def run(cmd, **kwargs):
     # Should be careful to use this function, as the child process cmd spawn may
     # keep running in the background after the current program is killed. To get
@@ -1126,6 +1130,7 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
+@timeline.event
 def get_node_ips(
         cluster_yaml: str,
         expected_num_nodes: int,
@@ -1176,6 +1181,7 @@ def get_node_ips(
     return head_ip + worker_ips
 
 
+@timeline.event
 def get_head_ip(
     handle: backends.Backend.ResourceHandle,
     use_cached_head_ip: bool = True,
@@ -1259,6 +1265,7 @@ def _ping_cluster_and_set_status(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
+@timeline.event
 def refresh_cluster_status_handle(
     cluster_name: str,
     force_refresh: bool = False
