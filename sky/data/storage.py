@@ -607,6 +607,9 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
+        keys = ['name', 'source', 'store', 'mode', 'persistent']
+        backend_utils.check_fields(config.keys(), keys)
+
         name = config.pop('name', None)
         source = config.pop('source', None)
         store = config.pop('store', None)
@@ -620,9 +623,7 @@ class Storage(object):
             mode = StorageMode.MOUNT
         persistent = config.pop('persistent', True)
 
-        if len(config) > 0:
-            keys = ['name', 'source', 'store', 'mode', 'persistent']
-            backend_utils.raise_unknown_field_error(config.keys(), keys)
+        assert not config, f'Invalid storage args: {config.keys()}'
 
         # Validation of the config object happens on instantiation.
         storage_obj = cls(name=name,

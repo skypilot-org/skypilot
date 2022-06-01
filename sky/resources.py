@@ -439,6 +439,13 @@ class Resources:
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
         if config is None:
             return Resources()
+
+        keys = [
+            'cloud', 'instance_type', 'accelerators', 'accelerator_args',
+            'use_spot', 'spot_recovery', 'disk_size', 'region'
+        ]
+        backend_utils.check_fields(config.keys(), keys)
+
         resources_fields = dict()
         if config.get('cloud') is not None:
             resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
@@ -459,12 +466,7 @@ class Resources:
         if config.get('region') is not None:
             resources_fields['region'] = config.pop('region')
 
-        if len(config) > 0:
-            keys = [
-                'cloud', 'instance_type', 'accelerators', 'accelerator_args',
-                'use_spot', 'spot_recovery', 'disk_size', 'region'
-            ]
-            backend_utils.raise_unknown_field_error(config.keys(), keys)
+        assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
 
     def to_yaml_config(self) -> Dict[str, Union[str, int]]:

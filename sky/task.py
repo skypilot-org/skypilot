@@ -203,6 +203,12 @@ class Task:
         if config is None:
             config = {}
 
+        keys = [
+            'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs',
+            'file_mounts', 'inputs', 'outputs', 'resources'
+        ]
+        backend_utils.check_fields(config.keys(), keys)
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -264,12 +270,6 @@ class Task:
             if acc.startswith('tpu-') and task.num_nodes > 1:
                 raise ValueError('Multi-node TPU cluster not supported. '
                                  f'Got num_nodes={task.num_nodes}')
-        if len(config) > 0:
-            keys = [
-                'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs',
-                'file_mounts', 'inputs', 'outputs', 'resources'
-            ]
-            backend_utils.raise_unknown_field_error(config.keys(), keys)
         task.set_resources({resources})
         assert not config, f'Invalid task args: {config.keys()}'
         return task
