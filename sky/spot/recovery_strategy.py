@@ -4,6 +4,7 @@ import typing
 from typing import Optional
 
 import sky
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -98,7 +99,7 @@ class StrategyExecutor:
             # TODO(zhwu): maybe exponential backoff is better?
             if retry_cnt >= max_retry:
                 if raise_on_failure:
-                    raise RuntimeError(
+                    raise exceptions.ResourcesUnavailableError(
                         f'Failed to launch the spot cluster after {max_retry} '
                         'retries.')
                 else:
@@ -166,7 +167,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             retry_init_gap_seconds=self._RETRY_INIT_GAP_SECONDS,
             raise_on_failure=False)
         if launched_time is None:
-            logger.error(f'Failed to recover the spot cluster after retrying '
-                         f'{self._MAX_RETRY_CNT} times.')
-            raise RuntimeError('Failed to recover the spot cluster.')
+            raise exceptions.ResourcesUnavailableError(
+                f'Failed to recover the spot cluster after retrying '
+                f'{self._MAX_RETRY_CNT} times.')
         return launched_time
