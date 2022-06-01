@@ -62,10 +62,17 @@ class SpotStatus(enum.Enum):
     def is_terminal(self) -> bool:
         return self in self.terminal_status()
 
+    def is_failed(self) -> bool:
+        return self in self.failure_status()
+
     @classmethod
     def terminal_status(cls) -> List['SpotStatus']:
         return (cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
                 cls.FAILED_CONTROLLER, cls.CANCELLED)
+
+    @classmethod
+    def failure_status(cls) -> List['SpotStatus']:
+        return (cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER)
 
 
 # === Status transition functions ===
@@ -144,10 +151,7 @@ def set_succeeded(job_id: int, end_time: float):
 def set_failed(job_id: int,
                failure_type: SpotStatus,
                end_time: Optional[float] = None):
-    assert (failure_type in [
-        SpotStatus.FAILED, SpotStatus.FAILED_NO_RESOURCE,
-        SpotStatus.FAILED_CONTROLLER
-    ]), failure_type
+    assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
     fields_to_set = {
         'end_at': end_time,
