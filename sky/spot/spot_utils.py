@@ -10,7 +10,6 @@ from typing import List, Optional, Tuple
 import colorama
 import filelock
 
-import sky
 from sky import backends
 from sky import global_user_state
 from sky import sky_logging
@@ -75,14 +74,6 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
 
 
 # ======== user functions ========
-
-
-def set_spot_job_pending(job_id: int, spot_yaml: str):
-    """Set a spot job to pending."""
-    task_name = pathlib.Path(spot_yaml).stem
-    task = sky.Task.from_yaml(spot_yaml)
-    resources_str = backend_utils.get_task_resources_str(task)
-    spot_state.set_pending(job_id, task_name, resources_str)
 
 
 def generate_spot_cluster_name(task_name: str, job_id: int) -> str:

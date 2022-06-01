@@ -129,6 +129,11 @@ class Task:
         self.resources = {sky.Resources()}
         self.time_estimator_func = None
         self.file_mounts = None
+
+        # For managed spot task, it should only be set when this task is a
+        # spot controller task.
+        self.spot_task = None
+
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
 

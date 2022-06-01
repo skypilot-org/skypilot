@@ -2232,21 +2232,17 @@ def spot_launch(
             },
             output_prefix=spot_lib.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as dag:
-            task = sky.Task.from_yaml(yaml_path)
-            assert len(task.resources) == 1
+            controller_task = sky.Task.from_yaml(yaml_path)
+            controller_task.spot_task = task
+            assert len(controller_task.resources) == 1
         click.secho(
             f'Launching managed spot job {name} from spot controller...',
             fg='yellow')
-        backend = backends.CloudVmRayBackend()
-        backend.register_info(
-            spot_user_yaml=os.path.join(spot_lib.SPOT_TASK_YAML_PREFIX, name +
-                                        '.yaml'))
         click.echo('Launching spot controller...')
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,
                    detach_run=detach_run,
-                   backend=backend,
                    idle_minutes_to_autostop=spot_lib.
                    SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                    is_spot_controller_task=True)

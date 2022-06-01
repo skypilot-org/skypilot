@@ -86,7 +86,8 @@ def set_pending(job_id: int, name: str, resources_str: str):
     _CONN.commit()
 
 
-def set_submit(job_id: int, name: str, run_timestamp: str, resources_str: str):
+def set_submitted(job_id: int, name: str, run_timestamp: str,
+                  resources_str: str):
     """Set the job to submitted."""
     _CURSOR.execute(
         """\
