@@ -4,6 +4,7 @@ import argparse
 import pathlib
 import time
 from typing import Optional
+import colorama
 
 import filelock
 
@@ -124,7 +125,8 @@ class SpotController:
         try:
             self._run()
         except exceptions.ResourcesUnavailableError as e:
-            logger.error(f'Resources unavailable: {e}')
+            logger.error(f'Resources unavailable: {colorama.Fore.RED}{e}'
+                         f'{colorama.Style.RESET_ALL}')
             spot_state.set_failed(
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE)

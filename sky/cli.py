@@ -2215,6 +2215,7 @@ def spot_launch(
             f'Launching managed spot job {name} from spot controller...',
             fg='yellow')
         backend = backends.CloudVmRayBackend()
+        click.echo('Launching spot controller...')
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,
@@ -2248,18 +2249,19 @@ def spot_status(all: bool, refresh: bool):
     Each spot job can have one of the following statuses:
     \b
     - SUBMITTED: The job is submitted to the spot controller.
-    - STARTING: The job is starting (starting the resources).
+    - STARTING: The job is starting (starting a spot cluster).
     - RUNNING: The job is running.
     - RECOVERING: The spot cluster is recovering from a preemption.
-    - SUCCEEDED: The job was succeeded.
-    - FAILED: The job was failed due to the user code.
-    - CLUSTER_FAILED: The job was failed due to the unexpected error in the spot
-    cluster / controller (mostly due to requested resources not available after
-    maximum retrying).
+    - SUCCEEDED: The job succeeded.
+    - FAILED: The job failed due to an error from the job itself.
+    - FAILED_NO_RESOURCES: The job failed due to resources being unavailable
+    after a maximum number of retry attempts.
+    - FAILED_CONTROLLER: The job failed due to an unexpected error in the spot
+    controller.
     - CANCELLED: The job was cancelled by the user.
 
-    If the job was failed (either user code or spot cluster), the error message
-    can be found with `sky logs sky-spot-controller job_id`.
+    If the job failed, either due to user code or spot unavailability, the error
+    log can be found with `sky logs sky-spot-controller job_id`.
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     cache = spot_lib.load_job_table_cache()
