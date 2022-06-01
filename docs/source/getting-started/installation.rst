@@ -28,7 +28,7 @@ dependencies installed.
 
 .. note::
 
-    As an alternative to installing Sky on your laptop, we also provide a Docker image as a quick way to try out Sky. See instructions below on running sky :ref:`in a container <docker-image>`.
+    As an alternative to installing Sky on your laptop, we also provide a Docker image as a quick way to try out Sky. See instructions below on running Sky :ref:`in a container <docker-image>`.
 
 .. _cloud-account-setup:
 
@@ -111,7 +111,7 @@ increases before proceeding.
 Docker image
 ------------
 
-If you are looking to try out sky, we also provide a Docker image with sky and
+If you are looking to try out Sky, we also provide a Docker image with sky and
 its dependencies installed. You can simply run:
 
 .. code-block:: console
@@ -120,8 +120,8 @@ its dependencies installed. You can simply run:
   $ docker exec -it sky /bin/bash
 
 If your cloud CLIs are already setup, your credentials will be mounted to the
-container and you can proceed to :ref:`quickstart <Quickstart>`. Else you can
-follow the instructions in :ref:`cloud account setup <cloud-account-setup>`
+container and you can proceed to :ref:`Quickstart <Quickstart>`. Else you can
+follow the instructions in :ref:`Cloud account setup <cloud-account-setup>`
 inside the container to setup your cloud accounts.
 
 If you exit from the shell in the container, the container will keep running
