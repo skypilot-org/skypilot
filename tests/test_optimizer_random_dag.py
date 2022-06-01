@@ -12,7 +12,7 @@ CLOUDS = {
     'Azure': sky.Azure(),
 }
 ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
-GCP_INSTANCE_TYPES = list(gcp_catalog.ON_DEMAND_PRICES.keys())
+GCP_INSTANCE_TYPES = list(gcp_catalog._ON_DEMAND_PRICES.keys())
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,

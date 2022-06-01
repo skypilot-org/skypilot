@@ -8,6 +8,15 @@ from sky import clouds
 from sky.adaptors import azure
 from sky.clouds import service_catalog
 
+# Minimum set of files under ~/.azure that grant Azure access.
+_CREDENTIAL_FILES = [
+    'accessTokens.json',
+    'azureProfile.json',
+    'clouds.config',
+    'config',
+    'msal_token_cache.json',
+]
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -67,7 +76,10 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
-    def get_default_instance_type(cls):
+    def get_default_instance_type(cls,
+                                  accelerators: Optional[Dict[str, int]] = None
+                                 ) -> str:
+        del accelerators
         # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
         return 'Standard_D8_v4'
 
@@ -243,8 +255,12 @@ class Azure(clouds.Cloud):
             return True, None
         return False, 'Azure credentials not set.' + help_str
 
-    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
-        return {'~/.azure': '~/.azure'}, []
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        """Returns a dict of credential file paths to mount paths."""
+        return {
+            f'~/.azure/{filename}': f'~/.azure/{filename}'
+            for filename in _CREDENTIAL_FILES
+        }
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type,

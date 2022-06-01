@@ -109,7 +109,7 @@ class Task:
             the same command, or a lambda, as documented above.
           docker_image: The base docker image that this Task will be built on.
             In effect when LocalDockerBackend is used.  Defaults to
-            'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'.
+            'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
         """
         self.name = name
         self.run = run
@@ -119,7 +119,7 @@ class Task:
         self._envs = envs
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
-                             'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04')
+                             'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
         self.num_nodes = num_nodes
 
         self.inputs = None

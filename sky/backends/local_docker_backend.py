@@ -146,15 +146,20 @@ class LocalDockerBackend(backends.Backend):
                   to_provision: Optional['resources.Resources'],
                   dryrun: bool,
                   stream_logs: bool,
-                  cluster_name: Optional[str] = None) -> ResourceHandle:
+                  cluster_name: Optional[str] = None,
+                  retry_until_up: bool = False) -> ResourceHandle:
         """
         Builds docker image for the task and returns the cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
         docker.
         """
-        assert task.name is not None, 'Task name cannot be None - have you ' \
-                                      'specified a task name?'
+        assert task.name is not None, ('Task name cannot be None - have you '
+                                       'specified a task name?')
+        if retry_until_up:
+            logger.warning(
+                f'Retrying until up is not supported in backend: {self.NAME}. '
+                'Ignored the flag.')
         if cluster_name is None:
             cluster_name = backend_utils.generate_cluster_name()
         if stream_logs:
