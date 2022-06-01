@@ -601,8 +601,10 @@ def cli():
     default=False,
     is_flag=True,
     required=False,
-    help=('If True, retry until the cluster is up even after sky fails to '
-          'launch cluster on any possible region/cloud.'))
+    help=(
+        'Whether to retry provisioning infinitely until the cluster is up, '
+        'if sky fails to launch the cluster on any possible region/cloud due '
+        'to unavailability errors.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1235,12 +1237,14 @@ def autostop(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@click.option('--retry-until-up',
-              '-r',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Retry until cluster is up.')
+@click.option(
+    '--retry-until-up',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('Retry provisioning infinitely until the cluster is up, '
+          'if sky fails to start the cluster due to unavailability errors.'))
 def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     """Restart cluster(s).
 

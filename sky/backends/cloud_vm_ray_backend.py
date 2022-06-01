@@ -66,12 +66,14 @@ _RSYNC_DISPLAY_OPTION = '-Pavz'
 _RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
 _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
 
-# Time gap between retries after provisioning on all possible place failed.
+# Time gap between retries after failing to provision in all possible places.
+# Used only if --retry-until-up is set.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 _RETRY_UNTIL_UP_MESSAGE = (f'{colorama.Style.BRIGHT}=== Retry until up ==='
                            f'{colorama.Style.RESET_ALL}\n'
-                           'Retry until up is set, retry the provisioning '
-                           'after {gap_seconds:.1f}s...')
+                           'Retrying provisioning after {gap_seconds:.0f}s '
+                           '(exponential backoff with random jittering). '
+                           'Already tried {num_attempts} attempts.')
 
 
 def _get_cluster_config_template(cloud):
@@ -660,7 +662,7 @@ class RetryingVmProvisioner(object):
                     cluster_name, global_user_state.ClusterStatus.UP)
 
                 raise exceptions.ResourcesUnavailableError(message,
-                                                           no_retry=True)
+                                                           no_failover=True)
 
             # If it reaches here: the cluster status gets set to INIT, since
             # a launch request was issued but failed.
@@ -681,7 +683,7 @@ class RetryingVmProvisioner(object):
                     cluster_name, global_user_state.ClusterStatus.STOPPED)
 
                 raise exceptions.ResourcesUnavailableError(message,
-                                                           no_retry=True)
+                                                           no_failover=True)
 
             assert cluster_status == global_user_state.ClusterStatus.INIT
             message = (f'Failed to launch cluster {cluster_name!r} '
@@ -689,7 +691,7 @@ class RetryingVmProvisioner(object):
                        f'with the original resources: {to_provision}.')
             logger.error(message)
             # We attempted re-launching a previously INIT cluster with the
-            # same cloud/region/resources, but failed. Here no_retry=False,
+            # same cloud/region/resources, but failed. Here no_failover=False,
             # so we will retry provisioning it with the current requested
             # resources in the outer loop.
             #
@@ -1067,7 +1069,7 @@ class RetryingVmProvisioner(object):
                 if dryrun:
                     return
             except exceptions.ResourcesUnavailableError as e:
-                if e.no_retry:
+                if e.no_failover:
                     raise e
                 if launchable_retries_disabled:
                     logger.warning(
@@ -1313,6 +1315,7 @@ class CloudVmRayBackend(backends.Backend):
             # install sky from PYPI.
             local_wheel_path = wheel_utils.build_sky_wheel()
             backoff = backend_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
+            attempt_cnt = 0
             while True:
                 try:
                     provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
@@ -1324,30 +1327,29 @@ class CloudVmRayBackend(backends.Backend):
                 except exceptions.ResourcesUnavailableError as e:
                     # Do not remove the stopped cluster from the global state
                     # if failed to start.
-                    if e.no_retry:
+                    if e.no_failover:
                         logger.error(e)
-                        if retry_until_up:
-                            gap_seconds = backoff.current_backoff()
-                            logger.info(
-                                _RETRY_UNTIL_UP_MESSAGE.format(
-                                    gap_seconds=gap_seconds))
-                            time.sleep(gap_seconds)
-                            continue
-                        sys.exit(1)
-                    # Clean up the cluster's entry in `sky status`.
-                    global_user_state.remove_cluster(cluster_name,
-                                                     terminate=True)
-                    logger.error(
-                        'Failed to provision all possible launchable resources.'
-                        f' Relax the task\'s resource requirements:\n '
-                        f'{task.num_nodes}x {task.resources}')
+                    else:
+                        # Clean up the cluster's entry in `sky status`.
+                        global_user_state.remove_cluster(cluster_name,
+                                                         terminate=True)
+                        logger.error(
+                            'Failed to provision all possible launchable '
+                            'resources.'
+                            f' Relax the task\'s resource requirements:\n '
+                            f'{task.num_nodes}x {task.resources}')
                     if retry_until_up:
+                        # Sleep and retry.
                         gap_seconds = backoff.current_backoff()
                         logger.info(
                             _RETRY_UNTIL_UP_MESSAGE.format(
-                                gap_seconds=gap_seconds))
+                                gap_seconds=gap_seconds,
+                                num_attempts=attempt_cnt))
                         time.sleep(gap_seconds)
                         continue
+                    logger.info(
+                        'To keep retrying until the cluster is up, use the '
+                        '`--retry-until-up` flag.')
                     sys.exit(1)
             if dryrun:
                 return

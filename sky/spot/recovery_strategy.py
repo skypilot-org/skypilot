@@ -167,7 +167,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             raise_on_failure=False)
         if launched_time is None:
             logger.error(f'Failed to recover the spot cluster after retrying '
-                         f'{self._MAX_RETRY_CNT} times every '
-                         f'{self._RETRY_INIT_GAP_SECONDS} seconds.')
+                         f'{self._MAX_RETRY_CNT} times.')
             raise RuntimeError('Failed to recover the spot cluster.')
         return launched_time

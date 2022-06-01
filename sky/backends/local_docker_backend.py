@@ -156,8 +156,10 @@ class LocalDockerBackend(backends.Backend):
         """
         assert task.name is not None, ('Task name cannot be None - have you '
                                        'specified a task name?')
-        assert not retry_until_up, ('Retrying until up is not supported in '
-                                    f'{self.NAME}')
+        if retry_until_up:
+            logger.warning(
+                f'Retrying until up is not supported in backend: {self.NAME}. '
+                'Ignored the flag.')
         if cluster_name is None:
             cluster_name = backend_utils.generate_cluster_name()
         if stream_logs:
