@@ -91,11 +91,15 @@ def set_submitted(job_id: int, name: str, run_timestamp: str,
     """Set the job to submitted."""
     _CURSOR.execute(
         """\
-        INSERT OR REPLACE INTO spot
-        (job_id, job_name, resources, submitted_at, status, run_timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)""",
-        (job_id, name, resources_str, time.time(), SpotStatus.SUBMITTED.value,
-         run_timestamp))
+        UPDATE spot SET
+        job_name=(?),
+        resources=(?),
+        submitted_at=(?),
+        status=(?),
+        run_timestamp=(?)
+        WHERE job_id=(?)""",
+        (name, resources_str, time.time(), SpotStatus.SUBMITTED.value,
+         run_timestamp, job_id))
     _CONN.commit()
 
 
