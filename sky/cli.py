@@ -35,11 +35,11 @@ import sys
 import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple
-import yaml
 
 import click
 import colorama
 from rich import progress as rich_progress
+import yaml
 
 import sky
 from sky import backends

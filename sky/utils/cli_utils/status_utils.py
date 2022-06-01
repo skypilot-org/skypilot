@@ -1,5 +1,6 @@
 """Utilities for sky status."""
 from typing import Callable
+
 import click
 
 from sky import backends

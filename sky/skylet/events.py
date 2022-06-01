@@ -1,11 +1,12 @@
 """skylet events"""
 import math
 import os
-import psutil
 import re
 import subprocess
 import time
 import traceback
+
+import psutil
 import yaml
 
 from sky import sky_logging

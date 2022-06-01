@@ -1,6 +1,5 @@
 """Util constants/functions for the backends."""
 import ast
-import colorama
 import datetime
 import enum
 import hashlib
@@ -23,12 +22,13 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
-import yaml
 
+import colorama
 import jinja2
 import rich.console as rich_console
 import rich.progress as rich_progress
 import rich.status as rich_status
+import yaml
 
 import sky
 from sky import authentication as auth

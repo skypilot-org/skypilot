@@ -6,8 +6,9 @@ Google Cloud Platform or Microsoft Azure."""
 
 import os
 import platform
-import setuptools
 import warnings
+
+import setuptools
 
 ROOT_DIR = os.path.dirname(__file__)
 

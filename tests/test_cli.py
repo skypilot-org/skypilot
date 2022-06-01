@@ -1,9 +1,9 @@
-import pytest
 import tempfile
 import textwrap
 
 import click
 from click import testing as cli_testing
+import pytest
 
 import sky
 import sky.cli as cli

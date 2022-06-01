@@ -1,6 +1,5 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
-import click
 import contextlib
 import enum
 import getpass
@@ -17,10 +16,11 @@ import textwrap
 import time
 import typing
 from typing import Dict, List, Optional, Tuple, Union
-import yaml
 
+import click
 import colorama
 import filelock
+import yaml
 
 import sky
 from sky import backends

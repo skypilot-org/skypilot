@@ -13,6 +13,7 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 
 from ray.autoscaler._private.util import check_legacy_fields
+
 from sky.skylet.providers.gcp.node import (GCPNodeType, MAX_POLLS,
                                            POLL_INTERVAL)
 
@@ -120,8 +121,7 @@ def wait_for_compute_global_operation(project_name, operation, compute):
 
 def key_pair_name(i, region, project_id, ssh_user):
     """Returns the ith default gcp_key_pair_name."""
-    key_name = "{}_gcp_{}_{}_{}_{}".format(RAY, region, project_id, ssh_user,
-                                           i)
+    key_name = "{}_gcp_{}_{}_{}_{}".format(RAY, region, project_id, ssh_user, i)
     return key_name
 
 
@@ -135,8 +135,9 @@ def key_pair_paths(key_name):
 def generate_rsa_key_pair():
     """Create public and private ssh-keys."""
 
-    key = rsa.generate_private_key(
-        backend=default_backend(), public_exponent=65537, key_size=2048)
+    key = rsa.generate_private_key(backend=default_backend(),
+                                   public_exponent=65537,
+                                   key_size=2048)
 
     public_key = key.public_key().public_bytes(
         serialization.Encoding.OpenSSH,
@@ -170,21 +171,24 @@ def _is_head_node_a_tpu(config: dict) -> bool:
 
 
 def _create_crm(gcp_credentials=None):
-    return discovery.build(
-        "cloudresourcemanager",
-        "v1",
-        credentials=gcp_credentials,
-        cache_discovery=False)
+    return discovery.build("cloudresourcemanager",
+                           "v1",
+                           credentials=gcp_credentials,
+                           cache_discovery=False)
 
 
 def _create_iam(gcp_credentials=None):
-    return discovery.build(
-        "iam", "v1", credentials=gcp_credentials, cache_discovery=False)
+    return discovery.build("iam",
+                           "v1",
+                           credentials=gcp_credentials,
+                           cache_discovery=False)
 
 
 def _create_compute(gcp_credentials=None):
-    return discovery.build(
-        "compute", "v1", credentials=gcp_credentials, cache_discovery=False)
+    return discovery.build("compute",
+                           "v1",
+                           credentials=gcp_credentials,
+                           cache_discovery=False)
 
 
 def _create_tpu(gcp_credentials=None):
@@ -232,9 +236,8 @@ def construct_clients_from_provider_config(provider_config):
         try:
             service_account_info = json.loads(credentials_field)
         except json.decoder.JSONDecodeError:
-            raise RuntimeError(
-                "gcp_credentials found in cluster yaml file but "
-                "formatted improperly.")
+            raise RuntimeError("gcp_credentials found in cluster yaml file but "
+                               "formatted improperly.")
         credentials = service_account.Credentials.from_service_account_info(
             service_account_info)
     elif cred_type == "credentials_token":
@@ -413,8 +416,7 @@ def _configure_key_pair(config, compute):
                         "Creating new key pair {}".format(key_name))
             public_key, private_key = generate_rsa_key_pair()
 
-            _create_project_ssh_key_pair(project, public_key, ssh_user,
-                                         compute)
+            _create_project_ssh_key_pair(project, public_key, ssh_user, compute)
 
             # Create the directory if it doesn't exists
             private_key_dir = os.path.dirname(private_key_path)
@@ -494,8 +496,7 @@ def _configure_subnet(config, compute):
 
         # compute
         if "networkInterfaces" not in node_config:
-            node_config["networkInterfaces"] = copy.deepcopy(
-                default_interfaces)
+            node_config["networkInterfaces"] = copy.deepcopy(default_interfaces)
         # TPU
         if "networkConfig" not in node_config:
             node_config["networkConfig"] = copy.deepcopy(default_interfaces)[0]
@@ -578,8 +579,7 @@ def _add_iam_policy_binding(service_account, roles, crm):
     email = service_account["email"]
     member_id = "serviceAccount:" + email
 
-    policy = crm.projects().getIamPolicy(
-        resource=project_id, body={}).execute()
+    policy = crm.projects().getIamPolicy(resource=project_id, body={}).execute()
 
     already_configured = True
     for role in roles:
@@ -603,10 +603,10 @@ def _add_iam_policy_binding(service_account, roles, crm):
         # roles, so only call setIamPolicy if needed.
         return
 
-    result = crm.projects().setIamPolicy(
-        resource=project_id, body={
-            "policy": policy,
-        }).execute()
+    result = crm.projects().setIamPolicy(resource=project_id,
+                                         body={
+                                             "policy": policy,
+                                         }).execute()
 
     return result
 

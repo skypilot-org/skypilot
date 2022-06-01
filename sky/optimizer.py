@@ -1,11 +1,11 @@
 """The Sky optimizer: assigns best resources to user tasks."""
 import collections
-import colorama
 import enum
 import sys
 import typing
 from typing import Dict, List, Optional, Tuple
 
+import colorama
 import numpy as np
 import prettytable
 

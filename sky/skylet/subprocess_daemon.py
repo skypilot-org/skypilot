@@ -5,13 +5,13 @@ processes of proc_pid.
 """
 
 import argparse
-from ray.dashboard.modules.job import common as job_common
-from ray.dashboard.modules.job import sdk as job_sdk
 import requests
 import sys
 import time
 
 import psutil
+from ray.dashboard.modules.job import common as job_common
+from ray.dashboard.modules.job import sdk as job_sdk
 
 if __name__ == '__main__':
 
