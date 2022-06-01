@@ -1318,6 +1318,14 @@ class CloudVmRayBackend(backends.Backend):
             backoff = backend_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1
             while True:
+                # RetryingVmProvisioner will retry within a cloud's regions
+                # first (if a region is not explicitly requested), then
+                # optionally retry on all other clouds (if
+                # backend.register_info() has been called).
+                # After this "round" of optimization across clouds, provisioning
+                # may still have not succeeded. This while loop will then kick
+                # in if retry_until_up is set, which will kick off new "rounds"
+                # of optimization infinitely.
                 try:
                     provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                                         self._optimize_target,
