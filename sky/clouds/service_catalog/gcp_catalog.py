@@ -208,7 +208,7 @@ def get_hourly_cost(
     use_spot: bool = False,
 ) -> float:
     """Returns the hourly price for a given instance type and region."""
-    del region # unused
+    del region  # unused
     if use_spot:
         return _SPOT_PRICES[instance_type]
     return _ON_DEMAND_PRICES[instance_type]
