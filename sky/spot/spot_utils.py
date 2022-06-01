@@ -129,8 +129,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
                 backend = backend_utils.get_backend_from_handle(handle)
                 backend.teardown(handle, terminate=True)
 
-            # Set the job status to FAILED.
-            spot_state.set_failed(job_id)
+            # The controller process for this job is not running: it must
+            # have exited abnormally, and we should set the job status to
+            # FAILED_CONTROLLER.
+            spot_state.set_failed(job_id,
+                                  spot_state.SpotStatus.FAILED_CONTROLLER)
             continue
 
         # Send the signal to the spot job controller.
@@ -194,7 +197,8 @@ def stream_logs_by_id(job_id: int) -> str:
         job_msg = ''
         if job_status in [
                 spot_state.SpotStatus.FAILED,
-                spot_state.SpotStatus.CLUSTER_FAILED
+                spot_state.SpotStatus.FAILED_NO_RESOURCE,
+                spot_state.SpotStatus.FAILED_CONTROLLER,
         ]:
             job_msg = ('\nFor detailed error message, please check: '
                        f'{colorama.Style.BRIGHT}sky logs '

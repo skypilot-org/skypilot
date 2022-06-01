@@ -55,7 +55,8 @@ class SpotStatus(enum.Enum):
     RECOVERING = 'RECOVERING'
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
-    CLUSTER_FAILED = 'CLUSTER_FAILED'
+    FAILED_NO_RESOURCE = 'FAILED_NO_RESOURCE'
+    FAILED_CONTROLLER = 'FAILED_CONTROLLER'
     CANCELLED = 'CANCELLED'
 
     def is_terminal(self) -> bool:
@@ -63,7 +64,8 @@ class SpotStatus(enum.Enum):
 
     @classmethod
     def terminal_status(cls) -> List['SpotStatus']:
-        return (cls.SUCCEEDED, cls.FAILED, cls.CANCELLED)
+        return (cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
+                cls.FAILED_CONTROLLER, cls.CANCELLED)
 
 
 # === Status transition functions ===
@@ -140,15 +142,17 @@ def set_succeeded(job_id: int, end_time: float):
 
 
 def set_failed(job_id: int,
-               end_time: Optional[float] = None,
-               cluster_failed: bool = False):
+               failure_type: SpotStatus,
+               end_time: Optional[float] = None):
+    assert (failure_type in [
+        SpotStatus.FAILED, SpotStatus.FAILED_NO_RESOURCE,
+        SpotStatus.FAILED_CONTROLLER
+    ]), failure_type
     end_time = time.time() if end_time is None else end_time
     fields_to_set = {
         'end_at': end_time,
-        'status': SpotStatus.FAILED.value,
+        'status': failure_type.value,
     }
-    if cluster_failed:
-        fields_to_set['status'] = SpotStatus.CLUSTER_FAILED.value
     previsou_status = _CURSOR.execute(
         'SELECT status FROM spot WHERE job_id=(?)', (job_id,)).fetchone()
     previsou_status = SpotStatus(previsou_status[0])
@@ -166,10 +170,14 @@ def set_failed(job_id: int,
         WHERE job_id=(?) AND end_at IS null""",
         (*list(fields_to_set.values()), job_id))
     _CONN.commit()
-    if cluster_failed:
-        logger.info('Job failed due to cluster failure.')
-    else:
+    if failure_type == SpotStatus.FAILED:
         logger.info('Job failed due to user code.')
+    elif failure_type == SpotStatus.FAILED_NO_RESOURCE:
+        logger.info('Job failed due to failing to find available resources '
+                    'after retries.')
+    else:
+        assert failure_type == SpotStatus.FAILED_CONTROLLER, failure_type
+        logger.info('Job failed due to unexpected controller failure.')
 
 
 def set_cancelled(job_id: int):

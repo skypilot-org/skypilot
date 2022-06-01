@@ -55,6 +55,7 @@ from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.utils import timeline
 from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
@@ -512,7 +513,8 @@ def _check_yaml(entrypoint: str) -> bool:
 
 
 def _start_cluster(cluster_name: str,
-                   idle_minutes_to_autostop: Optional[int] = None):
+                   idle_minutes_to_autostop: Optional[int] = None,
+                   retry_until_up: bool = False):
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -523,7 +525,8 @@ def _start_cluster(cluster_name: str,
                                to_provision=handle.launched_resources,
                                dryrun=False,
                                stream_logs=True,
-                               cluster_name=cluster_name)
+                               cluster_name=cluster_name,
+                               retry_until_up=retry_until_up)
     if idle_minutes_to_autostop is not None:
         backend.set_autostop(handle, idle_minutes_to_autostop)
     return handle
@@ -593,6 +596,15 @@ def cli():
           'of idleness after setup/file_mounts. This is equivalent to '
           'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
           'If not set, the cluster will not be auto-stopped.'))
+@click.option(
+    '--retry-until-up',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('Whether to retry provisioning infinitely until the cluster is up, '
+          'if sky fails to launch the cluster on any possible region/cloud due '
+          'to unavailability errors.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -615,6 +627,7 @@ def launch(
     env: List[Dict[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
+    retry_until_up: bool,
     yes: bool,
 ):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
@@ -715,7 +728,8 @@ def launch(
                cluster_name=cluster,
                detach_run=detach_run,
                backend=backend,
-               idle_minutes_to_autostop=idle_minutes_to_autostop)
+               idle_minutes_to_autostop=idle_minutes_to_autostop,
+               retry_until_up=retry_until_up)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1224,7 +1238,15 @@ def autostop(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-def start(clusters: Tuple[str], yes: bool):
+@click.option(
+    '--retry-until-up',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('Retry provisioning infinitely until the cluster is up, '
+          'if sky fails to start the cluster due to unavailability errors.'))
+def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status == STOPPED) or failed in
@@ -1313,7 +1335,7 @@ def start(clusters: Tuple[str], yes: bool):
             show_default=True)
 
     for name in to_start:
-        _start_cluster(name)
+        _start_cluster(name, retry_until_up=retry_until_up)
         click.secho(f'Cluster {name} started.', fg='green')
 
 
@@ -1859,6 +1881,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                 for gpu, qty in sorted(result.items()):
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
+                yield '\n\n'
             else:
                 return
 
@@ -1870,9 +1893,9 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
             yield f'Resources \'{gpu_name}\' not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
-        yield '\n\nNOTE: for most GCP accelerators, '
+        yield '*NOTE*: for most GCP accelerators, '
         yield 'INSTANCE_TYPE == (attachable) means '
-        yield 'the host VM\'s cost is not included.'
+        yield 'the host VM\'s cost is not included.\n\n'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = log_utils.create_table([
@@ -1897,7 +1920,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                     instance_type_str, mem_str, price_str, spot_price_str
                 ])
 
-            if i != 0 or gpu_name is None:
+            if i != 0:
                 yield '\n\n'
             yield from accelerator_table.get_string()
 
@@ -2049,6 +2072,7 @@ def spot():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@timeline.event
 def spot_launch(
     entrypoint: str,
     name: Optional[str],
@@ -2217,6 +2241,7 @@ def spot_launch(
         backend.register_info(
             spot_user_yaml=os.path.join(spot_lib.SPOT_TASK_YAML_PREFIX, name +
                                         '.yaml'))
+        click.echo('Launching spot controller...')
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,
@@ -2250,18 +2275,19 @@ def spot_status(all: bool, refresh: bool):
     Each spot job can have one of the following statuses:
     \b
     - SUBMITTED: The job is submitted to the spot controller.
-    - STARTING: The job is starting (starting the resources).
+    - STARTING: The job is starting (starting a spot cluster).
     - RUNNING: The job is running.
     - RECOVERING: The spot cluster is recovering from a preemption.
-    - SUCCEEDED: The job was succeeded.
-    - FAILED: The job was failed due to the user code.
-    - CLUSTER_FAILED: The job was failed due to the unexpected error in the spot
-    cluster / controller (mostly due to requested resources not available after
-    maximum retrying).
+    - SUCCEEDED: The job succeeded.
+    - FAILED: The job failed due to an error from the job itself.
+    - FAILED_NO_RESOURCES: The job failed due to resources being unavailable
+        after a maximum number of retry attempts.
+    - FAILED_CONTROLLER: The job failed due to an unexpected error in the spot
+        controller.
     - CANCELLED: The job was cancelled by the user.
 
-    If the job was failed (either user code or spot cluster), the error message
-    can be found with `sky logs sky-spot-controller job_id`.
+    If the job failed, either due to user code or spot unavailability, the error
+    log can be found with `sky logs sky-spot-controller job_id`.
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     cache = spot_lib.load_job_table_cache()

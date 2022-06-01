@@ -9,6 +9,7 @@ from multiprocessing import pool
 import os
 import pathlib
 import psutil
+import random
 import re
 import shlex
 import socket
@@ -36,6 +37,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
+from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -518,6 +520,7 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
+@timeline.event
 def write_cluster_config(to_provision: 'resources.Resources',
                          num_nodes: int,
                          cluster_config_template: str,
@@ -574,7 +577,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
     assert cluster_name is not None
 
     credentials = sky_check.get_cloud_credential_file_mounts()
-    credential_file_mounts, credential_excludes = credentials
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -603,8 +605,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
-                'credentials': credential_file_mounts,
-                'credential_excludes': credential_excludes,
+                'credentials': credentials,
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
@@ -688,6 +689,7 @@ def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
+@timeline.event
 def wait_until_ray_cluster_ready(
         cluster_config_file: str,
         num_nodes: int,
@@ -1046,6 +1048,7 @@ def run_in_parallel(func: Callable, args: List[Any]):
             sys.exit(1)
 
 
+@timeline.event
 def run(cmd, **kwargs):
     # Should be careful to use this function, as the child process cmd spawn may
     # keep running in the background after the current program is killed. To get
@@ -1128,6 +1131,7 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
+@timeline.event
 def get_node_ips(
         cluster_yaml: str,
         expected_num_nodes: int,
@@ -1178,6 +1182,7 @@ def get_node_ips(
     return head_ip + worker_ips
 
 
+@timeline.event
 def get_head_ip(
     handle: backends.Backend.ResourceHandle,
     use_cached_head_ip: bool = True,
@@ -1261,6 +1266,7 @@ def _ping_cluster_and_set_status(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
+@timeline.event
 def refresh_cluster_status_handle(
     cluster_name: str,
     force_refresh: bool = False
@@ -1288,7 +1294,9 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
     updated_records = []
     for record in rich_progress.track(records,
                                       description='Refreshing cluster status'):
-        record = _ping_cluster_and_set_status(record)
+        handle = record['handle']
+        if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+            record = _ping_cluster_and_set_status(record)
         if record is not None:
             updated_records.append(record)
     return updated_records
@@ -1441,3 +1449,30 @@ def stop_handler(signum, frame):
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
     sys.exit(exceptions.SIGTSTP_CODE)
+
+
+class Backoff:
+    """Exponential backoff with jittering."""
+    MULTIPLIER = 1.6
+    JITTER = 0.4
+
+    def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
+        self._initial = True
+        self._backoff = None
+        self._inital_backoff = initial_backoff
+        self._max_backoff = max_backoff_factor * self._inital_backoff
+
+    # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
+    # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc
+
+    def current_backoff(self) -> float:
+        """Backs off once and returns the current backoff in seconds."""
+        if self._initial:
+            self._initial = False
+            self._backoff = min(self._inital_backoff, self._max_backoff)
+        else:
+            self._backoff = min(self._backoff * self.MULTIPLIER,
+                                self._max_backoff)
+        self._backoff += random.uniform(-self.JITTER * self._backoff,
+                                        self.JITTER * self._backoff)
+        return self._backoff

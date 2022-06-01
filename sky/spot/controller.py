@@ -5,6 +5,7 @@ import pathlib
 import time
 from typing import Optional
 
+import colorama
 import filelock
 
 import sky
@@ -106,7 +107,10 @@ class SpotController:
                                            None,
                                            spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
-                    spot_state.set_failed(self._job_id, end_time=end_time)
+                    spot_state.set_failed(
+                        self._job_id,
+                        failure_type=spot_state.SpotStatus.FAILED,
+                        end_time=end_time)
                     break
                 assert (cluster_status == global_user_state.ClusterStatus.
                         STOPPED), ('The cluster should be STOPPED, but is '
@@ -123,6 +127,12 @@ class SpotController:
         """Start the controller."""
         try:
             self._run()
+        except exceptions.ResourcesUnavailableError as e:
+            logger.error(f'Resources unavailable: {colorama.Fore.RED}{e}'
+                         f'{colorama.Style.RESET_ALL}')
+            spot_state.set_failed(
+                self._job_id,
+                failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(f'Unexpected error occurred: {type(e).__name__}: {e}')
         finally:
@@ -131,7 +141,9 @@ class SpotController:
             # The job can be non-terminal if the controller exited abnormally,
             # e.g. failed to launch cluster after reaching the MAX_RETRY.
             if not job_status.is_terminal():
-                spot_state.set_failed(self._job_id, cluster_failed=True)
+                spot_state.set_failed(
+                    self._job_id,
+                    failure_type=spot_state.SpotStatus.FAILED_CONTROLLER)
 
             # Clean up Storages with persistent=False.
             self.backend.teardown_ephemeral_storage(self._task)

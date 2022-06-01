@@ -8,11 +8,19 @@ from google import auth
 
 from sky import clouds
 from sky.clouds import service_catalog
-from sky.clouds.service_catalog import gcp_catalog
 
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
+
+# Minimum set of files under ~/.config/gcloud that grant GCP access.
+_CREDENTIAL_FILES = [
+    'credentials.db',
+    'application_default_credentials.json',
+    'access_tokens.db',
+    'configurations',
+    'legacy_credentials',
+]
 
 
 def _run_output(cmd):
@@ -100,9 +108,10 @@ class GCP(clouds.Cloud):
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
-        if use_spot:
-            return gcp_catalog.SPOT_PRICES[instance_type]
-        return gcp_catalog.ON_DEMAND_PRICES[instance_type]
+        return service_catalog.get_hourly_cost(instance_type,
+                                               region=None,
+                                               use_spot=use_spot,
+                                               clouds='gcp')
 
     def accelerators_to_hourly_cost(self, accelerators, use_spot: bool):
         assert len(accelerators) == 1, accelerators
@@ -130,7 +139,7 @@ class GCP(clouds.Cloud):
         return isinstance(other, GCP)
 
     @classmethod
-    def get_default_instance_type(cls):
+    def get_default_instance_type(cls) -> str:
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
         return 'n1-highmem-8'
 
@@ -199,10 +208,10 @@ class GCP(clouds.Cloud):
             assert len(accelerator_match.items(
             )) == 1, 'cannot handle more than one accelerator candidates.'
             acc, acc_count = list(accelerator_match.items())[0]
-            if acc == 'A100':
-                # If A100 is used, host VM type must be A2.
-                # https://cloud.google.com/compute/docs/gpus#a100-gpus
-                host_vm_type = gcp_catalog.A100_INSTANCE_TYPES[acc_count]
+            host_list, _ = service_catalog.get_instance_type_for_accelerator(
+                acc, acc_count, clouds='gcp')
+            assert len(host_list) == 1, host_list
+            host_vm_type = host_list[0]
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,
@@ -261,17 +270,17 @@ class GCP(clouds.Cloud):
             )
         return True, None
 
-    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
+    def get_credential_file_mounts(self) -> Dict[str, str]:
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
-        # rsync_exclude only supports relative paths.
-        # TODO(zhwu): rsync_exclude here is unsafe as it may exclude the folder
-        # from other file_mounts as well in ray yaml.
-        return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
+        return {
+            f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
+            for filename in _CREDENTIAL_FILES
+        }
 
     def instance_type_exists(self, instance_type):
-        return instance_type in gcp_catalog.ON_DEMAND_PRICES.keys()
+        return service_catalog.instance_type_exists(instance_type, 'gcp')
 
     def region_exists(self, region: str) -> bool:
         return service_catalog.region_exists(region, 'gcp')
