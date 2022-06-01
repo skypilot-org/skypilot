@@ -59,25 +59,7 @@ The :code:`MOUNT` mode in :ref:`Sky Storage <sky-storage>` ensures the checkpoin
 Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
 
-With the above changes, you are ready to launch a spot job with ``sky spot launch``!
-
-.. code-block:: console
-
-    $ sky spot launch -n bert-qa bert_qa.yaml
-
-Sky will launch and start monitoring the spot job. When a preemption happens, Sky will automatically
-search for resources across regions and clouds to re-launch the job.
-
-
-Below is a complete `example <https://github.com/sky-proj/sky/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
-As HuggingFace has built-in support for periodically checkpointing, we only need to pass the below arguments for setting up the output directory and frequency of checkpointing 
-(see more on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
-You may also refer to another example `here <https://github.com/sky-proj/sky/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
-
-.. code-block:: console
-
-    $ python run_qa.py ... --output_dir /checkpoint/bert_qa/ --save_total_limit 10 --save_steps 1000
-
+Below we show an `example <https://github.com/sky-proj/sky/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
 
 .. code-block:: yaml
 
@@ -134,6 +116,25 @@ You may also refer to another example `here <https://github.com/sky-proj/sky/tre
     --report_to wandb \
     --save_total_limit 10 \
     --save_steps 1000
+
+As HuggingFace has built-in support for periodically checkpointing, we only need to pass the below arguments for setting up the output directory and frequency of checkpointing (see more on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
+
+.. code-block:: console
+
+    $ python run_qa.py ... --output_dir /checkpoint/bert_qa/ --save_total_limit 10 --save_steps 1000
+
+.. note::
+  You may also refer to another example `here <https://github.com/sky-proj/sky/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
+
+With the above changes, you are ready to launch a spot job with ``sky spot launch``!
+
+.. code-block:: console
+
+    $ sky spot launch -n bert-qa bert_qa.yaml
+
+Sky will launch and start monitoring the spot job. When a preemption happens, Sky will automatically
+search for resources across regions and clouds to re-launch the job.
+
 
 Below are some commands for managed spot jobs. Check :code:`sky spot --help` for more details.
 
