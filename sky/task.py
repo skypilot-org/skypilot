@@ -66,6 +66,12 @@ def _is_valid_env_var(name: str) -> bool:
 class Task:
     """Task: a coarse-grained stage in an application."""
 
+    # Update the key list when a new field is added.
+    yaml_keys = [
+        'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs', 'file_mounts',
+        'inputs', 'outputs', 'resources'
+    ]
+
     def __init__(
         self,
         name: Optional[str] = None,
@@ -203,11 +209,7 @@ class Task:
         if config is None:
             config = {}
 
-        keys = [
-            'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs',
-            'file_mounts', 'inputs', 'outputs', 'resources'
-        ]
-        backend_utils.check_fields(config.keys(), keys)
+        backend_utils.check_fields(config.keys(), Task.yaml_keys)
 
         task = Task(
             config.pop('name', None),

@@ -43,6 +43,12 @@ class Resources:
     # 3. Modify the to_config method to handle the new fields.
     _VERSION = 3
 
+    # Update the key list when a new field is added.
+    yaml_keys = [
+        'cloud', 'instance_type', 'accelerators', 'accelerator_args',
+        'use_spot', 'spot_recovery', 'disk_size', 'region'
+    ]
+
     def __init__(
         self,
         cloud: Optional[clouds.Cloud] = None,
@@ -440,11 +446,7 @@ class Resources:
         if config is None:
             return Resources()
 
-        keys = [
-            'cloud', 'instance_type', 'accelerators', 'accelerator_args',
-            'use_spot', 'spot_recovery', 'disk_size', 'region'
-        ]
-        backend_utils.check_fields(config.keys(), keys)
+        backend_utils.check_fields(config.keys(), cls.yaml_keys)
 
         resources_fields = dict()
         if config.get('cloud') is not None:
