@@ -1294,7 +1294,9 @@ def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
     updated_records = []
     for record in rich_progress.track(records,
                                       description='Refreshing cluster status'):
-        record = _ping_cluster_and_set_status(record)
+        handle = record['handle']
+        if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+            record = _ping_cluster_and_set_status(record)
         if record is not None:
             updated_records.append(record)
     return updated_records
