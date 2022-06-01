@@ -2276,9 +2276,9 @@ def spot_status(all: bool, refresh: bool):
     - SUCCEEDED: The job succeeded.
     - FAILED: The job failed due to an error from the job itself.
     - FAILED_NO_RESOURCES: The job failed due to resources being unavailable
-    after a maximum number of retry attempts.
+        after a maximum number of retry attempts.
     - FAILED_CONTROLLER: The job failed due to an unexpected error in the spot
-    controller.
+        controller.
     - CANCELLED: The job was cancelled by the user.
 
     If the job failed, either due to user code or spot unavailability, the error

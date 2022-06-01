@@ -131,10 +131,12 @@ def set_succeeded(job_id: int, end_time: float):
 
 
 def set_failed(job_id: int,
-               end_time: Optional[float] = None,
-               failure_type: SpotStatus = SpotStatus.FAILED):
-    assert (failure_type in [SpotStatus.FAILED,
-                             SpotStatus.FAILED_NO_RESOURCE]), failure_type
+               failure_type: SpotStatus,
+               end_time: Optional[float] = None):
+    assert (failure_type in [
+        SpotStatus.FAILED, SpotStatus.FAILED_NO_RESOURCE,
+        SpotStatus.FAILED_CONTROLLER
+    ]), failure_type
     end_time = time.time() if end_time is None else end_time
     fields_to_set = {
         'end_at': end_time,
@@ -161,10 +163,12 @@ def set_failed(job_id: int,
         logger.info('Job failed due to user code.')
     elif failure_type == SpotStatus.FAILED_NO_RESOURCE:
         logger.info(
-            'Job failed due to failed to find available resources after retry.')
+            'Job failed due to failing to find available resources '
+            'after retries.'
+        )
     else:
         assert failure_type == SpotStatus.FAILED_CONTROLLER, failure_type
-        logger.info('Job failed due to controller failure.')
+        logger.info('Job failed due to unexpected controller failure.')
 
 
 def set_cancelled(job_id: int):

@@ -4,8 +4,8 @@ import argparse
 import pathlib
 import time
 from typing import Optional
-import colorama
 
+import colorama
 import filelock
 
 import sky
@@ -107,7 +107,10 @@ class SpotController:
                                            None,
                                            spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
-                    spot_state.set_failed(self._job_id, end_time=end_time)
+                    spot_state.set_failed(
+                        self._job_id,
+                        failure_type=spot_state.SpotStatus.FAILED,
+                        end_time=end_time)
                     break
                 assert (cluster_status == global_user_state.ClusterStatus.
                         STOPPED), ('The cluster should be STOPPED, but is '
