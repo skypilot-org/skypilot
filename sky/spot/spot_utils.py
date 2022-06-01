@@ -120,8 +120,9 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
                 backend = backend_utils.get_backend_from_handle(handle)
                 backend.teardown(handle, terminate=True)
 
-            # The controller is not runningm it must be exited abnormally,
-            # and we should set the job status to FAILED_CONTROLLER.
+            # The controller process for this job is not running: it must
+            # have exited abnormally, and we should set the job status to
+            # FAILED_CONTROLLER.
             spot_state.set_failed(job_id,
                                   spot_state.SpotStatus.FAILED_CONTROLLER)
             continue

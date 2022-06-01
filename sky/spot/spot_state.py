@@ -162,10 +162,8 @@ def set_failed(job_id: int,
     if failure_type == SpotStatus.FAILED:
         logger.info('Job failed due to user code.')
     elif failure_type == SpotStatus.FAILED_NO_RESOURCE:
-        logger.info(
-            'Job failed due to failing to find available resources '
-            'after retries.'
-        )
+        logger.info('Job failed due to failing to find available resources '
+                    'after retries.')
     else:
         assert failure_type == SpotStatus.FAILED_CONTROLLER, failure_type
         logger.info('Job failed due to unexpected controller failure.')
