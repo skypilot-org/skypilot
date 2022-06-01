@@ -577,7 +577,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
     assert cluster_name is not None
 
     credentials = sky_check.get_cloud_credential_file_mounts()
-    credential_file_mounts, credential_excludes = credentials
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -606,8 +605,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
-                'credentials': credential_file_mounts,
-                'credential_excludes': credential_excludes,
+                'credentials': credentials,
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
