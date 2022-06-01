@@ -1881,6 +1881,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                 for gpu, qty in sorted(result.items()):
                     other_table.add_row([gpu, _list_to_str(qty)])
                 yield from other_table.get_string()
+                yield '\n\n'
             else:
                 return
 
@@ -1892,9 +1893,9 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
             yield f'Resources \'{gpu_name}\' not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
-        yield '\n\nNOTE: for most GCP accelerators, '
+        yield '*NOTE*: for most GCP accelerators, '
         yield 'INSTANCE_TYPE == (attachable) means '
-        yield 'the host VM\'s cost is not included.'
+        yield 'the host VM\'s cost is not included.\n\n'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table = log_utils.create_table([
@@ -1919,7 +1920,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                     instance_type_str, mem_str, price_str, spot_price_str
                 ])
 
-            if i != 0 or gpu_name is None:
+            if i != 0:
                 yield '\n\n'
             yield from accelerator_table.get_string()
 
