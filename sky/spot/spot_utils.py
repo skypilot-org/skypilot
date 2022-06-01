@@ -185,7 +185,7 @@ def stream_logs_by_id(job_id: int) -> str:
         job_msg = ''
         if job_status in [
                 spot_state.SpotStatus.FAILED,
-                spot_state.SpotStatus.CLUSTER_FAILED
+                spot_state.SpotStatus.FAILED_NO_RESOURCE
         ]:
             job_msg = ('\nFor detailed error message, please check: '
                        f'{colorama.Style.BRIGHT}sky logs '
