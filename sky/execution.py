@@ -25,6 +25,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
+from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
 
