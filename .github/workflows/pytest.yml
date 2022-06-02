@@ -16,14 +16,6 @@ jobs:
         python-version: [3.6]
         test-path:
           - tests/test_cli.py
-          - tests/test_global_user_state.py
-          - tests/test_list_accelerators.py
-          - tests/test_optimizer_dryruns.py
-          - tests/test_optimizer_random_dag.py
-          - tests/test_pycryptodome_version.py
-          - tests/test_storage.py
-          - tests/test_wheels.py
-          - tests/test_spot.py
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
@@ -59,10 +51,9 @@ jobs:
         run: |
           conda env list
           conda create -n new python=3.7
-          conda init bash
+          conda init
 
       - name: conda test 2
         run: |
-          conda activate new
           which pip
           pip install protobuf
