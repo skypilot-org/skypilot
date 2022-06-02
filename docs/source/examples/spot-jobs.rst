@@ -4,6 +4,7 @@ Managed Spot Jobs
 
 Sky supports managed spot jobs that can **automatically recover from preemptions**.
 This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances practical for long-running jobs.
+
 To maximize availability, Sky automatically finds available spot resources across regions and clouds.
 Here is an example of BERT training job failing over different regions across AWS and GCP.
 
@@ -13,9 +14,9 @@ Here is an example of BERT training job failing over different regions across AW
 
 Below are requirements for using managed spot jobs:
 
-(1) Local file mounts/workdir are not supported. Cloud buckets should be used to hold code and datasets, which can be satisfied by using :ref:`Sky Storage <sky-storage>`.
+(1) **Mounting code and datasets**: Local file mounts/workdir are not supported. Cloud buckets should be used to hold code and datasets, which can be satisfied by using :ref:`Sky Storage <sky-storage>`.
 
-(2) (For ML jobs) Application code should save checkpoints periodically to a :ref:`Sky Storage <sky-storage>`-mounted cloud bucket. For job recovery,  the program should try to reload a latest checkpoint from that path when it starts.
+(2) **Saving and loading checkpoints**: (For ML jobs) Application code should save checkpoints periodically to a :ref:`Sky Storage <sky-storage>`-mounted cloud bucket. For job recovery,  the program should try to reload a latest checkpoint from that path when it starts.
 
 We explain them in detail below.
 
