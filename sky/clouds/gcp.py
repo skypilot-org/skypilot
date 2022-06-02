@@ -186,36 +186,28 @@ class GCP(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return ([resources], fuzzy_candidate_list)
-        accelerator_match = None
-        if resources.accelerators is not None:
-            # TODO: Refactor below implementation with pandas
-            available_accelerators = service_catalog.list_accelerators(
-                gpus_only=False, clouds='gcp')
-            for acc, acc_count in resources.accelerators.items():
-                for acc_avail, infos in available_accelerators.items():
-                    # case-insenstive matching
-                    if acc.upper() == acc_avail.upper() and any(
-                            acc_count == info.accelerator_count
-                            for info in infos):
-                        accelerator_match = {acc_avail: acc_count}
-                        break
-                if accelerator_match is None:
-                    return ([], fuzzy_candidate_list)
+
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
         host_vm_type = GCP.get_default_instance_type()
-        if accelerator_match is not None:
-            assert len(accelerator_match.items(
+        if resources.accelerators is not None:
+            assert len(resources.accelerators.items(
             )) == 1, 'cannot handle more than one accelerator candidates.'
-            acc, acc_count = list(accelerator_match.items())[0]
-            host_list, _ = service_catalog.get_instance_type_for_accelerator(
-                acc, acc_count, clouds='gcp')
-            assert len(host_list) == 1, host_list
-            host_vm_type = host_list[0]
+            acc, acc_count = list(resources.accelerators.items())[0]
+            (instance_list, fuzzy_candidate_list
+            ) = service_catalog.get_instance_type_for_accelerator(acc,
+                                                                  acc_count,
+                                                                  clouds='gcp')
+
+            if instance_list is None:
+                return ([], fuzzy_candidate_list)
+            assert len(instance_list) == 1, instance_list
+            host_vm_type = instance_list[0]
+
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,
-            accelerators=accelerator_match,
+            accelerators={acc: acc_count},
         )
         return ([r], fuzzy_candidate_list)
 
