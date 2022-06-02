@@ -16,6 +16,14 @@ jobs:
         python-version: [3.6]
         test-path:
           - tests/test_cli.py
+          - tests/test_global_user_state.py
+          - tests/test_list_accelerators.py
+          - tests/test_optimizer_dryruns.py
+          - tests/test_optimizer_random_dag.py
+          - tests/test_pycryptodome_version.py
+          - tests/test_storage.py
+          - tests/test_wheels.py
+          - tests/test_spot.py
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
@@ -42,23 +50,20 @@ jobs:
           pip install ".[all]"
           pip install pytest
 
+      - name: Run tests with pytest
+        run: pytest ${{ matrix.test-path }}
+
       - name: Add conda to system path
         run: |
           # $CONDA is an environment variable pointing to the root of the miniconda directory
           echo $CONDA/bin >> $GITHUB_PATH
 
-      - name: conda test
+      - name: conda installation test
         run: |
-          conda env list
-          conda create -n new python=3.7
+          conda create -n condatest python=3.7
           conda init
-
-      - name: conda test 2
-        run: |
-          which pip
-          pip install protobuf
-
           eval "$(command conda 'shell.bash' 'hook' 2> /dev/null)"
-          conda activate new
-          which pip
-          pip install protobuf
+          conda activate condatest
+
+          pip install ".[all]"
+          sky
