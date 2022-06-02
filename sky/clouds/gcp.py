@@ -190,6 +190,7 @@ class GCP(clouds.Cloud):
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
         host_vm_type = GCP.get_default_instance_type()
+        acc_dict = None
         if resources.accelerators is not None:
             assert len(resources.accelerators.items(
             )) == 1, 'cannot handle more than one accelerator candidates.'
@@ -201,13 +202,16 @@ class GCP(clouds.Cloud):
 
             if instance_list is None:
                 return ([], fuzzy_candidate_list)
-            assert len(instance_list) == 1, instance_list
+            assert len(
+                instance_list
+            ) == 1, f'More than one instance type matched, {instance_list}'
             host_vm_type = instance_list[0]
+            acc_dict = {acc: acc_count}
 
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,
-            accelerators={acc: acc_count},
+            accelerators=acc_dict,
         )
         return ([r], fuzzy_candidate_list)
 
