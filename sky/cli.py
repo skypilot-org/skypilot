@@ -2227,6 +2227,7 @@ def spot_launch(
         controller_name = spot_lib.SPOT_CONTROLLER_NAME
         yaml_path = backend_utils.fill_template(
             spot_lib.SPOT_CONTROLLER_TEMPLATE, {
+                'remote_user_yaml_prefix': spot_lib.SPOT_TASK_YAML_PREFIX,
                 'user_yaml_path': f.name,
                 'spot_controller': controller_name,
                 'cluster_name': name,
@@ -2234,18 +2235,17 @@ def spot_launch(
             },
             output_prefix=spot_lib.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as dag:
-            task = sky.Task.from_yaml(yaml_path)
-            assert len(task.resources) == 1
+            controller_task = sky.Task.from_yaml(yaml_path)
+            controller_task.spot_task = task
+            assert len(controller_task.resources) == 1
         click.secho(
             f'Launching managed spot job {name} from spot controller...',
             fg='yellow')
-        backend = backends.CloudVmRayBackend()
         click.echo('Launching spot controller...')
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,
                    detach_run=detach_run,
-                   backend=backend,
                    idle_minutes_to_autostop=spot_lib.
                    SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                    is_spot_controller_task=True)
@@ -2320,7 +2320,7 @@ def spot_status(all: bool, refresh: bool):
         handle, code, require_outputs=True, stream_logs=False)
     backend_utils.handle_returncode(returncode, code,
                                     'Failed to fetch managed job statuses',
-                                    stderr)
+                                    job_table_str + stderr)
 
     spot_lib.dump_job_table_cache(job_table_str)
     click.echo(f'Managed spot jobs:\n{job_table_str}')
