@@ -359,6 +359,61 @@ def _check_interactive_node_resources_match(
             f'Requested: {node_type} with {resources}\n')
 
 
+def _launch_with_confirm(
+    dag,
+    backend,
+    cluster,
+    *,
+    dryrun,
+    detach_run,
+    no_confirm: bool = False,
+    idle_minutes_to_autostop: int = -1,
+    retry_until_up: bool = False,
+    is_interactive: bool = False,
+):
+    """Launch a cluster with a DAG."""
+    # TODO(zhwu): Fail fast if the requested resources does not match the
+    # existing cluster.
+    if cluster is None:
+        cluster = backend_utils.generate_cluster_name()
+    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
+    if maybe_status is None:
+        # Show the optimize log before the prompt if the cluster does not exist.
+        dag = sky.optimize(dag)
+
+    confirm_shown = False
+    if not no_confirm:
+        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
+        # it exists but is STOPPED.
+        prompt = None
+        if maybe_status is None:
+            cluster_str = '' if cluster is None else f' {cluster!r}'
+            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
+        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
+            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
+        if prompt is not None:
+            confirm_shown = True
+            click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    if is_interactive:
+        if maybe_status != global_user_state.ClusterStatus.UP:
+            click.secho(f'Setting up interactive cluster {cluster}...',
+                        fg='yellow')
+    elif not confirm_shown:
+        click.secho(f'Running task on cluster {cluster}...', fg='yellow')
+
+    if not is_interactive or maybe_status != global_user_state.ClusterStatus.UP:
+        # No need to sky.launch again when interactive cluster is already up.
+        sky.launch(dag,
+                   dryrun=dryrun,
+                   stream_logs=True,
+                   cluster_name=cluster,
+                   detach_run=detach_run,
+                   backend=backend,
+                   idle_minutes_to_autostop=idle_minutes_to_autostop,
+                   retry_until_up=retry_until_up)
+
+
 # TODO: skip installing ray to speed up provisioning.
 def _create_and_ssh_into_node(
     node_type: str,
@@ -398,48 +453,25 @@ def _create_and_ssh_into_node(
         task.set_resources(resources)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
-    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-        cluster_name)
-    if handle is not None:
-        # Avoid reusing clusters with requested resource mismatches.
-        _check_interactive_node_resources_match(node_type, resources,
-                                                handle.launched_resources,
-                                                user_requested_resources)
-    if handle is None or handle.head_ip is None:
-        # head_ip would be None if previous provisioning failed.
+    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster_name)
+    if maybe_status is not None and user_requested_resources:
+        name_arg = ''
+        if cluster_name != _default_interactive_node_name(node_type):
+            name_arg = f'-c {cluster_name}'
+        raise click.UsageError(
+            'Resources cannot be specified for an existing interactive cluster '
+            f'{cluster_name!r}. To login to the cluster, use: '
+            f'{colorama.Style.BRIGHT}'
+            f'sky {node_type} {name_arg}{colorama.Style.RESET_ALL}')
 
-        # This handles stopped interactive nodes where they are restarted by
-        # skipping sky start and directly calling sky [cpu|tpu|gpu]node.
-        if cluster_status == global_user_state.ClusterStatus.STOPPED:
-            assert handle.launched_resources is not None, handle
-            to_provision = None
-            task.set_resources(handle.launched_resources)
-            task.num_nodes = handle.launched_nodes
-            if not no_confirm:
-                click.confirm(
-                    f'Restarting the stopped cluster {cluster_name!r}. '
-                    'Proceed?',
-                    default=True,
-                    abort=True,
-                    show_default=True)
-        else:
-            dag = sky.optimize(dag)
-            task = dag.tasks[0]
-            backend.register_info(dag=dag)
-            to_provision = task.best_resources
-            if handle is None and not no_confirm:
-                # Only show the confirmation prompt if the cluster is not
-                # in the clusters table.
-                click.confirm('Launching a new cluster. Proceed?',
-                              default=True,
-                              abort=True,
-                              show_default=True)
-
-        handle = backend.provision(task,
-                                   to_provision=to_provision,
-                                   dryrun=False,
-                                   stream_logs=True,
-                                   cluster_name=cluster_name)
+    _launch_with_confirm(dag,
+                         backend,
+                         cluster_name,
+                         dryrun=False,
+                         detach_run=True,
+                         no_confirm=no_confirm,
+                         is_interactive=True)
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
@@ -706,33 +738,16 @@ def launch(
     else:
         raise ValueError(f'{backend_name} backend is not supported.')
 
-    confirm_shown = False
-    if not yes:
-        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
-        maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
-        prompt = None
-        if maybe_status is None:
-            cluster_str = '' if cluster is None else f' {cluster!r}'
-            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
-            dag = sky.optimize(dag)
-        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
-            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
-        if prompt is not None:
-            confirm_shown = True
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
-    if cluster is not None and not confirm_shown:
-        click.secho(f'Running task on cluster {cluster}...', fg='yellow')
-
-    sky.launch(dag,
-               dryrun=dryrun,
-               stream_logs=True,
-               cluster_name=cluster,
-               detach_run=detach_run,
-               backend=backend,
-               idle_minutes_to_autostop=idle_minutes_to_autostop,
-               retry_until_up=retry_until_up)
+    _launch_with_confirm(
+        dag,
+        backend,
+        cluster,
+        dryrun=dryrun,
+        detach_run=detach_run,
+        no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        retry_until_up=retry_until_up,
+    )
 
 
 @cli.command(cls=_DocumentedCodeCommand)
