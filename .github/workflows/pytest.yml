@@ -52,18 +52,3 @@ jobs:
 
       - name: Run tests with pytest
         run: pytest ${{ matrix.test-path }}
-
-      - name: Add conda to system path
-        run: |
-          # $CONDA is an environment variable pointing to the root of the miniconda directory
-          echo $CONDA/bin >> $GITHUB_PATH
-
-      - name: conda installation test
-        run: |
-          conda create -n condatest python=3.7
-          conda init
-          eval "$(command conda 'shell.bash' 'hook' 2> /dev/null)"
-          conda activate condatest
-
-          pip install ".[all]"
-          sky
