@@ -44,6 +44,8 @@ install_requires = [
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
     'grpcio<=1.43.0',
+    # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the fix.
+    # https://github.com/ray-project/ray/pull/25211
     'protobuf<4.0.0',
     'psutil',
     'pulp',
