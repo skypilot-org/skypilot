@@ -749,7 +749,8 @@ class S3Store(AbstractStore):
         file (Default path: ~/.aws/config).
         """
         source = os.path.abspath(os.path.expanduser(self.source))
-        sync_command = f'aws s3 sync {source} s3://{self.name}/'
+        sync_command = 'aws s3 sync --no-follow-symlinks ' \
+                       f'{source} s3://{self.name}/'
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{self.source} to s3://{self.name}/'):
