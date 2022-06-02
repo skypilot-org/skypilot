@@ -1160,6 +1160,11 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(bucket_name)
+            num_files = subprocess.check_output(
+                f'gsutil du gs://{bucket_name} | wc -l', shell=True)
+            num_files = int(num_files)
+            if num_files >= 256:
+                os.system(f'gsutil -m rm gs://{bucket_name}/*')
             bucket.delete(force=True)
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
