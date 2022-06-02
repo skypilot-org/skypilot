@@ -64,25 +64,6 @@ class Resources:
     ):
         self._version = self._VERSION
         self._cloud = cloud
-
-        # Check for Local Config
-        self.local_ips = None
-        self.local_resources = None
-        if (self._cloud is not None and
-                isinstance(self._cloud, clouds.Local) and
-                str(self._cloud) != 'Local'):
-            self.local_ips = self._cloud.get_local_ips()
-            self.set_local_resources()
-            if instance_type is not None:
-                raise ValueError('Local/On-prem mode does not support instance '
-                                 f'type {instance_type}')
-            if use_spot:
-                raise ValueError('Local/On-prem mode does not support spot '
-                                 'instances.')
-            if not self.local_ips:
-                raise ValueError('Local/On-prem mode needs IPs specified. '
-                                 'Please check the yaml in ~/.sky/local.')
-
         self._region: Optional[str] = None
         self._set_region(region)
 
@@ -104,6 +85,15 @@ class Resources:
             self._disk_size = int(disk_size)
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
+
+        self.local_ips = None
+        self.local_resources = None
+        if (self._cloud is not None and
+                isinstance(self._cloud, clouds.Local) and
+                str(self._cloud) != clouds.Local.DEFAULT_LOCAL_NAME):
+            self.local_ips = self._cloud.get_local_ips()
+            self.set_local_resources()
+            self._try_validate_local()
 
         self._set_accelerators(accelerators, accelerator_args)
 
@@ -325,7 +315,18 @@ class Resources:
                              'is not supported. The strategy should be among '
                              f'{list(spot.SPOT_STRATEGIES.keys())}')
 
-    def get_cost(self, seconds: float):
+    def _try_validate_local(self) -> None:
+        if self._instance_type is not None:
+            raise ValueError('Local/On-prem mode does not support instance '
+                             f'type {self._instance_type}')
+        if self._use_spot:
+            raise ValueError('Local/On-prem mode does not support spot '
+                             'instances.')
+        if not self.local_ips:
+            raise ValueError('Local/On-prem mode needs IPs specified. '
+                             'Please check the yaml in ~/.sky/local.')
+
+    def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
@@ -337,7 +338,13 @@ class Resources:
                 self.accelerators, self.use_spot)
         return hourly_cost * hours
 
-    def set_local_resources(self, auth_config: dict = None):
+    def set_local_resources(self, auth_config: dict = None) -> None:
+        """Sets local resources for the local cluster.
+
+        Attempts to fetch local accelerator resources from global state.
+        If not, fetches the local accelerator resources by querying the
+        local cluster nodes.
+        """
         assert isinstance(self.cloud, clouds.Local), 'Must be local cloud.'
         cluster_name = str(self.cloud)
         custom_resources = None
@@ -417,10 +424,15 @@ class Resources:
         # TODO(wei-lin): This is a hack. We may need to use our catalog to
         # handle this.
         if isinstance(other.cloud, clouds.Local):
+            # We are comparing if a Task's resources fits the cluster's
+            # resources. The cluster's resources is in
+            # other.local_resources. The other field, other.accelerators,
+            # denotes the task resources of the previous job launched
+            # (that was saved into CloudVMHandle).
             list_resources = other.local_resources
             other_accelerators = {}
             for d in list_resources:
-                for k in d.keys():
+                for k in d:
                     other_accelerators[k] = other_accelerators.get(k, 0) + d[k]
         else:
             other_accelerators = other.accelerators
@@ -487,9 +499,9 @@ class Resources:
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
         )
-        if isinstance(self.cloud, clouds.Local):
-            resources.local_resources = self.local_resources
-            return resources
+        # This field is dynamically generated.
+        # To save time, the field is directly passed in.
+        resources.local_resources = self.local_resources
         assert len(override) == 0
         return resources
 

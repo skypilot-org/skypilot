@@ -408,7 +408,12 @@ class Task:
             # if the local cluster resources has not been populated
             if (isinstance(resource.cloud, clouds.Local) and
                     not resource.local_resources and
-                    str(resource.cloud) != 'default-local-name'):
+                    str(resource.cloud) != clouds.Local.DEFAULT_LOCAL_NAME):
+                # Limitation of Sky Launch and Task.from_yaml method.
+                # Resources object can not be fully constructed without the
+                # local cluster name, which cannot be passed into
+                # Task.from_yaml. Hence, the initial construction of the
+                # Resources object will contain a default local cloud.
                 resource.set_local_resources(self.auth_config)
 
         self.resources = resources

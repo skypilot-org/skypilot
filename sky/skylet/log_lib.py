@@ -132,6 +132,9 @@ def run_with_log(
         dirname = os.path.dirname(log_path)
         os.makedirs(dirname, exist_ok=True)
     except PermissionError:
+        # Hack: Use sudo to make directory and logfile if there is no
+        # permission to do so. This case is encountered when submitting
+        # a job for Sky on-prem, when a non-admin user submits a job.
         use_sudo = True
         os.system(f'sudo mkdir -p {dirname} && sudo touch {log_path} '
                   f'&& sudo chmod a+rwx {log_path}')
@@ -173,11 +176,10 @@ def run_with_log(
             daemon_cmd,
             start_new_session=True,
             # Suppress output
-            # stdout=subprocess.DEVNULL,
-            # stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             # Disable input
             stdin=subprocess.DEVNULL,
-            #shell=True,
         )
         stdout = ''
         stderr = ''
@@ -261,7 +263,7 @@ def run_bash_command_with_log(bash_command: str,
         if len(gpu_list) > 0:
             gpu_list = [str(gpu_id) for gpu_id in gpu_list]
             # Switching users will give Ray process access to all GPUs,
-            # instead of the GPUs allocated
+            # instead of the GPUs allocated.
             inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(
                 gpu_list) + ' ' + inner_command
         return run_with_log(

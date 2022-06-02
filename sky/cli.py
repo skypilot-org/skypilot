@@ -85,26 +85,11 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 }
 
 
-def _truncate_long_string(s: str, max_length: int = 35) -> str:
-    if len(s) <= max_length:
-        return s
-    splits = s.split(' ')
-    if len(splits[0]) > max_length:
-        return splits[0][:max_length] + '...'  # Use '…'?
-    # Truncate on word boundary.
-    i = 0
-    total = 0
-    for i, part in enumerate(splits):
-        total += len(part)
-        if total >= max_length:
-            break
-    return ' '.join(splits[:i]) + ' ...'
-
-
 def _get_cloud(cloud: Optional[str],
                cluster_name: Optional[str] = None) -> Optional[clouds.Cloud]:
     """Check if cloud is registered and return cloud object."""
 
+    # Checks if cluster name is a local cluster name
     if cluster_name in _list_local_clusters():
         if cloud is None:
             cloud = 'local'
@@ -115,8 +100,8 @@ def _get_cloud(cloud: Optional[str],
         raise click.UsageError('Cloud is local. Must specify a cluster name.')
 
     cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
-    if (cloud is None and cluster_name is not None) or \
-        (cloud is not None and cloud_obj is None):
+
+    if cloud is not None and cloud_obj is None:
         if cloud.lower() == 'local':
             local_cloud = clouds.Local.get(cluster_name)
             if local_cloud is not None:
@@ -153,6 +138,7 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
 
 def _error_if_local_cluster(cluster: str, local_clusters: List[str],
                             error_msg: str) -> bool:
+    """Raises error if the cluster name is not a local cluster."""
     if cluster in local_clusters:
         print(error_msg)
         return False
@@ -524,9 +510,12 @@ def _create_and_ssh_into_node(
     click.secho(f'rsync -rP {cluster_name}:/remote/path /local/path', bold=True)
 
 
-def _check_yaml(entrypoint: str, with_outputs=False) -> bool:
+def _check_yaml(entrypoint: str, with_outputs=False):
     """Checks if entrypoint is a readable YAML file.
-    If `with_outputs` is True, also returns the YAML dict.
+
+    Args:
+        entrypoint: Path to a YAML file.
+        with_outputs: If True, also returns the loaded YAML dict.
     """
     is_yaml = True
     config = None
@@ -571,6 +560,7 @@ def _check_yaml(entrypoint: str, with_outputs=False) -> bool:
 
 
 def _check_cluster_config(yaml_config: dict):
+    """Checks if the cluster config has filled-in user credentials."""
     auth = yaml_config['auth']
     cluster = yaml_config['cluster']['name']
 
@@ -586,14 +576,15 @@ def _check_cluster_config(yaml_config: dict):
 def _check_local_cloud(cloud: Optional[str] = None,
                        yaml_cloud: Optional[str] = None,
                        cluster: Optional[str] = None) -> bool:
+    """Checks if user-provided arguments satisfies local cloud specs."""
     if cloud is None:
         # Check if yaml file specifies local cloud
         if yaml_cloud == 'local':
             return True
 
     if cluster in _list_local_clusters():
-        if (yaml_cloud and yaml_cloud != 'local') or (cloud and
-                                                      cloud != 'local'):
+        if ((yaml_cloud and yaml_cloud != 'local') or
+            (cloud and cloud != 'local')):
             raise ValueError(f'Detected Local cluster {cluster}. Must specify '
                              '`cloud: local` or no cloud.')
         else:
@@ -602,7 +593,8 @@ def _check_local_cloud(cloud: Optional[str] = None,
     return False
 
 
-def _list_local_clusters():
+def _list_local_clusters() -> List[str]:
+    """Lists all local clusters."""
     local_dir = os.path.expanduser(
         os.path.dirname(backend_utils.SKY_USER_LOCAL_CONFIG_PATH))
     os.makedirs(local_dir, exist_ok=True)
@@ -765,9 +757,9 @@ def launch(
 
     yaml_cloud = None
     if yaml_config:
-        if yaml_config.get('resources'):
-            if yaml_config['resources'].get('cloud'):
-                yaml_cloud = yaml_config['resources']['cloud']
+        if yaml_config.get('resources') and yaml_config['resources'].get(
+                'cloud'):
+            yaml_cloud = yaml_config['resources']['cloud']
 
     if _check_local_cloud(cloud, yaml_cloud, cluster):
         cloud = 'local'
@@ -803,6 +795,10 @@ def launch(
             if cloud.lower() == 'none':
                 override_params['cloud'] = None
             else:
+                # Limitation of Sky Launch and Task.from_yaml.
+                # Cloud object can not be fully constructed without the
+                # local cluster name. The newly constructed local cloud in
+                # override_params will replace the cloud object in Task.
                 override_params['cloud'] = _get_cloud(cloud, cluster)
         if region is not None:
             if region.lower() == 'none':
@@ -822,6 +818,8 @@ def launch(
         assert len(task.resources) == 1
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
+
+        # If local cloud, add authentication config to Task object
         if 'cloud' in override_params and isinstance(override_params['cloud'],
                                                      clouds.Local):
             local_cluster_path = os.path.expanduser(
@@ -1783,7 +1781,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     name = cluster
     if name in _list_local_clusters():
         raise click.BadParameter(
-            f'Local cluster {cluster!r} conflicts with gpunode {name}')
+            f'Local cluster {cluster!r} conflicts with gpunode.')
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
@@ -1862,7 +1860,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     name = cluster
     if name in _list_local_clusters():
         raise click.BadParameter(
-            f'Local cluster {cluster!r} conflicts with cpunode {name}')
+            f'Local cluster {cluster!r} conflicts with cpunode.')
     if name is None:
         name = _default_interactive_node_name('cpunode')
 
@@ -1938,7 +1936,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     name = cluster
     if name in _list_local_clusters():
         raise click.BadParameter(
-            f'Local cluster {cluster!r} conflicts with tpunode {name}')
+            f'Local cluster name {cluster!r} conflicts with tpunode.')
     if name is None:
         name = _default_interactive_node_name('tpunode')
 
@@ -2177,29 +2175,6 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
             'storage delete\'.')
 
 
-# Managed Spot CLIs
-
-
-def _is_spot_controller_up(
-    stopped_message: str,
-) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
-    controller_status, handle = backend_utils.refresh_cluster_status_handle(
-        spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
-    if controller_status is None:
-        click.echo('No managed spot job has been run.')
-    elif controller_status != global_user_state.ClusterStatus.UP:
-        msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
-               f'is {controller_status.value}.')
-        if controller_status == global_user_state.ClusterStatus.STOPPED:
-            msg += f'\n{stopped_message}'
-        if controller_status == global_user_state.ClusterStatus.INIT:
-            msg += '\nPlease wait for the controller to be ready.'
-        click.echo(msg)
-        handle = None
-    return controller_status, handle
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def admin():
     """Sky Administrator Commands for Local Clusters."""
@@ -2268,7 +2243,16 @@ def admin_deploy(clusterspec_yaml: str):
 
 
 def local_status():
-    """List all local clusters."""
+    """Lists all local clusters.
+
+    Lists both uninitialized and initialized local clusters. Uninitialized local
+    clusters are clusters that have their cluster configs in ~/.sky/local.
+    Sky does not know if the cluster is valid yet and does not know what
+    resources the cluster has. Hence, this method will return blank values for
+    such clusters. Initialized local clusters are ran using `sky launch`.
+    Sky understands what types of resources are on the nodes and has ran at
+    least one job on the cluster.
+    """
     clusters_status = backend_utils.get_clusters(refresh=False,
                                                  include_cloud_clusters=False,
                                                  include_local_clusters=True)
@@ -2281,6 +2265,7 @@ def local_status():
 
     cluster_table = log_utils.create_table(columns)
     names = []
+    # Handling for initialized clusters.
     for cluster_status in clusters_status:
         handle = cluster_status['handle']
         resources = handle.launched_resources
@@ -2313,6 +2298,7 @@ def local_status():
         names.append(cluster_name)
         cluster_table.add_row(row)
 
+    # Handling for uninitialized clusters.
     all_local_clusters = _list_local_clusters()
     for clus in all_local_clusters:
         if clus not in names:
@@ -2332,6 +2318,27 @@ def local_status():
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Local '
                    f'clusters:{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
+
+
+# Managed Spot CLIs
+def _is_spot_controller_up(
+    stopped_message: str,
+) -> Tuple[Optional[global_user_state.ClusterStatus],
+           Optional[backends.Backend.ResourceHandle]]:
+    controller_status, handle = backend_utils.refresh_cluster_status_handle(
+        spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
+    if controller_status is None:
+        click.echo('No managed spot job has been run.')
+    elif controller_status != global_user_state.ClusterStatus.UP:
+        msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
+               f'is {controller_status.value}.')
+        if controller_status == global_user_state.ClusterStatus.STOPPED:
+            msg += f'\n{stopped_message}'
+        if controller_status == global_user_state.ClusterStatus.INIT:
+            msg += '\nPlease wait for the controller to be ready.'
+        click.echo(msg)
+        handle = None
+    return controller_status, handle
 
 
 @cli.group(cls=_NaturalOrderGroup)

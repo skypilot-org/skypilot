@@ -10,16 +10,16 @@ Design
 -------------------
 Sky cluster manager is central for running Sky On-prem. It consists of the Sky job scheduler, which resides on the head node and schedules jobs to be run on local nodes, and the Sky job daemon, which resides on all local nodes and coordinates job logs and metadata with the head node.
 
-Sky has two types of users, the **system administrator**, who has **sudo** access to the machine, and **regular users**, who submit jobs to the local cluster.
+Sky has two types of users, **system administrators**, who have **sudo** access to the machine, and **regular users**, who submit jobs to the local cluster.
 
-The **system administrator** plays 4 important roles:
+**System administrators** plays 4 important roles:
 
-- Creates and maintains user accounts on all nodes in the cluster.
-- Installs Sky's dependency on all nodes
-- Submits a private cluster YAML file to Sky, which launches its services on the local cluster
-- Publishes a distributable cluster YAML file for all users
+- Create and maintain user accounts on all nodes in the cluster.
+- Install Sky's dependencies on all nodes
+- Submit a private cluster YAML file to Sky, which launches its services on the local cluster
+- Publish a distributable cluster YAML file for all regular users
 
-**Regular users** receive the distributable cluster YAML file from the administrator and register the cluster into Sky. Minimal changes to Sky's task YAML file are needed to launch jobs on the local cluster.
+**Regular users** receive the distributable cluster YAML file from the administrator and register the cluster into Sky. No changes to Sky's task YAML file are needed to launch jobs on the local cluster.
 
 Table of Contents
 -------------------

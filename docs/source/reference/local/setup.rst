@@ -8,12 +8,12 @@ To ensure sky nodes can communicate with each other, Sky On-prem requires the sy
 
 For the head node, Sky requires port :code:`6379` for the GCS server on Ray.
 
-For further reference, `here <https://docs.ray.io/en/latest/ray-core/configure.html#ports-configurations>`_ are the required ports from the Ray docs.
+For further reference, `here <https://docs.ray.io/en/latest/ray-core/configure.html#ports-configurations>`_ are the required ports directly from the Ray docs.
 
 Installing Sky dependencies
 ---------------------------
 
-Sky On-prem requires :code:`python3`, :code:`ray==1.10.0`, and `sky` to be setup on all local nodes and globally available to all users.
+Sky On-prem requires :code:`python3`, :code:`ray==1.10.0`, and :code:`sky` to be setup on all local nodes and globally available to all users.
 
 To install Ray and Sky for all users, run the following commands on all local nodes:
 
@@ -87,6 +87,21 @@ Finally, to check if Sky services have been installed correctly, run the followi
     0.00/142.900 GiB object_store_memory
 
 The console should display a list of healthy nodes the size of the local cluster.
+
+.. note::
+    If :code:`sky admin deploy` can not find Sky and/or Ray, a quick fix is to symlink Sky's and Ray's installation paths to :code:`/usr/bin`. An example is provided below.
+    
+    .. code-block::
+   
+       $ sudo which ray
+       ray not found
+
+       $ # Symlink Ray to /usr/bin
+       $ sudo ln -s /usr/local/bin/ray /usr/bin/ray
+
+       $ sudo which ray
+       /usr/bin/ray
+
 
 Publishing cluster YAML
 -------------------

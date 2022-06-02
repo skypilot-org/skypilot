@@ -69,7 +69,7 @@ To connect to the local cluster ``my-local-cluster`` and run a task, use :code:`
 
   $ sky launch -c my-local-cluster local_example.yaml
 
-Here, the name of the cluster **must match** the name of the local cluster. The cloud field is optional. Sky will automatically detect if the cloud is local when the user specifies the name of the local cluster in `sky launch`.
+Here, the name of the cluster **must match** the name of the local cluster. The cloud field in the YAML is optional. Sky will automatically detect if the cloud is local when the user specifies the name of the local cluster in `sky launch`.
 
 
 Executing multiple jobs

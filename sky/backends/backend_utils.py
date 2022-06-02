@@ -50,6 +50,8 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
 
+# Placeholder variable for generated cluster config when
+# `sky admin deploy` is run.
 AUTH_PLACEHOLDER = 'PLACEHOLDER'
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
@@ -59,7 +61,6 @@ IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_RAY_VERSION = '1.10.0'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
-SKY_USER_LOCAL_FILE_PATH = '~/.sky/generated/local'
 SKY_USER_LOCAL_CONFIG_PATH = '~/.sky/local/{}.yml'
 
 BOLD = '\033[1m'
@@ -76,8 +77,6 @@ _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
-_LAUNCHING_LOCAL_IP_PATTERN = re.compile(
-    r'({}): local[._]cluster[._]node'.format(IP_ADDR_REGEX))
 WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 
 # We use fixed IP address to avoid DNS lookup blocking the check, for machine
@@ -666,12 +665,22 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
 
 def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
-    """Checks if the Sky dependencies are properly installed on the machine."""
+    """Checks if the Sky dependencies are properly installed on the machine.
+
+    Checks if python3, Ray, and Sky have been installed correctly. This method
+    assumes that the user is a system administrator and has sudo access to the
+    machine.
+
+    Args:
+        ips: List of ips in the local cluster. 0-index corresponds to the head
+          node's ip.
+        auth_config: An authentication config that authenticates into the cluster.
+    """
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
 
-    def _run_command_and_handle_ssh_failure(ip: str, command: str,
-                                            failure_message: str):
+    def run_command_and_handle_ssh_failure(ip: str, command: str,
+                                           failure_message: str):
         rc = run_command_on_ip_via_ssh(ip,
                                        command,
                                        ssh_user=ssh_user,
@@ -686,17 +695,22 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
             raise ValueError(failure_message.format(ip=ip))
 
     for ip in ips:
-        # All nodes must have Ray and Python3
-        _run_command_and_handle_ssh_failure(ip, 'python3 --version',
-                                            'Python3 is not installed on {ip}')
+        # Checks for python3 installation.
+        run_command_and_handle_ssh_failure(ip, 'sudo python3 --version',
+                                           f'Python3 is not installed on {ip}')
 
-        _run_command_and_handle_ssh_failure(ip, 'ray --version',
-                                            'Ray is not installed on {ip}')
+        # Checks for Ray installation.
+        run_command_and_handle_ssh_failure(ip, 'sudo ray --version',
+                                           f'Ray is not installed on {ip}')
+
+        # Checks for Sky installation.
+        run_command_and_handle_ssh_failure(ip, 'sudo sky --help',
+                                           f'Sky is not installed on {ip}')
 
 
 def rsync_no_handle(ip: str, source: str, target: str, ssh_user: str,
-                    ssh_key: str):
-    """Helper method that rsyncs files to remote."""
+                    ssh_key: str) -> None:
+    """Rsyncs files to a remote ip."""
     rsync_command = [
         'rsync',
         '-Pavz',
@@ -728,14 +742,29 @@ def get_local_custom_resources(
         ips: List[str], auth_config: Dict[str, str]) -> List[Dict[str, int]]:
     """Gets the custom accelerators for the local cluster.
 
-    Returns a dictionary mapping accelerators and its count.
-    """
+    Loops through all cluster nodes to obtain a mapping of specific acclerator
+    types to the count of accelerators.
 
+    Args:
+        ips: List of ips in the local cluster. 0-index corresponds to the head
+          node's ip.
+        auth_config: An authentication config that authenticates into the cluster.
+
+    Returns:
+        A list of dictionaries corresponding to accelerator counts for each
+        node. Each dictionary maps accelerator type to the number of accelerators
+        on the node. For example, in a two node cluster:
+        [
+         {'V100': 8,},
+         {'K80': 2,},
+        ]
+    """
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
     remote_resource_path = '~/.sky/resource_group.py'
     custom_resources = []
 
+    # Ran on the remote cluster node to identify accelerator resources.
     code = \
     textwrap.dedent("""\
         import os
@@ -760,12 +789,14 @@ def get_local_custom_resources(
         """)
 
     for ip in ips:
+        # Upload code to the cluster node.
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(code)
             fp.flush()
             rsync_no_handle(ip, fp.name, remote_resource_path, ssh_user,
                             ssh_key)
 
+        # Run code on the node to get cluster node accelerators.
         rc, output, _ = run_command_on_ip_via_ssh(
             ip,
             f'python3 {remote_resource_path}',
@@ -785,8 +816,21 @@ def get_local_custom_resources(
 
 
 def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
-                         custom_resources: List[Dict[str, int]] = None):
-    """Launches Ray on all nodes for local cluster."""
+                         custom_resources: List[Dict[str, int]] = None) -> None:
+    """Launches Ray on all nodes for local cluster.
+
+    Launches Ray on the root user of all nodes and opens the Ray dashboard port
+    on the non-head nodes. This ensures that Sky can coordinate and cancel jobs
+    across nodes.
+
+    Args:
+        yaml_config: Dictionary representing the cluster config.
+          Contains cluster-specific hyperparameters and the authentication
+          config.
+        custom_resources: List of dictionaries corresponding to accelerator
+          counts for each node. Each dictionary maps accelerator type to the
+          number of accelerators on the node.
+    """
     local_cluster_config = yaml_config['cluster']
     ip_list = local_cluster_config['ips']
     if not isinstance(ip_list, list):
@@ -802,6 +846,7 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     total_workers = len(ip_list[1:])
     worker_ips = ip_list[1:]
 
+    # Stops all running Ray instances on all nodes
     display = rich_status.Status('[bold cyan]Stopping Ray Cluster')
     display.start()
 
@@ -822,6 +867,7 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
 
     display.stop()
 
+    # Launching Ray on the head node.
     head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
     head_cmd = ('sudo ray start --head --port=6379 '
                 '--object-manager-port=8076 --dashboard-port 8265 '
@@ -838,6 +884,8 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     handle_returncode(rc, head_cmd, 'Failed to launch Ray on Head node.')
     display.stop()
 
+    # Launches Ray on the worker nodes and links Ray dashboard from the head
+    # to worker node.
     remote_ssh_key = f'~/.ssh/{os.path.basename(ssh_key)}'
     dashboard_remote_path = '~/.sky/dashboard.sh'
     port_cmd = (
@@ -896,10 +944,18 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
         display.stop()
 
 
-def save_distributable_yaml(yaml_config: Dict[str, Dict[str, object]]):
-    """Generates a distributable yaml for the system admin to send to users."""
+def save_distributable_yaml(yaml_config: Dict[str, Dict[str, object]]) -> None:
+    """Generates a distributable yaml for the system admin to send to users.
+
+    Args:
+        yaml_config: Dictionary representing the cluster config.
+          Contains cluster-specific hyperparameters and the authentication
+          config.
+    """
+    # Admin authentication must be censored out.
     yaml_config['auth']['ssh_user'] = AUTH_PLACEHOLDER
     yaml_config['auth']['ssh_private_key'] = AUTH_PLACEHOLDER
+
     cluster_name = yaml_config['cluster']['name']
     yaml_path = SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)
     abs_yaml_path = os.path.expanduser(yaml_path)
@@ -923,7 +979,9 @@ def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
     elif cloud_type == 'Azure':
         config = auth.setup_azure_authentication(config)
     elif cloud_type == config['cluster_name']:
-        # Local cluster case
+        # Local cluster case, authentication is already filled by the user
+        # in the local cluster config (in ~/.sky/local/...). There is no need
+        # for Sky to generate authentication.
         pass
     else:
         raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
@@ -998,11 +1056,18 @@ def wait_until_ray_cluster_ready(
 
             # Workers that are ready
             ready_workers = 0
+            # On-prem/local case is handled differently.
+            # `ray status` produces different output for local case, and
+            # we poll for number of nodes launched instead of counting for
+            # head and number of worker nodes separately (it is impossible
+            # to distinguish between head and worker node for local case).
             if isinstance(cloud, clouds.Local):
                 result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
                 if len(result) == 0:
                     ready_workers = 0
                 else:
+                    # Here, ready_workers mean the total number of nodes
+                    # launched, including head.
                     ready_workers = len(result)
             else:
                 result = _LAUNCHED_WORKER_PATTERN.findall(output)
@@ -1024,17 +1089,13 @@ def wait_until_ray_cluster_ready(
                                  'workers ready')
 
             # In the local case, ready_head=0 and ready_workers=num_nodes
-            # This is because there is no matching regex for _LAUNCHED_HEAD_PATTERN
+            # This is because there is no matching regex for _LAUNCHED_HEAD_PATTERN.
             if ready_head + ready_workers == num_nodes or \
             ready_workers == num_nodes - 1:
                 # All nodes are up.
                 break
 
-            # Pending workers that have been launched by ray up.
-            if isinstance(cloud, clouds.Local):
-                found_ips = _LAUNCHING_LOCAL_IP_PATTERN.findall(output)
-            else:
-                found_ips = _LAUNCHING_IP_PATTERN.findall(output)
+            found_ips = _LAUNCHING_IP_PATTERN.findall(output)
             pending_workers = len(found_ips)
 
             # TODO(zhwu): Handle the case where the following occurs, where ray
@@ -1061,9 +1122,8 @@ def wait_until_ray_cluster_ready(
                     'Timed out when waiting for workers to be provisioned.')
                 return False  # failed
 
-            if '(no pending nodes)' in output and \
-            '(no failures)' in output and not isinstance(
-                    cloud, clouds.Local):
+            if ('(no pending nodes)' in output and '(no failures)' in output and
+                    not isinstance(cloud, clouds.Local)):
                 # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
                 # that GCP can satisfy only by half, the worker node would be
                 # forgotten. The correct behavior should be for it to error out.
@@ -1458,9 +1518,11 @@ def get_node_ips(
             worker_ips = re.findall(IP_ADDR_REGEX, out)
             # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
             # Workaround: List of IPs are shown in Stderr
-            if read_yaml(yaml_handle)['provider']['type'] == 'local':
+            ray_yaml = read_yaml(yaml_handle)
+            if ray_yaml['provider']['type'] == 'local':
                 out = proc.stderr.decode()
                 worker_ips = re.findall(IP_ADDR_REGEX, out)
+                # Remove head ip from worker ip list.
                 for i, ip in enumerate(worker_ips):
                     if ip == head_ip[0]:
                         del worker_ips[i]
@@ -1585,7 +1647,17 @@ def refresh_cluster_status_handle(
 def get_clusters(refresh: bool,
                  include_cloud_clusters: bool = True,
                  include_local_clusters: bool = False) -> List[Dict[str, Any]]:
-    """Gets launched clusters"""
+    """Gets launched clusters.
+
+    Combs through the Sky database (in ~/.sky/state.db) to get a list of records
+    corresponding to launched clusters.
+
+    Args:
+        refresh: If True, all records are refreshed and up-to-date with the current
+          cluster.
+        include_cloud_clusters: If True, all public cloud clusters are included.
+        include_local_clusters: If True, all local clusters are included.
+    """
     records = global_user_state.get_clusters(
         include_cloud_clusters=include_cloud_clusters,
         include_local_clusters=include_local_clusters)

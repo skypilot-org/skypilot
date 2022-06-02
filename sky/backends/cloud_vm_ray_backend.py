@@ -424,7 +424,8 @@ class RetryingVmProvisioner(object):
     def _in_blocklist(self, cloud, region, zones):
         if region.name in self._blocked_regions:
             return True
-        # We do not keep track of zones in Azure and Local
+        # We do not keep track of zones in Azure and Local,
+        # as both clouds do not have zones.
         if isinstance(cloud, (clouds.Azure, clouds.Local)):
             return False
         assert zones, (cloud, region, zones)
@@ -592,6 +593,7 @@ class RetryingVmProvisioner(object):
             return self._update_blocklist_on_azure_error(
                 region, zones, stdout, stderr)
 
+        # For the local cloud case, there are no errors regarding provisioning.
         if isinstance(cloud, clouds.Local):
             return None
 
@@ -621,6 +623,8 @@ class RetryingVmProvisioner(object):
                         region = config['provider']['location']
                         zones = None
                     elif cloud.is_same_cloud(sky.Local(cluster_name)):
+                        # Only 1 region per local cloud ('Local region').
+                        # No zones per local cloud.
                         region = clouds.Local.LOCAL_REGION.name
                         zones = None
                     else:
@@ -978,6 +982,8 @@ class RetryingVmProvisioner(object):
 
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
+
+        # Special case handling for Local cloud (since there are no zones).
         if isinstance(to_provision_cloud, clouds.Local):
             logger.info(
                 f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud}')
@@ -986,12 +992,18 @@ class RetryingVmProvisioner(object):
                 f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
                 f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
+
         # Edge case: /tmp/ray does not exist, so autoscaler can't create/store
-        # cluster lock and cluster state.
+        # cluster lock and cluster state. This also happens for public cloud
+        # clusters.
         os.makedirs('/tmp/ray', exist_ok=True)
         returncode, stdout, stderr = ray_up()
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
+        # Special handling is needed for the local case. This is due to a
+        # Ray autoscaler bug, where filemounting and setup does not work for
+        # the on-prem case in Ray. Hence, this method here replicates
+        # what the Ray autoscaler would do were it for public cloud.
         def local_cloud_ray_up():
             """Launches Ray autoscaler on worker nodes for a local cluster."""
             with open(cluster_config_file, 'r') as f:
@@ -1005,6 +1017,8 @@ class RetryingVmProvisioner(object):
             rsync_exclude = 'virtenv'
             setup_command = '\n'.join(setup_cmds)
             setup_script = log_lib.make_task_bash_script(setup_command)
+
+            # Uploads setup script to the worker node
             with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                 f.write(setup_script)
                 f.flush()
@@ -1012,9 +1026,11 @@ class RetryingVmProvisioner(object):
                 setup_file = os.path.basename(setup_sh_path)
                 file_mounts[f'/tmp/{setup_file}'] = setup_sh_path
 
-                # Ray Autoscaler Bug :(
-                # Filemounting on worker IPs + Setup Script
+                # Ray Autoscaler Bug: Filemounting + Ray Setup
+                # does not happen on workers.
                 def _ray_up_local_worker(ip):
+                    # Unable to access methods in CloudVMRayBackend class,
+                    # hence there is some replication in code below.
                     for dst, src in file_mounts.items():
                         if not os.path.isabs(dst) and \
                         not dst.startswith('~/'):
@@ -1136,6 +1152,8 @@ class RetryingVmProvisioner(object):
             return
         else:
             launched_resources = handle.launched_resources
+            # On-premise cluster should never reach this code. Ray cluster
+            # should already be running if the system admin has setup Ray.
             if isinstance(launched_resources.cloud, clouds.Local):
                 raise ValueError('Ray status errored out on On-premise machine.'
                                  'Check if Ray==1.10.0 is installed correctly.')
@@ -1162,6 +1180,9 @@ class RetryingVmProvisioner(object):
         to_provision = to_provision_config.resources
         num_nodes = to_provision_config.num_nodes
         resources = to_provision_config.resources
+        # Special handling for local cloud case: number of nodes provisioned
+        # is not what the task specifies, but refers to the size of the
+        # local cluster.
         if isinstance(resources.cloud, clouds.Local):
             num_nodes = len(resources.local_ips)
         cluster_exists = to_provision_config.cluster_exists
@@ -1301,6 +1322,7 @@ class CloudVmRayBackend(backends.Backend):
                     sky.AWS()):
                 region = provider['region']
             elif cloud.is_same_cloud(sky.Local(self.cluster_name)):
+                # There is only 1 region for Local cluster, 'Local'.
                 region = clouds.Local.LOCAL_REGION.name
 
             self.launched_resources = self.launched_resources.copy(
@@ -1373,6 +1395,8 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name, handle.launched_resources, handle.launched_nodes,
                 True)
         cloud = to_provision.cloud
+        # Alternative logging for local clusters, as opposed to public cloud
+        # clusters.
         if isinstance(cloud, clouds.Local):
             ssh_user = task.auth_config['ssh_user']
             logger.info(
@@ -1770,7 +1794,7 @@ class CloudVmRayBackend(backends.Backend):
                     f': {style.BRIGHT}{src}{style.RESET_ALL} -> '
                     f'{style.BRIGHT}{dst}{style.RESET_ALL}')
         cloud = handle.launched_resources.cloud
-        # TODO: Support Mounting for Local (remove sudo installation)
+        # TODO(romil): Support Mounting for Local (remove sudo installation)
         if action_message == 'Mounting' and isinstance(cloud, clouds.Local):
             logger.warning(
                 f'{colorama.Fore.RED}Sky On-prem does not support '
@@ -2134,6 +2158,7 @@ class CloudVmRayBackend(backends.Backend):
                            target=remote_run_file,
                            stream_logs=False)
 
+        # Get the home directory of ssh_user
         _, stdout, _ = backend_utils.run_command_on_ip_via_ssh(
             head_ip,
             f'chmod a+rwx {remote_run_file}; echo $HOME',

@@ -1,10 +1,10 @@
 # Local/On-premise cluster config.
 #
-# Created by the system administrator to launch Ray cluster over on-premise machines.
+# Created by the system administrator to launch a Ray cluster over on-premise machines.
 # The system administrator must have `sudo` access to the local nodes.
 # Requirements:
-#   1) Python (> 3.6) on all nodes   
-#   2) Ray CLI (= 1.10.0) on all nodes
+#   1) Python (> 3.6) on all nodes.
+#   2) Ray CLI (= 1.10.0) on all nodes.
 #
 # Example usage:
 #   >> sky admin deploy cluster-config.yaml
@@ -13,7 +13,7 @@ cluster:
   ips: [3.142.141.133, 3.144.206.91]
   name: my-local-cluster 
 
-# Authentication into Local cluster nodes
+# Authentication into local cluster nodes.
 auth:
   ssh_user: ubuntu
   ssh_private_key: ~/.ssh/ubuntu.pem

@@ -6,13 +6,12 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 import yaml
 
+from sky.backends import backend_utils
 from sky import clouds
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
-
-_LOCAL_YAML_PATH = '~/.sky/local/{}.yml'
 
 
 def _run_output(cmd):
@@ -40,7 +39,7 @@ class Local(clouds.Cloud):
     """
 
     LOCAL_REGION = clouds.Region('Local')
-    _REPR = 'Local'
+    DEFAULT_LOCAL_NAME = 'Local'
     _regions: List[clouds.Region] = [LOCAL_REGION]
 
     def __init__(self, cluster_name: str = None):
@@ -48,7 +47,7 @@ class Local(clouds.Cloud):
             self.local_cluster_name = cluster_name
         else:
             # Default local name is set for task.set_resources method.
-            self.local_cluster_name = 'default-local-name'
+            self.local_cluster_name = Local.DEFAULT_LOCAL_NAME
 
     @classmethod
     def regions(cls):
@@ -119,7 +118,7 @@ class Local(clouds.Cloud):
         return [resources], []
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
-        # clouds.Local is not called in `sky check`
+        # Cloud clouds.Local is not called in `sky check`
         # (not part of global registry).
         raise NotImplementedError
 
@@ -148,11 +147,11 @@ class Local(clouds.Cloud):
         """Returns IP addresses of the local cluster."""
         cluster = self.local_cluster_name
         local_cluster_path = os.path.expanduser(
-            _LOCAL_YAML_PATH.format(cluster))
+            backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster))
         try:
             with open(local_cluster_path, 'r') as f:
                 config = yaml.safe_load(f)
-        except OSError as e:
+        except yaml.YAMLError as e:
             raise ValueError(
                 f'Could not open/read file: {local_cluster_path}') from e
 

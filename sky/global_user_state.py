@@ -246,9 +246,11 @@ def get_clusters(include_cloud_clusters: bool = True,
         # TODO: use namedtuple instead of dict
         handle = pickle.loads(handle)
         cloud = handle.launched_resources.cloud
+        # Check for public cloud.
         if clouds.CLOUD_REGISTRY.from_str(
                 repr(cloud)) and not include_cloud_clusters:
             continue
+        # Check for local cloud.
         if isinstance(cloud, clouds.Local) and not include_local_clusters:
             continue
         record = {
