@@ -405,7 +405,7 @@ def test_cancel_pytorch():
             'sleep 60',
             f'sky exec {name} "(nvidia-smi | grep \'No running process\') || '
             # Ensure Xorg is the only process running.
-            '[ \$(nvidia-smi | grep -A 10 Processes | grep -A 10 === | grep -v Xorg) -eq 2 ])"',
+            '[ \$(nvidia-smi | grep -A 10 Processes | grep -A 10 === | grep -v Xorg) -eq 2 ]"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
