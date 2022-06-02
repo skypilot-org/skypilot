@@ -50,19 +50,19 @@ jobs:
           pip install ".[all]"
           pip install pytest
 
-      #- name: Run tests with pytest
-      #  run: pytest ${{ matrix.test-path }}
-
       - name: Add conda to system path
         run: |
           # $CONDA is an environment variable pointing to the root of the miniconda directory
           echo $CONDA/bin >> $GITHUB_PATH
 
-      - name: Test with pytest
+      - name: conda test
         run: |
           conda env list
           conda create -n new python=3.7
           conda init bash
+
+      - name: conda test 2
+        run: |
           conda activate new
           which pip
           pip install protobuf
