@@ -23,8 +23,6 @@ Path = str
 StorageHandle = Any
 StorageStatus = global_user_state.StorageStatus
 
-_BUCKET_CREATE_RETRIES = 5
-
 
 class StoreType(enum.Enum):
     S3 = 'S3'
