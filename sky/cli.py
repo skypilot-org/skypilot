@@ -716,8 +716,6 @@ def launch(
             cluster_str = '' if cluster is None else f' {cluster!r}'
             prompt = f'Launching a new cluster{cluster_str}. Proceed?'
             dag = sky.optimize(dag)
-            task = dag.tasks[0]
-            backend.register_info(dag=dag)
         elif maybe_status == global_user_state.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
