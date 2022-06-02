@@ -133,7 +133,9 @@ class RayCodeGen:
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
-    def add_prologue(self, job_id: int) -> None:
+    def add_prologue(self,
+                     job_id: int,
+                     spot_task: Optional['task_lib.Task'] = None) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
@@ -172,6 +174,14 @@ class RayCodeGen:
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
+        if spot_task is not None:
+            # Add the spot job to spot status table.
+            resources_str = backend_utils.get_task_resources_str(spot_task)
+            self._code += [
+                'from sky.spot import spot_state',
+                f'spot_state.set_pending('
+                f'{job_id}, {spot_task.name!r}, {resources_str!r})',
+            ]
 
     def add_gang_scheduling_placement_group(
         self,
@@ -1204,9 +1214,10 @@ class CloudVmRayBackend(backends.Backend):
         self._optimize_target = None
 
     def register_info(self, **kwargs) -> None:
-        self._dag = kwargs['dag']
-        self._optimize_target = kwargs.pop('optimize_target',
-                                           OptimizeTarget.COST)
+        self._dag = kwargs.pop('dag', self._dag)
+        self._optimize_target = kwargs.pop(
+            'optimize_target', self._optimize_target) or OptimizeTarget.COST
+        assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
     def _check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
                                                    task: task_lib.Task):
@@ -2103,7 +2114,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
+        codegen.add_prologue(job_id, spot_task=task.spot_task)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         if callable(task.run):
@@ -2138,7 +2149,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
+        codegen.add_prologue(job_id, spot_task=task.spot_task)
         codegen.add_gang_scheduling_placement_group(task.num_nodes,
                                                     accelerator_dict)
 

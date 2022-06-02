@@ -6,4 +6,4 @@ SPOT_CONTROLLER_NAME = 'sky-spot-controller'
 SPOT_CONTROLLER_TEMPLATE = 'spot-controller.yaml.j2'
 SPOT_CONTROLLER_YAML_PREFIX = '~/.sky/spot_controller'
 
-SPOT_TASK_YAML_PATH = '~/.sky/spot_tasks'
+SPOT_TASK_YAML_PREFIX = '~/.sky/spot_tasks'
