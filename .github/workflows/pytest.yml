@@ -57,3 +57,7 @@ jobs:
         run: |
           which pip
           pip install protobuf
+
+          conda activate new
+          which pip
+          pip install protobuf
