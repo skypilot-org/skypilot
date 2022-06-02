@@ -946,7 +946,20 @@ class S3Store(AbstractStore):
         # https://stackoverflow.com/questions/49239351/why-is-it-so-much-slower-to-delete-objects-in-aws-s3-than-it-is-to-create-them
         # The fastest way to delete is to run `aws s3 rb --force`,
         # which removes the bucket by force.
-        os.system(f'aws s3 rb s3://{bucket_name} --force')
+        remove_command = f'aws s3 rb s3://{bucket_name} --force'
+        with subprocess.Popen(remove_command.split(' '),
+                              stderr=subprocess.PIPE) as process:
+            while True:
+                line = process.stderr.readline()
+                if not line:
+                    break
+                str_line = line.decode('utf-8')
+                logger.info(str_line)
+            retcode = process.wait()
+            if retcode != 0:
+                raise exceptions.StorageDeleteError(
+                    f'Failed to delete S3 bucket {bucket_name}.')
+        logger.info(f'Deleted S3 bucket {bucket_name}.')
 
 
 class GcsStore(AbstractStore):
