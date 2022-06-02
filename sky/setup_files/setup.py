@@ -46,7 +46,7 @@ install_requires = [
     'grpcio<=1.43.0',
     # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the fix.
     # https://github.com/ray-project/ray/pull/25211
-    'protobuf',
+    'protobuf<4.0.0',
     'psutil',
     'pulp',
 ]
