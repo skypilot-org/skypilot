@@ -34,5 +34,6 @@ jobs:
         eval "$(command conda 'shell.bash' 'hook' 2> /dev/null)"
         conda activate condatest
 
-        pip install ".[aws]"
+        pip install ".[all]"
         sky
+        sky check
