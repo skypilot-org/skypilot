@@ -19,6 +19,7 @@ import sys
 import textwrap
 import threading
 import time
+import traceback
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
@@ -1497,4 +1498,9 @@ def check_fields(provided_fields, known_fields):
                 key_invalid += f' Did you mean one of {similar_keys}?'
             key_invalid += '\n'
             invalid_keys += key_invalid
-        raise ValueError(invalid_keys)
+        try:
+            raise ValueError(invalid_keys)
+        except ValueError:
+            # UX: only print last call in the stack + the exception message.
+            traceback.print_exception(*sys.exc_info())
+            sys.exit(1)
