@@ -2,7 +2,6 @@
 
 This is a remote utility module that provides logging functionality.
 """
-import hashlib
 import io
 import os
 import ray
@@ -239,14 +238,12 @@ def make_task_bash_script(codegen: str,
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               username: str,
-                              cluster_name: str,
                               job_id: str,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False):
 
-    job_hash_id = hashlib.sha256(
-        f'{cluster_name}-{job_id}-{username}'.encode()).hexdigest()
+    job_str_id = f'{job_id}-{username}'
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         if env_vars is not None:
             export_env_vars = '\n'.join(
@@ -273,7 +270,7 @@ def run_bash_command_with_log(bash_command: str,
             # the cmd to be a list.
             ['sudo', '-H', 'su', '-', username, '-c', inner_command],
             log_path,
-            job_id=job_hash_id,
+            job_id=job_str_id,
             stream_logs=stream_logs,
             with_ray=with_ray)
 
@@ -322,8 +319,7 @@ def _follow_job_logs(file,
             status = job_lib.get_status(job_id)
 
 
-def tail_logs(cluster_name: str,
-              ssh_user: str,
+def tail_logs(ssh_user: str,
               job_id: int,
               log_dir: Optional[str],
               spot_job_id: Optional[int] = None) -> None:
@@ -342,7 +338,7 @@ def tail_logs(cluster_name: str,
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
-    status = job_lib.query_job_status(cluster_name, ssh_user, [job_id])[0]
+    status = job_lib.query_job_status(ssh_user, [job_id])[0]
 
     # Wait for the log to be written. This is needed due to the `ray submit`
     # will take some time to start the job and write the log.
@@ -364,7 +360,7 @@ def tail_logs(cluster_name: str,
         print(f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
-        status = job_lib.query_job_status(cluster_name, ssh_user, [job_id])[0]
+        status = job_lib.query_job_status(ssh_user, [job_id])[0]
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         # Not using `ray job logs` because it will put progress bar in

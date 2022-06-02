@@ -135,7 +135,7 @@ class RayCodeGen:
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
-    def add_prologue(self, job_id: int, cluster_name: str) -> None:
+    def add_prologue(self, job_id: int) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
@@ -167,7 +167,6 @@ class RayCodeGen:
             ray.init(address = 'ray://localhost:10001', _redis_password='5241590000000000', namespace='__sky__{job_id}__', log_to_driver=True)
 
             job_id = {job_id!r}
-            cluster_name = {cluster_name!r}
 
             run_fn = None
             futures = []"""),
@@ -343,7 +342,6 @@ class RayCodeGen:
                         script,
                         log_path,
                         getpass.getuser(),
-                        cluster_name = cluster_name,
                         job_id = job_id,
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
@@ -1555,8 +1553,7 @@ class CloudVmRayBackend(backends.Backend):
                     cluster_config = yaml.safe_load(f)
                 # User name is guaranteed to exist (on all jinja files)
                 ssh_user = cluster_config['auth']['ssh_user']
-                cmd = job_lib.JobLibCodeGen.update_status(
-                    cluster_name, ssh_user)
+                cmd = job_lib.JobLibCodeGen.update_status(ssh_user)
                 with backend_utils.safe_console_status(
                         '[bold cyan]Preparing Job Queue'):
                     returncode, _, stderr = self.run_on_head(
@@ -2019,8 +2016,7 @@ class CloudVmRayBackend(backends.Backend):
         # User name is guaranteed to exist (on all jinja files)
         user_name = cluster_config['auth']['ssh_user']
 
-        code = job_lib.JobLibCodeGen.cancel_jobs(handle.cluster_name, user_name,
-                                                 jobs)
+        code = job_lib.JobLibCodeGen.cancel_jobs(user_name, jobs)
 
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
@@ -2171,12 +2167,10 @@ class CloudVmRayBackend(backends.Backend):
         head_home_path = stdout.strip()
         remote_run_file = remote_run_file.replace('~', head_home_path)
 
-        cluster_name = handle.cluster_name
-        job_id_hash = hashlib.sha256(
-            f'{cluster_name}-{job_id}-{ssh_user}'.encode()).hexdigest()
+        job_str = f'{job_id}-{ssh_user}'
         job_submit_cmd = (
             'ray job submit -v '
-            f'--address=127.0.0.1:8265 --job-id {job_id_hash} --no-wait '
+            f'--address=127.0.0.1:8265 --job-id {job_str} --no-wait '
             f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
         returncode, _, _ = self.run_on_head(handle,
                                             job_submit_cmd,
@@ -2222,8 +2216,7 @@ class CloudVmRayBackend(backends.Backend):
         # User name is guaranteed to exist (on all jinja files)
         ssh_user = cluster_config['auth']['ssh_user']
 
-        code = job_lib.JobLibCodeGen.tail_logs(handle.cluster_name,
-                                               ssh_user,
+        code = job_lib.JobLibCodeGen.tail_logs(ssh_user,
                                                job_id,
                                                spot_job_id=spot_job_id)
         if job_id is None:
@@ -2337,7 +2330,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id, handle.cluster_name)
+        codegen.add_prologue(job_id)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         if callable(task.run):
@@ -2372,7 +2365,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id, handle.cluster_name)
+        codegen.add_prologue(job_id)
         codegen.add_gang_scheduling_placement_group(task.num_nodes,
                                                     accelerator_dict)
 
