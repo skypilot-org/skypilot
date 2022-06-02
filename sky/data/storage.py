@@ -409,6 +409,7 @@ class Storage(object):
                     f'Found source={source}')
             # Local path, check if it exists
             source = os.path.abspath(os.path.expanduser(source))
+            # Only check if local source exists if it is synced to the bucket
             if not os.path.exists(source) and sync_on_reconstruction:
                 raise exceptions.StorageSourceError('Local source path does not'
                                                     f' exist: {source}')
