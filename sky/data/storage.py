@@ -957,7 +957,7 @@ class S3Store(AbstractStore):
                 logger.info(str_line)
             retcode = process.wait()
             if retcode != 0:
-                raise exceptions.StorageDeleteError(
+                raise exceptions.StorageBucketDeleteError(
                     f'Failed to delete S3 bucket {bucket_name}.')
         logger.info(f'Deleted S3 bucket {bucket_name}.')
 
