@@ -1164,11 +1164,24 @@ class GcsStore(AbstractStore):
                 f'gsutil du gs://{bucket_name} | wc -l', shell=True)
             num_files = int(num_files)
             if num_files >= 256:
-                os.system(f'gsutil -m rm gs://{bucket_name}/*')
+                remove_obj_command = f'gsutil -m rm gs://{bucket_name}/*'
+                with subprocess.Popen(remove_obj_command.split(' '),
+                                      stderr=subprocess.PIPE) as process:
+                    while True:
+                        line = process.stderr.readline()
+                        if not line:
+                            break
+                        str_line = line.decode('utf-8')
+                        logger.info(str_line)
+                    retcode = process.wait()
+                if retcode != 0:
+                    raise exceptions.StorageBucketDeleteError(
+                        f'Failed to delete GCS bucket {bucket_name}.')
             bucket.delete(force=True)
+            logger.info(f'Deleted GCS bucket {bucket_name}.')
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
-            logger.error('External Bucket detected; User not allowed to delete '
-                         'external bucket!')
+            logger.error('External Bucket detected. User not allowed to delete '
+                         'external bucket.')
             logger.error(e)
             raise e
