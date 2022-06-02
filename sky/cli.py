@@ -657,19 +657,6 @@ def launch(
         entrypoint = None
         is_yaml = False
 
-    if not yes:
-        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
-        maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
-        prompt = None
-        if maybe_status is None:
-            cluster_str = '' if cluster is None else f' {cluster!r}'
-            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
-        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
-            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
     with sky.Dag() as dag:
         if is_yaml:
             task = sky.Task.from_yaml(entrypoint)
@@ -712,15 +699,31 @@ def launch(
             task.name = name
         task.envs = env
 
-    if cluster is not None:
-        click.secho(f'Running task on cluster {cluster}...', fg='yellow')
-
     if backend_name == backends.LocalDockerBackend.NAME:
         backend = backends.LocalDockerBackend()
     elif backend_name == backends.CloudVmRayBackend.NAME:
         backend = backends.CloudVmRayBackend()
     else:
         raise ValueError(f'{backend_name} backend is not supported.')
+
+    confirm_shown = False
+    if not yes:
+        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
+        # it exists but is STOPPED.
+        maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
+        prompt = None
+        if maybe_status is None:
+            cluster_str = '' if cluster is None else f' {cluster!r}'
+            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
+            dag = sky.optimize(dag)
+        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
+            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
+        if prompt is not None:
+            confirm_shown = True
+            click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    if cluster is not None and not confirm_shown:
+        click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
     sky.launch(dag,
                dryrun=dryrun,
