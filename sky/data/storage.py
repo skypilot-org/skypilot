@@ -939,15 +939,14 @@ class S3Store(AbstractStore):
         Args:
           bucket_name: str; Name of bucket
         """
-        try:
-            s3 = aws.resource('s3')
-            bucket = s3.Bucket(bucket_name)
-            bucket.objects.all().delete()
-            bucket.delete()
-        except aws.client_exception() as e:
-            logger.error(f'Unable to delete S3 bucket {self.name}')
-            logger.error(e)
-            raise e
+        # Deleting objects is very slow programatically
+        # (i.e. bucket.objects.all().delete() is slow).
+        # In addition, standard delete operations (i.e. via `aws s3 rm`)
+        # is slow, since AWS puts deletion markers.
+        # https://stackoverflow.com/questions/49239351/why-is-it-so-much-slower-to-delete-objects-in-aws-s3-than-it-is-to-create-them
+        # The fastest way to delete is to run `aws s3 rb --force`,
+        # which removes the bucket by force.
+        os.system(f'aws s3 rb s3://{bucket_name} --force')
 
 
 class GcsStore(AbstractStore):
