@@ -50,8 +50,8 @@ jobs:
           pip install ".[all]"
           pip install pytest
 
-      - name: Run tests with pytest
-        run: pytest ${{ matrix.test-path }}
+      #- name: Run tests with pytest
+      #  run: pytest ${{ matrix.test-path }}
 
       - name: Add conda to system path
         run: |
@@ -60,5 +60,8 @@ jobs:
 
       - name: Test with pytest
         run: |
-          conda install pytest
           conda env list
+          conda create -n new python=3.7
+          conda activate new
+          which pip
+          pip install protobuf
