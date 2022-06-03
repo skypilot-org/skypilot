@@ -41,6 +41,7 @@ def test_infer_tpunode_type():
     for spec in resources:
         assert cli._infer_interactive_node_type(spec) == 'tpunode', spec
 
+
 def test_accelerator_mismatch():
     """Test the specified accelerator does not match the instance_type."""
     spec = textwrap.dedent("""\

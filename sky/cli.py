@@ -337,7 +337,7 @@ def _check_resources_match(backend: backends.Backend,
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         return
-        
+
     if node_type is not None:
         inferred_node_type = _infer_interactive_node_type(
             handle.launched_resources)
