@@ -36,7 +36,6 @@ from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
 from sky.skylet import autostop_lib
-from sky.skylet import benchmark_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
@@ -1403,31 +1402,6 @@ class CloudVmRayBackend(backends.Backend):
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop)
 
-    def get_benchmark_summary(self, handle: ResourceHandle, remote_log_dir: str,
-                              remote_output_path: str,
-                              local_log_dir: str) -> None:
-        # Generate a benchmark summary on a remote cluster.
-        code = benchmark_lib.BenchmarkCodeGen.generate_summary(
-            remote_log_dir, remote_output_path)
-        returncode, _, stderr = self.run_on_head(handle,
-                                                 code,
-                                                 require_outputs=True)
-        backend_utils.handle_returncode(
-            returncode,
-            code,
-            'Failed to generate a benchmark summary',
-            stderr=stderr,
-            raise_error=True)
-
-        # Download the summary to the local machine.
-        self._rsync_up(handle,
-                       remote_output_path,
-                       local_log_dir,
-                       stream_logs=False,
-                       is_down=True,
-                       filter_with_gitignore=False,
-                       raise_error=True)
-
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
@@ -2366,12 +2340,12 @@ class CloudVmRayBackend(backends.Backend):
         log_path: str = '/dev/null',
         ip: Optional[str] = None,
         raise_error: bool = True,
-        is_down: bool = False,
+        reverse: bool = False,
         filter_with_gitignore: bool = True,
     ) -> None:
         """Runs rsync from 'source' to the cluster's node 'target'.
 
-        If is_down is True, the rsync will be run from the cluster's node
+        If reverse is True, the rsync will be run from the cluster's node
         'source' to the local 'target'.
         """
         # Attempt to use 'rsync user@ip' directly, which is much faster than
@@ -2411,7 +2385,7 @@ class CloudVmRayBackend(backends.Backend):
                                            self._ssh_control_name(handle)))
         rsync_command.append(f'-e "ssh {ssh_options}"')
 
-        if is_down:
+        if reverse:
             rsync_command.extend([
                 f'{ssh_user}@{ip}:{source}',
                 target,
@@ -2427,7 +2401,7 @@ class CloudVmRayBackend(backends.Backend):
                                           log_path=log_path,
                                           stream_logs=stream_logs,
                                           shell=True)
-        up_or_down = 'up' if not is_down else 'down'
+        up_or_down = 'up' if not reverse else 'down'
         backend_utils.handle_returncode(
             returncode,
             command, f'Failed to rsync {up_or_down} {source} -> {target}, '
