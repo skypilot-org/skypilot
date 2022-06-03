@@ -88,7 +88,7 @@ def _get_latest_built_sky_callback_wheel() -> pathlib.Path:
 
 def _build_sky_callback_wheel() -> pathlib.Path:
     """Build a wheel for Sky Callback."""
-    norm_path = str(SKY_PACKAGE_PATH / 'skylet' / 'callbacks') + os.sep
+    norm_path = str(SKY_PACKAGE_PATH / 'callbacks') + os.sep
     try:
         subprocess.run([
             'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
