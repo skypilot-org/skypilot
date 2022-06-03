@@ -343,7 +343,7 @@ def _check_resources_match(backend: backends.Backend,
             handle.launched_resources)
         if node_type != inferred_node_type:
             name_arg = ''
-            if cluster_name == _default_interactive_node_name(
+            if cluster_name != _default_interactive_node_name(
                     inferred_node_type):
                 name_arg = f' -c {cluster_name}'
             raise click.UsageError(
