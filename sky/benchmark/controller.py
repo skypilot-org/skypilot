@@ -190,16 +190,16 @@ class BenchmarkController:
                         timestamps.append(ts)
 
             num_steps = int(len(timestamps) / 2)
-            steps_per_sec = 0
+            sec_per_step = 0
             for i in range(num_steps):
                 start = timestamps[2 * i]
                 end = timestamps[2 * i + 1]
-                steps_per_sec += end - start
-            steps_per_sec /= num_steps
+                sec_per_step += end - start
+            sec_per_step /= num_steps
 
             record = benchmark_state.BenchmarkRecord(
                 num_steps,
-                steps_per_sec,
+                sec_per_step,
                 total_steps,
                 start_ts,
                 timestamps[0],

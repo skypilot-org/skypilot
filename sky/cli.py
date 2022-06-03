@@ -1173,10 +1173,9 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
         record = result['record']
         prep_time = record.first_ts - record.start_ts
         run_time = record.last_ts - record.first_ts
-        sec_per_step = 1 / record.steps_per_sec
-        cost_per_step = num_nodes * resources.get_cost(sec_per_step)
+        cost_per_step = num_nodes * resources.get_cost(record.sec_per_step)
 
-        total_time = prep_time + sec_per_step * record.total_steps
+        total_time = prep_time + record.sec_per_step * record.total_steps
         total_cost = num_nodes * resources.get_cost(total_time)
 
         row = [
@@ -1191,7 +1190,7 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
             # STEPS
             record.num_steps,
             # SEC/ITER
-            f'{sec_per_step:.2f}',
+            f'{record.sec_per_step:.2f}',
             # $/ITER
             f'{cost_per_step:.6f}',
             # TOTAL_TIME (hr)

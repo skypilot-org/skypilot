@@ -66,7 +66,7 @@ class BenchmarkStatus(enum.Enum):
 class BenchmarkRecord(NamedTuple):
 
     num_steps: int
-    steps_per_sec: float
+    sec_per_step: float
     total_steps: int
     start_ts: int
     first_ts: int
