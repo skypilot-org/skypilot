@@ -2359,7 +2359,6 @@ class CloudVmRayBackend(backends.Backend):
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
         rsync_command = ['rsync', _RSYNC_DISPLAY_OPTION]
-
         # Legend
         #   dir-merge: ignore file can appear in any subdir, applies to that
         #     subdir downwards
