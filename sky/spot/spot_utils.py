@@ -16,6 +16,7 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.spot import constants
 from sky.spot import spot_state
 
 logger = sky_logging.init_logger(__name__)
@@ -119,8 +120,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
                 backend = backend_utils.get_backend_from_handle(handle)
                 backend.teardown(handle, terminate=True)
 
-            # Set the job status to FAILED.
-            spot_state.set_failed(job_id)
+            # The controller process for this job is not running: it must
+            # have exited abnormally, and we should set the job status to
+            # FAILED_CONTROLLER.
+            spot_state.set_failed(job_id,
+                                  spot_state.SpotStatus.FAILED_CONTROLLER)
             continue
 
         # Send the signal to the spot job controller.
@@ -181,9 +185,15 @@ def stream_logs_by_id(job_id: int) -> str:
         job_status = spot_state.get_status(job_id)
 
     if job_status.is_terminal():
+        job_msg = ''
+        if job_status.is_failed():
+            job_msg = ('\nFor detailed error message, please check: '
+                       f'{colorama.Style.BRIGHT}sky logs '
+                       f'{constants.SPOT_CONTROLLER_NAME} {job_id}'
+                       f'{colorama.Style.RESET_ALL}')
         return (
             f'Job {job_id} is already in terminal state {job_status.value}. '
-            'Logs will not be shown.')
+            f'Logs will not be shown.{job_msg}')
     task_name = spot_state.get_task_name_by_job_id(job_id)
     cluster_name = generate_spot_cluster_name(task_name, job_id)
     backend = backends.CloudVmRayBackend()

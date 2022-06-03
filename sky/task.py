@@ -8,6 +8,7 @@ import yaml
 
 import sky
 from sky import clouds
+from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_transfer as data_transfer_lib
 from sky.data import data_utils
@@ -65,6 +66,12 @@ def _is_valid_env_var(name: str) -> bool:
 class Task:
     """Task: a coarse-grained stage in an application."""
 
+    # Update the key list when a new field is added.
+    _YAML_KEYS = [
+        'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs', 'file_mounts',
+        'inputs', 'outputs', 'resources'
+    ]
+
     def __init__(
         self,
         name: Optional[str] = None,
@@ -108,7 +115,7 @@ class Task:
             the same command, or a lambda, as documented above.
           docker_image: The base docker image that this Task will be built on.
             In effect when LocalDockerBackend is used.  Defaults to
-            'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04'.
+            'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
         """
         self.name = name
         self.run = run
@@ -118,7 +125,7 @@ class Task:
         self._envs = envs
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
-                             'gpuci/miniconda-cuda:11.4-runtime-ubuntu18.04')
+                             'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
         self.num_nodes = num_nodes
 
         self.inputs = None
@@ -129,6 +136,11 @@ class Task:
         self.resources = {sky.Resources()}
         self.time_estimator_func = None
         self.file_mounts = None
+
+        # Only set when 'self' is a spot controller task: 'self.spot_task' is
+        # the underlying managed spot task (Task object).
+        self.spot_task = None
+
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
 
@@ -202,6 +214,8 @@ class Task:
         if config is None:
             config = {}
 
+        backend_utils.check_fields(config.keys(), Task._YAML_KEYS)
+
         task = Task(
             config.pop('name', None),
             run=config.pop('run', None),
@@ -263,9 +277,8 @@ class Task:
             if acc.startswith('tpu-') and task.num_nodes > 1:
                 raise ValueError('Multi-node TPU cluster not supported. '
                                  f'Got num_nodes={task.num_nodes}')
-        if len(config) > 0:
-            raise ValueError(f'Unknown fields in in YAML: {config.keys()}')
         task.set_resources({resources})
+        assert not config, f'Invalid task args: {config.keys()}'
         return task
 
     def to_yaml_config(self) -> Dict[str, Any]:

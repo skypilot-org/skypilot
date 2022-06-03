@@ -236,6 +236,9 @@ class Storage(object):
         storage.delete()
     """
 
+    # Update the key list when a new field is added.
+    _YAML_KEYS = ['name', 'source', 'store', 'mode', 'persistent']
+
     class StorageMetadata(object):
         """A pickle-able tuple of:
 
@@ -607,10 +610,13 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
+        backend_utils.check_fields(config.keys(), cls._YAML_KEYS)
+
         name = config.pop('name', None)
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
+
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
             mode = StorageMode(mode_str.upper())
@@ -618,6 +624,9 @@ class Storage(object):
             # Make sure this keeps the same as the default mode in __init__
             mode = StorageMode.MOUNT
         persistent = config.pop('persistent', True)
+
+        assert not config, f'Invalid storage args: {config.keys()}'
+
         # Validation of the config object happens on instantiation.
         storage_obj = cls(name=name,
                           source=source,
@@ -625,9 +634,6 @@ class Storage(object):
                           mode=mode)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
-        if config:
-            raise exceptions.StorageSpecError(
-                f'Invalid storage spec. Unknown fields: {config.keys()}')
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:

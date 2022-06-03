@@ -46,10 +46,11 @@ class _SQLiteConn(threading.local):
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS clusters (
             name TEXT PRIMARY KEY,
-            lauched_at INTEGER,
+            launched_at INTEGER,
             handle BLOB,
             last_use TEXT,
-            status TEXT)""")
+            status TEXT,
+            autostop INTEGER DEFAULT -1)""")
         # Table for Sky Config (e.g. enabled clouds)
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS config (
@@ -58,7 +59,7 @@ class _SQLiteConn(threading.local):
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS storage (
             name TEXT PRIMARY KEY,
-            lauched_at INTEGER,
+            launched_at INTEGER,
             handle BLOB,
             last_use TEXT,
             status TEXT)""")
@@ -71,11 +72,6 @@ class _SQLiteConn(threading.local):
         # For backward compatibility.
         db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
                                      'benchmark', 'TEXT DEFAULT NULL')
-        db_utils.rename_column(self.cursor, self.conn, 'clusters', 'lauched_at',
-                               'launched_at')
-        db_utils.rename_column(self.cursor, self.conn, 'storage', 'lauched_at',
-                               'launched_at')
-
         self.conn.commit()
 
 
