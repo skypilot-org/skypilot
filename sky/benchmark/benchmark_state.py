@@ -7,7 +7,7 @@ import sqlite3
 import time
 import threading
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Union
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 
@@ -45,10 +45,7 @@ class _BenchmarkSQLiteConn(threading.local):
             cluster TEXT PRIMARY KEY,
             num_nodes INTEGER,
             resources BLOB,
-            start_ts INTEGER,
-            first_ts INTEGER,
-            last_ts INTEGER,
-            iters INTEGER,
+            record BLOB,
             benchmark TEXT,
             FOREIGN KEY (benchmark)
             REFERENCES benchmark (name)
@@ -64,6 +61,16 @@ class BenchmarkStatus(enum.Enum):
 
     RUNNING = 'RUNNING'
     FINISHED = 'FINISHED'
+
+
+class BenchmarkRecord(NamedTuple):
+
+    num_steps: int
+    steps_per_sec: float
+    total_steps: int
+    start_ts: int
+    first_ts: int
+    last_ts: int
 
 
 def add_benchmark(benchmark_name: str, task_name: Union[None, str]) -> None:
@@ -92,28 +99,18 @@ def add_benchmark_result(
     resources = pickle.dumps(cluster_handle.launched_resources)
     _BENCHMARK_DB.cursor.execute(
         'INSERT INTO benchmark_results'
-        '(cluster, num_nodes, resources, '
-        'start_ts, first_ts, last_ts, iters, benchmark) '
-        'VALUES (?, ?, ?, NULL, NULL, NULL, NULL, ?)',
+        '(cluster, num_nodes, resources, record, benchmark) '
+        'VALUES (?, ?, ?, NULL, ?)',
         (name, num_nodes, resources, benchmark_name))
     _BENCHMARK_DB.conn.commit()
 
 
 def update_benchmark_result(benchmark_name: str, cluster_name: str,
-                            start_ts: int, first_ts: Union[None, int],
-                            last_ts: int, iters: int) -> None:
-    if first_ts is None:
-        _BENCHMARK_DB.cursor.execute(
-            'UPDATE benchmark_results SET '
-            'start_ts=(?), first_ts=NULL, last_ts=(?), iters=(?) '
-            'WHERE cluster=(?) AND benchmark=(?)',
-            (start_ts, last_ts, iters, cluster_name, benchmark_name))
-    else:
-        _BENCHMARK_DB.cursor.execute(
-            'UPDATE benchmark_results SET '
-            'start_ts=(?), first_ts=(?), last_ts=(?), iters=(?) '
-            'WHERE cluster=(?) AND benchmark=(?)',
-            (start_ts, first_ts, last_ts, iters, cluster_name, benchmark_name))
+                            benchmark_record: BenchmarkRecord) -> None:
+    _BENCHMARK_DB.cursor.execute(
+        'UPDATE benchmark_results SET '
+        'record=(?) WHERE benchmark=(?) AND cluster=(?)',
+        (pickle.dumps(benchmark_record), benchmark_name, cluster_name))
     _BENCHMARK_DB.conn.commit()
 
 
@@ -168,16 +165,15 @@ def get_benchmark_results(benchmark_name: str) -> List[Dict[str, Any]]:
         'select * from benchmark_results where benchmark=(?)',
         (benchmark_name,))
     records = []
-    for row in rows:
+    for cluster, num_nodes, resources, benchmark_record, benchmark in rows:
+        if benchmark_record is not None:
+            benchmark_record = pickle.loads(benchmark_record)
         record = {
-            'cluster': row[0],
-            'num_nodes': row[1],
-            'resources': pickle.loads(row[2]),
-            'start_ts': row[3],
-            'first_ts': row[4],
-            'last_ts': row[5],
-            'iters': row[6],
-            'benchmark': row[7],
+            'cluster': cluster,
+            'num_nodes': num_nodes,
+            'resources': pickle.loads(resources),
+            'record': benchmark_record,
+            'benchmark': benchmark,
         }
         records.append(record)
     return records
