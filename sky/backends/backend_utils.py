@@ -74,7 +74,7 @@ WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 # We use fixed IP address to avoid DNS lookup blocking the check, for machine
 # with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
-_TEST_IP = '1.1.1.1'
+_TEST_IP = '8.8.8.8'
 
 # GCP has a 63 char limit; however, Ray autoscaler adds many
 # characters. Through testing, 37 chars is the maximum length for the Sky
