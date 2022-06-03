@@ -1,54 +1,91 @@
-from datetime import datetime
+import json
 import os
-import psutil
+import subprocess
+import tempfile
 import threading
 import time
 import queue
 
-SKY_CLOUD_BENCHMARK_DIR = '~/sky_benchmark_dir'
+import psutil
+
+SKY_REMOTE_BENCHMARK_DIR = '~/sky_benchmark_dir'
+CONFIG = 'config.json'
 TIMESTAMP_LOG = 'timestamps.log'
 NUM_BYTES_PER_TIMESTAMP = 4
 BYTE_ORDER = 'big'
 
 
-class SkyCallback(object):
+class SkyCallback:
 
     def __init__(self,
-                 log_dir=SKY_CLOUD_BENCHMARK_DIR,
+                 log_dir=SKY_REMOTE_BENCHMARK_DIR,
                  max_queue_size=10,
-                 flush_secs=5):
-        self.log_dir = os.path.join(
-            log_dir, 'sky-' + datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f'))
-        self.log_dir = os.path.expanduser(self.log_dir)
-        os.makedirs(self.log_dir, exist_ok=True)
+                 flush_secs=10):
+        self.start_ts = int(psutil.Process(os.getpid()).create_time())
+        self.total_train_steps = None
 
-        # TODO: For generality, use protobuf to write the timestamp log.
-        self._general_file_writer = open(
-            os.path.join(self.log_dir, TIMESTAMP_LOG), 'wb')
+        # Create a log directory.
+        self.log_dir = os.path.expanduser(log_dir)
+        os.makedirs(self.log_dir, exist_ok=True)
+        self._save_config()
+
+        # Save the timestamps in the local storage.
+        self._general_file_writer = tempfile.NamedTemporaryFile('w+b', delete=False)
         self._async_writer = _AsyncWriter(self._general_file_writer,
                                           max_queue_size, flush_secs)
-        # Save the start timestamp
-        self._save_start_time()
-        self.flush()
+
+        # Asynchronously copy the locally saved timestamps
+        # to the cloud storage.
+        self._async_copy_worker = _AsyncCopyWorker(
+            self._general_file_writer.name,
+            os.path.join(self.log_dir, TIMESTAMP_LOG),
+            flush_secs,
+        )
+        self._async_copy_worker.start()
+
+    def config(self, total_train_steps):
+        self.total_train_steps = total_train_steps
+        self._save_config()
+
+    def _save_config(self):
+        config = {
+            'start_ts': self.start_ts,
+            'total_steps': self.total_train_steps,
+        }
+        config_str = json.dumps(config)
+        with open(os.path.join(self.log_dir, CONFIG), 'w') as f:
+            f.write(config_str)
 
     def _save_timestamp(self, timestamp):
+        # TODO: For generality, use protobuf to write the timestamp log.
         timestamp = timestamp.to_bytes(NUM_BYTES_PER_TIMESTAMP,
                                        byteorder=BYTE_ORDER)
         self._async_writer.write(timestamp)
 
-    def _save_start_time(self):
-        start_time = int(psutil.Process(os.getpid()).create_time())
-        self._save_timestamp(start_time)
-
-    def save_timestamp(self):
+    def on_train_step_begin(self):
         now = int(time.time())
         self._save_timestamp(now)
 
-    def flush(self):
-        self._async_writer.flush()
+    def on_train_step_end(self):
+        now = int(time.time())
+        self._save_timestamp(now)
 
-    def close(self):
-        self._async_writer.close()
+
+class _AsyncCopyWorker(threading.Thread):
+
+    def __init__(self, src, dst, interval=10):
+        threading.Thread.__init__(self)
+        self.src = src
+        self.dst = dst
+        self.interval = interval
+
+    def run(self):
+        while True:
+            subprocess.run(['cp', str(self.src), str(self.dst)], check=False)
+            time.sleep(self.interval)
+
+    def stop(self):
+        self.join()
 
 
 # FIXME: Check the license of the snippet below.
