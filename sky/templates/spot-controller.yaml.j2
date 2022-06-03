@@ -17,11 +17,11 @@ setup: |
   # Install cli dependencies
   (pip list | grep boto3 2>&1 > /dev/null && \
    pip list | grep google-api-python-client 2>&1 > /dev/null) || \
-   pip3 install "$(echo {{sky_remote_path}}/*.whl)[aws,gcp]" 2>&1 > /dev/null
+   pip3 install "$(echo {{sky_remote_path}}/sky-*.whl)[aws,gcp]" 2>&1 > /dev/null
 
   # We do not install azure dependencies for now since our subscription does not support spot instances.
   # pip list | grep azure-cli 2>&1 > /dev/null || \
-  #  pip3 install "$(echo {{sky_remote_path}}/*.whl)[azure]" 2>&1 > /dev/null 
+  #  pip3 install "$(echo {{sky_remote_path}}/sky-*.whl)[azure]" 2>&1 > /dev/null 
 
   gcloud --version 2>&1 > /dev/null || \
   (wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && \
