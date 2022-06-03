@@ -1221,7 +1221,7 @@ class CloudVmRayBackend(backends.Backend):
     def check_resources_match(self, handle: ResourceHandle,
                               task: task_lib.Task):
         """Check if resources requested by the task are available.
-        
+
         The resources requested by the task should be smaller than the existing
         cluster.
         """

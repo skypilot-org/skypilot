@@ -25,6 +25,7 @@ class Backend:
 
     def check_resources_match(self, handle: ResourceHandle,
                               task: 'task_lib.Task') -> None:
+        """Check whether resources of the task is satisfied by handle."""
         raise NotImplementedError
 
     def provision(self,
