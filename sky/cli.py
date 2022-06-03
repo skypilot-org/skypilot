@@ -34,7 +34,6 @@ import os
 import shlex
 import sys
 import tempfile
-import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import yaml
@@ -53,11 +52,10 @@ from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
-from sky.benchmark import benchmark_utils
+from sky.benchmark.controller import BenchmarkController
 from sky.clouds import service_catalog
 from sky.data import data_utils
 from sky.data.storage import StoreType
-from sky.skylet import log_lib
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.utils.cli_utils import status_utils
@@ -265,11 +263,6 @@ _TASK_OPTIONS = [
         default=None,
         help=('Whether to request spot instances. If specified, override the '
               '"resources.use_spot".')),
-    click.option('--instance-type',
-                 '-t',
-                 required=False,
-                 type=str,
-                 help='Instance type to use.'),
     click.option(
         '--env',
         required=False,
@@ -629,7 +622,6 @@ def launch(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
-    instance_type: Optional[str],
     env: List[Dict[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
@@ -701,11 +693,6 @@ def launch(
                 override_params['accelerators'] = None
             else:
                 override_params['accelerators'] = gpus
-        if instance_type is not None:
-            if instance_type.lower() == 'none':
-                override_params['instance_type'] = None
-            else:
-                override_params['instance_type'] = instance_type
         if use_spot is not None:
             override_params['use_spot'] = use_spot
         if disk_size is not None:
@@ -763,7 +750,6 @@ def exec(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
-    instance_type: Optional[str],
     env: List[Dict[str, str]],
 ):
     """Execute a task or a command on a cluster (skip setup).
@@ -869,11 +855,6 @@ def exec(
                 override_params['accelerators'] = None
             else:
                 override_params['accelerators'] = gpus
-        if instance_type is not None:
-            if instance_type.lower() == 'none':
-                override_params['instance_type'] = None
-            else:
-                override_params['instance_type'] = instance_type
         if use_spot is not None:
             override_params['use_spot'] = use_spot
 
@@ -892,63 +873,22 @@ def exec(
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _get_resource_options(yaml_path: str) -> Union[None, Dict[str, str]]:
-    with open(os.path.expanduser(yaml_path), 'r') as f:
-        config = yaml.safe_load(f)
+def _get_resource_candidates(yaml_path: str) -> Union[None, Dict[str, str]]:
+    config = backend_utils.read_yaml(os.path.expanduser(yaml_path))
     assert isinstance(config, dict)
     if config.get('resources') is None:
         return
 
     resources = config['resources']
     assert isinstance(resources, dict)
-    if resources.get('options') is None:
+    if resources.get('candidates') is None:
         return
 
-    options = resources['options']
-    assert isinstance(options, list)
-    if len(options) == 0:
+    candidates = resources['candidates']
+    assert isinstance(candidates, list)
+    if len(candidates) == 0:
         return
-    return options
-
-
-def _parallel_launch(yaml_paths: List[str], cluster_names: List[str],
-                     launch_params: List[Dict[str, Any]]) -> None:
-    num_clusters = len(cluster_names)
-    assert (len(yaml_paths) == num_clusters and
-            len(launch_params) == num_clusters)
-
-    launch_cmds = []
-    for yaml_path, cluster, param in zip(yaml_paths, cluster_names,
-                                         launch_params):
-        # detached run is required for parallel launch
-        cmd = ['sky', 'launch', yaml_path, '-c', cluster, '-d', '-y']
-        for arg_name, arg in param.items():
-            if isinstance(arg, list):
-                for v in arg:
-                    cmd += [f'--{arg_name}', str(v)]
-            else:
-                cmd += [f'--{arg_name}', str(arg)]
-        launch_cmds.append(cmd)
-
-    # TODO: Provide a rich progress bar for summarizing cluster setup status.
-    def _launch_with_log(cluster: str, cmd: List[str], wait: int) -> None:
-        time.sleep(wait)  # A bandage solution to avoid boto3 errors.
-        log_lib.run_with_log(
-            cmd,
-            log_path='/dev/null',
-            stream_logs=True,
-            prefix=
-            f'{colorama.Fore.MAGENTA}({cluster}){colorama.Style.RESET_ALL} ',
-            skip_lines=[
-                'optimizer.py',
-                'Tip: ',
-            ],  # FIXME: Use regex
-            end_streaming_at='Job submitted with Job ID:',
-        )
-
-    backend_utils.run_in_parallel(
-        lambda arg: _launch_with_log(*arg),
-        list(zip(cluster_names, launch_cmds, range(num_clusters))))
+    return candidates
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -970,6 +910,16 @@ def bench():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
+@click.option(
+    '--idle-minutes-to-autostop',
+    '-i',
+    default=None,
+    type=int,
+    required=False,
+    help=('Automatically stop the cluster after this many minutes '
+          'of idleness after setup/file_mounts. This is equivalent to '
+          'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
+          'If not set, the cluster will not be auto-stopped.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -986,15 +936,17 @@ def benchmark_launch(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
-    instance_type: Optional[str],
     env: List[Dict[str, str]],
     disk_size: Optional[int],
+    idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ) -> None:
     """Benchmark a task on different resources."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
-        raise click.BadParameter(f'Benchmark {benchmark} already exists. To delete the previous benchmark result, run `sky bench delete {benchmark}`.')
+        raise click.BadParameter(f'Benchmark {benchmark} already exists. '
+                                 'To delete the previous benchmark result, '
+                                 f'run `sky bench delete {benchmark}`.')
 
     entrypoint = ' '.join(entrypoint)
     if entrypoint:
@@ -1014,13 +966,13 @@ def benchmark_launch(
         entrypoint = None
         is_yaml = False
 
-    options = None
+    candidates = None
     if is_yaml:
-        options = _get_resource_options(entrypoint)
+        candidates = _get_resource_candidates(entrypoint)
 
     # The user can specify the benchmark candidates in either of the two ways:
-    # 1. By specifying resources.options in the YAML.
-    # 2. By specifying multiple gpu types with --gpus.
+    # 1. By specifying resources.candidates in the YAML.
+    # 2. By specifying gpu types as a command line argument (--gpus).
     if gpus is not None:
         gpus = gpus.split(',')
         gpus = [gpu.strip() for gpu in gpus]
@@ -1029,78 +981,58 @@ def benchmark_launch(
         else:
             # If len(gpus) > 1, gpus is intrepreted
             # as a list of benchmark candidates.
-            if options is None:
-                options = [{'accelerators': gpu} for gpu in gpus]
+            if candidates is None:
+                candidates = [{'accelerators': gpu} for gpu in gpus]
                 gpus = None
             else:
                 raise ValueError('Provide benchmark candidates in either of '
-                                 '--gpus and resources.options in the YAML.')
-    if options is None:
-        options = [{}]
+                                 '--gpus and resources.candidates in the YAML.')
+    if candidates is None:
+        candidates = [{}]
 
     if not yes:
-        plural = 's' if len(options) > 1 else ''
-        prompt = f'Launching {len(options)} cluster{plural}. Proceed?'
+        plural = 's' if len(candidates) > 1 else ''
+        prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
         click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    override_params = {}
+    config = None
+    if is_yaml:
+        config = backend_utils.read_yaml(os.path.expanduser(entrypoint))
+    if config is None:
+        config = {}
+
+    # Override the yaml config with the command line arguments.
     if name is not None:
-        override_params['name'] = name
+        config['name'] = name
     if workdir is not None:
-        override_params['workdir'] = workdir
+        config['workdir'] = workdir
+    if num_nodes is not None:
+        config['num_nodes'] = num_nodes
     if cloud is not None:
-        override_params['cloud'] = cloud
+        config['resources']['cloud'] = cloud
     if region is not None:
-        override_params['region'] = region
+        config['resources']['region'] = region
     if gpus is not None:
         if gpus.lower() == 'none':
-            override_params['accelerators'] = None
+            config['resources']['accelerators'] = None
         else:
-            override_params['accelerators'] = gpus
-    if num_nodes is not None:
-        override_params['num_nodes'] = num_nodes
+            config['resources']['accelerators'] = gpus
     if use_spot is not None:
-        override_params['use_spot'] = use_spot
-    if instance_type is not None:
-        override_params['instance_type'] = instance_type
+        config['resources']['use_spot'] = use_spot
     if disk_size is not None:
-        override_params['disk_size'] = disk_size
+        config['resources']['disk_size'] = disk_size
+
+    cl_args = {}
+    if idle_minutes_to_autostop is not None:
+        cl_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
     if len(env) > 0:
-        override_params['env'] = [f'{k}={v}' for k, v in env.items()]
+        cl_args['env'] = [f'{k}={v}' for k, v in env.items()]
 
-    # Generate command line arguments for each benchmark candidate.
-    clusters = [f'{benchmark}-cluster{i}' for i in range(len(options))]
-    launch_params = []
-    for option in options:
-        params = override_params.copy()
-        params.update(option)
-        for k in list(params.keys()):
-            if '_' in k:
-                params[k.replace('_', '-')] = params.pop(k)
-            elif k == 'accelerators':
-                params['gpus'] = params.pop(k)
-        launch_params.append(params)
-    _parallel_launch([entrypoint] * len(options), clusters, launch_params)
-
-    # If at least one cluster was launched successfully,
-    # add the benchmark to the state.
-    benchmark_created = False
-    for cluster in clusters:
-        record = global_user_state.get_cluster_from_name(cluster)
-        if record is not None:
-            if not benchmark_created:
-                if is_yaml:
-                    task_name = _get_task_name_from_yaml(entrypoint)
-                else:
-                    task_name = None
-                benchmark_state.add_benchmark(benchmark, task_name)
-                benchmark_created = True
-            global_user_state.set_cluster_benchmark_name(cluster, benchmark)
-            benchmark_state.add_benchmark_result(benchmark, record['handle'])
+    BenchmarkController.launch(benchmark, config, cl_args, candidates)
 
     logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
                 f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
-                '\nTo check the bench results (on the fly): '
+                '\nTo see the benchmark results: '
                 f'{backend_utils.BOLD}sky bench show '
                 f'{benchmark}{backend_utils.RESET_BOLD}'
                 '\nTo stop the clusters: '
@@ -1121,6 +1053,7 @@ def benchmark_ls() -> None:
         'TASK',
         'LAUNCHED',
         'STATUS',
+        '#NODES',
     ]
 
     max_num_candidates = 1
@@ -1138,15 +1071,10 @@ def benchmark_ls() -> None:
     benchmark_table = log_utils.create_table(columns)
 
     for benchmark in benchmarks:
-        benchmark_results = benchmark_state.get_benchmark_results(
-            benchmark['name'])
         if benchmark['task'] is not None:
             task = benchmark['task']
         else:
             task = '-'
-        benchmark_resources = [
-            f'{b["num_nodes"]}x {b["resources"]}' for b in benchmark_results
-        ]
         row = [
             # BENCHMARK
             benchmark['name'],
@@ -1157,10 +1085,15 @@ def benchmark_ls() -> None:
             # STATUS
             benchmark['status'].value,
         ]
+
+        benchmark_results = benchmark_state.get_benchmark_results(
+            benchmark['name'])
+        # NODES
+        row.append(benchmark_results[0]['num_nodes'])
         # RESOURCES
-        for resources in benchmark_resources:
-            row.append(resources)
-        row += [''] * (max_num_candidates - len(benchmark_resources))
+        for b in benchmark_results:
+            row.append(str(b['resources']))
+        row += [''] * (max_num_candidates - len(benchmark_results))
         benchmark_table.add_row(row)
     if benchmarks:
         click.echo(benchmark_table)
@@ -1168,26 +1101,8 @@ def benchmark_ls() -> None:
         click.echo('No benchmark history found.')
 
 
-def _download_and_update_benchmark_logs(benchmark: str,
-                                        clusters: List[str]) -> None:
-    summaries = benchmark_utils.get_benchmark_summaries(benchmark, clusters)
-    for cluster, summary in summaries.items():
-        benchmark_state.update_benchmark_result(
-            benchmark,
-            cluster,
-            summary['start_ts'],
-            summary['first_ts'],
-            summary['last_ts'],
-            summary['iters'],
-        )
-
-
 @bench.command('show', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
-@click.option('--total-iters',
-              type=int,
-              required=False,
-              help='Total number of iterations.')
 @click.option('--force-download',
               default=False,
               is_flag=True,
@@ -1200,39 +1115,30 @@ def _download_and_update_benchmark_logs(benchmark: str,
               required=False,
               help='Show all information in full.')
 # pylint: disable=redefined-builtin
-def benchmark_show(benchmark: str, total_iters: Optional[int],
-                   force_download: bool, all: bool) -> None:
+def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
     """Show a benchmark report."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
 
-    if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or
-            force_download):
+    if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or force_download):
         clusters = global_user_state.get_clusters_from_benchmark(benchmark)
-        running = [
-            cluster['name']
-            for cluster in clusters
-            if cluster['status'] == global_user_state.ClusterStatus.UP
-        ]
-        if len(running) > 0:
-            _download_and_update_benchmark_logs(benchmark, running)
+        clusters = [cluster['name'] for cluster in clusters]
+        BenchmarkController.download_logs(benchmark, clusters)
+        BenchmarkController.parse_logs(benchmark, clusters)
 
     # Generate a report.
     columns = [
         'NAME',
         'RESOURCES',
-        'INIT_TIME (min)',
+        'PREP_TIME (min)',
         'RUN_TIME (min)',
-        '#ITERS',
-        'SEC/ITER',
-        '$/ITER',
+        '#STEPS',
+        'SEC/STEP',
+        '$/STEP',
+        'TOTAL_TIME (hr)',
+        'TOTAL_COST ($)',
     ]
-    if total_iters is not None:
-        columns += [
-            'TOTAL_TIME (hr)',
-            'TOTAL_COST ($)',
-        ]
     if all:
         columns += [
             'START_TIMESTAMP',
@@ -1245,66 +1151,45 @@ def benchmark_show(benchmark: str, total_iters: Optional[int],
     for result in benchmark_results:
         num_nodes = result['num_nodes']
         resources = result['resources']
-        start_ts = result['start_ts']
-        first_ts = result['first_ts']
-        last_ts = result['last_ts']
-        iters = result['iters']
 
-        if start_ts is not None and first_ts is not None:
-            init_time = first_ts - start_ts
-        else:
-            init_time = 0
+        record = result['record']
+        prep_time = record.first_ts - record.start_ts
+        run_time = record.last_ts - record.first_ts
+        sec_per_step = 1 / record.steps_per_sec
+        cost_per_step = num_nodes * resources.get_cost(sec_per_step)
 
-        if last_ts is not None and first_ts is not None:
-            run_time = last_ts - first_ts
-        else:
-            run_time = 0
-
-        if run_time > 0 and iters is not None:
-            sec_per_iter = run_time / (iters - 1)
-            cost_per_iter = num_nodes * resources.get_cost(sec_per_iter)
-        else:
-            sec_per_iter = 0
-            cost_per_iter = 0
+        total_time = prep_time + sec_per_step * record.total_steps
+        total_cost = num_nodes * resources.get_cost(total_time)
 
         row = [
             # NAME
             result['cluster'],
             # RESOURCES
             f'{num_nodes}x {resources}',
-            # INIT_TIME (min)
-            f'{init_time / 60:.2f}',
+            # PREP_TIME (min)
+            f'{prep_time / 60:.2f}',
             # RUN_TIME (min)
             f'{run_time / 60:.2f}',
-            # ITERS
-            iters,
+            # STEPS
+            record.num_steps,
             # SEC/ITER
-            f'{sec_per_iter:.2f}',
+            f'{sec_per_step:.2f}',
             # $/ITER
-            f'{cost_per_iter:.6f}',
+            f'{cost_per_step:.6f}',
+            # TOTAL_TIME (hr)
+            f'{total_time / 3600:.2f}',
+            # TOTAL_COST ($)
+            f'{total_cost:.2f}',
         ]
-        if total_iters is not None:
-            total_time = init_time + sec_per_iter * total_iters
-            total_cost = num_nodes * resources.get_cost(total_time)
-            row += [
-                # TOTAL_TIME (hr)
-                f'{total_time / 3600:.2f}',
-                # TOTAL_COST ($)
-                f'{total_cost:.4f}',
-            ]
 
         if all:
-            if first_ts is None:
-                first_ts = '-'
-            else:
-                first_ts = datetime.fromtimestamp(first_ts)
             row += [
                 # START_TIMESTAMP
-                datetime.fromtimestamp(start_ts),
+                datetime.fromtimestamp(record.start_ts),
                 # FIRST_TIMESTAMP
-                first_ts,
+                datetime.fromtimestamp(record.first_ts),
                 # LAST_TIMESTAMP
-                datetime.fromtimestamp(last_ts),
+                datetime.fromtimestamp(record.last_ts),
             ]
         cluster_table.add_row(row)
     click.echo(cluster_table)
@@ -1316,15 +1201,6 @@ def _terminate_or_stop_benchmark(benchmark, except_clusters, terminate, yes):
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
 
     clusters = global_user_state.get_clusters_from_benchmark(benchmark)
-    running = [
-        cluster['name']
-        for cluster in clusters
-        if cluster['status'] == global_user_state.ClusterStatus.UP
-    ]
-
-    if record['status'] == benchmark_state.BenchmarkStatus.RUNNING:
-        _download_and_update_benchmark_logs(benchmark, running)
-
     to_stop = [
         cluster['name']
         for cluster in clusters
@@ -1434,7 +1310,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         for cluster in clusters:
             global_user_state.set_cluster_benchmark_name(cluster['name'], None)
         benchmark_state.delete_benchmark(benchmark['name'])
-        benchmark_utils.remove_benchmark_logs(benchmark['name'])
+        BenchmarkController.remove_logs(benchmark['name'])
     click.secho(f'Benchmark {benchmark_list} deleted.', fg='green')
 
 
