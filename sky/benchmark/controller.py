@@ -1,4 +1,5 @@
 import colorama
+import copy
 import json
 import os
 import subprocess
@@ -20,7 +21,7 @@ SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 SKY_REMOTE_BENCHMARK_DIR = '~/.sky_benchmark_dir'
 SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
 
-SKY_BENCHMARK_BUCKET = 'sky-benchmark1'
+SKY_BENCHMARK_BUCKET = 'sky-benchmark'
 SKY_BENCHMARK_BUCKET_TYPE = data.StoreType.S3 # FIXME
 
 
@@ -62,7 +63,7 @@ class BenchmarkController:
         candidate_configs = []
         for cluster, candidate in zip(clusters, candidates):
             # Re-override the config with each candidate config.
-            candidate_config = config.copy()
+            candidate_config = copy.deepcopy(config)
             if 'resources' not in candidate_config:
                 candidate_config['resources'] = {}
             if 'candidates' in candidate_config['resources']:
