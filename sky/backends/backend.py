@@ -23,9 +23,9 @@ class Backend:
         def get_cluster_name(self) -> str:
             raise NotImplementedError
 
-    def check_resources_match(self, handle: ResourceHandle,
-                              task: 'task_lib.Task') -> None:
-        """Check whether resources of the task is satisfied by handle."""
+    def check_resources_fit_cluster(self, handle: ResourceHandle,
+                                    task: 'task_lib.Task') -> None:
+        """Check whether resources of the task are satisfied by cluster."""
         raise NotImplementedError
 
     def provision(self,

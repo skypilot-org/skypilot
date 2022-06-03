@@ -1218,9 +1218,9 @@ class CloudVmRayBackend(backends.Backend):
             'optimize_target', self._optimize_target) or OptimizeTarget.COST
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
-    def check_resources_match(self, handle: ResourceHandle,
-                              task: task_lib.Task):
-        """Check if resources requested by the task are available.
+    def check_resources_fit_cluster(self, handle: ResourceHandle,
+                                    task: task_lib.Task):
+        """Check if resources requested by the task fit the cluster.
 
         The resources requested by the task should be smaller than the existing
         cluster.
@@ -1259,7 +1259,7 @@ class CloudVmRayBackend(backends.Backend):
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             # Cluster already exists.
-            self.check_resources_match(handle, task)
+            self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return RetryingVmProvisioner.ToProvisionConfig(
@@ -2089,7 +2089,7 @@ class CloudVmRayBackend(backends.Backend):
     ) -> None:
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
-        self.check_resources_match(handle, task)
+        self.check_resources_fit_cluster(handle, task)
 
         # Otherwise, handle a basic Task.
         if task.run is None:

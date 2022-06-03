@@ -330,8 +330,8 @@ def _check_resources_match(backend: backends.Backend,
     additional arguments, then login succeeds.
 
     Args:
-        cluster_name
-        resources: Resources to attach to VM.
+        cluster_name: The name of the cluster.
+        task: The task requested to be run on the cluster.
         node_type: Only used for interactive node. Node type to attach to VM.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -347,11 +347,11 @@ def _check_resources_match(backend: backends.Backend,
                     inferred_node_type):
                 name_arg = f' -c {cluster_name}'
             raise click.UsageError(
-                f'Failed to attach to interactive cluster {cluster_name}. '
+                f'Failed to attach to interactive node {cluster_name}. '
                 f'Please use: {colorama.Style.BRIGHT}'
                 f'sky {inferred_node_type}{name_arg}{colorama.Style.RESET_ALL}')
         return
-    backend.check_resources_match(handle, task)
+    backend.check_resources_fit_cluster(handle, task)
 
 
 def _launch_with_confirm(
@@ -367,13 +367,13 @@ def _launch_with_confirm(
     node_type: Optional[str] = None,
 ):
     """Launch a cluster with a DAG."""
-    task = dag.tasks[0]
     if cluster is None:
         cluster = backend_utils.generate_cluster_name()
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
         dag = sky.optimize(dag)
+    task = dag.tasks[0]
 
     _check_resources_match(backend, cluster, task, node_type=node_type)
 
@@ -393,13 +393,13 @@ def _launch_with_confirm(
 
     if node_type is not None:
         if maybe_status != global_user_state.ClusterStatus.UP:
-            click.secho(f'Setting up interactive cluster {cluster}...',
+            click.secho(f'Setting up interactive node {cluster}...',
                         fg='yellow')
     elif not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
     if node_type is None or maybe_status != global_user_state.ClusterStatus.UP:
-        # No need to sky.launch again when interactive cluster is already up.
+        # No need to sky.launch again when interactive node is already up.
         sky.launch(dag,
                    dryrun=dryrun,
                    stream_logs=True,
@@ -455,7 +455,7 @@ def _create_and_ssh_into_node(
         if cluster_name != _default_interactive_node_name(node_type):
             name_arg = f' -c {cluster_name}'
         raise click.UsageError(
-            'Resources cannot be specified for an existing interactive cluster '
+            'Resources cannot be specified for an existing interactive node '
             f'{cluster_name!r}. To login to the cluster, use: '
             f'{colorama.Style.BRIGHT}'
             f'sky {node_type}{name_arg}{colorama.Style.RESET_ALL}')

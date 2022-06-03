@@ -141,8 +141,8 @@ class LocalDockerBackend(backends.Backend):
             self.images[c.name] = [c.image, metadata]
             self.containers[c.name] = c
 
-    def check_resources_match(self, handle: ResourceHandle,
-                              task: 'task_lib.Task') -> None:
+    def check_resources_fit_cluster(self, handle: ResourceHandle,
+                                    task: 'task_lib.Task') -> None:
         pass
 
     def provision(self,
