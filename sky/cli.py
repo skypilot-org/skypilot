@@ -337,6 +337,7 @@ def _check_resources_match(backend: backends.Backend,
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         return
+        
     if node_type is not None:
         inferred_node_type = _infer_interactive_node_type(
             handle.launched_resources)
@@ -346,8 +347,9 @@ def _check_resources_match(backend: backends.Backend,
                     inferred_node_type):
                 name_arg = f' -c {cluster_name}'
             raise click.UsageError(
-                f'Failed to attach to interactive cluster {cluster_name}.'
-                f'Please use: sky {inferred_node_type}{name_arg}')
+                f'Failed to attach to interactive cluster {cluster_name}. '
+                f'Please use: {colorama.Style.BRIGHT}'
+                f'sky {inferred_node_type}{name_arg}{colorama.Style.RESET_ALL}')
         return
     backend.check_resources_match(handle, task)
 
