@@ -6,9 +6,11 @@ on:
   push:
     branches:
       - master
+      - conda-test
   pull_request:
     branches:
       - master
+      - conda-test
 jobs:
   condatest:
     runs-on: ubuntu-latest
