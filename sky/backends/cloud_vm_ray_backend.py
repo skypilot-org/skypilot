@@ -1219,8 +1219,8 @@ class CloudVmRayBackend(backends.Backend):
             'optimize_target', self._optimize_target) or OptimizeTarget.COST
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
-    def _check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
-                                                   task: task_lib.Task):
+    def check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
+                                                  task: task_lib.Task):
         """Check if resources requested by the task are available."""
         assert len(task.resources) == 1, task.resources
 
@@ -1256,7 +1256,7 @@ class CloudVmRayBackend(backends.Backend):
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             # Cluster already exists.
-            self._check_task_resources_smaller_than_cluster(handle, task)
+            self.check_task_resources_smaller_than_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return RetryingVmProvisioner.ToProvisionConfig(

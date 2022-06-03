@@ -320,66 +320,61 @@ def _infer_interactive_node_type(resources: sky.Resources):
     return 'cpunode'
 
 
-def _check_interactive_node_resources_match(
-        node_type: str,
-        resources: sky.Resources,
-        launched_resources: sky.Resources,
-        user_requested_resources: Optional[bool] = False) -> None:
+def _check_resources_match(backend: backends.Backend,
+                           cluster_name: str,
+                           task: 'sky.Task',
+                           node_type: Optional[str] = None) -> None:
     """Check matching resources when reusing an existing cluster.
 
     The only exception is when [cpu|tpu|gpu]node -c cluster_name is used with no
     additional arguments, then login succeeds.
 
     Args:
-        node_type: Type of interactive node.
+        cluster_name
         resources: Resources to attach to VM.
-        launched_resources: Existing launched resources associated with cluster.
-        user_requested_resources: If true, user requested resources explicitly.
+        node_type: Only used for interactive node. Node type to attach to VM.
     """
-    # In the case where the user specifies no cloud, we infer the cloud from
-    # the launched resources before performing the check.
-    # e.g. user launches sky gpunode --gpus V100 creates an AWS(p3.2xlarge)
-    # but when the resource check will fail because is_same_resources expects
-    # resources.cloud and handle.launched_resources to match.
-    if resources.cloud is None:
-        assert launched_resources.cloud is not None, launched_resources
-        resources = resources.copy(cloud=launched_resources.cloud)
-
-    # TODO: Check for same number of launched_nodes if multi-node support is
-    # added for gpu/cpu/tpunode.
-    inferred_node_type = _infer_interactive_node_type(launched_resources)
-    node_type_match = inferred_node_type == node_type
-    launched_resources_match = resources.is_same_resources(launched_resources)
-    no_resource_requests = not user_requested_resources  # e.g. sky gpunode
-    if not (node_type_match and
-            (no_resource_requests or launched_resources_match)):
-        raise click.UsageError(
-            'Resources cannot change for an existing cluster.\n'
-            f'Existing: {inferred_node_type} with {launched_resources}\n'
-            f'Requested: {node_type} with {resources}\n')
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        return
+    if node_type is not None:
+        inferred_node_type = _infer_interactive_node_type(
+            handle.launched_resources)
+        if node_type != inferred_node_type:
+            name_arg = ''
+            if cluster_name == _default_interactive_node_name(
+                    inferred_node_type):
+                name_arg = f' -c {cluster_name}'
+            raise click.UsageError(
+                f'Failed to attach to interactive cluster {cluster_name}.'
+                f'Please use: sky {inferred_node_type}{name_arg}')
+        return
+    if isinstance(backend, backends.CloudVmRayBackend):
+        backend.check_task_resources_smaller_than_cluster(handle, task)
 
 
 def _launch_with_confirm(
-    dag,
-    backend,
-    cluster,
+    dag: sky.Dag,
+    backend: backends.Backend,
+    cluster: str,
     *,
-    dryrun,
-    detach_run,
+    dryrun: bool,
+    detach_run: bool,
     no_confirm: bool = False,
     idle_minutes_to_autostop: int = -1,
     retry_until_up: bool = False,
-    is_interactive: bool = False,
+    node_type: Optional[str] = None,
 ):
     """Launch a cluster with a DAG."""
-    # TODO(zhwu): Fail fast if the requested resources does not match the
-    # existing cluster.
+    task = dag.tasks[0]
     if cluster is None:
         cluster = backend_utils.generate_cluster_name()
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
         dag = sky.optimize(dag)
+
+    _check_resources_match(backend, cluster, task, node_type=node_type)
 
     confirm_shown = False
     if not no_confirm:
@@ -395,14 +390,14 @@ def _launch_with_confirm(
             confirm_shown = True
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    if is_interactive:
+    if node_type is not None:
         if maybe_status != global_user_state.ClusterStatus.UP:
             click.secho(f'Setting up interactive cluster {cluster}...',
                         fg='yellow')
     elif not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
-    if not is_interactive or maybe_status != global_user_state.ClusterStatus.UP:
+    if node_type is None or maybe_status != global_user_state.ClusterStatus.UP:
         # No need to sky.launch again when interactive cluster is already up.
         sky.launch(dag,
                    dryrun=dryrun,
@@ -457,20 +452,22 @@ def _create_and_ssh_into_node(
     if maybe_status is not None and user_requested_resources:
         name_arg = ''
         if cluster_name != _default_interactive_node_name(node_type):
-            name_arg = f'-c {cluster_name}'
+            name_arg = f' -c {cluster_name}'
         raise click.UsageError(
             'Resources cannot be specified for an existing interactive cluster '
             f'{cluster_name!r}. To login to the cluster, use: '
             f'{colorama.Style.BRIGHT}'
-            f'sky {node_type} {name_arg}{colorama.Style.RESET_ALL}')
+            f'sky {node_type}{name_arg}{colorama.Style.RESET_ALL}')
 
-    _launch_with_confirm(dag,
-                         backend,
-                         cluster_name,
-                         dryrun=False,
-                         detach_run=True,
-                         no_confirm=no_confirm,
-                         is_interactive=True)
+    _launch_with_confirm(
+        dag,
+        backend,
+        cluster_name,
+        dryrun=False,
+        detach_run=True,
+        no_confirm=no_confirm,
+        node_type=node_type,
+    )
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
