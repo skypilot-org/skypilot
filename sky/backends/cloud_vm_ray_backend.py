@@ -2340,14 +2340,8 @@ class CloudVmRayBackend(backends.Backend):
         log_path: str = '/dev/null',
         ip: Optional[str] = None,
         raise_error: bool = True,
-        reverse: bool = False,
-        filter_with_gitignore: bool = True,
     ) -> None:
-        """Runs rsync from 'source' to the cluster's node 'target'.
-
-        If reverse is True, the rsync will be run from the cluster's node
-        'source' to the local 'target'.
-        """
+        """Runs rsync from 'source' to the cluster's node 'target'."""
         # Attempt to use 'rsync user@ip' directly, which is much faster than
         # going through ray (either 'ray rsync_*' or sdk.rsync()).
         if ip is None:
@@ -2366,45 +2360,36 @@ class CloudVmRayBackend(backends.Backend):
         # OS has a default rsync==2.6.9 (16 years old).
         rsync_command = ['rsync', _RSYNC_DISPLAY_OPTION]
 
-        if filter_with_gitignore:
-            # Legend
-            #   dir-merge: ignore file can appear in any subdir, applies to that
-            #     subdir downwards
-            # Note that "-" is mandatory for rsync and means all patterns in the
-            # ignore files are treated as *exclude* patterns.  Non-exclude
-            # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
-            # allows it.
-            rsync_command.append(_RSYNC_FILTER_OPTION)
-            git_exclude = '.git/info/exclude'
-            if (pathlib.Path(source) / git_exclude).exists():
-                # Ensure file exists; otherwise, rsync will error out.
-                rsync_command.append(_RSYNC_EXCLUDE_OPTION)
+        # Legend
+        #   dir-merge: ignore file can appear in any subdir, applies to that
+        #     subdir downwards
+        # Note that "-" is mandatory for rsync and means all patterns in the
+        # ignore files are treated as *exclude* patterns.  Non-exclude
+        # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
+        # allows it.
+        rsync_command.append(_RSYNC_FILTER_OPTION)
+        git_exclude = '.git/info/exclude'
+        if (pathlib.Path(source) / git_exclude).exists():
+            # Ensure file exists; otherwise, rsync will error out.
+            rsync_command.append(_RSYNC_EXCLUDE_OPTION)
 
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,
                                            self._ssh_control_name(handle)))
         rsync_command.append(f'-e "ssh {ssh_options}"')
-
-        if reverse:
-            rsync_command.extend([
-                f'{ssh_user}@{ip}:{source}',
-                target,
-            ])
-        else:
-            rsync_command.extend([
-                source,
-                f'{ssh_user}@{ip}:{target}',
-            ])
+        rsync_command.extend([
+            source,
+            f'{ssh_user}@{ip}:{target}',
+        ])
         command = ' '.join(rsync_command)
 
         returncode = log_lib.run_with_log(command,
                                           log_path=log_path,
                                           stream_logs=stream_logs,
                                           shell=True)
-        up_or_down = 'up' if not reverse else 'down'
         backend_utils.handle_returncode(
             returncode,
-            command, f'Failed to rsync {up_or_down} {source} -> {target}, '
+            command, f'Failed to rsync up {source} -> {target}, '
             f'see {log_path} for details.',
             raise_error=raise_error)
 
