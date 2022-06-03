@@ -349,8 +349,7 @@ def _check_resources_match(backend: backends.Backend,
                 f'Failed to attach to interactive cluster {cluster_name}.'
                 f'Please use: sky {inferred_node_type}{name_arg}')
         return
-    if isinstance(backend, backends.CloudVmRayBackend):
-        backend.check_task_resources_smaller_than_cluster(handle, task)
+    backend.check_resources_match(handle, task)
 
 
 def _launch_with_confirm(

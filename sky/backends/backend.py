@@ -23,6 +23,10 @@ class Backend:
         def get_cluster_name(self) -> str:
             raise NotImplementedError
 
+    def check_resources_match(self, handle: ResourceHandle,
+                              task: 'task_lib.Task') -> None:
+        raise NotImplementedError
+
     def provision(self,
                   task: 'task_lib.Task',
                   to_provision: Optional['resources.Resources'],

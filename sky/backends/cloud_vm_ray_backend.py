@@ -638,7 +638,7 @@ class RetryingVmProvisioner(object):
                     f' was previously launched in {cloud} '
                     f'({region.name}). Relaunching in that region.')
             # This should be handled in the
-            # _check_task_resources_smaller_than_cluster function.
+            # check_task_resources_smaller_than_cluster function.
             assert (to_provision.region is None or
                     region.name == to_provision.region), (
                         f'Cluster {cluster_name!r} was previously launched in '
@@ -1219,8 +1219,8 @@ class CloudVmRayBackend(backends.Backend):
             'optimize_target', self._optimize_target) or OptimizeTarget.COST
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
-    def check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
-                                                  task: task_lib.Task):
+    def check_resources_match(self, handle: ResourceHandle,
+                              task: task_lib.Task):
         """Check if resources requested by the task are available."""
         assert len(task.resources) == 1, task.resources
 
@@ -1256,7 +1256,7 @@ class CloudVmRayBackend(backends.Backend):
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             # Cluster already exists.
-            self.check_task_resources_smaller_than_cluster(handle, task)
+            self.check_resources_match(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return RetryingVmProvisioner.ToProvisionConfig(
@@ -2086,7 +2086,7 @@ class CloudVmRayBackend(backends.Backend):
     ) -> None:
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
-        self._check_task_resources_smaller_than_cluster(handle, task)
+        self.check_resources_match(handle, task)
 
         # Otherwise, handle a basic Task.
         if task.run is None:
