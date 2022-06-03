@@ -637,8 +637,7 @@ class RetryingVmProvisioner(object):
                     f'Cluster {cluster_name!r} (status: {cluster_status.value})'
                     f' was previously launched in {cloud} '
                     f'({region.name}). Relaunching in that region.')
-            # This should be handled in the
-            # check_task_resources_smaller_than_cluster function.
+            # This should be handled in the check_resources_match function.
             assert (to_provision.region is None or
                     region.name == to_provision.region), (
                         f'Cluster {cluster_name!r} was previously launched in '
@@ -1221,7 +1220,11 @@ class CloudVmRayBackend(backends.Backend):
 
     def check_resources_match(self, handle: ResourceHandle,
                               task: task_lib.Task):
-        """Check if resources requested by the task are available."""
+        """Check if resources requested by the task are available.
+        
+        The resources requested by the task should be smaller than the existing
+        cluster.
+        """
         assert len(task.resources) == 1, task.resources
 
         launched_resources = handle.launched_resources
