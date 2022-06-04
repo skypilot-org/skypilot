@@ -735,6 +735,7 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
                                            f'Sky is not installed on {ip}')
 
 
+# TODO(mluo): Make this function compatible with CloudVMRayBackend's rsync
 def rsync_to_ip(ip: str, source: str, target: str, ssh_user: str,
                 ssh_key: str) -> None:
     """Rsyncs files to a remote ip."""

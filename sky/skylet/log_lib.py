@@ -13,6 +13,7 @@ import tempfile
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
+import ray
 
 from sky import sky_logging
 from sky.skylet import job_lib
@@ -257,9 +258,9 @@ def run_bash_command_with_log(bash_command: str,
         subprocess.call(f'chmod a+rwx {script_path}', shell=True)
 
         inner_command = f'/bin/bash -i {script_path}'
-        cuda_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
-        if cuda_devices is not None:
-            gpu_list = cuda_devices.split(',')
+        gpu_list = ray.get_gpu_ids()
+        if len(gpu_list) > 0:
+            gpu_list = [str(gpu_id) for gpu_id in gpu_list]
             # Switching users will give Ray process access to all GPUs,
             # instead of the GPUs allocated.
             inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(

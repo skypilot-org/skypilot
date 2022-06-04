@@ -2610,6 +2610,7 @@ class CloudVmRayBackend(backends.Backend):
                 os.remove(handle.tpu_delete_script)
         return True
 
+    # TODO(mluo): Move function to `backend_utils.py`
     def _rsync_up(
         self,
         handle: ResourceHandle,
