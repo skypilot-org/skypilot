@@ -637,8 +637,7 @@ class RetryingVmProvisioner(object):
                     f'Cluster {cluster_name!r} (status: {cluster_status.value})'
                     f' was previously launched in {cloud} '
                     f'({region.name}). Relaunching in that region.')
-            # This should be handled in the
-            # _check_task_resources_smaller_than_cluster function.
+            # This should be handled in the check_resources_match function.
             assert (to_provision.region is None or
                     region.name == to_provision.region), (
                         f'Cluster {cluster_name!r} was previously launched in '
@@ -1219,9 +1218,13 @@ class CloudVmRayBackend(backends.Backend):
             'optimize_target', self._optimize_target) or OptimizeTarget.COST
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
-    def _check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
-                                                   task: task_lib.Task):
-        """Check if resources requested by the task are available."""
+    def check_resources_fit_cluster(self, handle: ResourceHandle,
+                                    task: task_lib.Task):
+        """Check if resources requested by the task fit the cluster.
+
+        The resources requested by the task should be smaller than the existing
+        cluster.
+        """
         assert len(task.resources) == 1, task.resources
 
         launched_resources = handle.launched_resources
@@ -1231,6 +1234,9 @@ class CloudVmRayBackend(backends.Backend):
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
+
+        # Remove traceback from the error message.
+        sys.tracebacklimit = 0
 
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
@@ -1248,6 +1254,8 @@ class CloudVmRayBackend(backends.Backend):
                 f'{handle.launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: sky down {cluster_name}')
+        # Reset traceback limit to default.
+        sys.tracebacklimit = 1000
 
     @timeline.event
     def _check_existing_cluster(
@@ -1256,7 +1264,7 @@ class CloudVmRayBackend(backends.Backend):
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             # Cluster already exists.
-            self._check_task_resources_smaller_than_cluster(handle, task)
+            self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return RetryingVmProvisioner.ToProvisionConfig(
@@ -2086,7 +2094,7 @@ class CloudVmRayBackend(backends.Backend):
     ) -> None:
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
-        self._check_task_resources_smaller_than_cluster(handle, task)
+        self.check_resources_fit_cluster(handle, task)
 
         # Otherwise, handle a basic Task.
         if task.run is None:
