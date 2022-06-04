@@ -420,8 +420,12 @@ class Task:
                 # Resources object can not be fully constructed without the
                 # local cluster name, which cannot be passed into
                 # Task.from_yaml. Hence, the initial construction of the
-                # Resources object will contain a default local cloud.
-                resource.set_local_resources(self.auth_config)
+                # Resources object does not have the actual local cluster
+                # name and will instead default to a default local cloud
+                # name (clouds.Local.DEFAULT_LOCAL_NAME).
+                custom_resources = backend_utils.fetch_local_resources(
+                    resource, self.auth_config)
+                resource.set_local_resources(custom_resources)
 
         self.resources = resources
         return self

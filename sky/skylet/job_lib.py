@@ -214,7 +214,7 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     return records
 
 
-def query_job_status(ssh_user: str, job_ids: List[int]) -> List[JobStatus]:
+def query_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
     """Return the status of the jobs based on the `ray job status` command.
 
     Though we update job status actively in ray program and job cancelling,
@@ -225,16 +225,17 @@ def query_job_status(ssh_user: str, job_ids: List[int]) -> List[JobStatus]:
         return []
 
     # TODO: if too slow, directly query against redis.
-    jobs_str = [f'{job_id}-{ssh_user}' for job_id in job_ids]
+    ray_job_ids = [f'{job_id}-{job_owner}' for job_id in job_ids]
     test_cmd = [
         (
-            f'(ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
+            f'(ray job status --address 127.0.0.1:8265 {ray_job} 2>&1 | '
             # Not a typo, ray has inconsistent output for job status.
             # succeeded: Job 'job_id' succeeded
             # running: job 'job_id': RUNNING
             # stopped: Job 'job_id' was stopped
             # failed: Job 'job_id' failed
-            f'grep "ob \'{job}\'" || echo "not found")') for job in jobs_str
+            f'grep "ob \'{ray_job}\'" || echo "not found")')
+        for ray_job in ray_job_ids
     ]
     test_cmd = ' && '.join(test_cmd)
     proc = subprocess.run(test_cmd,
@@ -282,7 +283,7 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status(ssh_user: str, submitted_gap_sec: int = 0) -> None:
+def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
@@ -295,7 +296,7 @@ def update_status(ssh_user: str, submitted_gap_sec: int = 0) -> None:
         submitted_gap_sec=submitted_gap_sec)
     running_job_ids = [job['job_id'] for job in running_jobs]
 
-    job_status = query_job_status(ssh_user, running_job_ids)
+    job_status = query_job_status(job_owner, running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
         # Do not update the status if the ray job status is RUNNING,
@@ -355,7 +356,7 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
     _show_job_queue(jobs)
 
 
-def cancel_jobs(ssh_user: str, jobs: Optional[List[int]]) -> None:
+def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     """Cancel the jobs.
 
     Args:
@@ -369,11 +370,12 @@ def cancel_jobs(ssh_user: str, jobs: Optional[List[int]]) -> None:
         job_records = _get_jobs_by_ids(jobs)
 
     jobs = [job['job_id'] for job in job_records]
-    jobs_str = [f'{job_id}-{ssh_user}' for job_id in jobs]
+    ray_job_ids = [f'{job_id}-{job_owner}' for job_id in jobs]
     # TODO(zhwu): `ray job stop` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
     cancel_cmd = [
-        f'ray job stop --address 127.0.0.1:8265 {job}' for job in jobs_str
+        f'ray job stop --address 127.0.0.1:8265 {ray_job}'
+        for ray_job in ray_job_ids
     ]
     cancel_cmd = ';'.join(cancel_cmd)
     subprocess.run(cancel_cmd, shell=True, check=False, executable='/bin/bash')
@@ -439,9 +441,9 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def update_status(cls, ssh_user: str) -> str:
+    def update_status(cls, job_owner: str) -> str:
         code = [
-            f'job_lib.update_status({ssh_user!r})',
+            f'job_lib.update_status({job_owner!r})',
         ]
         return cls._build(code)
 
@@ -451,8 +453,8 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs(cls, ssh_user: str, job_ids: Optional[List[int]]) -> str:
-        code = [f'job_lib.cancel_jobs({ssh_user!r},{job_ids!r})']
+    def cancel_jobs(cls, job_owner: str, job_ids: Optional[List[int]]) -> str:
+        code = [f'job_lib.cancel_jobs({job_owner!r},{job_ids!r})']
         return cls._build(code)
 
     @classmethod
@@ -462,13 +464,13 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def tail_logs(cls, ssh_user: str, job_id: Optional[int],
+    def tail_logs(cls, job_owner: str, job_id: Optional[int],
                   spot_job_id: Optional[int]) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
             'log_dir = job_lib.log_dir(job_id)',
-            f'log_lib.tail_logs({ssh_user!r},'
+            f'log_lib.tail_logs({job_owner!r},'
             f'job_id, log_dir, {spot_job_id!r})',
         ]
         return cls._build(code)

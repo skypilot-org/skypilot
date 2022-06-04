@@ -1552,8 +1552,8 @@ class CloudVmRayBackend(backends.Backend):
                 with open(os.path.expanduser(cluster_yaml), 'r') as f:
                     cluster_config = yaml.safe_load(f)
                 # User name is guaranteed to exist (on all jinja files)
-                ssh_user = cluster_config['auth']['ssh_user']
-                cmd = job_lib.JobLibCodeGen.update_status(ssh_user)
+                job_owner = cluster_config['auth']['ssh_user']
+                cmd = job_lib.JobLibCodeGen.update_status(job_owner)
                 with backend_utils.safe_console_status(
                         '[bold cyan]Preparing Job Queue'):
                     returncode, _, stderr = self.run_on_head(
@@ -2014,9 +2014,9 @@ class CloudVmRayBackend(backends.Backend):
             cluster_config = yaml.safe_load(f)
 
         # User name is guaranteed to exist (on all jinja files)
-        user_name = cluster_config['auth']['ssh_user']
+        job_owner = cluster_config['auth']['ssh_user']
 
-        code = job_lib.JobLibCodeGen.cancel_jobs(user_name, jobs)
+        code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs)
 
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
@@ -2167,10 +2167,10 @@ class CloudVmRayBackend(backends.Backend):
         head_home_path = stdout.strip()
         remote_run_file = remote_run_file.replace('~', head_home_path)
 
-        job_str = f'{job_id}-{ssh_user}'
+        ray_job_id = f'{job_id}-{ssh_user}'
         job_submit_cmd = (
             'ray job submit -v '
-            f'--address=127.0.0.1:8265 --job-id {job_str} --no-wait '
+            f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
             f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
         returncode, _, _ = self.run_on_head(handle,
                                             job_submit_cmd,
@@ -2214,9 +2214,9 @@ class CloudVmRayBackend(backends.Backend):
         with open(os.path.expanduser(cluster_yaml), 'r') as f:
             cluster_config = yaml.safe_load(f)
         # User name is guaranteed to exist (on all jinja files)
-        ssh_user = cluster_config['auth']['ssh_user']
+        job_owner = cluster_config['auth']['ssh_user']
 
-        code = job_lib.JobLibCodeGen.tail_logs(ssh_user,
+        code = job_lib.JobLibCodeGen.tail_logs(job_owner,
                                                job_id,
                                                spot_job_id=spot_job_id)
         if job_id is None:

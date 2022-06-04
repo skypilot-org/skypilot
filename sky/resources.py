@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from sky import clouds
 from sky import global_user_state
@@ -344,30 +344,10 @@ class Resources:
                 self.accelerators, self.use_spot)
         return hourly_cost * hours
 
-    def set_local_resources(self, auth_config: dict = None) -> None:
-        """Sets local resources for the local cluster.
-
-        Attempts to fetch local accelerator resources from global state.
-        If not, fetches the local accelerator resources by querying the
-        local cluster nodes.
-        """
+    def set_local_resources(self, local_resources: List[dict] = None) -> None:
+        """Sets local resources for the local cluster."""
         assert isinstance(self.cloud, clouds.Local), 'Must be local cloud.'
-        cluster_name = str(self.cloud)
-        custom_resources = None
-        if auth_config is None:
-            # Attempt to fetch from global state, elsewise do nothing
-            records = global_user_state.get_clusters(
-                include_cloud_clusters=False, include_local_clusters=True)
-            for record in records:
-                resources = record['handle'].launched_resources
-                record_name = str(resources.cloud)
-                if cluster_name == record_name:
-                    custom_resources = resources.local_resources
-                    break
-        else:
-            custom_resources = backend_utils.get_local_custom_resources(
-                self.local_ips, auth_config)
-        self.local_resources = custom_resources
+        self.local_resources = local_resources
 
     def is_same_resources(self, other: 'Resources') -> bool:
         """Returns whether two resources are the same.
@@ -430,13 +410,25 @@ class Resources:
         # TODO(wei-lin): This is a hack. We may need to use our catalog to
         # handle this.
         if isinstance(other.cloud, clouds.Local):
-            # We are comparing if a Task's resources fits the cluster's
-            # resources. The cluster's resources is in
-            # other.local_resources. The other field, other.accelerators,
-            # denotes the task resources of the previous job launched
-            # (that was saved into CloudVMHandle).
+            # Public cloud accelerators definition:
+            #   - First time `sky launch` is called: self.accelerators means
+            #     both cluster resources and task resources.
+            #   - Subsequent times `sky launch/exec` is called:
+            #     self.accelerators means only task resources.
+            #
+            # On-prem/local cloud accelerators definition:
+            #   - First and subsequent times `sky launch/exec` is called:
+            #     self.accelerators means only task resources.
+            #   - self.local_resources means only cluster resources.
+            #
+            # Hence for the on-prem case, we want to determine if the current
+            # task's resources (self.accelerators) is less than the cluster's
+            # resources (other.local_resources).
             list_resources = other.local_resources
             other_accelerators = {}
+            # other.local_resources is a list of each node's accelerators. We
+            # want to aggregate all node's resources into `other_accelerators`,
+            # which represents the total cluster's resources.
             for d in list_resources:
                 for k in d:
                     other_accelerators[k] = other_accelerators.get(k, 0) + d[k]
@@ -478,8 +470,11 @@ class Resources:
             return self._instance_type == other.instance_type
         # For GCP, when a accelerator type fails to launch, it should be blocked
         # regardless of the count, since the larger number will fail either.
-        return (self.accelerators is None and other.accelerators is None
-               ) or self.accelerators.keys() == other.accelerators.keys()
+        if self.accelerators is None:
+            if other.accelerators is None:
+                return True
+            return False
+        return self.accelerators.keys() == other.accelerators.keys()
 
     def is_empty(self) -> bool:
         """Is this Resources an empty request (all fields None)?"""

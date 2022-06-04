@@ -70,8 +70,8 @@ class JobUpdateEvent(SkyletEvent):
                 config = yaml.safe_load(f)
             except yaml.YAMLError as e:
                 raise e
-        ssh_user = config['auth']['ssh_user']
-        job_lib.update_status(ssh_user,
+        job_owner = config['auth']['ssh_user']
+        job_lib.update_status(job_owner,
                               submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
 
 

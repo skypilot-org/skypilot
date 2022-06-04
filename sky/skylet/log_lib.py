@@ -4,7 +4,6 @@ This is a remote utility module that provides logging functionality.
 """
 import io
 import os
-import ray
 import selectors
 import subprocess
 import sys
@@ -104,7 +103,7 @@ def run_with_log(
     with_ray: bool = False,
     process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
-    job_id: str = None,
+    ray_job_id: Optional[str] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -135,8 +134,10 @@ def run_with_log(
         # permission to do so. This case is encountered when submitting
         # a job for Sky on-prem, when a non-admin user submits a job.
         use_sudo = True
-        os.system(f'sudo mkdir -p {dirname} && sudo touch {log_path} '
-                  f'&& sudo chmod a+rwx {log_path}')
+        subprocess.call(
+            f'sudo mkdir -p {dirname} && sudo touch {log_path} '
+            f'&& sudo chmod a+rwx {log_path}',
+            shell=True)
     except OSError as e:
         raise e
     # Redirect stderr to stdout when using ray, to preserve the order of
@@ -169,8 +170,8 @@ def run_with_log(
         ]
         if use_sudo:
             daemon_cmd.insert(0, 'sudo')
-        if job_id is not None:
-            daemon_cmd.extend(['--job-id', str(job_id)])
+        if ray_job_id is not None:
+            daemon_cmd.extend(['--ray-job-id', str(ray_job_id)])
         subprocess.Popen(
             daemon_cmd,
             start_new_session=True,
@@ -237,13 +238,13 @@ def make_task_bash_script(codegen: str,
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              username: str,
+                              job_owner: str,
                               job_id: str,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False):
 
-    job_str_id = f'{job_id}-{username}'
+    ray_job_id = f'{job_id}-{job_owner}'
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         if env_vars is not None:
             export_env_vars = '\n'.join(
@@ -253,12 +254,12 @@ def run_bash_command_with_log(bash_command: str,
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
-        os.system(f'chmod a+rwx {script_path}')
+        subprocess.call(f'chmod a+rwx {script_path}', shell=True)
 
         inner_command = f'/bin/bash -i {script_path}'
-        gpu_list = ray.get_gpu_ids()
-        if len(gpu_list) > 0:
-            gpu_list = [str(gpu_id) for gpu_id in gpu_list]
+        cuda_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
+        if cuda_devices is not None:
+            gpu_list = cuda_devices.split(',')
             # Switching users will give Ray process access to all GPUs,
             # instead of the GPUs allocated.
             inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(
@@ -268,9 +269,9 @@ def run_bash_command_with_log(bash_command: str,
             # Do not use shell=True because it will cause the environment
             # set in this task visible to other tasks. shell=False requires
             # the cmd to be a list.
-            ['sudo', '-H', 'su', '-', username, '-c', inner_command],
+            ['sudo', '-H', 'su', '-', job_owner, '-c', inner_command],
             log_path,
-            job_id=job_str_id,
+            ray_job_id=ray_job_id,
             stream_logs=stream_logs,
             with_ray=with_ray)
 
@@ -319,7 +320,7 @@ def _follow_job_logs(file,
             status = job_lib.get_status(job_id)
 
 
-def tail_logs(ssh_user: str,
+def tail_logs(job_owner: str,
               job_id: int,
               log_dir: Optional[str],
               spot_job_id: Optional[int] = None) -> None:
@@ -338,7 +339,7 @@ def tail_logs(ssh_user: str,
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
-    status = job_lib.query_job_status(ssh_user, [job_id])[0]
+    status = job_lib.query_job_status(job_owner, [job_id])[0]
 
     # Wait for the log to be written. This is needed due to the `ray submit`
     # will take some time to start the job and write the log.
@@ -360,7 +361,7 @@ def tail_logs(ssh_user: str,
         print(f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
-        status = job_lib.query_job_status(ssh_user, [job_id])[0]
+        status = job_lib.query_job_status(job_owner, [job_id])[0]
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         # Not using `ray job logs` because it will put progress bar in

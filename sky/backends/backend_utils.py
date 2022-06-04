@@ -665,6 +665,32 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
+def fetch_local_resources(resources: 'resources_lib.Resources',
+                          auth_config: dict) -> Optional[List[dict]]:
+    """Fetches local custom resources, either cached or non-cached.
+
+    Attempts to fetch local accelerator resources from global state.
+    If not, fetches the local accelerator resources by querying the
+    local cluster nodes.
+    """
+    cluster_name = resources.cloud.local_cluster_name
+    custom_resources = None
+    if auth_config is None:
+        # Attempt to fetch from global state, elsewise do nothing
+        records = global_user_state.get_clusters(include_cloud_clusters=False,
+                                                 include_local_clusters=True)
+        for record in records:
+            resources = record['handle'].launched_resources
+            record_name = str(resources.cloud)
+            if cluster_name == record_name:
+                custom_resources = resources.local_resources
+                break
+    else:
+        custom_resources = get_local_custom_resources(resources.local_ips,
+                                                      auth_config)
+    return custom_resources
+
+
 def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
     """Checks if the Sky dependencies are properly installed on the machine.
 
@@ -709,8 +735,8 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
                                            f'Sky is not installed on {ip}')
 
 
-def rsync_no_handle(ip: str, source: str, target: str, ssh_user: str,
-                    ssh_key: str) -> None:
+def rsync_to_ip(ip: str, source: str, target: str, ssh_user: str,
+                ssh_key: str) -> None:
     """Rsyncs files to a remote ip."""
     rsync_command = [
         'rsync',
@@ -794,8 +820,7 @@ def get_local_custom_resources(
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(code)
             fp.flush()
-            rsync_no_handle(ip, fp.name, remote_resource_path, ssh_user,
-                            ssh_key)
+            rsync_to_ip(ip, fp.name, remote_resource_path, ssh_user, ssh_key)
 
         # Run code on the node to get cluster node accelerators.
         rc, output, _ = run_command_on_ip_via_ssh(
@@ -922,12 +947,11 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
         # Worker nodes need access to Ray dashboard to poll the
         # JobSubmissionClient (in subprocess_daemon.py) for completed,
         # failed, or cancelled jobs.
-        rsync_no_handle(ip, ssh_key, remote_ssh_key, ssh_user, ssh_key)
+        rsync_to_ip(ip, ssh_key, remote_ssh_key, ssh_user, ssh_key)
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(port_cmd)
             fp.flush()
-            rsync_no_handle(ip, fp.name, dashboard_remote_path, ssh_user,
-                            ssh_key)
+            rsync_to_ip(ip, fp.name, dashboard_remote_path, ssh_user, ssh_key)
         rc = run_command_on_ip_via_ssh(
             ip, f'chmod a+rwx {dashboard_remote_path};'
             'screen -S ray-dashboard -X quit;'

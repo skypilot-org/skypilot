@@ -17,7 +17,7 @@ TODO:
 """
 from datetime import datetime
 import json
-import os
+import subprocess
 from typing import Any
 
 from sky import clouds
@@ -102,7 +102,7 @@ def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
     sync_command = f'gsutil -m rsync -rd gs://{gs_bucket_name} \
         s3://{s3_bucket_name}'
 
-    os.system(sync_command)
+    subprocess.call(sync_command, shell=True)
 
 
 def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:
