@@ -158,7 +158,7 @@ def test_file_mounts():
             'touch ~/tmpfile',
             'mkdir -p ~/tmp-workdir',
             'touch ~/tmp-workdir/foo',
-            'ln -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
+            'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
             f'sky launch -y -c {name} examples/using_file_mounts.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
