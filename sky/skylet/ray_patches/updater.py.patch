@@ -3,5 +3,5 @@
 > # Sky patch changes:
 > #  - Ensure the node state is refreshed before checking if the node is terminated.
 > 
-248a249
+291a292
 >                     self.provider.non_terminated_nodes({})
