@@ -447,14 +447,14 @@ class Storage(object):
                 # yaml spec (the name is the source).
                 handle = global_user_state.get_handle_from_storage_name(
                     self.name)
-                if handle:
+                if handle is not None:
                     return
                 else:
                     raise exceptions.StorageSourceError(
                         'Storage source must be specified when '
                         'using COPY mode.')
             else:
-                # If source is not specified in mount mode, the intent is to
+                # If source is not specified in COPY mode, the intent is to
                 # create a bucket and use it as scratch disk. Name must be
                 # specified to create bucket.
                 if not self.name:
