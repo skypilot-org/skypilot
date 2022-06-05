@@ -222,7 +222,6 @@ def get_instance_type_for_accelerator(
     with fuzzy search (should be empty as it must have already been generated in
     caller).
     """
-
     (instance_list,
      fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
          df=_df, acc_name=acc_name, acc_count=acc_count)
