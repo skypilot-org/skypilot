@@ -158,6 +158,7 @@ def test_file_mounts():
             'touch ~/tmpfile',
             'mkdir -p ~/tmp-workdir',
             'touch ~/tmp-workdir/foo',
+            'ln -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
             f'sky launch -y -c {name} examples/using_file_mounts.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
@@ -543,6 +544,8 @@ class TestStorageWithCredentials:
         tmp_dir.mkdir()
         tmp_file = tmp_dir / 'tmp-file'
         tmp_file.write_text('test')
+        circle_link = tmp_dir / 'circle-link'
+        circle_link.symlink_to(tmp_dir, target_is_directory=True)
         yield str(tmp_dir)
 
     @pytest.fixture
@@ -624,6 +627,14 @@ class TestStorageWithCredentials:
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
+
+        # Check symlinks - symlinks don't get copied by sky storage
+        assert pathlib.Path(tmp_mount + '/circle-link').is_symlink(), \
+            'circle-link was not found in the upload source - ' \
+            'are the test fixtures correct?'
+        assert 'circle-link' not in out.decode('utf-8'), \
+            'Symlink found in bucket - ls output was : {}'.format(out.decode
+                                                                  ('utf-8'))
 
         # Run sky storage ls to check if storage object exists in the output.
         # It should not exist because the bucket was created externally.
