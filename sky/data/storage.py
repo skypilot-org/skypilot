@@ -941,7 +941,7 @@ class S3Store(AbstractStore):
         Args:
           bucket_name: str; Name of bucket
         """
-        # Deleting objects are very slow programatically
+        # Deleting objects is very slow programatically
         # (i.e. bucket.objects.all().delete() is slow).
         # In addition, standard delete operations (i.e. via `aws s3 rm`)
         # is slow, since AWS puts deletion markers.
