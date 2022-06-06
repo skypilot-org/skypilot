@@ -1330,8 +1330,9 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                   'for sky bench delete. Letting --all take effect.')
 
     benchmark_list = ', '.join([r['name'] for r in to_delete])
+    plural = 's' if len(to_delete) > 1 else ''
     if not yes:
-        click.confirm(f'Deleting benchmark: {benchmark_list}. Proceed?',
+        click.confirm(f'Deleting benchmark{plural}: {benchmark_list}. Proceed?',
                       default=True,
                       abort=True,
                       show_default=True)
@@ -1343,7 +1344,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             global_user_state.set_cluster_benchmark_name(cluster['name'], None)
         benchmark_state.delete_benchmark(benchmark['name'])
         BenchmarkController.remove_logs(benchmark['name'])
-    click.secho(f'Benchmark {benchmark_list} deleted.', fg='green')
+    click.secho(f'Benchmark{plural} {benchmark_list} deleted.', fg='green')
 
 
 @cli.command()
