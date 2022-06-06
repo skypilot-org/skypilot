@@ -116,3 +116,8 @@ run: |
   # sky.egg-info/ should not exists on remote due to the .gitingore
   cd ~/sky_workdir
   ! ls sky.egg-info/
+
+  # Symlinks should be copied, but they will be broken
+  # Assumes symlink named circle-link in /tmp/workdir (created by test_smoke.py)
+  ls /tmp/workdir/circle-link
+  ! readlink -f /tmp/workdir/circle-link
