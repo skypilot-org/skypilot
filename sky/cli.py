@@ -884,7 +884,7 @@ def exec(
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _get_candidate_configs(yaml_path: str) -> Optional[Dict[str, str]]:
+def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, Any]]]:
     """Get candidate resource configs from a YAML file."""
     config = backend_utils.read_yaml(os.path.expanduser(yaml_path))
     assert isinstance(config, dict)
