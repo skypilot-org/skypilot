@@ -1,5 +1,5 @@
 """Util constants/functions for the backends."""
-import colorama
+import contextlib
 import datetime
 import difflib
 import enum
@@ -9,7 +9,6 @@ import getpass
 from multiprocessing import pool
 import os
 import pathlib
-import psutil
 import random
 import re
 import shlex
@@ -19,15 +18,16 @@ import sys
 import textwrap
 import threading
 import time
-import traceback
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
-import yaml
 
+import colorama
 import jinja2
+import psutil
 import rich.console as rich_console
 import rich.progress as rich_progress
+import yaml
 
 import sky
 from sky import authentication as auth
@@ -1498,9 +1498,23 @@ def check_fields(provided_fields, known_fields):
                 key_invalid += f' Did you mean one of {similar_keys}?'
             key_invalid += '\n'
             invalid_keys += key_invalid
-        try:
+        with print_exception_no_traceback():
             raise ValueError(invalid_keys)
-        except ValueError:
-            # UX: only print last call in the stack + the exception message.
-            traceback.print_exception(*sys.exc_info())
-            sys.exit(1)
+
+
+@contextlib.contextmanager
+def print_exception_no_traceback():
+    """A context manager that prints out an exception without traceback.
+
+    Mainly for UX: user-facing errors, e.g., ValueError, should suppress long
+    tracebacks.
+
+    Example usage:
+
+        with print_exception_no_traceback():
+            if error():
+                raise ValueError('...')
+    """
+    sys.tracebacklimit = 0
+    yield
+    sys.tracebacklimit = 1000

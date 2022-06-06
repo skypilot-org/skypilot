@@ -1235,27 +1235,23 @@ class CloudVmRayBackend(backends.Backend):
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
 
-        # Remove traceback from the error message.
-        sys.tracebacklimit = 0
-
-        # requested_resources <= actual_resources.
-        if not (task.num_nodes <= handle.launched_nodes and
-                task_resources.less_demanding_than(launched_resources)):
-            if (task_resources.region is not None and
-                    task_resources.region != launched_resources.region):
+        with backend_utils.print_exception_no_traceback():
+            # requested_resources <= actual_resources.
+            if not (task.num_nodes <= handle.launched_nodes and
+                    task_resources.less_demanding_than(launched_resources)):
+                if (task_resources.region is not None and
+                        task_resources.region != launched_resources.region):
+                    raise exceptions.ResourcesMismatchError(
+                        'Task requested the resources in region '
+                        f'{task_resources.region!r}, but the existed cluster '
+                        f'is in region {launched_resources.region!r}.')
                 raise exceptions.ResourcesMismatchError(
-                    'Task requested the resources in region '
-                    f'{task_resources.region!r}, but the existed cluster is in '
-                    f'region {launched_resources.region!r}.')
-            raise exceptions.ResourcesMismatchError(
-                'Requested resources do not match the existing cluster.\n'
-                f'  Requested:\t{task.num_nodes}x {task_resources} \n'
-                f'  Existing:\t{handle.launched_nodes}x '
-                f'{handle.launched_resources}\n'
-                f'To fix: specify a new cluster name, or down the '
-                f'existing cluster first: sky down {cluster_name}')
-        # Reset traceback limit to default.
-        sys.tracebacklimit = 1000
+                    'Requested resources do not match the existing cluster.\n'
+                    f'  Requested:\t{task.num_nodes}x {task_resources} \n'
+                    f'  Existing:\t{handle.launched_nodes}x '
+                    f'{handle.launched_resources}\n'
+                    f'To fix: specify a new cluster name, or down the '
+                    f'existing cluster first: sky down {cluster_name}')
 
     @timeline.event
     def _check_existing_cluster(
