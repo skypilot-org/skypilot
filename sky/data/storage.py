@@ -750,7 +750,7 @@ class S3Store(AbstractStore):
         """
         source = os.path.abspath(os.path.expanduser(self.source))
         sync_command = ('aws s3 sync --no-follow-symlinks '
-                        '{source} s3://{self.name}/')
+                        f'{source} s3://{self.name}/')
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{self.source} to s3://{self.name}/'):
