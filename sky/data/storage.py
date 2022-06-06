@@ -944,7 +944,7 @@ class S3Store(AbstractStore):
         # Deleting objects is very slow programatically
         # (i.e. bucket.objects.all().delete() is slow).
         # In addition, standard delete operations (i.e. via `aws s3 rm`)
-        # is slow, since AWS puts deletion markers.
+        # are slow, since AWS puts deletion markers.
         # https://stackoverflow.com/questions/49239351/why-is-it-so-much-slower-to-delete-objects-in-aws-s3-than-it-is-to-create-them
         # The fastest way to delete is to run `aws s3 rb --force`,
         # which removes the bucket by force.
