@@ -1025,14 +1025,17 @@ def handle_returncode(returncode: int,
         sys.exit(returncode)
 
 
-def run_in_parallel(func: Callable, args: List[Any]):
+def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
     The function should raise a CommandError if the command fails.
+    Returns a list of the return values of the function func, in the same order
+    as the arguments.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     with pool.ThreadPool() as p:
         try:
+            # Run the function in parallel on the arguments, keeping the order.
             return list(p.imap(func, args))
         except exceptions.CommandError as e:
             # Print the error message here, to avoid the other processes'
@@ -1289,6 +1292,17 @@ def refresh_cluster_status_handle(
 
 
 def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
+    """Returns a list of cached cluster records.
+
+    Args:
+        include_reserved: Whether to include sky-reserved clusters, e.g. spot
+            controller.
+        refresh: Whether to refresh the status of the clusters. (Refreshing will
+            set the status to STOPPED if the cluster cannot be pinged.)
+
+    Returns:
+        A list of cluster records.
+    """
     records = global_user_state.get_clusters()
     if not include_reserved:
         records = [
