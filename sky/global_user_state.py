@@ -69,6 +69,7 @@ class _SQLiteConn(threading.local):
         # Add autostop column to clusters table
         db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
                                      'autostop', 'INTEGER DEFAULT -1')
+
         self.conn.commit()
 
 
@@ -239,11 +240,11 @@ def get_cluster_from_name(
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from clusters')
     records = []
-    for name, laucnhed_at, handle, last_use, status, autostop in rows:
+    for name, launched_at, handle, last_use, status, autostop in rows:
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
-            'launched_at': laucnhed_at,
+            'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
             'status': ClusterStatus[status],
