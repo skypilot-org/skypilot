@@ -884,7 +884,8 @@ def exec(
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _get_resource_candidates(yaml_path: str) -> Optional[Dict[str, str]]:
+def _get_candidate_configs(yaml_path: str) -> Optional[Dict[str, str]]:
+    """Get candidate resource configs from a YAML file."""
     config = backend_utils.read_yaml(os.path.expanduser(yaml_path))
     assert isinstance(config, dict)
     if config.get('resources') is None:
@@ -979,7 +980,7 @@ def benchmark_launch(
 
     candidates = None
     if is_yaml:
-        candidates = _get_resource_candidates(entrypoint)
+        candidates = _get_candidate_configs(entrypoint)
 
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
