@@ -1997,7 +1997,7 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         sky storage delete -a
     """
     if all:
-        click.echo('Deleting all storage objects...')
+        click.echo('Deleting all storage objects.')
         storages = global_user_state.get_storage()
         for row in storages:
             store_object = data.Storage(name=row['name'],
@@ -2010,7 +2010,7 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
             if handle is None:
                 click.echo(f'Storage name {n} not found.')
             else:
-                click.echo(f'Deleting storage object {n}...')
+                click.echo(f'Deleting storage object {n}.')
                 store_object = data.Storage(name=handle.storage_name,
                                             source=handle.source,
                                             sync_on_reconstruction=False)

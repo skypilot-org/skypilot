@@ -735,8 +735,8 @@ class S3Store(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
-        logger.info(f'Deleting S3 Bucket {self.name}')
-        return self._delete_s3_bucket(self.name)
+        self._delete_s3_bucket(self.name)
+        logger.info(f'Deleted S3 bucket {self.name}.')
 
     def get_handle(self) -> StorageHandle:
         return aws.resource('s3').Bucket(self.name)
@@ -939,7 +939,7 @@ class S3Store(AbstractStore):
         Args:
           bucket_name: str; Name of bucket
         """
-        # Deleting objects is very slow programatically
+        # Deleting objects are very slow programatically
         # (i.e. bucket.objects.all().delete() is slow).
         # In addition, standard delete operations (i.e. via `aws s3 rm`)
         # is slow, since AWS puts deletion markers.
@@ -947,19 +947,14 @@ class S3Store(AbstractStore):
         # The fastest way to delete is to run `aws s3 rb --force`,
         # which removes the bucket by force.
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
-        with subprocess.Popen(remove_command.split(' '),
-                              stderr=subprocess.PIPE) as process:
-            while True:
-                line = process.stderr.readline()
-                if not line:
-                    break
-                str_line = line.decode('utf-8')
-                logger.info(str_line)
-            retcode = process.wait()
-            if retcode != 0:
-                raise exceptions.StorageBucketDeleteError(
-                    f'Failed to delete S3 bucket {bucket_name}.')
-        logger.info(f'Deleted S3 bucket {bucket_name}.')
+        try:
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
+                subprocess.check_output(remove_command.split(' '))
+        except subprocess.CalledProcessError as e:
+            logger.error(e.output)
+            raise exceptions.StorageBucketDeleteError(
+                f'Failed to delete S3 bucket {bucket_name}.')
 
 
 class GcsStore(AbstractStore):

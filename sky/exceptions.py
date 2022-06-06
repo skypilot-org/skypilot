@@ -59,7 +59,7 @@ class StorageBucketGetError(StorageInitError):
     pass
 
 
-class StorageBucketDeleteError(StorageInitError):
+class StorageBucketDeleteError(StorageError):
     # Error raised if attempt to delete an existing bucket fails.
     pass
 
