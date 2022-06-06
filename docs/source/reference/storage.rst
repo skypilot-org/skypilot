@@ -171,9 +171,9 @@ and storage mounting:
 
 .. note::
     Symbolic links are handled differently in :code:`file_mounts` depending on whether Sky Storage is used.
-    For mounts backed by Sky Storage, referenced data for all symbolic links is copied to remote.
-    For mounts not using Sky Storage (e.g., those using rsync) the symbolic links are directly copied.
-    Their targets must be separately mounted or else the symlinks may break.
+    For mounts backed by Sky Storage, symbolic links are not copied to remote.
+    For mounts not using Sky Storage (e.g., those using rsync) the symbolic links are directly copied, not their target data.
+    The targets must be separately mounted or else the symlinks may break.
 
 Creating a shared file system
 -----------------------------
