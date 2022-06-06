@@ -320,43 +320,94 @@ def _infer_interactive_node_type(resources: sky.Resources):
     return 'cpunode'
 
 
-def _check_interactive_node_resources_match(
-        node_type: str,
-        resources: sky.Resources,
-        launched_resources: sky.Resources,
-        user_requested_resources: Optional[bool] = False) -> None:
+def _check_resources_match(backend: backends.Backend,
+                           cluster_name: str,
+                           task: 'sky.Task',
+                           node_type: Optional[str] = None) -> None:
     """Check matching resources when reusing an existing cluster.
 
     The only exception is when [cpu|tpu|gpu]node -c cluster_name is used with no
     additional arguments, then login succeeds.
 
     Args:
-        node_type: Type of interactive node.
-        resources: Resources to attach to VM.
-        launched_resources: Existing launched resources associated with cluster.
-        user_requested_resources: If true, user requested resources explicitly.
+        cluster_name: The name of the cluster.
+        task: The task requested to be run on the cluster.
+        node_type: Only used for interactive node. Node type to attach to VM.
     """
-    # In the case where the user specifies no cloud, we infer the cloud from
-    # the launched resources before performing the check.
-    # e.g. user launches sky gpunode --gpus V100 creates an AWS(p3.2xlarge)
-    # but when the resource check will fail because is_same_resources expects
-    # resources.cloud and handle.launched_resources to match.
-    if resources.cloud is None:
-        assert launched_resources.cloud is not None, launched_resources
-        resources = resources.copy(cloud=launched_resources.cloud)
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        return
 
-    # TODO: Check for same number of launched_nodes if multi-node support is
-    # added for gpu/cpu/tpunode.
-    inferred_node_type = _infer_interactive_node_type(launched_resources)
-    node_type_match = inferred_node_type == node_type
-    launched_resources_match = resources.is_same_resources(launched_resources)
-    no_resource_requests = not user_requested_resources  # e.g. sky gpunode
-    if not (node_type_match and
-            (no_resource_requests or launched_resources_match)):
-        raise click.UsageError(
-            'Resources cannot change for an existing cluster.\n'
-            f'Existing: {inferred_node_type} with {launched_resources}\n'
-            f'Requested: {node_type} with {resources}\n')
+    if node_type is not None:
+        inferred_node_type = _infer_interactive_node_type(
+            handle.launched_resources)
+        if node_type != inferred_node_type:
+            name_arg = ''
+            if cluster_name != _default_interactive_node_name(
+                    inferred_node_type):
+                name_arg = f' -c {cluster_name}'
+            raise click.UsageError(
+                f'Failed to attach to interactive node {cluster_name}. '
+                f'Please use: {colorama.Style.BRIGHT}'
+                f'sky {inferred_node_type}{name_arg}{colorama.Style.RESET_ALL}')
+        return
+    backend.check_resources_fit_cluster(handle, task)
+
+
+def _launch_with_confirm(
+    dag: sky.Dag,
+    backend: backends.Backend,
+    cluster: str,
+    *,
+    dryrun: bool,
+    detach_run: bool,
+    no_confirm: bool = False,
+    idle_minutes_to_autostop: int = -1,
+    retry_until_up: bool = False,
+    node_type: Optional[str] = None,
+):
+    """Launch a cluster with a DAG."""
+    if cluster is None:
+        cluster = backend_utils.generate_cluster_name()
+    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
+    if maybe_status is None:
+        # Show the optimize log before the prompt if the cluster does not exist.
+        dag = sky.optimize(dag)
+    task = dag.tasks[0]
+
+    _check_resources_match(backend, cluster, task, node_type=node_type)
+
+    confirm_shown = False
+    if not no_confirm:
+        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
+        # it exists but is STOPPED.
+        prompt = None
+        if maybe_status is None:
+            cluster_str = '' if cluster is None else f' {cluster!r}'
+            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
+        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
+            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
+        if prompt is not None:
+            confirm_shown = True
+            click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    if node_type is not None:
+        if maybe_status != global_user_state.ClusterStatus.UP:
+            click.secho(f'Setting up interactive node {cluster}...',
+                        fg='yellow')
+    elif not confirm_shown:
+        click.secho(f'Running task on cluster {cluster}...', fg='yellow')
+
+    if node_type is None or maybe_status != global_user_state.ClusterStatus.UP:
+        # No need to sky.launch again when interactive node is already up.
+        sky.launch(dag,
+                   dryrun=dryrun,
+                   stream_logs=True,
+                   cluster_name=cluster,
+                   detach_run=detach_run,
+                   backend=backend,
+                   idle_minutes_to_autostop=idle_minutes_to_autostop,
+                   retry_until_up=retry_until_up)
 
 
 # TODO: skip installing ray to speed up provisioning.
@@ -398,48 +449,27 @@ def _create_and_ssh_into_node(
         task.set_resources(resources)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
-    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-        cluster_name)
-    if handle is not None:
-        # Avoid reusing clusters with requested resource mismatches.
-        _check_interactive_node_resources_match(node_type, resources,
-                                                handle.launched_resources,
-                                                user_requested_resources)
-    if handle is None or handle.head_ip is None:
-        # head_ip would be None if previous provisioning failed.
+    maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster_name)
+    if maybe_status is not None and user_requested_resources:
+        name_arg = ''
+        if cluster_name != _default_interactive_node_name(node_type):
+            name_arg = f' -c {cluster_name}'
+        raise click.UsageError(
+            'Resources cannot be specified for an existing interactive node '
+            f'{cluster_name!r}. To login to the cluster, use: '
+            f'{colorama.Style.BRIGHT}'
+            f'sky {node_type}{name_arg}{colorama.Style.RESET_ALL}')
 
-        # This handles stopped interactive nodes where they are restarted by
-        # skipping sky start and directly calling sky [cpu|tpu|gpu]node.
-        if cluster_status == global_user_state.ClusterStatus.STOPPED:
-            assert handle.launched_resources is not None, handle
-            to_provision = None
-            task.set_resources(handle.launched_resources)
-            task.num_nodes = handle.launched_nodes
-            if not no_confirm:
-                click.confirm(
-                    f'Restarting the stopped cluster {cluster_name!r}. '
-                    'Proceed?',
-                    default=True,
-                    abort=True,
-                    show_default=True)
-        else:
-            dag = sky.optimize(dag)
-            task = dag.tasks[0]
-            backend.register_info(dag=dag)
-            to_provision = task.best_resources
-            if handle is None and not no_confirm:
-                # Only show the confirmation prompt if the cluster is not
-                # in the clusters table.
-                click.confirm('Launching a new cluster. Proceed?',
-                              default=True,
-                              abort=True,
-                              show_default=True)
-
-        handle = backend.provision(task,
-                                   to_provision=to_provision,
-                                   dryrun=False,
-                                   stream_logs=True,
-                                   cluster_name=cluster_name)
+    _launch_with_confirm(
+        dag,
+        backend,
+        cluster_name,
+        dryrun=False,
+        detach_run=True,
+        no_confirm=no_confirm,
+        node_type=node_type,
+    )
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
 
     # Use ssh rather than 'ray attach' to suppress ray messages, speed up
     # connection, and for allowing adding 'cd workdir' in the future.
@@ -657,19 +687,6 @@ def launch(
         entrypoint = None
         is_yaml = False
 
-    if not yes:
-        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
-        maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
-        prompt = None
-        if maybe_status is None:
-            cluster_str = '' if cluster is None else f' {cluster!r}'
-            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
-        elif maybe_status == global_user_state.ClusterStatus.STOPPED:
-            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
     with sky.Dag() as dag:
         if is_yaml:
             task = sky.Task.from_yaml(entrypoint)
@@ -712,9 +729,6 @@ def launch(
             task.name = name
         task.envs = env
 
-    if cluster is not None:
-        click.secho(f'Running task on cluster {cluster}...', fg='yellow')
-
     if backend_name == backends.LocalDockerBackend.NAME:
         backend = backends.LocalDockerBackend()
     elif backend_name == backends.CloudVmRayBackend.NAME:
@@ -722,14 +736,16 @@ def launch(
     else:
         raise ValueError(f'{backend_name} backend is not supported.')
 
-    sky.launch(dag,
-               dryrun=dryrun,
-               stream_logs=True,
-               cluster_name=cluster,
-               detach_run=detach_run,
-               backend=backend,
-               idle_minutes_to_autostop=idle_minutes_to_autostop,
-               retry_until_up=retry_until_up)
+    _launch_with_confirm(
+        dag,
+        backend,
+        cluster,
+        dryrun=dryrun,
+        detach_run=detach_run,
+        no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        retry_until_up=retry_until_up,
+    )
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2224,6 +2240,7 @@ def spot_launch(
         controller_name = spot_lib.SPOT_CONTROLLER_NAME
         yaml_path = backend_utils.fill_template(
             spot_lib.SPOT_CONTROLLER_TEMPLATE, {
+                'remote_user_yaml_prefix': spot_lib.SPOT_TASK_YAML_PREFIX,
                 'user_yaml_path': f.name,
                 'spot_controller': controller_name,
                 'cluster_name': name,
@@ -2231,18 +2248,17 @@ def spot_launch(
             },
             output_prefix=spot_lib.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as dag:
-            task = sky.Task.from_yaml(yaml_path)
-            assert len(task.resources) == 1
+            controller_task = sky.Task.from_yaml(yaml_path)
+            controller_task.spot_task = task
+            assert len(controller_task.resources) == 1
         click.secho(
             f'Launching managed spot job {name} from spot controller...',
             fg='yellow')
-        backend = backends.CloudVmRayBackend()
         click.echo('Launching spot controller...')
         sky.launch(dag,
                    stream_logs=True,
                    cluster_name=controller_name,
                    detach_run=detach_run,
-                   backend=backend,
                    idle_minutes_to_autostop=spot_lib.
                    SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                    is_spot_controller_task=True)
@@ -2317,7 +2333,7 @@ def spot_status(all: bool, refresh: bool):
         handle, code, require_outputs=True, stream_logs=False)
     backend_utils.handle_returncode(returncode, code,
                                     'Failed to fetch managed job statuses',
-                                    stderr)
+                                    job_table_str + stderr)
 
     spot_lib.dump_job_table_cache(job_table_str)
     click.echo(f'Managed spot jobs:\n{job_table_str}')

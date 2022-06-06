@@ -133,7 +133,9 @@ class RayCodeGen:
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
-    def add_prologue(self, job_id: int) -> None:
+    def add_prologue(self,
+                     job_id: int,
+                     spot_task: Optional['task_lib.Task'] = None) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
@@ -172,6 +174,14 @@ class RayCodeGen:
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
+        if spot_task is not None:
+            # Add the spot job to spot status table.
+            resources_str = backend_utils.get_task_resources_str(spot_task)
+            self._code += [
+                'from sky.spot import spot_state',
+                f'spot_state.set_pending('
+                f'{job_id}, {spot_task.name!r}, {resources_str!r})',
+            ]
 
     def add_gang_scheduling_placement_group(
         self,
@@ -627,8 +637,7 @@ class RetryingVmProvisioner(object):
                     f'Cluster {cluster_name!r} (status: {cluster_status.value})'
                     f' was previously launched in {cloud} '
                     f'({region.name}). Relaunching in that region.')
-            # This should be handled in the
-            # _check_task_resources_smaller_than_cluster function.
+            # This should be handled in the check_resources_match function.
             assert (to_provision.region is None or
                     region.name == to_provision.region), (
                         f'Cluster {cluster_name!r} was previously launched in '
@@ -1204,13 +1213,18 @@ class CloudVmRayBackend(backends.Backend):
         self._optimize_target = None
 
     def register_info(self, **kwargs) -> None:
-        self._dag = kwargs['dag']
-        self._optimize_target = kwargs.pop('optimize_target',
-                                           OptimizeTarget.COST)
+        self._dag = kwargs.pop('dag', self._dag)
+        self._optimize_target = kwargs.pop(
+            'optimize_target', self._optimize_target) or OptimizeTarget.COST
+        assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
-    def _check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
-                                                   task: task_lib.Task):
-        """Check if resources requested by the task are available."""
+    def check_resources_fit_cluster(self, handle: ResourceHandle,
+                                    task: task_lib.Task):
+        """Check if resources requested by the task fit the cluster.
+
+        The resources requested by the task should be smaller than the existing
+        cluster.
+        """
         assert len(task.resources) == 1, task.resources
 
         launched_resources = handle.launched_resources
@@ -1220,6 +1234,9 @@ class CloudVmRayBackend(backends.Backend):
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
+
+        # Remove traceback from the error message.
+        sys.tracebacklimit = 0
 
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
@@ -1237,6 +1254,8 @@ class CloudVmRayBackend(backends.Backend):
                 f'{handle.launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: sky down {cluster_name}')
+        # Reset traceback limit to default.
+        sys.tracebacklimit = 1000
 
     @timeline.event
     def _check_existing_cluster(
@@ -1245,7 +1264,7 @@ class CloudVmRayBackend(backends.Backend):
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             # Cluster already exists.
-            self._check_task_resources_smaller_than_cluster(handle, task)
+            self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return RetryingVmProvisioner.ToProvisionConfig(
@@ -2075,7 +2094,7 @@ class CloudVmRayBackend(backends.Backend):
     ) -> None:
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
-        self._check_task_resources_smaller_than_cluster(handle, task)
+        self.check_resources_fit_cluster(handle, task)
 
         # Otherwise, handle a basic Task.
         if task.run is None:
@@ -2103,7 +2122,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
+        codegen.add_prologue(job_id, spot_task=task.spot_task)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         if callable(task.run):
@@ -2138,7 +2157,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
+        codegen.add_prologue(job_id, spot_task=task.spot_task)
         codegen.add_gang_scheduling_placement_group(task.num_nodes,
                                                     accelerator_dict)
 
