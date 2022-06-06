@@ -91,7 +91,8 @@ class Optimizer:
                  minimize=OptimizeTarget.COST,
                  blocked_launchable_resources: Optional[List[
                      resources_lib.Resources]] = None,
-                 raise_error: bool = False):
+                 raise_error: bool = False,
+                 print_plan: bool = True):
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
@@ -100,7 +101,8 @@ class Optimizer:
                 dag,
                 minimize_cost=minimize == OptimizeTarget.COST,
                 blocked_launchable_resources=blocked_launchable_resources,
-                raise_error=raise_error)
+                raise_error=raise_error,
+                print_plan=print_plan)
         finally:
             # Make sure to remove the dummy source/sink nodes, even if the
             # optimization fails.
@@ -734,6 +736,7 @@ class Optimizer:
         blocked_launchable_resources: Optional[List[
             resources_lib.Resources]] = None,
         raise_error: bool = False,
+        print_plan: bool = True,
     ) -> Dict[Task, resources_lib.Resources]:
         """Finds the optimal task-resource mapping for the entire DAG.
 
@@ -770,11 +773,12 @@ class Optimizer:
             total_cost = Optimizer._compute_total_cost(graph, topo_order,
                                                        best_plan)
 
-        Optimizer.print_optimized_plan(graph, topo_order, best_plan, total_time,
-                                       total_cost, node_to_cost_map,
-                                       minimize_cost)
-        if not sky_logging.MINIMIZE_LOGGING:
-            Optimizer._print_candidates(node_to_candidate_map)
+        if print_plan:
+            Optimizer.print_optimized_plan(graph, topo_order, best_plan, total_time,
+                                           total_cost, node_to_cost_map,
+                                           minimize_cost)
+            if not sky_logging.MINIMIZE_LOGGING:
+                Optimizer._print_candidates(node_to_candidate_map)
         return best_plan
 
 

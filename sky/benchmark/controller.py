@@ -2,27 +2,29 @@ import colorama
 import copy
 import json
 import os
+import prettytable
 import subprocess
 import tempfile
 from rich import progress as rich_progress
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
+import sky
 from sky import data
 from sky import exceptions
 from sky import global_user_state
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.skylet import log_lib
+from sky.skylet.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
 
-SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
-SKY_REMOTE_BENCHMARK_DIR = '~/.sky_benchmark_dir'
-SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
-
-SKY_BENCHMARK_BUCKET = 'sky-benchmark'
-SKY_BENCHMARK_BUCKET_TYPE = data.StoreType.S3 # FIXME
+_SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
+_SKY_REMOTE_BENCHMARK_DIR = '~/.sky_benchmark_dir'
+_SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
+_SKY_BENCHMARK_BUCKET = 'sky-benchmark'
 
 
 def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
@@ -30,13 +32,75 @@ def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
     for i in range(num_clusters):
         name = f'{benchmark}-{i}'
         if global_user_state.get_cluster_from_name(name) is not None:
-            raise ValueError(f'Cluster name {name} is taken.')
+            raise ValueError(f'Cluster name {name} is taken. '
+                             'Try using a different benchmark name.')
         names.append(name)
     return names
 
 
+def _get_optimized_resources(candidate_configs: List[Dict[str, Any]]) -> List['resources_lib.Resources']:
+    optimized_resources = []
+    for config in candidate_configs:
+        with sky.Dag() as dag:
+            resources = config.pop('resources', None)
+            resources = sky.Resources.from_yaml_config(resources)
+            task = sky.Task()
+            task.set_resources({resources})
+
+        dag = sky.optimize(dag, print_plan=False)
+        task = dag.tasks[0]
+        optimized_resources.append(task.best_resources)
+    return optimized_resources
+
+
+def _print_candidate_resources(clusters: List[str], config: Dict[str, Any], candidate_resources: List['resources_lib.Resources']) -> None:
+    # FIXME: refactor this as it shares many parts with the printing methods of Optimizer.
+    task_str = config.get('name', 'a task')
+    num_nodes = config.get('num_nodes', 1)
+    plural = 's' if num_nodes > 1 else ''
+    logger.info(
+        f'{colorama.Style.BRIGHT}Benchmarking {task_str} '
+        f'on candidate resources ({num_nodes} node{plural}):'
+        f'{colorama.Style.RESET_ALL}')
+
+    columns = ['NAME', 'CLOUD', 'INSTANCE', 'ACCELERATORS']
+    table_kwargs = {
+        'hrules': prettytable.FRAME,
+        'vrules': prettytable.NONE,
+        'border': True,
+    }
+    candidate_table = log_utils.create_table(columns, **table_kwargs)
+
+    def _get_resources_element_list(
+            resources: 'resources_lib.Resources') -> List[str]:
+        accelerators = resources.accelerators
+        if accelerators is None:
+            accelerators = '-'
+        elif isinstance(accelerators, dict) and len(accelerators) == 1:
+            accelerators, count = list(accelerators.items())[0]
+            accelerators = f'{accelerators}:{count}'
+
+        return [
+            str(resources.cloud), resources.instance_type,
+            str(accelerators)
+        ]
+
+    for cluster, resources in zip(clusters, candidate_resources):
+        row = [cluster, *_get_resources_element_list(resources)]
+        candidate_table.add_row(row)
+    logger.info(f'{candidate_table}\n')
+
+
+def _create_benchmark_bucket(bucket_name: str, bucket_type: data.StoreType = data.StoreType.S3) -> None:
+    handle = global_user_state.get_handle_from_storage_name(bucket_name)
+    if handle is None:
+        logger.info(f'Creating a bucket {bucket_name} '
+                    'to save the benchmark logs.')
+        storage = data.Storage(bucket_name, source=None, persistent=True)
+        storage.add_store(bucket_type)
+
+
 def _launch_with_log(cluster: str, cmd: List[str]) -> None:
-    # TODO: show well-organized optimizer messages.
     log_lib.run_with_log(
         cmd,
         log_path='/dev/null',
@@ -53,11 +117,7 @@ def _launch_with_log(cluster: str, cmd: List[str]) -> None:
 class BenchmarkController:
 
     @staticmethod
-    def launch(benchmark: str, config: Dict[str, Any], cl_args: Dict[str, Any], candidates: List[Dict[str, Any]]) -> None:
-        # Create a Sky storage to save the benchmark logs.
-        storage = data.Storage(SKY_BENCHMARK_BUCKET, source=None, persistent=True)
-        storage.add_store(SKY_BENCHMARK_BUCKET_TYPE)
-
+    def generate_configs(benchmark: str, config: Dict[str, Any], candidates: List[Dict[str, Any]]) -> Tuple[List[str], List[Dict[str, Any]]]:
         # Generate a config for each cluster.
         clusters = _generate_cluster_names(benchmark, len(candidates))
         candidate_configs = []
@@ -73,19 +133,28 @@ class BenchmarkController:
             # Mount the benchmark bucket to SKY_BENCHMARK_DIR.
             if 'file_mounts' not in candidate_config:
                 candidate_config['file_mounts'] = {}
-            candidate_config['file_mounts'][SKY_REMOTE_BENCHMARK_DIR] = {
-                'name': SKY_BENCHMARK_BUCKET,
+            candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR] = {
+                'name': _SKY_BENCHMARK_BUCKET,
                 'mode': 'MOUNT',
             }
 
             # Create a sym link to a directory in the benchmark bucket.
-            benchmark_dir = os.path.join(SKY_REMOTE_BENCHMARK_DIR, benchmark, cluster)
+            benchmark_dir = os.path.join(_SKY_REMOTE_BENCHMARK_DIR, benchmark, cluster)
             if 'setup' not in candidate_config:
                 candidate_config['setup'] = ''
             candidate_config['setup'] = (f'mkdir -p {benchmark_dir}; '
-                + f'ln -s {benchmark_dir} {SKY_REMOTE_BENCHMARK_DIR_SYMLINK}; '
+                + f'ln -s {benchmark_dir} {_SKY_REMOTE_BENCHMARK_DIR_SYMLINK}; '
                 + candidate_config['setup'])
             candidate_configs.append(candidate_config)
+
+        candidate_resources = _get_optimized_resources(candidate_configs)
+        _print_candidate_resources(clusters, config, candidate_resources)
+        return clusters, candidate_configs
+
+    @staticmethod
+    def launch(benchmark: str, clusters: List[str], candidate_configs: List[Dict[str, Any]], commandline_args: List[Dict[str, Any]]) -> None:
+        # Create a Sky storage to save the benchmark logs.
+        _create_benchmark_bucket(_SKY_BENCHMARK_BUCKET)
 
         # Generate a temporary yaml file for each cluster.
         yaml_fds = []
@@ -96,7 +165,7 @@ class BenchmarkController:
 
         # Generate a common launch command.
         cmd = ['-d', '-y']
-        for arg_name, arg in cl_args.items():
+        for arg_name, arg in commandline_args.items():
             if isinstance(arg, list):
                 # 'env' arguments.
                 for v in arg:
@@ -126,8 +195,8 @@ class BenchmarkController:
             record = global_user_state.get_cluster_from_name(cluster)
             if record is not None:
                 if not benchmark_created:
-                    benchmark_state.add_benchmark(
-                        benchmark, task_name=config.get('name', None))
+                    task_name = candidate_configs[0].get('name', None)
+                    benchmark_state.add_benchmark(benchmark, task_name)
                     benchmark_created = True
                 global_user_state.set_cluster_benchmark_name(cluster, benchmark)
                 benchmark_state.add_benchmark_result(benchmark, record['handle'])
@@ -142,11 +211,11 @@ class BenchmarkController:
             f'[bold cyan]Downloading {len(clusters)} benchmark log{plural}[/]',
             total=len(clusters))
 
-        storage = data.Storage(SKY_BENCHMARK_BUCKET, source=None, persistent=True)
-        bucket = storage.stores[SKY_BENCHMARK_BUCKET_TYPE]
+        storage = data.Storage(_SKY_BENCHMARK_BUCKET, source=None, persistent=True)
+        bucket = list(storage.stores.values())[0]
 
         def _download_log(cluster: str):
-            local_dir = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
+            local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
             os.makedirs(local_dir, exist_ok=True)
             try:
                 # FIXME: Use download_remote_dir method instead.
@@ -169,12 +238,12 @@ class BenchmarkController:
     @staticmethod
     def parse_logs(benchmark: str, clusters: List[str]):
         for cluster in clusters:
-            local_dir = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
+            local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
             config_file = os.path.join(local_dir, 'config.json')
             with open(config_file, 'r') as f:
                 config = json.load(f)
             start_ts = config['start_ts']
-            total_steps = config['total_steps']
+            total_steps = config.get('total_steps', None)
 
             # FIXME
             timestamp_log = os.path.join(local_dir, 'timestamps.log')
@@ -209,6 +278,6 @@ class BenchmarkController:
 
     @staticmethod
     def remove_logs(benchmark: str):
-        log_dir = os.path.join(SKY_LOCAL_BENCHMARK_DIR, benchmark)
+        log_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
         subprocess.run(['rm', '-rf', log_dir], check=False)
         # TODO: remove the logs in the bucket.

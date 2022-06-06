@@ -4,10 +4,10 @@ import os
 import pathlib
 import pickle
 import sqlite3
-import time
 import threading
+import time
 import typing
-from typing import Any, Dict, List, NamedTuple, Optional, Union
+from typing import Any, Dict, List, NamedTuple, Optional
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 
@@ -67,13 +67,13 @@ class BenchmarkRecord(NamedTuple):
 
     num_steps: int
     sec_per_step: float
-    total_steps: int
+    total_steps: Optional[int]
     start_ts: int
     first_ts: int
     last_ts: int
 
 
-def add_benchmark(benchmark_name: str, task_name: Union[None, str]) -> None:
+def add_benchmark(benchmark_name: str, task_name: Optional[str] = None) -> None:
     """Add a new benchmark."""
     launched_at = int(time.time())
     if task_name is None:
