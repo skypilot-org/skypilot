@@ -51,6 +51,7 @@ class _BenchmarkSQLiteConn(threading.local):
             REFERENCES benchmark (name)
                 ON DELETE CASCADE
             )""")
+        self.conn.commit()
 
 
 _BENCHMARK_DB = _BenchmarkSQLiteConn()
