@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from sky import clouds
 from sky.skylet.utils import db_utils
@@ -69,9 +69,6 @@ class _SQLiteConn(threading.local):
         # Add autostop column to clusters table
         db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
                                      'autostop', 'INTEGER DEFAULT -1')
-        # For backward compatibility.
-        db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
-                                     'benchmark', 'TEXT DEFAULT NULL')
         self.conn.commit()
 
 
@@ -142,19 +139,15 @@ def add_or_update_cluster(cluster_name: str,
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
-        '(name, launched_at, handle, last_use, status, autostop, benchmark) '
+        '(name, launched_at, handle, last_use, status, autostop) '
         'VALUES (?, ?, ?, ?, ?, '
         # Keep the old autostop value if it exists, otherwise set it to
         # default -1.
         'COALESCE('
-        '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1), '
-        # Keep the old benchmark name if it exists, otherwise set it to
-        # default NULL.
-        'COALESCE('
-        '(SELECT benchmark FROM clusters WHERE name=?), NULL)'
+        '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1)'
         ')',  # VALUES
         (cluster_name, cluster_launched_at, handle, last_use, status.value,
-         cluster_name, ClusterStatus.STOPPED.value, cluster_name))
+         cluster_name, ClusterStatus.STOPPED.value))
     _DB.conn.commit()
 
 
@@ -227,52 +220,18 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def set_cluster_benchmark_name(cluster_name: str,
-                               benchmark_name: Union[None, str]) -> None:
-    if benchmark_name is None:
-        _DB.cursor.execute('UPDATE clusters SET benchmark=NULL WHERE name=(?)',
-                           (cluster_name,))
-    else:
-        _DB.cursor.execute('UPDATE clusters SET benchmark=(?) WHERE name=(?)',
-                           (benchmark_name, cluster_name))
-    count = _DB.cursor.rowcount
-    _DB.conn.commit()
-    assert count <= 1, count
-    if count == 0:
-        raise ValueError(f'Cluster {cluster_name} not found.')
-
-
-def get_clusters_from_benchmark(benchmark_name: str) -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('SELECT * FROM clusters WHERE benchmark=(?)',
-                              (benchmark_name,))
-    records = []
-    for row in rows:
-        record = {
-            'name': row[0],
-            'launched_at': row[1],
-            'handle': pickle.loads(row[2]),
-            'last_use': row[3],
-            'status': ClusterStatus[row[4]],
-            'autostop': row[5],
-            'benchmark': row[6],
-        }
-        records.append(record)
-    return records
-
-
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
                               (cluster_name,))
-    for row in rows:
+    for name, launched_at, handle, last_use, status, autostop in rows:
         record = {
-            'name': row[0],
-            'launched_at': row[1],
-            'handle': pickle.loads(row[2]),
-            'last_use': row[3],
-            'status': ClusterStatus[row[4]],
-            'autostop': row[5],
-            'benchmark': row[6],
+            'name': name,
+            'launched_at': launched_at,
+            'handle': pickle.loads(handle),
+            'last_use': last_use,
+            'status': ClusterStatus[status],
+            'autostop': autostop,
         }
         return record
 
@@ -280,16 +239,15 @@ def get_cluster_from_name(
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from clusters')
     records = []
-    for row in rows:
+    for name, laucnhed_at, handle, last_use, status, autostop in rows:
         # TODO: use namedtuple instead of dict
         record = {
-            'name': row[0],
-            'launched_at': row[1],
-            'handle': pickle.loads(row[2]),
-            'last_use': row[3],
-            'status': ClusterStatus[row[4]],
-            'autostop': row[5],
-            'benchmark': row[6],
+            'name': name,
+            'launched_at': laucnhed_at,
+            'handle': pickle.loads(handle),
+            'last_use': last_use,
+            'status': ClusterStatus[status],
+            'autostop': autostop,
         }
         records.append(record)
     return records
