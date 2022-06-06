@@ -53,6 +53,8 @@ install_requires = [
 
 extras_require = {
     'aws': ['awscli', 'boto3'],
+    # TODO(zongheng): azure-cli is huge and takes a long time to install.
+    # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     'azure': ['azure-cli==2.30.0'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
