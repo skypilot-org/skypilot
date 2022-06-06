@@ -1247,7 +1247,7 @@ def _terminate_or_stop_benchmark(benchmark: str, clusters_to_exclude: List[str],
 
 @bench.command('stop', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
-@click.option('--except',
+@click.option('--exclude',
               '-e',
               'clusters_to_exclude',
               required=False,
@@ -1274,7 +1274,7 @@ def benchmark_stop(
 
 @bench.command('down', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
-@click.option('--except',
+@click.option('--exclude',
               '-e',
               'clusters_to_exclude',
               required=False,
