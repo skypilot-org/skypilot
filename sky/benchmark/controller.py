@@ -54,7 +54,7 @@ def _get_optimized_resources(candidate_configs: List[Dict[str, Any]]) -> List['r
 
 
 def _print_candidate_resources(clusters: List[str], config: Dict[str, Any], candidate_resources: List['resources_lib.Resources']) -> None:
-    # FIXME: refactor this as it shares many parts with the printing methods of Optimizer.
+    # FIXME: refactor this as it shares the code with the printing methods of Optimizer.
     task_str = config.get('name', 'a task')
     num_nodes = config.get('num_nodes', 1)
     plural = 's' if num_nodes > 1 else ''
@@ -63,7 +63,7 @@ def _print_candidate_resources(clusters: List[str], config: Dict[str, Any], cand
         f'on candidate resources ({num_nodes} node{plural}):'
         f'{colorama.Style.RESET_ALL}')
 
-    columns = ['NAME', 'CLOUD', 'INSTANCE', 'ACCELERATORS']
+    columns = ['NAME', 'CLOUD', 'INSTANCE', 'ACCELERATORS', 'COST ($/hr)']
     table_kwargs = {
         'hrules': prettytable.FRAME,
         'vrules': prettytable.NONE,
@@ -86,7 +86,8 @@ def _print_candidate_resources(clusters: List[str], config: Dict[str, Any], cand
         ]
 
     for cluster, resources in zip(clusters, candidate_resources):
-        row = [cluster, *_get_resources_element_list(resources)]
+        cost = num_nodes * resources.get_cost(3600)
+        row = [cluster, *_get_resources_element_list(resources), round(cost, 2)]
         candidate_table.add_row(row)
     logger.info(f'{candidate_table}\n')
 
