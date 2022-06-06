@@ -79,8 +79,8 @@ class S3CloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        download_via_awscli = f'mkdir -p {destination} && \
-                                aws s3 cp {source} {destination}'
+        download_via_awscli = (f'mkdir -p {destination} &&'
+                               'aws s3 cp {source} {destination}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)

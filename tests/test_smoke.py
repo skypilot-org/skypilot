@@ -629,12 +629,12 @@ class TestStorageWithCredentials:
                                                                 ('utf-8'))
 
         # Check symlinks - symlinks don't get copied by sky storage
-        assert pathlib.Path(tmp_mount + '/circle-link').is_symlink(), \
-            'circle-link was not found in the upload source - ' \
-            'are the test fixtures correct?'
-        assert 'circle-link' not in out.decode('utf-8'), \
+        assert (pathlib.Path(tmp_mount) / 'circle-link').is_symlink(), (
+            'circle-link was not found in the upload source - '
+            'are the test fixtures correct?')
+        assert 'circle-link' not in out.decode('utf-8'), (
             'Symlink found in bucket - ls output was : {}'.format(out.decode
-                                                                  ('utf-8'))
+                                                                  ('utf-8')))
 
         # Run sky storage ls to check if storage object exists in the output.
         # It should not exist because the bucket was created externally.
