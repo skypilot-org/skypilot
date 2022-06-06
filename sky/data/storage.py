@@ -22,6 +22,9 @@ Path = str
 StorageHandle = Any
 StorageStatus = global_user_state.StorageStatus
 
+# Max number of objects a GCS bucket can be directly deleted with
+_GCS_RM_MAX_OBJS = 256
+
 
 class StoreType(enum.Enum):
     S3 = 'S3'
@@ -1029,8 +1032,8 @@ class GcsStore(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
-        logger.info(f'Deleting GCS Bucket {self.name}')
-        return self._delete_gcs_bucket(self.name)
+        self._delete_gcs_bucket(self.name)
+        logger.info(f'Deleted GCS bucket {self.name}.')
 
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
@@ -1169,10 +1172,25 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(bucket_name)
-            bucket.delete(force=True)
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
-            logger.error('External Bucket detected; User not allowed to delete '
-                         'external bucket!')
+            logger.error('External Bucket detected. User not allowed to delete '
+                         'external bucket.')
             logger.error(e)
             raise e
+
+        num_files = subprocess.check_output(
+            f'gsutil du gs://{bucket_name} | wc -l', shell=True)
+        num_files = int(num_files)
+
+        try:
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
+                if num_files >= _GCS_RM_MAX_OBJS:
+                    remove_obj_command = f'gsutil rm -m -a gs://{bucket_name}/*'
+                    subprocess.check_output(remove_obj_command.split(' '))
+                bucket.delete(force=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(e.output)
+            raise exceptions.StorageBucketDeleteError(
+                f'Failed to delete GCS bucket {bucket_name}.')
