@@ -723,7 +723,7 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
 
     for ip in ips:
         # Checks for python3 installation.
-        run_command_and_handle_ssh_failure(ip, 'sudo python3 --version',
+        run_command_and_handle_ssh_failure(ip, 'python3 --version',
                                            f'Python3 is not installed on {ip}')
 
         # Checks for Ray installation.
@@ -731,7 +731,7 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
                                            f'Ray is not installed on {ip}')
 
         # Checks for Sky installation.
-        run_command_and_handle_ssh_failure(ip, 'sudo sky --help',
+        run_command_and_handle_ssh_failure(ip, 'sky --help',
                                            f'Sky is not installed on {ip}')
 
 
