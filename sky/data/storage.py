@@ -23,6 +23,9 @@ Path = str
 StorageHandle = Any
 StorageStatus = global_user_state.StorageStatus
 
+# Max number of objects a GCS bucket can be directly deleted with
+_GCS_RM_MAX_OBJS = 256
+
 
 class StoreType(enum.Enum):
     S3 = 'S3'
@@ -385,7 +388,8 @@ class Storage(object):
                     self.add_store(StoreType.GCS)
 
     @staticmethod
-    def _validate_source(source: str, mode: StorageMode) -> Tuple[str, bool]:
+    def _validate_source(source: str, mode: StorageMode,
+                         sync_on_reconstruction: bool) -> Tuple[str, bool]:
         """Validates the source path.
 
         Args:
@@ -409,7 +413,8 @@ class Storage(object):
                     f'Found source={source}')
             # Local path, check if it exists
             source = os.path.abspath(os.path.expanduser(source))
-            if not os.path.exists(source):
+            # Only check if local source exists if it is synced to the bucket
+            if not os.path.exists(source) and sync_on_reconstruction:
                 raise exceptions.StorageSourceError('Local source path does not'
                                                     f' exist: {source}')
             # Raise warning if user's path is a symlink
@@ -460,7 +465,7 @@ class Storage(object):
                     return
         elif self.source is not None:
             source, is_local_source = Storage._validate_source(
-                self.source, self.mode)
+                self.source, self.mode, self.sync_on_reconstruction)
 
             if not self.name:
                 if is_local_source:
@@ -736,8 +741,8 @@ class S3Store(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
-        logger.info(f'Deleting S3 Bucket {self.name}')
-        return self._delete_s3_bucket(self.name)
+        self._delete_s3_bucket(self.name)
+        logger.info(f'Deleted S3 bucket {self.name}.')
 
     def get_handle(self) -> StorageHandle:
         return aws.resource('s3').Bucket(self.name)
@@ -750,7 +755,8 @@ class S3Store(AbstractStore):
         file (Default path: ~/.aws/config).
         """
         source = os.path.abspath(os.path.expanduser(self.source))
-        sync_command = f'aws s3 sync {source} s3://{self.name}/'
+        sync_command = ('aws s3 sync --no-follow-symlinks '
+                        f'{source} s3://{self.name}/')
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{self.source} to s3://{self.name}/'):
@@ -798,10 +804,23 @@ class S3Store(AbstractStore):
 
         try:
             # Try Public bucket case.
-            # This line will error out if bucket is private.
+            # This line does not error out if the bucket is an external public
+            # bucket or if it is a user's bucket that is publicly
+            # accessible.
             self.client.get_public_access_block(Bucket=self.name)
             return bucket, False
         except aws.client_exception() as e:
+            error_code = e.response['Error']['Code']
+            # AccessDenied error for buckets that are private and not owned by
+            # user.
+            if error_code == 'AccessDenied':
+                ex = exceptions.StorageBucketGetError(
+                    f'Failed to connect to an existing bucket {self.name!r}.\n'
+                    'Check if the 1) the bucket name is taken and/or '
+                    '2) the bucket permissions are not setup correctly. '
+                    f'Consider using `aws s3 ls {self.name}` to debug.')
+                logger.error(ex)
+                raise ex from e
             # Try private bucket case.
             if data_utils.verify_s3_bucket(self.name):
                 return bucket, False
@@ -932,18 +951,26 @@ class S3Store(AbstractStore):
         Args:
           bucket_name: str; Name of bucket
         """
+        # Deleting objects is very slow programatically
+        # (i.e. bucket.objects.all().delete() is slow).
+        # In addition, standard delete operations (i.e. via `aws s3 rm`)
+        # are slow, since AWS puts deletion markers.
+        # https://stackoverflow.com/questions/49239351/why-is-it-so-much-slower-to-delete-objects-in-aws-s3-than-it-is-to-create-them
+        # The fastest way to delete is to run `aws s3 rb --force`,
+        # which removes the bucket by force.
+        remove_command = f'aws s3 rb s3://{bucket_name} --force'
         try:
-            s3 = aws.resource('s3')
-            bucket = s3.Bucket(bucket_name)
-            bucket.objects.all().delete()
-            bucket.delete()
-            # Wait until bucket deletion propagates on AWS servers
-            while data_utils.verify_s3_bucket(bucket_name):
-                time.sleep(1)
-        except aws.client_exception() as e:
-            logger.error(f'Unable to delete S3 bucket {self.name}')
-            logger.error(e)
-            raise e
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
+                subprocess.check_output(remove_command.split(' '))
+        except subprocess.CalledProcessError as e:
+            logger.error(e.output)
+            raise exceptions.StorageBucketDeleteError(
+                f'Failed to delete S3 bucket {bucket_name}.')
+
+        # Wait until bucket deletion propagates on AWS servers
+        while data_utils.verify_s3_bucket(bucket_name):
+            time.sleep(0.1)
 
 
 class GcsStore(AbstractStore):
@@ -1016,8 +1043,8 @@ class GcsStore(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
-        logger.info(f'Deleting GCS Bucket {self.name}')
-        return self._delete_gcs_bucket(self.name)
+        self._delete_gcs_bucket(self.name)
+        logger.info(f'Deleted GCS bucket {self.name}.')
 
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
@@ -1156,10 +1183,25 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(bucket_name)
-            bucket.delete(force=True)
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
-            logger.error('External Bucket detected; User not allowed to delete '
-                         'external bucket!')
+            logger.error('External Bucket detected. User not allowed to delete '
+                         'external bucket.')
             logger.error(e)
             raise e
+
+        num_files = subprocess.check_output(
+            f'gsutil du gs://{bucket_name} | wc -l', shell=True)
+        num_files = int(num_files)
+
+        try:
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
+                if num_files >= _GCS_RM_MAX_OBJS:
+                    remove_obj_command = f'gsutil rm -m -a gs://{bucket_name}/*'
+                    subprocess.check_output(remove_obj_command.split(' '))
+                bucket.delete(force=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(e.output)
+            raise exceptions.StorageBucketDeleteError(
+                f'Failed to delete GCS bucket {bucket_name}.')

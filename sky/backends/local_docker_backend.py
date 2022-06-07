@@ -89,7 +89,7 @@ class LocalDockerBackend(backends.Backend):
             return str.__new__(cls, prefixed_str, **kw)
 
         def get_cluster_name(self):
-            return self
+            return self.lstrip(_DOCKER_HANDLE_PREFIX)
 
     # Define the Docker-in-Docker mount
     _dind_mount = {
@@ -140,6 +140,10 @@ class LocalDockerBackend(backends.Backend):
                     metadata[k[len(_DOCKER_LABEL_PREFIX):]] = v
             self.images[c.name] = [c.image, metadata]
             self.containers[c.name] = c
+
+    def check_resources_fit_cluster(self, handle: ResourceHandle,
+                                    task: 'task_lib.Task') -> None:
+        pass
 
     def provision(self,
                   task: 'task_lib.Task',

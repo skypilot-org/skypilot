@@ -17,6 +17,7 @@ with sky.Dag() as dag:
            conda activate resnet && \
            conda install cudatoolkit=11.0 -y && \
            pip install tensorflow==2.4.0 pyyaml && \
+           pip install protobuf==3.20 && \
            cd models && pip install -e .)'
 
     # The command to run.  Will be run under the working directory.
