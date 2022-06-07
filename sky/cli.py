@@ -55,7 +55,6 @@ from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
-from sky.utils import timeline
 from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
