@@ -920,7 +920,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - INIT: Undergoing provisioning or runtime setup and may be live or down.
     - UP: Provisioning and runtime setup have succeeded and the cluster is live.
     - STOPPED: The cluster is stopped and the storage is persisted. Use
-        :code:`sky start`. to restart the cluster.
+        :code:`sky start` to restart the cluster.
     """
     status_utils.show_status_table(all, refresh)
 
@@ -1228,7 +1228,6 @@ def autostop(
 
         # Cancel auto stopping for a specific cluster.
         sky autostop cluster_name --cancel
-    .. code-block:: bash
 
     """
     if cancel and idle_minutes is not None:
