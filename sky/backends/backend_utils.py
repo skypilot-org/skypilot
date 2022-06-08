@@ -1218,6 +1218,123 @@ def check_network_connection():
         raise exceptions.NetworkError(
             'Could not refresh the cluster. Network seems down.') from e
 
+def _process_cli_query(
+    cloud: str, cluster: str, query_cmd: str, deliminator: str,
+    status_map: Dict[str, global_user_state.ClusterStatus]
+) -> Tuple[Optional[global_user_state.ClusterStatus], Optional[str]]:
+    returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
+                                                      '/dev/null',
+                                                      require_outputs=True,
+                                                      shell=True)
+    cluster_status_ip = stdout.strip()
+    if cluster_status_ip == '':
+        return None, None
+    status_ip_list = cluster_status_ip.split(deliminator)
+    if returncode != 0 or status_ip_list[0] not in status_map:
+        raise exceptions.ClusterStatusFetchingError(
+            f'Failed to query {cloud} cluster {cluster!r} status: {stdout + stderr}'
+        )
+    status = status_map[cluster_status_ip[0]]
+    ip = None
+    if len(status_ip_list) > 1:
+        assert len(status_ip_list) == 2, status_ip_list
+        ip = status_ip_list[1]
+    return status, ip
+
+
+def _query_status_ip_aws(
+    cluster: str, config: Dict[str, Any]
+) -> Tuple[Optional[global_user_state.ClusterStatus], str]:
+    status_map = {
+        'pending': global_user_state.ClusterStatus.INIT,
+        'running': global_user_state.ClusterStatus.UP,
+        'stopping': global_user_state.ClusterStatus.STOPPED,
+        'stopped': global_user_state.ClusterStatus.STOPPED,
+        'shutting-down': None,
+        'terminated': None,
+    }
+    region = config['provider']['region']
+    query_cmd = (
+        'aws ec2 describe-instances --filters '
+        f'Name=tag:ray-cluster-name,Values={cluster} '
+        'Name=tag:ray-node-type,Values=head '
+        f'--region {region} '
+        '--query "[Reservations[].Instances[].State.Name,Reservations[].Instances[].PublicIpAddress]" '
+        '--output text')
+    return _process_cli_query('AWS', cluster, query_cmd, '\n', status_map)
+
+
+def _query_status_ip_gcp(
+    cluster: str, config: Dict[str, Any]
+) -> Tuple[Optional[global_user_state.ClusterStatus], str]:
+    del config  # unused
+    status_map = {
+        'PROVISIONING': global_user_state.ClusterStatus.INIT,
+        'STARTING': global_user_state.ClusterStatus.INIT,
+        'RUNNING': global_user_state.ClusterStatus.UP,
+        'REPAIRING': global_user_state.ClusterStatus.STOPPED,
+        'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
+        'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
+        'STOPPING': None,
+        'TERMINATED': None,
+    }
+    query_cmd = (
+        f'gcloud compute instances list '
+        f'--filter="labels.ray-cluster-name={cluster} AND '
+        f'labels.ray-node-type=head" --format="value(status,EXTERNAL_IP)"')
+    return _process_cli_query('GCP', cluster, query_cmd, ' ', status_map)
+
+
+
+def _query_status_ip_azure(
+    cluster: str, config: Dict[str, Any]
+) -> Tuple[Optional[global_user_state.ClusterStatus], str]:
+    del config  # unused
+    status_map = {
+        'VM starting': global_user_state.ClusterStatus.INIT,
+        'VM running': global_user_state.ClusterStatus.UP,
+        'VM stopping': global_user_state.ClusterStatus.INIT,
+        'VM stopped': global_user_state.ClusterStatus.INIT,
+        'VM deallocating': global_user_state.ClusterStatus.STOPPED,
+        'VM deallocated': global_user_state.ClusterStatus.STOPPED,
+    }
+
+    query_cmd = textwrap.dedent(f"""\
+            az vm show -d --ids \                                    ✭ ✱
+            $(az vm list --query \
+            "[?tags.\"ray-cluster-name\" == '{cluster}' \
+            && tags.\"ray-node-type\" == 'head'].id" -o tsv) \
+            --query "[powerState,publicIps]" -o tsv
+        """)
+    # NOTE: Azure cli should be handled carefully. The query command above
+    # takes about 1 second to run.
+    # An alternative is the following command, but it will take more than
+    # 20 seconds to run.
+    # query_cmd = (
+    #     f'az vm list --show-details --query "['
+    #     f'?tags.\\"ray-cluster-name\\" == \'{handle.cluster_name}\' '
+    #     '&& tags.\\"ray-node-type\\" == \'head\'].powerState" -o tsv'
+    # )
+    return _process_cli_query('Azure', cluster, query_cmd, '\n', status_map)
+
+
+
+_QUERY_STATUS_IP_FN = {
+    'AWS': _query_status_ip_aws,
+    'GCP': _query_status_ip_gcp,
+    'Azure': _query_status_ip_azure,
+}
+
+
+def _get_cluster_status_ip(
+    handle: 'backends.Backend.ResourceHandle'
+) -> Optional[global_user_state.ClusterStatus]:
+    """Returns the status of the cluster."""
+    resources: sky.Resources = handle.launched_resources
+    cloud = resources.cloud
+    config = read_yaml(handle.cluster_yaml)
+    return _QUERY_STATUS_IP_FN[str(cloud)](handle.cluster_name, config)
+
 
 def _ping_cluster_and_set_status(
         record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1250,6 +1367,7 @@ def _ping_cluster_and_set_status(
         # Should not set the cluster to STOPPED if INIT, since it may be
         # still launching.
         return record
+    cluster_status, ip = _get_cluster_status_ip(handle)
     # Set the cluster status to STOPPED. It is safe to do so, even if the
     # cluster is still partially UP:
     # 1. Autostop case: the whole cluster will be properly stopped soon.
