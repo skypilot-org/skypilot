@@ -238,7 +238,7 @@ def get_cluster_from_name(
 
 
 def get_clusters() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('select * from clusters')
+    rows = _DB.cursor.execute('select * from clusters order by launched_at desc')
     records = []
     for name, launched_at, handle, last_use, status, autostop in rows:
         # TODO: use namedtuple instead of dict
