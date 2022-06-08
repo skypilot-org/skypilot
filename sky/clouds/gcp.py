@@ -191,6 +191,7 @@ class GCP(clouds.Cloud):
         # default VM type.
         host_vm_type = GCP.get_default_instance_type()
         acc_dict = None
+        # Find instance candidates to meet user's requirements
         if resources.accelerators is not None:
             assert len(resources.accelerators.items(
             )) == 1, 'cannot handle more than one accelerator candidates.'
