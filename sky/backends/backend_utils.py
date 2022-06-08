@@ -1239,7 +1239,11 @@ def _process_cli_query(
     cluster_status = stdout.strip()
     if cluster_status == '':
         return []
-    return [status_map[s] for s in cluster_status.split(deliminiator) if status_map[s] is not None]
+    return [
+        status_map[s]
+        for s in cluster_status.split(deliminiator)
+        if status_map[s] is not None
+    ]
 
 
 def _query_status_aws(
@@ -1297,7 +1301,7 @@ def _query_status_azure(
     }
 
     query_cmd = textwrap.dedent(f"""\
-            az vm show -d --ids \                                    ✭ ✱
+            az vm show -d --ids \
             $(az vm list --query \
             "[?tags.\"ray-cluster-name\" == '{cluster}' \
             && tags.\"ray-node-type\" == 'head'].id" -o tsv) \
@@ -1379,17 +1383,27 @@ def _ping_cluster_and_set_status(
         # removed. With high likelihood the cluster has been removed.
         return None
 
-    cluster_statuses = _get_cluster_status_ip(handle)
-    # If the cluster_statuses is empty, all the nodes are terminated. We can
-    # safely set the cluster status to TERMINATED. This handles the edge case
-    # where the cluster is terminated by the user manually through the UI.
-    # NOTE: For the managed spot case, we have set the preemption policy to
-    # stopped, so the cluster will be in the STOPPED state.
-    # NOTE: The cluster can be partially UP for the following cases:
-    # 1. It is in state transition because of sky commands
-    # 2. The user has manually terminated part of the cluster through the UI,
-    # which is out of our control.
-    to_terminate = not cluster_statuses
+    if handle.launched_resources.use_spot:
+        # NOTE: We need to set the cluster status to STOPPED for preempted spot
+        # cluster to make sure our managed spot can retry on the same region
+        # first.
+        # This is True for GCP and Azure, since the preemption policy is stopping
+        # the cluster.
+        # For AWS, although the preemption policy is terminating the cluster (the
+        # stopping preemption policy is only supported for persistent spot, which
+        # is not our case), we still need to set it to STOPPED for the correctness
+        # of the managed spot mentioned above.
+        to_terminate = False
+    else:
+        cluster_statuses = _get_cluster_status_ip(handle)
+        # If the cluster_statuses is empty, all the nodes are terminated. We can
+        # safely set the cluster status to TERMINATED. This handles the edge case
+        # where the cluster is terminated by the user manually through the UI.
+        # NOTE: The cluster can be partially UP for the following cases:
+        # 1. It is in state transition because of sky commands
+        # 2. The user has manually terminated part of the cluster through the UI,
+        # which is out of our control.
+        to_terminate = not cluster_statuses
     auth_config = config['auth']
     global_user_state.remove_cluster(cluster_name, terminate=to_terminate)
     SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)

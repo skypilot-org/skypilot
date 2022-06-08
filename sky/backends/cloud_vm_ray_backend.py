@@ -2290,15 +2290,6 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = (
                     f'aws ec2 terminate-instances --region {region} '
                     f'--instance-ids $({query_cmd})')
-                with backend_utils.safe_console_status(
-                        f'[bold cyan]Terminating '
-                        f'[green]{cluster_name}'):
-                    returncode, stdout, stderr = log_lib.run_with_log(
-                        terminate_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
             elif isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
                 query_cmd = (
@@ -2308,18 +2299,17 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = (
                     f'gcloud compute instances delete --zone={zone} --quiet '
                     f'$({query_cmd})')
-                with backend_utils.safe_console_status(
-                        f'[bold cyan]Terminating '
-                        f'[green]{cluster_name}'):
-                    returncode, stdout, stderr = log_lib.run_with_log(
-                        terminate_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
             else:
                 raise ValueError(f'Unsupported cloud {cloud} for stopped '
                                  f'cluster {cluster_name!r}.')
+            with backend_utils.safe_console_status(f'[bold cyan]Terminating '
+                                                   f'[green]{cluster_name}'):
+                returncode, stdout, stderr = log_lib.run_with_log(
+                    terminate_cmd,
+                    log_abs_path,
+                    shell=True,
+                    stream_logs=False,
+                    require_outputs=True)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
