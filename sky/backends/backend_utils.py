@@ -1218,33 +1218,33 @@ def check_network_connection():
         raise exceptions.NetworkError(
             'Could not refresh the cluster. Network seems down.') from e
 
+
 def _process_cli_query(
-    cloud: str, cluster: str, query_cmd: str, deliminator: str,
+    cloud: str, cluster: str, query_cmd: str, deliminiator: str,
     status_map: Dict[str, global_user_state.ClusterStatus]
-) -> Tuple[Optional[global_user_state.ClusterStatus], Optional[str]]:
+) -> List[global_user_state.ClusterStatus]:
     returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
                                                       '/dev/null',
                                                       require_outputs=True,
                                                       shell=True)
-    cluster_status_ip = stdout.strip()
-    if cluster_status_ip == '':
-        return None, None
-    status_ip_list = cluster_status_ip.split(deliminator)
-    if returncode != 0 or status_ip_list[0] not in status_map:
+    if (cloud == str(sky.Azure()) and returncode == 2 and
+            'argument --ids: expected at least one argument' in stderr):
+        return []
+
+    if returncode != 0:
         raise exceptions.ClusterStatusFetchingError(
             f'Failed to query {cloud} cluster {cluster!r} status: {stdout + stderr}'
         )
-    status = status_map[cluster_status_ip[0]]
-    ip = None
-    if len(status_ip_list) > 1:
-        assert len(status_ip_list) == 2, status_ip_list
-        ip = status_ip_list[1]
-    return status, ip
+
+    cluster_status = stdout.strip()
+    if cluster_status == '':
+        return []
+    return [status_map[s] for s in cluster_status.split(deliminiator) if status_map[s] is not None]
 
 
-def _query_status_ip_aws(
-    cluster: str, config: Dict[str, Any]
-) -> Tuple[Optional[global_user_state.ClusterStatus], str]:
+def _query_status_aws(
+        cluster: str,
+        config: Dict[str, Any]) -> List[global_user_state.ClusterStatus]:
     status_map = {
         'pending': global_user_state.ClusterStatus.INIT,
         'running': global_user_state.ClusterStatus.UP,
@@ -1254,19 +1254,18 @@ def _query_status_ip_aws(
         'terminated': None,
     }
     region = config['provider']['region']
-    query_cmd = (
-        'aws ec2 describe-instances --filters '
-        f'Name=tag:ray-cluster-name,Values={cluster} '
-        'Name=tag:ray-node-type,Values=head '
-        f'--region {region} '
-        '--query "[Reservations[].Instances[].State.Name,Reservations[].Instances[].PublicIpAddress]" '
-        '--output text')
-    return _process_cli_query('AWS', cluster, query_cmd, '\n', status_map)
+    query_cmd = ('aws ec2 describe-instances --filters '
+                 f'Name=tag:ray-cluster-name,Values={cluster} '
+                 'Name=tag:ray-node-type,Values=head '
+                 f'--region {region} '
+                 '--query "Reservations[].Instances[].State.Name" '
+                 '--output text')
+    return _process_cli_query('AWS', cluster, query_cmd, ' ', status_map)
 
 
-def _query_status_ip_gcp(
-    cluster: str, config: Dict[str, Any]
-) -> Tuple[Optional[global_user_state.ClusterStatus], str]:
+def _query_status_gcp(
+        cluster: str,
+        config: Dict[str, Any]) -> List[global_user_state.ClusterStatus]:
     del config  # unused
     status_map = {
         'PROVISIONING': global_user_state.ClusterStatus.INIT,
@@ -1278,17 +1277,15 @@ def _query_status_ip_gcp(
         'STOPPING': None,
         'TERMINATED': None,
     }
-    query_cmd = (
-        f'gcloud compute instances list '
-        f'--filter="labels.ray-cluster-name={cluster} AND '
-        f'labels.ray-node-type=head" --format="value(status,EXTERNAL_IP)"')
-    return _process_cli_query('GCP', cluster, query_cmd, ' ', status_map)
+    query_cmd = (f'gcloud compute instances list '
+                 f'--filter="labels.ray-cluster-name={cluster} AND '
+                 f'labels.ray-node-type=head" --format="value(status)"')
+    return _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
 
 
-
-def _query_status_ip_azure(
-    cluster: str, config: Dict[str, Any]
-) -> Tuple[Optional[global_user_state.ClusterStatus], str]:
+def _query_status_azure(
+        cluster: str,
+        config: Dict[str, Any]) -> List[global_user_state.ClusterStatus]:
     del config  # unused
     status_map = {
         'VM starting': global_user_state.ClusterStatus.INIT,
@@ -1304,7 +1301,7 @@ def _query_status_ip_azure(
             $(az vm list --query \
             "[?tags.\"ray-cluster-name\" == '{cluster}' \
             && tags.\"ray-node-type\" == 'head'].id" -o tsv) \
-            --query "[powerState,publicIps]" -o tsv
+            --query "powerState" -o tsv
         """)
     # NOTE: Azure cli should be handled carefully. The query command above
     # takes about 1 second to run.
@@ -1315,14 +1312,13 @@ def _query_status_ip_azure(
     #     f'?tags.\\"ray-cluster-name\\" == \'{handle.cluster_name}\' '
     #     '&& tags.\\"ray-node-type\\" == \'head\'].powerState" -o tsv'
     # )
-    return _process_cli_query('Azure', cluster, query_cmd, '\n', status_map)
-
+    return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
 
 
 _QUERY_STATUS_IP_FN = {
-    'AWS': _query_status_ip_aws,
-    'GCP': _query_status_ip_gcp,
-    'Azure': _query_status_ip_azure,
+    'AWS': _query_status_aws,
+    'GCP': _query_status_gcp,
+    'Azure': _query_status_azure,
 }
 
 
@@ -1362,12 +1358,31 @@ def _ping_cluster_and_set_status(
         return record
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
-                     f'{cluster_name!r}, set to STOPPED')
+                     f'{cluster_name!r}, trying to fetch from provider.')
+    cluster_statuses = _get_cluster_status_ip(handle)
+    if len(cluster_statuses) == 0:
+        final_status = None
+    elif len(cluster_statuses) != handle.launched_nodes:
+        final_status = global_user_state.ClusterStatus.INIT
+        logger.debug(f'Refreshing status: Cluster {cluster_name!r} is '
+        f'partially available with statuses {cluster_statuses}. '
+        'Set to INIT.')
+    else:
+        assert len(cluster_statuses) == handle.launched_nodes, cluster_statuses
+        all_stopped = all(status == global_user_state.ClusterStatus.STOPPED for status in cluster_statuses)
+        if all_stopped:
+            final_status = global_user_state.ClusterStatus.STOPPED
+        else:
+            # There are two cases here:
+            # 1. The cluster is partially up, then the cluster should be INIT.
+            # 2. All nodes are up, but ray fails to fetch IPs. That is probably because
+            # the ray cluster is still starting or crashed. The cluster state should 
+            # be INIT.
+            final_status = global_user_state.ClusterStatus.INIT
     if record['status'] == global_user_state.ClusterStatus.INIT:
         # Should not set the cluster to STOPPED if INIT, since it may be
         # still launching.
         return record
-    cluster_status, ip = _get_cluster_status_ip(handle)
     # Set the cluster status to STOPPED. It is safe to do so, even if the
     # cluster is still partially UP:
     # 1. Autostop case: the whole cluster will be properly stopped soon.
@@ -1384,7 +1399,7 @@ def _ping_cluster_and_set_status(
         # removed. With high likelihood the cluster has been removed.
         return None
     auth_config = config['auth']
-    global_user_state.remove_cluster(cluster_name, terminate=False)
+    global_user_state.remove_cluster(cluster_name, terminate=(cluster_status is None))
     SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
     return global_user_state.get_cluster_from_name(cluster_name)
 
