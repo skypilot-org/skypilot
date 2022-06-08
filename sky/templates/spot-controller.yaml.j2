@@ -5,13 +5,13 @@ name: {{cluster_name}}
 resources:
   disk_size: 50
 # It is now using default CPU instance type hard-coded in sky code for spot controller,
-# i.e. m4.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8_v4 (8vCPUs, 32 GB) for Azure, and n1-highmem-8 (8 vCPUs, 52 GB) for GCP.
+# i.e. m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8_v4 (8vCPUs, 32 GB) for Azure, and n1-highmem-8 (8 vCPUs, 52 GB) for GCP.
 # This allows users without the credits for some of the clouds available to use managed spot instances.
 # TODO(zhwu): Fix this to be able to failvoer across clouds with cheaper instance.
 #  instance_type: t3.xlarge
 
 file_mounts:
-  ~/.sky/sky_spot_tasks/{{cluster_name}}.yaml: {{user_yaml_path}}
+  {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml: {{user_yaml_path}}
 
 setup: |
   # Install cli dependencies
@@ -32,5 +32,5 @@ setup: |
 
 run: |
   python -u -m sky.spot.controller \
-    ~/.sky/sky_spot_tasks/{{cluster_name}}.yaml \
+    {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \
     --job-id $SKY_JOB_ID

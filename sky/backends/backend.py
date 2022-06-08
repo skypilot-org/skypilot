@@ -23,12 +23,18 @@ class Backend:
         def get_cluster_name(self) -> str:
             raise NotImplementedError
 
+    def check_resources_fit_cluster(self, handle: ResourceHandle,
+                                    task: 'task_lib.Task') -> None:
+        """Check whether resources of the task are satisfied by cluster."""
+        raise NotImplementedError
+
     def provision(self,
                   task: 'task_lib.Task',
                   to_provision: Optional['resources.Resources'],
                   dryrun: bool,
                   stream_logs: bool,
-                  cluster_name: Optional[str] = None) -> ResourceHandle:
+                  cluster_name: Optional[str] = None,
+                  retry_until_up: bool = False) -> ResourceHandle:
         raise NotImplementedError
 
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:

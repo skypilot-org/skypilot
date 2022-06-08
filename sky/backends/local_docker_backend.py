@@ -89,7 +89,7 @@ class LocalDockerBackend(backends.Backend):
             return str.__new__(cls, prefixed_str, **kw)
 
         def get_cluster_name(self):
-            return self
+            return self.lstrip(_DOCKER_HANDLE_PREFIX)
 
     # Define the Docker-in-Docker mount
     _dind_mount = {
@@ -141,20 +141,29 @@ class LocalDockerBackend(backends.Backend):
             self.images[c.name] = [c.image, metadata]
             self.containers[c.name] = c
 
+    def check_resources_fit_cluster(self, handle: ResourceHandle,
+                                    task: 'task_lib.Task') -> None:
+        pass
+
     def provision(self,
                   task: 'task_lib.Task',
                   to_provision: Optional['resources.Resources'],
                   dryrun: bool,
                   stream_logs: bool,
-                  cluster_name: Optional[str] = None) -> ResourceHandle:
+                  cluster_name: Optional[str] = None,
+                  retry_until_up: bool = False) -> ResourceHandle:
         """
         Builds docker image for the task and returns the cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
         docker.
         """
-        assert task.name is not None, 'Task name cannot be None - have you ' \
-                                      'specified a task name?'
+        assert task.name is not None, ('Task name cannot be None - have you '
+                                       'specified a task name?')
+        if retry_until_up:
+            logger.warning(
+                f'Retrying until up is not supported in backend: {self.NAME}. '
+                'Ignored the flag.')
         if cluster_name is None:
             cluster_name = backend_utils.generate_cluster_name()
         if stream_logs:

@@ -236,6 +236,9 @@ class Storage(object):
         storage.delete()
     """
 
+    # Update the key list when a new field is added.
+    _YAML_KEYS = ['name', 'source', 'store', 'mode', 'persistent']
+
     class StorageMetadata(object):
         """A pickle-able tuple of:
 
@@ -381,7 +384,8 @@ class Storage(object):
                     self.add_store(StoreType.GCS)
 
     @staticmethod
-    def _validate_source(source: str, mode: StorageMode) -> Tuple[str, bool]:
+    def _validate_source(source: str, mode: StorageMode,
+                         sync_on_reconstruction: bool) -> Tuple[str, bool]:
         """Validates the source path.
 
         Args:
@@ -405,7 +409,8 @@ class Storage(object):
                     f'Found source={source}')
             # Local path, check if it exists
             source = os.path.abspath(os.path.expanduser(source))
-            if not os.path.exists(source):
+            # Only check if local source exists if it is synced to the bucket
+            if not os.path.exists(source) and sync_on_reconstruction:
                 raise exceptions.StorageSourceError('Local source path does not'
                                                     f' exist: {source}')
             # Raise warning if user's path is a symlink
@@ -456,7 +461,7 @@ class Storage(object):
                     return
         elif self.source is not None:
             source, is_local_source = Storage._validate_source(
-                self.source, self.mode)
+                self.source, self.mode, self.sync_on_reconstruction)
 
             if not self.name:
                 if is_local_source:
@@ -607,10 +612,13 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
+        backend_utils.check_fields(config.keys(), cls._YAML_KEYS)
+
         name = config.pop('name', None)
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
+
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
             mode = StorageMode(mode_str.upper())
@@ -618,6 +626,9 @@ class Storage(object):
             # Make sure this keeps the same as the default mode in __init__
             mode = StorageMode.MOUNT
         persistent = config.pop('persistent', True)
+
+        assert not config, f'Invalid storage args: {config.keys()}'
+
         # Validation of the config object happens on instantiation.
         storage_obj = cls(name=name,
                           source=source,
@@ -625,9 +636,6 @@ class Storage(object):
                           mode=mode)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
-        if config:
-            raise exceptions.StorageSpecError(
-                f'Invalid storage spec. Unknown fields: {config.keys()}')
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:

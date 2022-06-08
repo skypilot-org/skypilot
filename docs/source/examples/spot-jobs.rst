@@ -1,21 +1,79 @@
 .. _spot-jobs:
+
 Managed Spot Jobs
 ================================================
 
 Sky supports managed spot jobs that can **automatically recover from preemptions**.
-This feature **saves significant cost** (e.g., 70\% for GPUs) by making preemptible spot instances practical for long-running jobs.
+This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances practical for long-running jobs.
 
-To launch a spot job, use the same task YAML and invoke it with ``sky spot launch``:
+To maximize availability, Sky automatically finds available spot resources across regions and clouds.
+Here is an example of BERT training job failing over different regions across AWS and GCP.
 
-.. code-block:: console
+.. image:: ../imgs/spot-training.png
+  :width: 600
+  :alt: BERT training on Spot V100
 
-    $ sky spot launch -n bert-qa bert_qa.yaml
+Below are requirements for using managed spot jobs:
 
-Sky will launch and start monitoring the spot job. When a preemption happens, Sky will automatically
-attempt to provision the required resources and launch the job again.
+(1) **Mounting code and datasets**: Local file mounts/workdir are not supported. Cloud buckets should be used to hold code and datasets, which can be satisfied by using :ref:`Sky Storage <sky-storage>`.
+
+(2) **Saving and loading checkpoints**: (For ML jobs) Application code should save checkpoints periodically to a :ref:`Sky Storage <sky-storage>`-mounted cloud bucket. For job recovery,  the program should try to reload a latest checkpoint from that path when it starts.
+
+We explain them in detail below.
 
 
-The following is an example of a spot job managed by Sky:
+Mounting code and datasets
+--------------------------------
+
+To launch a spot job, users should upload their codebase and data to cloud buckets through :ref:`Sky Storage <sky-storage>`.
+Note that the cloud buckets can be mounted to VMs in different regions/clouds and thus enable enables transparent job relaunching without user's intervention.
+The YAML below shows an example.
+
+.. code-block:: yaml
+
+  file_mounts:
+    /code:
+      name: # NOTE: Fill in your bucket name
+      source: /path/to/your/codebase
+      persistent: true
+      mode: COPY
+
+    # If data is stored locally
+    /data:
+      name: # NOTE: Fill in your bucket name
+      source: /path/to/your/dataset
+      persistent: true
+      mode: COPY
+
+    # If data is already on S3
+    /data2: s3://your-s3-bucket-name
+
+.. note::
+
+  Currently :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
+  supported for spot jobs. You can convert them to :ref:`Sky Storage <sky-storage>`.
+
+Saving and loading checkpoints
+--------------------------------
+
+To allow spot recovery, another cloud bucket is typically needed for storing states of the job (e.g., model checkpoints).
+Below is an example of mounting a bucket to :code:`/checkpoint`.
+
+.. code-block:: yaml
+
+  file_mounts:
+    /checkpoint:
+      name: # NOTE: Fill in your bucket name
+      mode: MOUNT
+
+The :code:`MOUNT` mode in :ref:`Sky Storage <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
+Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
+This is typically achieved by reloading the latest checkpoint at the beginning of your program.
+
+An end-to-end example
+--------------------------------
+
+Below we show an `example <https://github.com/sky-proj/sky/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
 
 .. code-block:: yaml
 
@@ -70,19 +128,29 @@ The following is an example of a spot job managed by Sky:
     --doc_stride 128 \
     --output_dir /checkpoint/bert_qa/ \
     --report_to wandb \
-    --save_total_limit 10
+    --save_total_limit 10 \
+    --save_steps 1000
+
+As HuggingFace has built-in support for periodically checkpointing, we only need to pass the below arguments for setting up the output directory and frequency of checkpointing (see more on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
+
+.. code-block:: console
+
+    $ python run_qa.py ... --output_dir /checkpoint/bert_qa/ --save_total_limit 10 --save_steps 1000
 
 .. note::
+  You may also refer to another example `here <https://github.com/sky-proj/sky/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
 
-  The training code needs to save the training state periodically to a Sky Storage mounted directory
-  (:code:`/checkpoint` in the example), and is responsible for reloading the state whenever the job is
-  restarted.  This is typically achieved by reloading the latest checkpoint in the directory on program startup.
+With the above changes, you are ready to launch a spot job with ``sky spot launch``!
 
-  :ref:`Workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
-  supported for spot jobs.
-  Please use file mounts with cloud storage buckets or :ref:`Sky Storage <sky-storage>` for syncing code and artifacts.
+.. code-block:: console
 
-To interact with spot jobs, use ``sky spot status`` and ``sky spot cancel``:
+    $ sky spot launch -n bert-qa bert_qa.yaml
+
+Sky will launch and start monitoring the spot job. When a preemption happens, Sky will automatically
+search for resources across regions and clouds to re-launch the job.
+
+
+Here are some commands for managed spot jobs. Check :code:`sky spot --help` for more details.
 
 .. code-block:: console
 

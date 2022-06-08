@@ -78,9 +78,11 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
                if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
     reason = f'\nReason: {command}' if proc.returncode else ''
-    test.echo(f'{outcome}.'
-              f'{reason}'
-              f'\nLog: less {log_file.name}\n')
+    msg = (f'{outcome}.'
+           f'{reason}'
+           f'\nLog: less {log_file.name}\n')
+    test.echo(msg)
+    log_file.write(msg)
     if proc.returncode == 0 and test.teardown is not None:
         backend_utils.run(
             test.teardown,
@@ -401,7 +403,9 @@ def test_cancel_pytorch():
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel {name} 1',
             'sleep 60',
-            f'sky exec {name} "nvidia-smi | grep \'No running process\'"',
+            f'sky exec {name} "(nvidia-smi | grep \'No running process\') || '
+            # Ensure Xorg is the only process running.
+            '[ \$(nvidia-smi | grep -A 10 Processes | grep -A 10 === | grep -v Xorg) -eq 2 ]"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',

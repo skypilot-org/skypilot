@@ -5,6 +5,7 @@ import pathlib
 import time
 from typing import Optional
 
+import colorama
 import filelock
 
 import sky
@@ -31,11 +32,11 @@ class SpotController:
         # TODO(zhwu): this assumes the specific backend.
         self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
-        spot_state.init(self._job_id,
-                        self._task_name,
-                        self.backend.run_timestamp,
-                        resources_str=backend_utils.get_task_resources_str(
-                            self._task))
+        spot_state.set_submitted(
+            self._job_id,
+            self._task_name,
+            self.backend.run_timestamp,
+            resources_str=backend_utils.get_task_resources_str(self._task))
         self._cluster_name = spot_utils.generate_spot_cluster_name(
             self._task_name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
@@ -91,14 +92,25 @@ class SpotController:
             if job_status == job_lib.JobStatus.FAILED:
                 # Check the status of the spot cluster. It can be STOPPED or UP,
                 # where STOPPED means partially down.
-                cluster_status = backend_utils.refresh_cluster_status_handle(
-                    self._cluster_name, force_refresh=True)[0]
+                (cluster_status,
+                 handle) = backend_utils.refresh_cluster_status_handle(
+                     self._cluster_name, force_refresh=True)
                 if cluster_status == global_user_state.ClusterStatus.UP:
                     # The user code has probably crashed.
                     end_time = spot_utils.get_job_timestamp(self.backend,
                                                             self._cluster_name,
                                                             get_end_time=True)
-                    spot_state.set_failed(self._job_id, end_time=end_time)
+                    logger.info(
+                        'The user job failed. Please check the logs below.\n'
+                        f'== Logs of the user job (ID: {self._job_id}) ==\n')
+                    self.backend.tail_logs(handle,
+                                           None,
+                                           spot_job_id=self._job_id)
+                    logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+                    spot_state.set_failed(
+                        self._job_id,
+                        failure_type=spot_state.SpotStatus.FAILED,
+                        end_time=end_time)
                     break
                 assert (cluster_status == global_user_state.ClusterStatus.
                         STOPPED), ('The cluster should be STOPPED, but is '
@@ -115,6 +127,12 @@ class SpotController:
         """Start the controller."""
         try:
             self._run()
+        except exceptions.ResourcesUnavailableError as e:
+            logger.error(f'Resources unavailable: {colorama.Fore.RED}{e}'
+                         f'{colorama.Style.RESET_ALL}')
+            spot_state.set_failed(
+                self._job_id,
+                failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(f'Unexpected error occurred: {type(e).__name__}: {e}')
         finally:
@@ -123,7 +141,9 @@ class SpotController:
             # The job can be non-terminal if the controller exited abnormally,
             # e.g. failed to launch cluster after reaching the MAX_RETRY.
             if not job_status.is_terminal():
-                spot_state.set_failed(self._job_id)
+                spot_state.set_failed(
+                    self._job_id,
+                    failure_type=spot_state.SpotStatus.FAILED_CONTROLLER)
 
             # Clean up Storages with persistent=False.
             self.backend.teardown_ephemeral_storage(self._task)
