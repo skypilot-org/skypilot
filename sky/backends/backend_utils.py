@@ -1338,14 +1338,17 @@ def _get_cluster_status_ip(
 
 def _ping_cluster_and_set_status(
         record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Pings a cluster and potentially sets it to stopped.
+    """Pings a cluster and potentially sets it to stopped or terminated.
 
     Setting it to STOPPED means (1) setting the clusters table, (2) removing it
     from the SSH config.
 
+    Setting it to TERMINATED means (1) removing it from the clusters table,
+    (2) removing it from the SSH config.
+
     Returns:
       If the cluster yaml is found to be concurrently removed, returns None.
-      Otherwise returns the input record with status potentially updated.
+      Otherwise returns the input record with status and ip potentially updated.
     """
     handle = record['handle']
     cluster_name = handle.cluster_name
@@ -1367,11 +1370,7 @@ def _ping_cluster_and_set_status(
         # Should not set the cluster to STOPPED if INIT, since it may be
         # still launching.
         return record
-    # Set the cluster status to STOPPED. It is safe to do so, even if the
-    # cluster is still partially UP:
-    # 1. Autostop case: the whole cluster will be properly stopped soon.
-    # 2. Managed spot case: We will soon relaunch the cluster by the strategy
-    #    on the same region or terminate the cluster.
+
     try:
         config = read_yaml(handle.cluster_yaml)
     except FileNotFoundError:
@@ -1381,32 +1380,44 @@ def _ping_cluster_and_set_status(
         #
         # We know we can't ping the IP and the cluster yaml has been
         # removed. With high likelihood the cluster has been removed.
-        return None
+        config = None
+
+    cluster_statuses = _get_cluster_status_ip(handle)
+    # If the cluster_statuses is empty, all the nodes are terminated. We can
+    # safely set the cluster status to TERMINATED. This handles the edge case
+    # where the cluster is terminated by the user manually through the UI.
+    # NOTE: Set the cluster status to STOPPED. It is safe to do so, even
+    # if the cluster is still partially UP:
+    # 1. Autostop case: the whole cluster will be properly stopped soon.
+    # 2. The user has manually terminated part of the cluster through the UI,
+    # which is out of our control.
+    to_terminate = not cluster_statuses
 
     if handle.launched_resources.use_spot:
-        # NOTE: We need to set the cluster status to STOPPED for preempted spot
-        # cluster to make sure our managed spot can retry on the same region
-        # first.
-        # This is True for GCP and Azure, since the preemption policy is stopping
-        # the cluster.
-        # For AWS, although the preemption policy is terminating the cluster (the
-        # stopping preemption policy is only supported for persistent spot, which
-        # is not our case), we still need to set it to STOPPED for the correctness
-        # of the managed spot mentioned above.
-        to_terminate = False
-    else:
-        cluster_statuses = _get_cluster_status_ip(handle)
-        # If the cluster_statuses is empty, all the nodes are terminated. We can
-        # safely set the cluster status to TERMINATED. This handles the edge case
-        # where the cluster is terminated by the user manually through the UI.
-        # NOTE: The cluster can be partially UP for the following cases:
-        # 1. It is in state transition because of sky commands
-        # 2. The user has manually terminated part of the cluster through the UI,
-        # which is out of our control.
-        to_terminate = not cluster_statuses
-    auth_config = config['auth']
+        # The preemption policy of GCP and Azure is stopping the cluster.
+        # The preemption policy of AWS is terminating the cluster (the stopping
+        # preemption policy is only supported for persistent spot), we
+        # still need to set it to STOPPED for the correctness of the managed spot
+        # mentioned above.
+        # Managed spot: We will soon relaunch the cluster by the strategy
+        # on the same region or terminate the cluster.
+        all_stopped = all(s == global_user_state.ClusterStatus.STOPPED
+                          for s in cluster_statuses)
+        if all_stopped or to_terminate:
+            # Only set the cluster to STOPPED if all the spot nodes are stopped or
+            # terminated.
+            to_terminate = False
+        else:
+            # If the cluster is partially preempted, we should set the cluster to
+            # INIT to avoid resource leakage.
+            record['status'] = global_user_state.ClusterStatus.INIT
+            return record
     global_user_state.remove_cluster(cluster_name, terminate=to_terminate)
-    SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
+    if config is not None:
+        # Remove the cluster from the SSH config.
+        auth_config = config['auth']
+        SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip,
+                                       auth_config)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
