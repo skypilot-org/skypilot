@@ -1359,26 +1359,6 @@ def _ping_cluster_and_set_status(
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
                      f'{cluster_name!r}, trying to fetch from provider.')
-    cluster_statuses = _get_cluster_status_ip(handle)
-    if len(cluster_statuses) == 0:
-        final_status = None
-    elif len(cluster_statuses) != handle.launched_nodes:
-        final_status = global_user_state.ClusterStatus.INIT
-        logger.debug(f'Refreshing status: Cluster {cluster_name!r} is '
-        f'partially available with statuses {cluster_statuses}. '
-        'Set to INIT.')
-    else:
-        assert len(cluster_statuses) == handle.launched_nodes, cluster_statuses
-        all_stopped = all(status == global_user_state.ClusterStatus.STOPPED for status in cluster_statuses)
-        if all_stopped:
-            final_status = global_user_state.ClusterStatus.STOPPED
-        else:
-            # There are two cases here:
-            # 1. The cluster is partially up, then the cluster should be INIT.
-            # 2. All nodes are up, but ray fails to fetch IPs. That is probably because
-            # the ray cluster is still starting or crashed. The cluster state should 
-            # be INIT.
-            final_status = global_user_state.ClusterStatus.INIT
     if record['status'] == global_user_state.ClusterStatus.INIT:
         # Should not set the cluster to STOPPED if INIT, since it may be
         # still launching.
@@ -1398,8 +1378,20 @@ def _ping_cluster_and_set_status(
         # We know we can't ping the IP and the cluster yaml has been
         # removed. With high likelihood the cluster has been removed.
         return None
+
+    cluster_statuses = _get_cluster_status_ip(handle)
+    # If the cluster_statuses is empty, all the nodes are terminated. We can
+    # safely set the cluster status to TERMINATED. This handles the edge case
+    # where the cluster is terminated by the user manually through the UI.
+    # NOTE: For the managed spot case, we have set the preemption policy to
+    # stopped, so the cluster will be in the STOPPED state.
+    # NOTE: The cluster can be partially UP for the following cases:
+    # 1. It is in state transition because of sky commands
+    # 2. The user has manually terminated part of the cluster through the UI,
+    # which is out of our control.
+    to_terminate = not cluster_statuses
     auth_config = config['auth']
-    global_user_state.remove_cluster(cluster_name, terminate=(cluster_status is None))
+    global_user_state.remove_cluster(cluster_name, terminate=to_terminate)
     SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
     return global_user_state.get_cluster_from_name(cluster_name)
 
