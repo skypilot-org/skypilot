@@ -1869,6 +1869,8 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
             yield f'Resources \'{gpu_name}\' not found. '
             yield 'Try \'sky show-gpus --all\' '
             yield 'to show available accelerators.'
+            return
+
         yield '*NOTE*: for most GCP accelerators, '
         yield 'INSTANCE_TYPE == (attachable) means '
         yield 'the host VM\'s cost is not included.\n\n'
