@@ -1422,15 +1422,6 @@ def _ping_cluster_and_set_status(
     # which is out of our control.
     to_terminate = not cluster_statuses
 
-    all_nodes_exist = len(cluster_statuses) == handle.launched_nodes
-    all_init = (all_nodes_exist and
-                all(status == global_user_state.ClusterStatus.INIT
-                    for status in cluster_statuses))
-    if all_init:
-        # All nodes are still initializing.
-        record['status'] = global_user_state.ClusterStatus.INIT
-        return record
-
     if handle.launched_resources.use_spot:
         # The preemption policy of GCP and Azure is stopping the cluster.
         # The preemption policy of AWS is terminating the cluster (the stopping
@@ -1438,6 +1429,7 @@ def _ping_cluster_and_set_status(
         # still need to set it to STOPPED for the correctness of the managed spot,
         # as we will soon relaunch the cluster by the recovery strategy on the same
         # region or terminate the cluster.
+        all_nodes_exist = len(cluster_statuses) == handle.launched_nodes
         all_stopped = (all_nodes_exist and
                        all(s == global_user_state.ClusterStatus.STOPPED
                            for s in cluster_statuses))
@@ -1450,11 +1442,19 @@ def _ping_cluster_and_set_status(
             # INIT to avoid resource leakage.
             record['status'] = global_user_state.ClusterStatus.INIT
             return record
+
+    has_up = any(status == global_user_state.ClusterStatus.UP
+                 for status in cluster_statuses)
+    if has_up:
+        # If the user starts part of a STOPPED cluster, we still need a status to
+        # represent the abnormal status (UNHEALTHY may be a better status).
+        record['status'] = global_user_state.ClusterStatus.INIT
+        return record
+
     global_user_state.remove_cluster(cluster_name, terminate=to_terminate)
     # Remove the cluster from the SSH config.
     auth_config = config['auth']
-    SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip,
-                                    auth_config)
+    SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
