@@ -1258,8 +1258,8 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
-    provisioning/a task's setup (status is INIT), this command will attempt to
-    start the cluster.  (In the second case, any failed setup steps are not
+    provisioning/Sky runtime setup (status is INIT), this command will attempt
+    to start the cluster.  (In the second case, any failed setup steps are not
     performed and only a request to start the machines is attempted.)
 
     Auto-failover provisioning is not used when restarting stopped
@@ -2392,20 +2392,8 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
               type=str,
               help='Managed spot job name.')
 @click.argument('job_id', required=False, type=int)
-@click.option(
-    '--sync-down',
-    '-s',
-    is_flag=True,
-    default=False,
-    help='Sync down the archive logs of the job (this will download all '
-    'logs from all recoveries).')
-def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
-    """Show spot controller logs.
-
-    If ``--sync-down`` is specified, logs from all recoveries will be
-    downloaded from the controller. Otherwise, the realtime logs from the job
-    will be streamed.
-    """
+def spot_logs(name: Optional[str], job_id: Optional[int]):
+    """Tail the log of a managed spot job."""
     # TODO(zhwu): Automatically restart the spot controller
     _, handle = _is_spot_controller_up(
         'Please restart the spot controller with '
@@ -2416,14 +2404,8 @@ def spot_logs(name: Optional[str], job_id: Optional[int], sync_down: bool):
     if name is not None and job_id is not None:
         click.UsageError('Cannot specify both --name and --job-id.')
     backend = backend_utils.get_backend_from_handle(handle)
-
-    if not sync_down:
-        # Stream the realtime logs
-        backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
-    else:
-        # Sync down the archived logs
-        # TODO(wei-lin): Please fill in the implementation.
-        raise NotImplementedError('Sync down is not implemented yet.')
+    # Stream the realtime logs
+    backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
 
 
 def main():
