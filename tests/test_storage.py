@@ -53,7 +53,6 @@ class TestStorageSpecValidation:
     def test_name_and_nosource(self):
         """Tests when only name is specified"""
         # When mode is COPY - invalid spec
-        # TODO(romilb): This case should work if my-bucket already exists.
         with pytest.raises(exceptions.StorageSourceError) as e:
             storage_lib.Storage(name='my-bucket',
                                 mode=storage_lib.StorageMode.COPY)

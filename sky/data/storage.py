@@ -451,7 +451,7 @@ class Storage(object):
                     return
                 else:
                     raise exceptions.StorageSourceError(
-                        'Storage source must be specified when '
+                        'New storage object: source must be specified when '
                         'using COPY mode.')
             else:
                 # If source is not specified in COPY mode, the intent is to
