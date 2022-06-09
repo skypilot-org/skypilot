@@ -4,7 +4,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import List, Optional, Tuple, NamedTuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import colorama
 import pytest
@@ -553,11 +553,18 @@ class TestStorageWithCredentials:
         timestamp = str(time.time()).replace('.', '')
         yield f'sky-test-{timestamp}'
 
-    @pytest.fixture
-    def tmp_local_storage_obj(self, tmp_bucket_name, tmp_mount):
+    @staticmethod
+    def yield_storage_object(name: Optional[str] = None,
+                             source: Optional[storage_lib.Path] = None,
+                             stores: Optional[Dict[storage_lib.StoreType, storage_lib.AbstractStore]] = None,
+                             persistent: Optional[bool] = True,
+                             mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT):
         # Creates a temporary storage object. Stores must be added in the test.
-        storage_obj = storage_lib.Storage(name=tmp_bucket_name,
-                                          source=tmp_mount)
+        storage_obj = storage_lib.Storage(name=name,
+                                          source=source,
+                                          stores=stores,
+                                          persistent=persistent,
+                                          mode=mode)
         yield storage_obj
         handle = global_user_state.get_handle_from_storage_name(
             storage_obj.name)
@@ -568,6 +575,17 @@ class TestStorageWithCredentials:
             #   eject storage from global_user_state and delete the bucket using
             #   boto3 directly.
             storage_obj.delete()
+
+    @pytest.fixture
+    def tmp_scratch_storage_obj(self, tmp_bucket_name):
+        # Creates a storage object with no source to create a scratch storage.
+        # Stores must be added in the test.
+        yield from self.yield_storage_object(name=tmp_bucket_name)
+
+    @pytest.fixture
+    def tmp_local_storage_obj(self, tmp_bucket_name, tmp_mount):
+        # Creates a temporary storage object. Stores must be added in the test.
+        yield from self.yield_storage_object(name=tmp_bucket_name, source=tmp_mount)
 
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
@@ -629,6 +647,25 @@ class TestStorageWithCredentials:
         # It should not exist because the bucket was created externally.
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
+
+    def test_copy_mount_existing_storage(self, tmp_scratch_storage_obj):
+        # Creates a bucket with no source in MOUNT mode (empty bucket), and
+        # then tries to load the same storage in COPY mode.
+        tmp_scratch_storage_obj.add_store(storage_lib.StoreType.S3)
+        storage_name = tmp_scratch_storage_obj.name
+
+        # Try to initialize another storage with the storage object created above,
+        # but now in COPY mode. This should succeed.
+        copy_storage = storage_lib.Storage(name=storage_name,
+                                           mode=storage_lib.StorageMode.COPY)
+        copy_storage.add_store(storage_lib.StoreType.S3)
+
+        # Check `sky storage ls` to ensure storage object exists
+        out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
+        assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
+
+
+
 
 
 # ---------- Testing YAML Specs ----------
