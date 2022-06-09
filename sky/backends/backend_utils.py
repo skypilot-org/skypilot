@@ -1355,7 +1355,7 @@ _QUERY_STATUS_FUNCS = {
 
 def _get_cluster_status_via_cloud_cli(
     handle: 'backends.Backend.ResourceHandle'
-) -> Optional[global_user_state.ClusterStatus]:
+) -> List[global_user_state.ClusterStatus]:
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
