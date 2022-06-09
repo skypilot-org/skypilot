@@ -622,7 +622,9 @@ def cli():
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done. '
+          'queue. Idleness starts counting after setup/file_mounts are done; '
+          'the clock gets reset whenever there are running/pending jobs in the '
+          'job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be auto-stopped.'))
@@ -1014,7 +1016,7 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
 def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
     """Tail the log of a job.
 
-    If JOB_ID is not provided, tail the logs of the last job on the cluster.
+    If JOB_ID is not provided, tails the logs of the last job on the cluster.
     """
     cluster_name = cluster
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
@@ -1138,7 +1140,7 @@ def stop(
     CLUSTER is the name (or glob pattern) of the cluster to stop.  If both
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
-    Stopping a cluster does not lose data on the attached disks; billing for
+    Data on attached disks is not lost when a cluster is stopped.  Billing for
     the instances will stop while the disks will still be charged.  Those disks
     will be reattached when restarting the cluster.
 
