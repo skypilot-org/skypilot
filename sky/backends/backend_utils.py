@@ -1409,7 +1409,7 @@ def _ping_cluster_and_set_status(
         #
         # We know we can't ping the IP and the cluster yaml has been
         # removed. With high likelihood the cluster has been removed.
-        config = None
+        return None
 
     cluster_statuses = _get_cluster_status_via_cloud_cli(handle)
     # If the cluster_statuses is empty, all the nodes are terminated. We can
@@ -1451,11 +1451,10 @@ def _ping_cluster_and_set_status(
             record['status'] = global_user_state.ClusterStatus.INIT
             return record
     global_user_state.remove_cluster(cluster_name, terminate=to_terminate)
-    if config is not None:
-        # Remove the cluster from the SSH config.
-        auth_config = config['auth']
-        SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip,
-                                       auth_config)
+    # Remove the cluster from the SSH config.
+    auth_config = config['auth']
+    SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip,
+                                    auth_config)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
