@@ -1443,7 +1443,7 @@ def _ping_cluster_and_set_status(
             record['status'] = global_user_state.ClusterStatus.INIT
             return record
 
-    has_up = any(status == global_user_state.ClusterStatus.UP
+    has_up = any(status != global_user_state.ClusterStatus.STOPPED
                  for status in cluster_statuses)
     if has_up:
         # If the user starts part of a STOPPED cluster, we still need a status to
