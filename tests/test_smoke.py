@@ -601,7 +601,6 @@ class TestStorageWithCredentials:
         yield from self.yield_storage_object(name=storage_name,
                                              mode=storage_lib.StorageMode.COPY)
 
-
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
@@ -663,7 +662,8 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
 
-    def test_copy_mount_existing_storage(self, tmp_copy_mnt_existing_storage_obj):
+    def test_copy_mount_existing_storage(self,
+                                         tmp_copy_mnt_existing_storage_obj):
         # Creates a bucket with no source in MOUNT mode (empty bucket), and
         # then tries to load the same storage in COPY mode.
         tmp_copy_mnt_existing_storage_obj.add_store(storage_lib.StoreType.S3)
