@@ -1435,10 +1435,9 @@ def _ping_cluster_and_set_status(
         # The preemption policy of GCP and Azure is stopping the cluster.
         # The preemption policy of AWS is terminating the cluster (the stopping
         # preemption policy is only supported for persistent spot), we
-        # still need to set it to STOPPED for the correctness of the managed spot
-        # mentioned above.
-        # Managed spot: We will soon relaunch the cluster by the strategy
-        # on the same region or terminate the cluster.
+        # still need to set it to STOPPED for the correctness of the managed spot,
+        # as we will soon relaunch the cluster by the recovery strategy on the same
+        # region or terminate the cluster.
         all_stopped = (all_nodes_exist and
                        all(s == global_user_state.ClusterStatus.STOPPED
                            for s in cluster_statuses))
