@@ -554,11 +554,13 @@ class TestStorageWithCredentials:
         yield f'sky-test-{timestamp}'
 
     @staticmethod
-    def yield_storage_object(name: Optional[str] = None,
-                             source: Optional[storage_lib.Path] = None,
-                             stores: Optional[Dict[storage_lib.StoreType, storage_lib.AbstractStore]] = None,
-                             persistent: Optional[bool] = True,
-                             mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT):
+    def yield_storage_object(
+            name: Optional[str] = None,
+            source: Optional[storage_lib.Path] = None,
+            stores: Optional[Dict[storage_lib.StoreType,
+                                  storage_lib.AbstractStore]] = None,
+            persistent: Optional[bool] = True,
+            mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT):
         # Creates a temporary storage object. Stores must be added in the test.
         storage_obj = storage_lib.Storage(name=name,
                                           source=source,
@@ -585,7 +587,8 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_mount):
         # Creates a temporary storage object. Stores must be added in the test.
-        yield from self.yield_storage_object(name=tmp_bucket_name, source=tmp_mount)
+        yield from self.yield_storage_object(name=tmp_bucket_name,
+                                             source=tmp_mount)
 
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
@@ -663,9 +666,6 @@ class TestStorageWithCredentials:
         # Check `sky storage ls` to ensure storage object exists
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
-
-
-
 
 
 # ---------- Testing YAML Specs ----------
