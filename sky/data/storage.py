@@ -4,6 +4,7 @@ import os
 import random
 import subprocess
 import textwrap
+import time
 from typing import Any, Dict, Optional, Tuple, Union
 import urllib.parse
 
@@ -800,28 +801,19 @@ class S3Store(AbstractStore):
         """
         s3 = aws.resource('s3')
         bucket = s3.Bucket(self.name)
-        # Checks if bucket exists (both public and private buckets)
+
         try:
-            s3.meta.client.head_bucket(Bucket=self.name)
+            # Try Public bucket case.
+            # This line does not error out if the bucket is an external public
+            # bucket or if it is a user's bucket that is publicly
+            # accessible.
+            self.client.get_public_access_block(Bucket=self.name)
             return bucket, False
         except aws.client_exception() as e:
-            # If it was a 404 error, then the bucket does not exist.
             error_code = e.response['Error']['Code']
-            if error_code == '404':
-                if self.source is not None:
-                    if self.source.startswith('s3://'):
-                        raise exceptions.StorageBucketGetError(
-                            'Attempted to connect to a non-existent bucket: '
-                            f'{self.source}. Consider using `aws s3 ls '
-                            f'{self.source}` to debug.') from e
-                    else:
-                        bucket = self._create_s3_bucket(self.name)
-                        return bucket, True
-                # TODO(romilb): Fix this logic repetition here
-                else:
-                    bucket = self._create_s3_bucket(self.name)
-                    return bucket, True
-            else:
+            # AccessDenied error for buckets that are private and not owned by
+            # user.
+            if error_code == 'AccessDenied':
                 ex = exceptions.StorageBucketGetError(
                     f'Failed to connect to an existing bucket {self.name!r}.\n'
                     'Check if the 1) the bucket name is taken and/or '
@@ -829,6 +821,20 @@ class S3Store(AbstractStore):
                     f'Consider using `aws s3 ls {self.name}` to debug.')
                 logger.error(ex)
                 raise ex from e
+            # Try private bucket case.
+            if data_utils.verify_s3_bucket(self.name):
+                return bucket, False
+
+        if self.source is not None and self.source.startswith('s3://'):
+            raise exceptions.StorageBucketGetError(
+                'Attempted to connect to a non-existent bucket: '
+                f'{self.source}. Consider using `aws s3 ls '
+                f'{self.source}` to debug.') from e
+
+        # If bucket cannot be found in both private and public settings,
+        # the bucket is created by Sky.
+        bucket = self._create_s3_bucket(self.name)
+        return bucket, True
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
@@ -961,6 +967,10 @@ class S3Store(AbstractStore):
             logger.error(e.output)
             raise exceptions.StorageBucketDeleteError(
                 f'Failed to delete S3 bucket {bucket_name}.')
+
+        # Wait until bucket deletion propagates on AWS servers
+        while data_utils.verify_s3_bucket(bucket_name):
+            time.sleep(0.1)
 
 
 class GcsStore(AbstractStore):
